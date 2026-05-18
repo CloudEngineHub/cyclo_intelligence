@@ -128,7 +128,7 @@ class TestMetadataManager:
         config_data = {
             "camera_topics": {
                 "cam_head": "/zed/image",
-                "rgb.cam_left_wrist": "/camera_left/image",
+                "cam_wrist_left": "/camera_left/image",
             }
         }
         config_path = temp_bag_dir / "robot_config.yaml"
