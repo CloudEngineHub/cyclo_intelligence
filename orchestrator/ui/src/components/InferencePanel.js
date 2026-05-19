@@ -232,7 +232,6 @@ const InferencePanel = () => {
 
       <PolicyBackendControl
         serviceType={info.serviceType}
-        policyType={info.policyType}
       />
 
       {/* Edit mode indicator */}

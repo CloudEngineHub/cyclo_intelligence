@@ -27,10 +27,10 @@ const processLabels = {
   'engine-process': 'Engine',
 };
 
-const getBackendLabel = (serviceType, policyType) => {
+const getBackendLabel = (serviceType) => {
   if (serviceType === 'groot') return 'GR00T Docker';
-  if (serviceType === 'lerobot' && policyType === 'act') return 'ACT Docker';
-  return 'LeRobot Docker';
+  if (serviceType === 'lerobot') return 'LeRobot Docker';
+  return 'Policy Docker';
 };
 
 async function readJsonResponse(response) {
@@ -43,11 +43,11 @@ async function readJsonResponse(response) {
   }
 }
 
-export default function PolicyBackendControl({ serviceType, policyType }) {
+export default function PolicyBackendControl({ serviceType }) {
   const backend = serviceType === 'groot' ? 'groot' : 'lerobot';
   const label = useMemo(
-    () => getBackendLabel(serviceType, policyType),
-    [serviceType, policyType]
+    () => getBackendLabel(serviceType),
+    [serviceType]
   );
 
   const [status, setStatus] = useState(null);
