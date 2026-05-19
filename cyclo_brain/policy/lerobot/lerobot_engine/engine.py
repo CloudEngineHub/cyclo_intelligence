@@ -49,6 +49,7 @@ Upstream API used:
 
 from __future__ import annotations
 
+import gc
 import logging
 import os
 import sys
@@ -115,8 +116,8 @@ class LeRobotEngine(
         self._state_modalities: List[str] = []
         self._action_keys: List[str] = []
         self._has_mobile_state: bool = False
-        # Cached robot_type (so re-LOAD with the same model_path can skip
-        # the heavy weights load — mirrors GR00TInference.load_policy).
+        # Cached robot_type for repeated LOAD requests before an explicit
+        # UNLOAD. cleanup() must clear this together with the policy cache.
         self._loaded_robot_type: Optional[str] = None
 
         # Resize target for input cameras. The preprocessor's stored
@@ -150,8 +151,8 @@ class LeRobotEngine(
             # alongside (lerobot-train layout).
             model_path = self._resolve_model_dir(model_path)
 
-            # Skip weights load when we're just reattaching the robot
-            # client to a different robot for the same model (save 5–30 s).
+            # Skip weights load when a second LOAD arrives before UNLOAD and
+            # we're just reattaching the robot client for the same model.
             cache_hit = (
                 self._policy is not None
                 and self._loaded_model_path == model_path
@@ -222,12 +223,34 @@ class LeRobotEngine(
             return self._fail(str(e))
 
     def cleanup(self) -> None:
-        """Release the robot client; keep policy cached for fast re-LOAD."""
+        """Release robot and policy resources for a true UNLOAD."""
         self._teardown_robot()
+
+        had_policy = any(
+            obj is not None
+            for obj in (self._policy, self._preprocessor, self._postprocessor)
+        )
+        if had_policy:
+            logger.info("Releasing LeRobot policy: %s", self._loaded_model_path)
+
+        self._policy = None
+        self._preprocessor = None
+        self._postprocessor = None
+        self._device = None
+        self._loaded_model_path = None
+        self._loaded_robot_type = None
+        self._image_resize = None
+
         self._cameras = {}
         self._state_modalities = []
         self._action_keys = []
         self._has_mobile_state = False
+
+        if had_policy:
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+                torch.cuda.ipc_collect()
 
     @staticmethod
     def _fail(message: str) -> Dict[str, Any]:

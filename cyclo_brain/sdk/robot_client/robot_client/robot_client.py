@@ -219,7 +219,6 @@ class RobotClient:
             0.0,
             _float_env("CMD_VEL_ANGULAR_DEADBAND", 0.0),
         )
-
         self._closed = False
 
         self._init_subscriptions()
@@ -598,18 +597,19 @@ class RobotClient:
         linear_x = float(values[0]) if len(values) > 0 else 0.0
         linear_y = float(values[1]) if len(values) > 1 else 0.0
         angular_z = float(values[2]) if len(values) > 2 else 0.0
-        linear_x = _deadband(linear_x, self._cmd_vel_linear_deadband)
-        linear_y = _deadband(linear_y, self._cmd_vel_linear_deadband)
-        angular_z = _deadband(angular_z, self._cmd_vel_angular_deadband)
+        filtered_linear_x = _deadband(linear_x, self._cmd_vel_linear_deadband)
+        filtered_linear_y = _deadband(linear_y, self._cmd_vel_linear_deadband)
+        filtered_angular_z = _deadband(angular_z, self._cmd_vel_angular_deadband)
+
         linear = Vector3(
-            x=linear_x,
-            y=linear_y,
+            x=filtered_linear_x,
+            y=filtered_linear_y,
             z=0.0,
         )
         angular = Vector3(
             x=0.0,
             y=0.0,
-            z=angular_z,
+            z=filtered_angular_z,
         )
         publisher.publish(linear=linear, angular=angular)
 

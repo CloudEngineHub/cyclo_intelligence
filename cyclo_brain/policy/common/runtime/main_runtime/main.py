@@ -15,6 +15,7 @@ from __future__ import annotations
 import os
 import sys
 import threading
+import time
 from pathlib import Path
 
 
@@ -88,6 +89,7 @@ class MainRuntime:
         self._shutdown = threading.Event()
 
     def start(self) -> None:
+        self._wait_for_engine_ready()
         self._control_loop.run_background()
 
         def _response_factory(**kwargs):
@@ -116,6 +118,30 @@ class MainRuntime:
         logger.info("ZENOH_SUB_READY")
         while not self._shutdown.is_set():
             self._shutdown.wait(timeout=1.0)
+
+    def _wait_for_engine_ready(self) -> None:
+        timeout_s = float(os.environ.get("ENGINE_READY_TIMEOUT_S", "120.0"))
+        ping_timeout_s = float(os.environ.get("ENGINE_READY_PING_TIMEOUT_S", "1.0"))
+        deadline = time.monotonic() + timeout_s
+        last_error = "not ready"
+        while time.monotonic() < deadline:
+            try:
+                if self._engine_client.ping(timeout_s=ping_timeout_s):
+                    logger.info(
+                        "EngineCommand service ready at /%s/engine_command",
+                        self._backend,
+                    )
+                    return
+            except Exception as e:
+                last_error = str(e)
+                try:
+                    self._engine_client.reconnect()
+                except Exception as reconnect_error:
+                    last_error = f"{last_error}; reconnect failed: {reconnect_error}"
+            time.sleep(0.5)
+        raise RuntimeError(
+            f"EngineCommand service not ready after {timeout_s:.1f}s: {last_error}"
+        )
 
     def shutdown(self) -> None:
         self._shutdown.set()

@@ -77,10 +77,16 @@ class InferenceEngine(ABC):
 
     @abstractmethod
     def cleanup(self) -> None:
-        """Release the RobotClient + drop policy refs.
+        """Release RobotClient and all in-process model resources.
 
-        Called on UNLOAD. Should be safe to call before ``load_policy``
-        and idempotent on repeat calls so the Engine process can use it as a
+        Called on UNLOAD. Implementations must drop policy/model/preprocessor
+        references and invalidate any same-model in-memory cache; the next
+        LOAD after UNLOAD should perform a real model load rather than report
+        a cached restart. Repeated LOAD calls before UNLOAD may still reuse a
+        live policy when that backend intentionally supports it.
+
+        This method should be safe to call before ``load_policy`` and
+        idempotent on repeat calls so the Engine process can use it as a
         catch-all teardown.
         """
 

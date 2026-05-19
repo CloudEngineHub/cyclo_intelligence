@@ -24,6 +24,7 @@ common Engine process.
 
 Original Step 1 location: cyclo_brain/policy/groot/inference.py.
 """
+import gc
 import logging
 import os
 import sys
@@ -41,7 +42,12 @@ _ROBOT_CLIENT_PATH = os.environ.get("ROBOT_CLIENT_SDK_PATH", "/robot_client_sdk"
 if os.path.exists(_ROBOT_CLIENT_PATH) and _ROBOT_CLIENT_PATH not in sys.path:
     sys.path.insert(0, _ROBOT_CLIENT_PATH)
 
+_POLICY_RUNTIME_PATH = os.environ.get("POLICY_RUNTIME_PATH", "/policy_runtime")
+if os.path.exists(_POLICY_RUNTIME_PATH) and _POLICY_RUNTIME_PATH not in sys.path:
+    sys.path.insert(0, _POLICY_RUNTIME_PATH)
+
 import gr00t.model  # noqa: F401 - register custom models
+from engine import InferenceEngine  # noqa: E402
 from gr00t.data.embodiment_tags import EmbodimentTag  # noqa: E402
 from gr00t.policy.gr00t_policy import Gr00tPolicy  # noqa: E402
 from runtime.camera_mapping import resolve_camera_mappings  # noqa: E402
@@ -225,7 +231,7 @@ class TensorRTOptimizer:
             return None
 
 
-class GR00TInference:
+class GR00TInference(InferenceEngine):
     """Encapsulates GR00T policy loading, observation building, and inference."""
 
     logger = logging.getLogger("groot_inference")
@@ -469,10 +475,19 @@ class GR00TInference:
         }
 
     def cleanup(self) -> None:
-        """Release robot resources. Policy is kept cached for fast restart."""
+        """Release robot and policy resources for a true UNLOAD."""
         if self.robot is not None:
             self.robot.close()
             self.robot = None
+
+        if self.policy is not None:
+            self.logger.info("Releasing GR00T policy: %s", self._loaded_model_path)
+            self.policy = None
+            self._loaded_model_path = None
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+                torch.cuda.ipc_collect()
 
         self.policy_info = {k: [] for k in self.policy_info}
         self.robot_info = {
@@ -487,5 +502,5 @@ class GR00TInference:
         return {"success": False, "message": message}
 
 
-def create_engine() -> GR00TInference:
+def create_engine() -> InferenceEngine:
     return GR00TInference()

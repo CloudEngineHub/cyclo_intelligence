@@ -21,6 +21,7 @@ import toast from 'react-hot-toast';
 import { MdFolderOpen, MdInfoOutline } from 'react-icons/md';
 import FileBrowserModal from './FileBrowserModal';
 import InferenceModelSelector from './InferenceModelSelector';
+import PolicyBackendControl from './PolicyBackendControl';
 import Tooltip from './Tooltip';
 import { InferencePhase } from '../constants/taskPhases';
 import { DEFAULT_PATHS } from '../constants/paths';
@@ -228,6 +229,11 @@ const InferencePanel = () => {
       </div>
 
       <InferenceModelSelector readonly={!isEditable} />
+
+      <PolicyBackendControl
+        serviceType={info.serviceType}
+        policyType={info.policyType}
+      />
 
       {/* Edit mode indicator */}
       <div
