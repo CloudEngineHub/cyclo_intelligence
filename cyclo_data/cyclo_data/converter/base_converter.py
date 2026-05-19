@@ -26,6 +26,7 @@ between LeRobot v2.1 and v3.0. Format-specific writers live in
 """
 
 import bisect
+import hashlib
 import json
 import os
 import shutil  # noqa: F401  (re-exported transitively for legacy callers)
@@ -1526,6 +1527,36 @@ class RosbagToLerobotConverterBase:
                 f"({exc!r}); Phase 2 will recompute"
             )
 
+    def _store_video_stats_cached(
+        self, video_path: Path, camera_name: str, stats: Optional[Dict[str, Any]]
+    ) -> None:
+        """Persist already-computed video stats next to ``video_path``."""
+        if not stats:
+            return
+        stats_path = Path(video_path).parent / "video_stats.json"
+        existing: Dict[str, Any] = {}
+        if stats_path.exists():
+            try:
+                loaded = json.loads(stats_path.read_text(encoding="utf-8"))
+                if isinstance(loaded, dict):
+                    existing = loaded
+            except (OSError, ValueError) as exc:
+                self._log_warning(
+                    f"{camera_name}: failed to read existing video_stats.json "
+                    f"({exc!r}); overwriting"
+                )
+        existing[camera_name] = stats
+        try:
+            stats_path.write_text(
+                json.dumps(existing),
+                encoding="utf-8",
+            )
+        except OSError as exc:
+            self._log_warning(
+                f"{camera_name}: failed to write streamed video stats "
+                f"({exc!r}); Phase 2 will compute lazily"
+            )
+
     def _can_convert_transcode_state(self, bag_path: Path) -> bool:
         """Return True iff the episode is safe to feed to LeRobot conversion.
 
@@ -1649,6 +1680,9 @@ class RosbagToLerobotConverterBase:
             resize_key = (
                 list(image_resize) if image_resize else None
             )
+            src_stat = src_path.stat()
+            indices_i64 = np.asarray(indices, dtype=np.int64)
+            indices_hash = hashlib.sha256(indices_i64.tobytes()).hexdigest()
 
             # Cache reuse: when v2.1 and v3.0 run on the same dataset
             # back-to-back, v3.0's Phase 1 would otherwise redo the
@@ -1663,6 +1697,9 @@ class RosbagToLerobotConverterBase:
                 "rotation_deg": rotation_extra,
                 "image_resize": resize_key,
                 "frame_count": int(indices.size),
+                "frame_indices_sha256": indices_hash,
+                "source_size": int(src_stat.st_size),
+                "source_mtime_ns": int(src_stat.st_mtime_ns),
             }
             if (
                 out_path.exists()
@@ -1704,7 +1741,7 @@ class RosbagToLerobotConverterBase:
                         f"({exc!r}); regenerating"
                     )
             try:
-                remux_selected_frames(
+                sync_result = remux_selected_frames(
                     src_path, indices, out_path,
                     target_fps=target_fps,
                     rotation_deg=rotation_extra,
@@ -1732,14 +1769,19 @@ class RosbagToLerobotConverterBase:
                     )
                 self._log_info(
                     f"{cam_name}: synced MP4 {indices.size} frames "
-                    f"-> {out_path.name} (UI extra rotation={rotation_extra}°)"
+                    f"-> {out_path.name} (UI extra rotation={rotation_extra}°, "
+                    f"fallback={sync_result.used_fallback})"
                 )
-                # Precompute Phase 2's per-camera video stats while we
-                # have a fresh synced.mp4 and a worker process to spare.
-                # Phase 2 (``_compute_episode_stats``) is single-threaded
-                # — caching here moves the decode cost into Phase 1's
-                # parallel pool, plus the result persists across runs.
-                self._ensure_video_stats_cached(out_path, cam_name)
+                # Streaming sync can compute stats from the selected
+                # frames while they are already in memory. If it fell back
+                # to the legacy JPEG path, keep the old decode-once cache
+                # behaviour.
+                if sync_result.stats:
+                    self._store_video_stats_cached(
+                        out_path, cam_name, sync_result.stats
+                    )
+                else:
+                    self._ensure_video_stats_cached(out_path, cam_name)
                 synced[cam_name] = out_path
             except Exception as exc:
                 self._log_error(

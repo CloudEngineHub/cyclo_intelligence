@@ -532,8 +532,38 @@ class Mp4ConversionWorker:
                             output_queue.put(('error', f'[Stage 1/{n_stages} MP4] {message}'))
                             continue
 
+                        # Stage 2/3 combined fast path: parse each
+                        # _converted episode once, then feed both writers.
+                        if convert_v21 and convert_v30:
+                            v21_start, _ = ranges['v21']
+                            _, v30_end = ranges['v30']
+                            logger.info(
+                                '=== Stages v2.1+v3.0: shared parse + dual write ===')
+                            success, message = Mp4ConversionWorker._convert_to_lerobot_both(
+                                dataset_path=dataset_path,
+                                robot_config_path=robot_config_path,
+                                progress_queue=progress_queue,
+                                logger=logger,
+                                fps=fps,
+                                progress_start=v21_start,
+                                progress_end=v30_end,
+                                selected_cameras=selected_cameras,
+                                camera_rotations=camera_rotations,
+                                image_resize=image_resize,
+                                selected_state_topics=selected_state_topics,
+                                selected_action_topics=selected_action_topics,
+                                selected_joints=selected_joints,
+                                source_rosbags=source_folders or [Path(dataset_path).name],
+                            )
+                            if not success:
+                                logger.error(f'Shared LeRobot conversion failed: {message}')
+                                output_queue.put((
+                                    'error',
+                                    f'[LeRobot v2.1+v3.0] {message}'))
+                                continue
+
                         # Stage 2: LeRobot v2.1 conversion
-                        if convert_v21:
+                        elif convert_v21:
                             v21_start, v21_end = ranges['v21']
                             stage_idx = stage_names.index('v21') + 1
                             logger.info(
@@ -564,7 +594,7 @@ class Mp4ConversionWorker:
                             logger.info('Skipping LeRobot v2.1 (not selected)')
 
                         # Stage 3: LeRobot v3.0 conversion
-                        if convert_v30:
+                        if convert_v30 and not convert_v21:
                             v30_start, v30_end = ranges['v30']
                             stage_idx = stage_names.index('v30') + 1
                             logger.info(
@@ -591,7 +621,7 @@ class Mp4ConversionWorker:
                                     'error',
                                     f'[Stage {stage_idx}/{n_stages} LeRobot v3.0] {message}'))
                                 continue
-                        else:
+                        elif not convert_v30:
                             logger.info('Skipping LeRobot v3.0 (not selected)')
 
                         # Cleanup intermediate Stage 1 outputs ({episode}_converted).
@@ -874,6 +904,250 @@ class Mp4ConversionWorker:
             import traceback
             logger.error(f'Conversion error: {traceback.format_exc()}')
             return False, f'Conversion error: {str(e)}'
+
+    @staticmethod
+    def _collect_converted_bag_paths(dataset_path: Path) -> List[Path]:
+        return sorted(
+            [
+                d for d in dataset_path.iterdir()
+                if d.is_dir() and d.name.endswith('_converted')
+            ],
+            key=lambda d: int(d.name[: -len('_converted')]),
+        )
+
+    @staticmethod
+    def _copy_converter_context(src, dst) -> None:
+        """Carry parse-time metadata into a writer-only converter."""
+        for attr in (
+            '_state_joint_names',
+            '_action_joint_names',
+            '_joint_order_by_group',
+            '_staleness_reports',
+            '_quality_reports',
+        ):
+            if hasattr(src, attr):
+                value = getattr(src, attr)
+                if isinstance(value, dict):
+                    value = dict(value)
+                elif isinstance(value, list):
+                    value = list(value)
+                setattr(dst, attr, value)
+
+    @staticmethod
+    def _parse_converted_episodes(
+        bag_paths: List[Path],
+        config,
+        logger: logging.Logger,
+    ) -> tuple:
+        """Parse _converted episodes once for the dual v2.1/v3.0 path."""
+        from concurrent.futures import ProcessPoolExecutor, as_completed
+
+        from cyclo_data.converter.base_converter import (
+            RosbagToLerobotConverterBase,
+            _conversion_worker_init,
+            _convert_rosbag_worker,
+            _resolve_conversion_worker_count,
+        )
+
+        parser = RosbagToLerobotConverterBase(config, logger)
+        episodes_data = []
+
+        if len(bag_paths) <= 1:
+            for idx, bag_path in enumerate(bag_paths):
+                episode_data = parser.convert_single_rosbag(Path(bag_path), idx)
+                if episode_data is not None:
+                    episodes_data.append(episode_data)
+            return episodes_data, parser
+
+        config_dict = {
+            'repo_id': config.repo_id,
+            'output_dir': config.output_dir,
+            'fps': config.fps,
+            'robot_type': config.robot_type,
+            'use_videos': config.use_videos,
+            'chunks_size': config.chunks_size,
+            'robot_config_path': config.robot_config_path,
+            'state_topics': config.state_topics,
+            'action_topics': config.action_topics,
+            'apply_trim': config.apply_trim,
+            'apply_exclude_regions': config.apply_exclude_regions,
+            'quality_warning_multiplier': config.quality_warning_multiplier,
+            'quality_error_multiplier': config.quality_error_multiplier,
+            'selected_cameras': list(config.selected_cameras),
+            'camera_rotations': dict(config.camera_rotations),
+            'image_resize': (
+                tuple(config.image_resize) if config.image_resize else None
+            ),
+            'selected_state_topics': list(config.selected_state_topics),
+            'selected_action_topics': list(config.selected_action_topics),
+            'selected_joints': list(config.selected_joints),
+            'source_rosbags': list(config.source_rosbags),
+        }
+
+        max_workers = _resolve_conversion_worker_count(len(bag_paths))
+        logger.info(
+            f'Starting shared LeRobot parsing with {max_workers} workers'
+        )
+        with ProcessPoolExecutor(
+            max_workers=max_workers,
+            initializer=_conversion_worker_init,
+        ) as executor:
+            futures = {}
+            for idx, bag_path in enumerate(bag_paths):
+                future = executor.submit(
+                    _convert_rosbag_worker,
+                    str(bag_path), idx, config_dict,
+                )
+                futures[future] = idx
+
+            for future in as_completed(futures):
+                idx = futures[future]
+                try:
+                    episode_index, episode_data = future.result()
+                    if episode_data is not None:
+                        episodes_data.append(episode_data)
+                        logger.info(
+                            f'Episode {episode_index} parsed successfully'
+                        )
+                    else:
+                        logger.warning(f'Episode {idx} returned no data')
+                except Exception as e:
+                    logger.error(f'Error parsing episode {idx}: {e}')
+
+        episodes_data.sort(key=lambda ep: ep.episode_index)
+        return episodes_data, parser
+
+    @staticmethod
+    def _convert_to_lerobot_both(
+        dataset_path: str,
+        robot_config_path: str,
+        progress_queue: multiprocessing.Queue,
+        logger: logging.Logger,
+        fps: int = 15,
+        progress_start: float = 33.0,
+        progress_end: float = 100.0,
+        selected_cameras: Optional[List[str]] = None,
+        camera_rotations: Optional[Dict[str, int]] = None,
+        image_resize: Optional[tuple] = None,
+        selected_state_topics: Optional[List[str]] = None,
+        selected_action_topics: Optional[List[str]] = None,
+        selected_joints: Optional[List[str]] = None,
+        source_rosbags: Optional[List[str]] = None,
+    ) -> tuple:
+        """Shared parse path for v2.1 + v3.0 conversion."""
+        try:
+            from cyclo_data.converter.to_lerobot_v21 import (
+                ConversionConfig,
+                RosbagToLerobotConverter,
+            )
+            from cyclo_data.converter.to_lerobot_v30 import (
+                V30ConversionConfig,
+                RosbagToLerobotV30Converter,
+            )
+        except ImportError as e:
+            return False, f'Failed to import LeRobot converters: {str(e)}'
+
+        try:
+            dataset_path = Path(dataset_path)
+            LEROBOT_OUTPUT_ROOT.mkdir(parents=True, exist_ok=True)
+            repo_id = dataset_path.name
+            v21_output_dir = LEROBOT_OUTPUT_ROOT / f'{dataset_path.name}_lerobot_v21'
+            v30_output_dir = LEROBOT_OUTPUT_ROOT / f'{dataset_path.name}_lerobot_v30'
+
+            bag_paths = Mp4ConversionWorker._collect_converted_bag_paths(dataset_path)
+            if not bag_paths:
+                return False, f'No _converted folders found in {dataset_path}'
+
+            progress_queue.put({
+                'current': 0,
+                'total': len(bag_paths),
+                'percentage': progress_start,
+                'current_episode': '',
+                'dataset_path': str(dataset_path),
+                'stage': 'lerobot_v21_v30'
+            })
+
+            parser_config = ConversionConfig(
+                repo_id=repo_id,
+                output_dir=v21_output_dir,
+                fps=fps,
+                robot_config_path=robot_config_path if robot_config_path else None,
+                selected_cameras=list(selected_cameras or []),
+                camera_rotations=dict(camera_rotations or {}),
+                image_resize=tuple(image_resize) if image_resize else None,
+                selected_state_topics=list(selected_state_topics or []),
+                selected_action_topics=list(selected_action_topics or []),
+                selected_joints=list(selected_joints or []),
+                source_rosbags=list(source_rosbags or [dataset_path.name]),
+            )
+            episodes_data, parser = Mp4ConversionWorker._parse_converted_episodes(
+                bag_paths, parser_config, logger,
+            )
+            if not episodes_data:
+                return False, 'No episodes were successfully parsed'
+
+            progress_queue.put({
+                'current': len(episodes_data),
+                'total': len(bag_paths),
+                'percentage': progress_start + (progress_end - progress_start) * 0.45,
+                'current_episode': '',
+                'dataset_path': str(dataset_path),
+                'stage': 'lerobot_v21_v30'
+            })
+
+            v21_converter = RosbagToLerobotConverter(parser_config, logger)
+            Mp4ConversionWorker._copy_converter_context(parser, v21_converter)
+            if not v21_converter.write_from_episodes(episodes_data):
+                return False, f'LeRobot v2.1 writing failed for {dataset_path}'
+            _copy_dataset_readme(dataset_path, v21_output_dir, logger)
+
+            progress_queue.put({
+                'current': len(episodes_data),
+                'total': len(bag_paths),
+                'percentage': progress_start + (progress_end - progress_start) * 0.65,
+                'current_episode': '',
+                'dataset_path': str(dataset_path),
+                'stage': 'lerobot_v21_v30'
+            })
+
+            v30_config = V30ConversionConfig(
+                repo_id=repo_id,
+                output_dir=v30_output_dir,
+                fps=fps,
+                robot_config_path=robot_config_path if robot_config_path else None,
+                selected_cameras=list(selected_cameras or []),
+                camera_rotations=dict(camera_rotations or {}),
+                image_resize=tuple(image_resize) if image_resize else None,
+                selected_state_topics=list(selected_state_topics or []),
+                selected_action_topics=list(selected_action_topics or []),
+                selected_joints=list(selected_joints or []),
+                source_rosbags=list(source_rosbags or [dataset_path.name]),
+            )
+            v30_converter = RosbagToLerobotV30Converter(v30_config, logger)
+            Mp4ConversionWorker._copy_converter_context(parser, v30_converter)
+            if not v30_converter.write_from_episodes(episodes_data):
+                return False, f'LeRobot v3.0 writing failed for {dataset_path}'
+            _copy_dataset_readme(dataset_path, v30_output_dir, logger)
+
+            progress_queue.put({
+                'current': len(episodes_data),
+                'total': len(bag_paths),
+                'percentage': progress_end,
+                'current_episode': '',
+                'dataset_path': str(dataset_path),
+                'stage': 'lerobot_v21_v30'
+            })
+
+            return True, (
+                f'LeRobot v2.1+v3.0 conversion completed: '
+                f'{v21_output_dir}, {v30_output_dir}'
+            )
+        except Exception as e:
+            import traceback
+            logger.error(
+                f'LeRobot shared conversion error: {traceback.format_exc()}'
+            )
+            return False, f'LeRobot shared conversion error: {str(e)}'
 
     @staticmethod
     def _convert_to_lerobot_v21(

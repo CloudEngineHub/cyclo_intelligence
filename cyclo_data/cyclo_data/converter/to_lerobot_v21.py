@@ -186,6 +186,25 @@ class RosbagToLerobotConverter(RosbagToLerobotConverterBase):
             self._log_error("No episodes were successfully converted")
             return False
 
+        return self.write_from_episodes(episodes_data)
+
+    def write_from_episodes(self, episodes_data: List[EpisodeData]) -> bool:
+        """Write a v2.1 dataset from already parsed episodes."""
+        if not episodes_data:
+            self._log_error("No episodes were provided for LeRobot v2.1 writing")
+            return False
+
+        self._total_episodes = 0
+        self._total_frames = 0
+        self._features = {}
+        self._tasks = {}
+        self._task_to_index = {}
+        self._episodes = {}
+        self._episodes_stats = {}
+
+        output_dir = Path(self.config.output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+
         self._build_features(episodes_data)
         self._write_dataset(episodes_data)
 

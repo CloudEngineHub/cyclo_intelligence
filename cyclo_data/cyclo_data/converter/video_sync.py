@@ -6,33 +6,44 @@
 #
 #     http://www.apache.org/licenses/LICENSE-2.0
 
-"""Convert a recorded MJPEG MP4 + frame index list into a synced MP4.
+"""Convert a recorded MP4 + frame index list into a synced MP4.
 
 LeRobot's dataset format assumes a 1:1 mapping between parquet rows and
 MP4 frames per episode. The recorder writes one frame per camera publish
 event (variable rate), so the convert step has to re-pack the MP4 with
 exactly one frame per resampled grid timestamp.
 
-Strategy: extract every frame from the input MP4 as a JPEG (no decode —
-``-c:v copy`` writes raw MJPEG packets to disk), build a textual concat
-manifest selecting the desired frames in order, and re-mux them into a
-new MP4 at the target FPS. Pure I/O — no pixel decode/encode, no quality
-loss, no rotation applied here (that's a converter-level concern done
-later if needed).
+Strategy: stream-decode the input MP4 once, write selected frames directly
+to a H.264 encoder, and fall back to the older JPEG-temp implementation if
+the streaming path cannot handle the input. This avoids materialising every
+source frame on disk in the common recording-v2 path.
 """
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 import os
 from pathlib import Path
 import shutil
 import subprocess
 import tempfile
-from typing import Sequence
+from typing import Any, Optional, Sequence
+
+import numpy as np
 
 
 _VIDEO_SYNC_TMPDIR_ENV = "CYCLO_VIDEO_SYNC_TMPDIR"
 _VIDEO_SYNC_MIN_FREE_MB_ENV = "CYCLO_VIDEO_SYNC_MIN_FREE_MB"
+_VIDEO_SYNC_FORCE_FALLBACK_ENV = "CYCLO_VIDEO_SYNC_FORCE_FALLBACK"
+
+
+@dataclass
+class VideoSyncResult:
+    """Summary returned by :func:`remux_selected_frames`."""
+
+    frame_count: int
+    stats: Optional[dict[str, Any]] = None
+    used_fallback: bool = False
 
 
 def _ffmpeg() -> str:
@@ -181,6 +192,97 @@ def _rotation_transpose(rotation_deg: int) -> str | None:
     return None
 
 
+def _video_filter_args(
+    rotation_deg: int,
+    image_resize: "tuple[int, int] | None",
+) -> list[str]:
+    """Build ffmpeg ``-vf`` args for rotation then resize."""
+    vf_filters: list[str] = []
+    rot_filter = _rotation_transpose(rotation_deg)
+    if rot_filter:
+        vf_filters.append(rot_filter)
+    if image_resize is not None:
+        h, w = int(image_resize[0]), int(image_resize[1])
+        if h > 0 and w > 0:
+            vf_filters.append(f"scale={w}:{h}")
+    return ["-vf", ",".join(vf_filters)] if vf_filters else []
+
+
+def _video_frame_count(video_path: Path) -> Optional[int]:
+    """Return decoded frame count using ffprobe, or None if unknown."""
+    try:
+        cmd = [
+            "ffprobe", "-v", "error",
+            "-select_streams", "v:0",
+            "-count_frames",
+            "-show_entries", "stream=nb_read_frames,nb_frames",
+            "-of", "default=noprint_wrappers=1",
+            str(video_path),
+        ]
+        res = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+        if res.returncode != 0:
+            return None
+        values: dict[str, str] = {}
+        for line in res.stdout.splitlines():
+            if "=" not in line:
+                continue
+            k, v = line.split("=", 1)
+            values[k.strip()] = v.strip()
+        for key in ("nb_read_frames", "nb_frames"):
+            raw = values.get(key)
+            if raw and raw != "N/A":
+                return int(raw)
+    except Exception:
+        return None
+    return None
+
+
+def _stats_from_samples(samples_rgb: list[np.ndarray]) -> Optional[dict[str, Any]]:
+    if not samples_rgb:
+        return None
+    frames = np.asarray(samples_rgb, dtype=np.float32) / 255.0
+    channels = [frames[:, :, :, i] for i in range(3)]
+
+    def channel_stats(channel: np.ndarray) -> dict[str, float]:
+        return {
+            "mean": float(np.mean(channel)),
+            "std": float(np.std(channel)),
+            "min": float(np.min(channel)),
+            "max": float(np.max(channel)),
+        }
+
+    r_stats, g_stats, b_stats = [channel_stats(channel) for channel in channels]
+    return {
+        "min": [[[r_stats["min"]]], [[g_stats["min"]]], [[b_stats["min"]]]],
+        "max": [[[r_stats["max"]]], [[g_stats["max"]]], [[b_stats["max"]]]],
+        "mean": [[[r_stats["mean"]]], [[g_stats["mean"]]], [[b_stats["mean"]]]],
+        "std": [[[r_stats["std"]]], [[g_stats["std"]]], [[b_stats["std"]]]],
+        "count": [len(samples_rgb)],
+    }
+
+
+def _transform_frame_for_stats(
+    frame_bgr: np.ndarray,
+    rotation_deg: int,
+    image_resize: "tuple[int, int] | None",
+) -> np.ndarray:
+    """Mirror the ffmpeg filter chain closely enough for cached stats."""
+    import cv2
+
+    deg = int(rotation_deg or 0) % 360
+    if deg == 90:
+        frame_bgr = cv2.rotate(frame_bgr, cv2.ROTATE_90_CLOCKWISE)
+    elif deg == 180:
+        frame_bgr = cv2.rotate(frame_bgr, cv2.ROTATE_180)
+    elif deg == 270:
+        frame_bgr = cv2.rotate(frame_bgr, cv2.ROTATE_90_COUNTERCLOCKWISE)
+    if image_resize is not None:
+        h, w = int(image_resize[0]), int(image_resize[1])
+        if h > 0 and w > 0:
+            frame_bgr = cv2.resize(frame_bgr, (w, h), interpolation=cv2.INTER_AREA)
+    return cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
+
+
 def remux_selected_frames(
     input_mp4: Path,
     frame_indices: Sequence[int],
@@ -188,7 +290,7 @@ def remux_selected_frames(
     target_fps: int,
     rotation_deg: int = 0,
     image_resize: "tuple[int, int] | None" = None,
-) -> None:
+) -> VideoSyncResult:
     """Produce ``output_mp4`` containing the listed frames in order.
 
     Args:
@@ -210,15 +312,31 @@ def remux_selected_frames(
     if len(frame_indices) == 0:
         raise ValueError("frame_indices is empty")
 
+    frame_indices = [int(i) for i in frame_indices]
     ffmpeg = _ffmpeg()
+    if not os.environ.get(_VIDEO_SYNC_FORCE_FALLBACK_ENV):
+        try:
+            return _remux_selected_frames_streaming(
+                input_mp4=input_mp4,
+                frame_indices=frame_indices,
+                output_mp4=output_mp4,
+                target_fps=target_fps,
+                rotation_deg=rotation_deg,
+                image_resize=image_resize,
+                ffmpeg=ffmpeg,
+            )
+        except Exception as exc:
+            import sys as _sys
+            print(
+                f"video_sync[{input_mp4.name}]: streaming path failed "
+                f"({exc!r}); falling back to JPEG temp path",
+                file=_sys.stderr,
+            )
+            output_mp4.unlink(missing_ok=True)
+
     tmp_parent, cleanup_tmp_parent = _resolve_tmp_parent(output_mp4)
     try:
         _check_tmp_free_space(tmp_parent)
-    except Exception:
-        output_mp4.unlink(missing_ok=True)
-        _cleanup_tmp_parent(tmp_parent, cleanup_tmp_parent)
-        raise
-    try:
         with tempfile.TemporaryDirectory(
             prefix="video_sync_", dir=str(tmp_parent)
         ) as tmpdir:
@@ -239,8 +357,155 @@ def remux_selected_frames(
                 frames_dir=frames_dir,
                 seq_dir=seq_dir,
             )
+        produced_frames = _video_frame_count(output_mp4)
+        if produced_frames != len(frame_indices):
+            output_mp4.unlink(missing_ok=True)
+            raise RuntimeError(
+                f"video_sync fallback frame count mismatch for "
+                f"{output_mp4.name}: expected {len(frame_indices)}, "
+                f"got {produced_frames}"
+            )
+        return VideoSyncResult(
+            frame_count=int(produced_frames),
+            stats=None,
+            used_fallback=True,
+        )
     finally:
         _cleanup_tmp_parent(tmp_parent, cleanup_tmp_parent)
+
+
+def _remux_selected_frames_streaming(
+    *,
+    input_mp4: Path,
+    frame_indices: Sequence[int],
+    output_mp4: Path,
+    target_fps: int,
+    rotation_deg: int,
+    image_resize: "tuple[int, int] | None",
+    ffmpeg: str,
+) -> VideoSyncResult:
+    """Decode input once and stream selected BGR frames to ffmpeg."""
+    if any(i < 0 for i in frame_indices):
+        raise ValueError("frame_indices must be non-negative")
+    if any(b < a for a, b in zip(frame_indices, frame_indices[1:])):
+        raise ValueError("streaming sync requires non-decreasing frame_indices")
+
+    import cv2
+
+    cap = cv2.VideoCapture(str(input_mp4))
+    if not cap.isOpened():
+        raise RuntimeError(f"failed to open input video: {input_mp4}")
+
+    process: subprocess.Popen | None = None
+    last_frame: np.ndarray | None = None
+    current_idx = -1
+    clamped_count = 0
+    sample_positions = set(
+        np.linspace(
+            0,
+            len(frame_indices) - 1,
+            min(100, len(frame_indices)),
+            dtype=int,
+        ).tolist()
+    )
+    samples_rgb: list[np.ndarray] = []
+    stderr = ""
+
+    try:
+        for out_idx, requested_idx in enumerate(frame_indices):
+            while current_idx < requested_idx:
+                ret, frame = cap.read()
+                if not ret:
+                    if last_frame is None:
+                        raise RuntimeError(
+                            f"no frames decoded from {input_mp4.name}"
+                        )
+                    clamped_count += 1
+                    break
+                current_idx += 1
+                last_frame = frame
+
+            if last_frame is None:
+                raise RuntimeError(f"no frame available for {input_mp4.name}")
+
+            if process is None:
+                height, width = last_frame.shape[:2]
+                encoder, enc_opts = _h264_encoder(ffmpeg)
+                cmd = [
+                    ffmpeg, "-hide_banner", "-loglevel", "warning", "-y",
+                    *_ffmpeg_threads_arg(),
+                    "-f", "rawvideo",
+                    "-pix_fmt", "bgr24",
+                    "-s", f"{width}x{height}",
+                    "-r", str(int(target_fps)),
+                    "-i", "pipe:0",
+                    *_video_filter_args(rotation_deg, image_resize),
+                    "-c:v", encoder,
+                    *enc_opts,
+                    "-pix_fmt", "yuv420p",
+                    "-r", str(int(target_fps)),
+                    "-video_track_timescale", "90000",
+                    "-movflags", "+faststart",
+                    str(output_mp4),
+                ]
+                process = subprocess.Popen(
+                    cmd,
+                    stdin=subprocess.PIPE,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.PIPE,
+                )
+
+            assert process.stdin is not None
+            process.stdin.write(last_frame.tobytes())
+
+            if out_idx in sample_positions:
+                samples_rgb.append(
+                    _transform_frame_for_stats(
+                        last_frame,
+                        rotation_deg=rotation_deg,
+                        image_resize=image_resize,
+                    )
+                )
+
+        if process is None or process.stdin is None:
+            raise RuntimeError("encoder was not started")
+        process.stdin.close()
+        if process.stderr is not None:
+            stderr = process.stderr.read().decode(errors="replace")
+        rc = process.wait(timeout=300)
+        if rc != 0:
+            raise RuntimeError(f"ffmpeg encode rc={rc}: {stderr[-500:]}")
+
+        produced_frames = _video_frame_count(output_mp4)
+        if produced_frames != len(frame_indices):
+            output_mp4.unlink(missing_ok=True)
+            raise RuntimeError(
+                f"streaming frame count mismatch for {output_mp4.name}: "
+                f"expected {len(frame_indices)}, got {produced_frames}"
+            )
+
+        if clamped_count:
+            import sys as _sys
+            print(
+                f"video_sync[{input_mp4.name}]: clamped {clamped_count} "
+                f"selected indices beyond decoded frames to last frame",
+                file=_sys.stderr,
+            )
+
+        return VideoSyncResult(
+            frame_count=int(produced_frames),
+            stats=_stats_from_samples(samples_rgb),
+            used_fallback=False,
+        )
+    finally:
+        cap.release()
+        if process is not None and process.poll() is None:
+            try:
+                if process.stdin and not process.stdin.closed:
+                    process.stdin.close()
+            except Exception:
+                pass
+            process.kill()
 
 
 def _remux_selected_frames_in_tmp(
@@ -381,23 +646,13 @@ def _remux_selected_frames_in_tmp(
     # target dimensions describe the final output, not the
     # pre-rotation orientation. ``image_resize`` is ``(height, width)``
     # to match the orchestrator-side ConversionConfig field.
-    vf_filters: list[str] = []
-    rot_filter = _rotation_transpose(rotation_deg)
-    if rot_filter:
-        vf_filters.append(rot_filter)
-    if image_resize is not None:
-        h, w = int(image_resize[0]), int(image_resize[1])
-        if h > 0 and w > 0:
-            # ``scale=W:H`` order; ffmpeg uses W first.
-            vf_filters.append(f"scale={w}:{h}")
-    vf_args = ["-vf", ",".join(vf_filters)] if vf_filters else []
     mux_cmd = [
         ffmpeg, "-hide_banner", "-loglevel", "warning", "-y",
         *_ffmpeg_threads_arg(),
         "-framerate", str(int(target_fps)),
         "-start_number", "0",
         "-i", str(seq_dir / "seq_%08d.jpg"),
-        *vf_args,
+        *_video_filter_args(rotation_deg, image_resize),
         "-c:v", encoder,
         *enc_opts,
         "-pix_fmt", "yuv420p",

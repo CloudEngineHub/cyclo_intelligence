@@ -47,6 +47,8 @@ LeRobot v3.0 Dataset Structure:
 """
 
 import json
+import os
+import shutil
 import subprocess
 import tempfile
 from dataclasses import dataclass, field
@@ -71,6 +73,7 @@ from .base_converter import (
     _convert_rosbag_worker,
     _resolve_conversion_worker_count,
 )
+from .video_sync import _ffmpeg, _ffmpeg_threads_arg, _h264_encoder
 
 
 CODEBASE_VERSION_V30 = "v3.0"
@@ -291,6 +294,35 @@ class RosbagToLerobotV30Converter(RosbagToLerobotConverterBase):
         if not episodes_data:
             self._log_error("No episodes were successfully converted")
             return False
+
+        return self.write_from_episodes(episodes_data)
+
+    def write_from_episodes(self, episodes_data: List[EpisodeData]) -> bool:
+        """Write a v3.0 dataset from already parsed episodes."""
+        if not episodes_data:
+            self._log_error("No episodes were provided for LeRobot v3.0 writing")
+            return False
+
+        output_dir = Path(self.config.output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        (output_dir / "meta" / "episodes").mkdir(parents=True, exist_ok=True)
+        (output_dir / "data").mkdir(parents=True, exist_ok=True)
+        (output_dir / "videos").mkdir(parents=True, exist_ok=True)
+
+        self._features = {}
+        self._tasks = {}
+        self._task_to_index = {}
+        self._total_episodes = 0
+        self._total_frames = 0
+        self._episode_metadata_list = []
+        self._current_data_chunk_idx = 0
+        self._current_data_file_idx = 0
+        self._current_data_file_size_mb = 0.0
+        self._current_data_file_frames = 0
+        self._video_tracking = {}
+        self._pending_parquet_data = []
+        self._pending_video_files = {}
 
         self._build_features(episodes_data)
         self._collect_tasks(episodes_data)
@@ -594,6 +626,28 @@ class RosbagToLerobotV30Converter(RosbagToLerobotConverterBase):
 
         expected_frames = self._expected_aggregated_frame_count(videos)
 
+        if len(videos) == 1:
+            _, source_video, _ = videos[0]
+            if output_path.exists():
+                output_path.unlink()
+            try:
+                os.link(source_video, output_path)
+            except OSError:
+                shutil.copy2(source_video, output_path)
+            try:
+                self._validate_aggregated_video(output_path, expected_frames)
+                self._log_info(
+                    f"Linked single episode video without re-encode: "
+                    f"{output_path.name} ({expected_frames} frames)"
+                )
+                return
+            except RuntimeError as exc:
+                output_path.unlink(missing_ok=True)
+                self._log_warning(
+                    f"Single episode video fast path failed ({exc}); "
+                    "falling back to CFR re-encode"
+                )
+
         # Create concat list file for ffmpeg
         with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
             for _, video_path, _ in videos:
@@ -603,9 +657,12 @@ class RosbagToLerobotV30Converter(RosbagToLerobotConverterBase):
         try:
             fps = float(self.config.fps)
             fps_str = f"{fps:g}"
+            ffmpeg = _ffmpeg()
+            encoder, enc_opts = _h264_encoder(ffmpeg)
             cmd = [
-                "ffmpeg",
+                ffmpeg,
                 "-y",
+                *_ffmpeg_threads_arg(),
                 "-f",
                 "concat",
                 "-safe",
@@ -618,7 +675,8 @@ class RosbagToLerobotV30Converter(RosbagToLerobotConverterBase):
                 fps_str,
                 "-an",
                 "-c:v",
-                "libx264",
+                encoder,
+                *enc_opts,
                 "-pix_fmt",
                 "yuv420p",
                 "-movflags",
