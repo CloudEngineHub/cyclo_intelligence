@@ -98,9 +98,10 @@ class ReplayDataHandler:
         task_markers: List[Dict],
         trim_points: Optional[Dict] = None,
         exclude_regions: Optional[List[Dict]] = None,
+        segments: Optional[List[Dict]] = None,
     ) -> Dict:
         return self._metadata_manager.update_task_markers(
-            Path(bag_path), task_markers, trim_points, exclude_regions
+            Path(bag_path), task_markers, trim_points, exclude_regions, segments
         )
 
     def get_replay_data(self, bag_path: str) -> Dict:
@@ -137,6 +138,7 @@ class ReplayDataHandler:
             "recording_date": None,
             "file_size_bytes": 0,
             "task_markers": [],
+            "segments": [],
             "trim_points": None,
             "exclude_regions": [],
             "frame_counts": {},
@@ -527,6 +529,10 @@ class ReplayDataHandler:
                 result["start_time"] = 0.0
                 result["end_time"] = max_time - min_time
                 result["duration"] = max_time - min_time
+
+            result["segments"] = self._metadata_manager.get_episode_segments(
+                bag_path_obj, duration=result["duration"]
+            )
 
             result["success"] = True
             result["message"] = "Replay data loaded successfully"

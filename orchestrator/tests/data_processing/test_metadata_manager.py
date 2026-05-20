@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import json
 import os
 import tempfile
 from pathlib import Path
@@ -95,6 +96,7 @@ class TestMetadataManager:
         assert markers[0]["instruction"] == "Start"
 
     def test_update_task_markers(self, manager, temp_bag_dir):
+        manager.save_robot_config(temp_bag_dir, {})
         markers = [
             {"frame": 50, "time": 1.5, "instruction": "Move"},
             {"frame": 10, "time": 0.3, "instruction": "Init"},
@@ -109,6 +111,7 @@ class TestMetadataManager:
         assert loaded_markers[1]["frame"] == 50
 
     def test_update_task_markers_with_trim_points(self, manager, temp_bag_dir):
+        manager.save_robot_config(temp_bag_dir, {})
         markers = [{"frame": 0, "time": 0.0, "instruction": "Start"}]
         trim_points = {
             "start": {"time": 1.0, "frame": 30},
@@ -123,6 +126,126 @@ class TestMetadataManager:
         loaded_trim = manager.get_trim_points(temp_bag_dir)
         assert loaded_trim is not None
         assert loaded_trim["start"]["time"] == 1.0
+
+    def test_get_episode_segments_keeps_timestamp_segments(
+        self, manager, temp_bag_dir
+    ):
+        info = {
+            "segment_time_unit": "seconds",
+            "segment_time_reference": "episode_start",
+            "fps": 15,
+            "segments": [
+                {
+                    "sub_task_index": 0,
+                    "sub_task_description": "",
+                    "sub_task_instruction": "Move",
+                    "frame_duration": [0.5, 2.25],
+                }
+            ],
+        }
+        (temp_bag_dir / "episode_info.json").write_text(
+            json.dumps(info), encoding="utf-8"
+        )
+
+        segments = manager.get_episode_segments(temp_bag_dir, duration=3.0)
+
+        assert len(segments) == 1
+        assert segments[0]["frame_duration"] == [0.5, 2.25]
+        assert segments[0]["sub_task_instruction"] == "Move"
+
+    def test_get_episode_segments_converts_legacy_frame_segments(
+        self, manager, temp_bag_dir
+    ):
+        info = {
+            "fps": 15,
+            "segments": [
+                {
+                    "sub_task_index": -1,
+                    "sub_task_description": "",
+                    "sub_task_instruction": "Pick",
+                    "frame_duration": [0, 552],
+                },
+                {
+                    "sub_task_index": -1,
+                    "sub_task_description": "",
+                    "sub_task_instruction": "Move",
+                    "frame_duration": [552, 799],
+                },
+            ],
+        }
+        (temp_bag_dir / "episode_info.json").write_text(
+            json.dumps(info), encoding="utf-8"
+        )
+
+        segments = manager.get_episode_segments(temp_bag_dir, duration=83.5)
+
+        assert len(segments) == 2
+        assert segments[0]["frame_duration"] == [0.0, 36.8]
+        assert segments[1]["frame_duration"][0] == 36.8
+        assert round(segments[1]["frame_duration"][1], 6) == round(799 / 15, 6)
+
+    def test_get_episode_segments_skips_malformed_segments(
+        self, manager, temp_bag_dir
+    ):
+        info = {
+            "segment_time_unit": "seconds",
+            "segments": [
+                {"frame_duration": [0.0]},
+                {"frame_duration": ["bad", 1.0]},
+                {"sub_task_instruction": "Good", "frame_duration": [1.0, 2.0]},
+            ],
+        }
+        (temp_bag_dir / "episode_info.json").write_text(
+            json.dumps(info), encoding="utf-8"
+        )
+
+        segments = manager.get_episode_segments(temp_bag_dir)
+
+        assert len(segments) == 1
+        assert segments[0]["sub_task_instruction"] == "Good"
+
+    def test_update_task_markers_writes_timestamp_segments(
+        self, manager, temp_bag_dir
+    ):
+        (temp_bag_dir / "episode_info.json").write_text(
+            json.dumps({"task_instruction": "task"}), encoding="utf-8"
+        )
+        segments = [
+            {
+                "sub_task_index": 0,
+                "sub_task_description": "",
+                "sub_task_instruction": "Pick",
+                "frame_duration": [0.0, 1.5],
+            }
+        ]
+
+        result = manager.update_task_markers(
+            temp_bag_dir,
+            [],
+            segments=segments,
+        )
+
+        assert result["success"] is True
+        saved = json.loads((temp_bag_dir / "episode_info.json").read_text())
+        assert saved["segment_time_unit"] == "seconds"
+        assert saved["segment_time_reference"] == "episode_start"
+        assert saved["segments"][0]["frame_duration"] == [0.0, 1.5]
+        assert not (temp_bag_dir / "robot_config.yaml").exists()
+
+    def test_update_task_markers_keeps_existing_robot_config(
+        self, manager, temp_bag_dir
+    ):
+        manager.save_robot_config(temp_bag_dir, {"robot_type": "test_robot"})
+
+        result = manager.update_task_markers(
+            temp_bag_dir,
+            [{"frame": 1, "time": 0.1, "instruction": "Move"}],
+        )
+
+        assert result["success"] is True
+        saved = yaml.safe_load((temp_bag_dir / "robot_config.yaml").read_text())
+        assert saved["robot_type"] == "test_robot"
+        assert saved["task_markers"][0]["instruction"] == "Move"
 
     def test_get_camera_name_map(self, manager, temp_bag_dir):
         config_data = {

@@ -21,14 +21,20 @@ import { setTaskInfo } from '../../../features/tasks/taskSlice';
 import { useRosServiceCaller } from '../../../hooks/useRosServiceCaller';
 import { DEFAULT_PATHS } from '../../../constants/paths';
 
-// Convert a task folder name like "ffw_sg2_rev1_test_0406_1" to the
-// task_name expected by the backend (strip the "{robotType}_" prefix when
-// it matches). The backend rebuilds the full path as
-// /workspace/rosbag2/{robot_type}_{task_name}.
-const stripRobotPrefix = (folderName, robotType) => {
-  if (!robotType) return folderName;
-  const prefix = `${robotType}_`;
-  return folderName.startsWith(prefix) ? folderName.slice(prefix.length) : folderName;
+const normalizeRosbagTaskPath = (item) => {
+  const rawPath = item?.full_path || item?.path || item?.name || '';
+  const trimmedPath = rawPath.replace(/\/+$/, '');
+  const rosbagRoot = DEFAULT_PATHS.ROSBAG2_PATH.replace(/\/+$/, '');
+
+  if (trimmedPath === rosbagRoot) {
+    return '';
+  }
+
+  if (trimmedPath.startsWith(`${rosbagRoot}/`)) {
+    return trimmedPath.slice(rosbagRoot.length + 1);
+  }
+
+  return trimmedPath;
 };
 
 export default function DatasetConvertSection({ isEditable = true }) {
@@ -38,7 +44,6 @@ export default function DatasetConvertSection({ isEditable = true }) {
   const conversionStatus = useSelector(
     (state) => state.editDataset.conversionStatus
   );
-  const robotType = useSelector((state) => state.tasks.robotType) || '';
 
   // ----- local state ------------------------------------------------------
   const [singleTaskName, setSingleTaskName] = useState('');
@@ -145,14 +150,10 @@ export default function DatasetConvertSection({ isEditable = true }) {
   ]);
 
   // ----- file browser callbacks ------------------------------------------
-  const handleSingleFolderSelect = useCallback(
-    (item) => {
-      const taskName = stripRobotPrefix(item.name, robotType);
-      setSingleTaskName(taskName);
-      setShowSingleBrowser(false);
-    },
-    [robotType]
-  );
+  const handleSingleFolderSelect = useCallback((item) => {
+    setSingleTaskName(normalizeRosbagTaskPath(item));
+    setShowSingleBrowser(false);
+  }, []);
 
   // ----- derived ----------------------------------------------------------
   const optionsValid =
@@ -195,7 +196,7 @@ export default function DatasetConvertSection({ isEditable = true }) {
               type="text"
               value={singleTaskName}
               onChange={(e) => setSingleTaskName(e.target.value)}
-              placeholder="e.g. Task_1_1_MCAP"
+              placeholder="e.g. Task_1_1_MCAP or Temp/Task_1_1_MCAP"
               disabled={isConverting || !isEditable}
               className={clsx(
                 'text-sm flex-1 p-2 border border-gray-300 rounded-md',

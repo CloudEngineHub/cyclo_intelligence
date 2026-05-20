@@ -44,6 +44,8 @@ const SECTION_NAME = {
   DOWNLOAD: 'download',
 };
 
+const HF_FILE_BROWSER_ROOT = '/workspace';
+
 // HuggingFace repository name validation
 const validateHfRepoName = (repoName) => {
   if (!repoName) return { isValid: false, message: '' };
@@ -1164,11 +1166,10 @@ const HuggingfaceSection = () => {
         title="Select Local Directory for Upload"
         selectButtonText="Select"
         allowDirectorySelect={true}
-        // Datasets are now stored as rosbag2 task folders, so we drop the
-        // LeRobot marker (`meta` / `videos` / `data`) folder filter and just
-        // start the picker at the rosbag2 root.
-        initialPath={DEFAULT_PATHS.ROSBAG2_PATH}
-        defaultPath={DEFAULT_PATHS.ROSBAG2_PATH}
+        // Start at /workspace so users can choose rosbag2, lerobot, model,
+        // or another mounted workspace directory.
+        initialPath={HF_FILE_BROWSER_ROOT}
+        defaultPath={HF_FILE_BROWSER_ROOT}
         homePath=""
       />
 
@@ -1184,16 +1185,8 @@ const HuggingfaceSection = () => {
         selectButtonText="Select"
         allowDirectorySelect={true}
         allowFileSelect={false}
-        initialPath={
-          downloadType === 'model'
-            ? DEFAULT_PATHS.HF_MODEL_DOWNLOAD_PATH
-            : DEFAULT_PATHS.HF_DATASET_DOWNLOAD_PATH
-        }
-        defaultPath={
-          downloadType === 'model'
-            ? DEFAULT_PATHS.HF_MODEL_DOWNLOAD_PATH
-            : DEFAULT_PATHS.HF_DATASET_DOWNLOAD_PATH
-        }
+        initialPath={HF_FILE_BROWSER_ROOT}
+        defaultPath={HF_FILE_BROWSER_ROOT}
         homePath=""
       />
 

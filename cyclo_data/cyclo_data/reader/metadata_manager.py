@@ -16,6 +16,7 @@
 
 """Metadata manager for ROSbag robot_config.yaml files."""
 
+import json
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -187,12 +188,191 @@ class MetadataManager:
             return []
         return config.get("exclude_regions", [])
 
+    def load_episode_info(self, bag_path: Path) -> Dict:
+        """Load episode_info.json from a rosbag episode directory."""
+        info_path = Path(bag_path) / "episode_info.json"
+        if not info_path.exists():
+            return {}
+
+        try:
+            with open(info_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            return data if isinstance(data, dict) else {}
+        except Exception as e:
+            self._log_error(f"Failed to load episode_info.json: {e}")
+            return {}
+
+    def get_episode_segments(
+        self,
+        bag_path: Path,
+        duration: Optional[float] = None,
+    ) -> List[Dict]:
+        """Return episode segments with frame_duration in relative seconds."""
+        info = self.load_episode_info(bag_path)
+        raw_segments = info.get("segments", [])
+        if not isinstance(raw_segments, list):
+            return []
+
+        unit = str(info.get("segment_time_unit", "") or "").lower()
+        fps = self._coerce_positive_float(info.get("fps"))
+        convert_frames = unit in {"frame", "frames"}
+
+        if unit not in {"second", "seconds", "sec", "secs"} and not convert_frames:
+            convert_frames = self._segments_look_frame_based(
+                raw_segments, fps=fps, duration=duration
+            )
+
+        segments = []
+        for idx, segment in enumerate(raw_segments):
+            if not isinstance(segment, dict):
+                continue
+            duration_pair = segment.get("frame_duration")
+            if (
+                not isinstance(duration_pair, list)
+                or len(duration_pair) != 2
+            ):
+                continue
+
+            start = self._coerce_float(duration_pair[0])
+            end = self._coerce_float(duration_pair[1])
+            if start is None or end is None:
+                continue
+            if convert_frames and fps:
+                start /= fps
+                end /= fps
+            if end < start:
+                continue
+
+            normalized = dict(segment)
+            normalized["sub_task_index"] = self._coerce_int(
+                normalized.get("sub_task_index"), idx
+            )
+            normalized["sub_task_description"] = str(
+                normalized.get("sub_task_description", "") or ""
+            )
+            normalized["sub_task_instruction"] = str(
+                normalized.get("sub_task_instruction", "") or ""
+            )
+            normalized["frame_duration"] = [float(start), float(end)]
+            segments.append(normalized)
+
+        segments.sort(key=lambda s: s["frame_duration"][0])
+        return segments
+
+    def update_episode_segments(self, bag_path: Path, segments: List[Dict]) -> bool:
+        """Write timestamp-based segments into episode_info.json."""
+        bag_path = Path(bag_path)
+        info_path = bag_path / "episode_info.json"
+        info = self.load_episode_info(bag_path)
+
+        normalized = []
+        for idx, segment in enumerate(segments or []):
+            if not isinstance(segment, dict):
+                continue
+            duration_pair = segment.get("frame_duration")
+            if (
+                not isinstance(duration_pair, list)
+                or len(duration_pair) != 2
+            ):
+                continue
+            start = self._coerce_float(duration_pair[0])
+            end = self._coerce_float(duration_pair[1])
+            if start is None or end is None or end < start:
+                continue
+            normalized.append({
+                "sub_task_index": self._coerce_int(
+                    segment.get("sub_task_index"), idx
+                ),
+                "sub_task_description": str(
+                    segment.get("sub_task_description", "") or ""
+                ),
+                "sub_task_instruction": str(
+                    segment.get("sub_task_instruction", "") or ""
+                ),
+                "frame_duration": [float(start), float(end)],
+            })
+
+        normalized.sort(key=lambda s: s["frame_duration"][0])
+        for idx, segment in enumerate(normalized):
+            segment["sub_task_index"] = idx
+
+        info["segments"] = normalized
+        info["segment_time_unit"] = "seconds"
+        info["segment_time_reference"] = "episode_start"
+
+        try:
+            info_path.parent.mkdir(parents=True, exist_ok=True)
+            tmp_path = info_path.with_suffix(info_path.suffix + ".tmp")
+            with open(tmp_path, "w", encoding="utf-8") as f:
+                json.dump(info, f, ensure_ascii=False, indent=2)
+                f.write("\n")
+            tmp_path.replace(info_path)
+            self._log_info(f"Saved episode segments to: {info_path}")
+            return True
+        except Exception as e:
+            self._log_error(f"Failed to save episode segments: {e}")
+            return False
+
+    @staticmethod
+    def _coerce_float(value: Any) -> Optional[float]:
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+
+    @classmethod
+    def _coerce_positive_float(cls, value: Any) -> Optional[float]:
+        coerced = cls._coerce_float(value)
+        if coerced is None or coerced <= 0:
+            return None
+        return coerced
+
+    @staticmethod
+    def _coerce_int(value: Any, default: int) -> int:
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return default
+
+    @classmethod
+    def _segments_look_frame_based(
+        cls,
+        segments: List[Dict],
+        fps: Optional[float],
+        duration: Optional[float],
+    ) -> bool:
+        if not fps:
+            return False
+
+        values = []
+        for segment in segments:
+            if not isinstance(segment, dict):
+                continue
+            duration_pair = segment.get("frame_duration")
+            if not isinstance(duration_pair, list) or len(duration_pair) != 2:
+                continue
+            for value in duration_pair:
+                coerced = cls._coerce_float(value)
+                if coerced is not None:
+                    values.append(coerced)
+
+        if not values:
+            return False
+        if any(abs(value - round(value)) > 1e-6 for value in values):
+            return False
+
+        max_value = max(values)
+        if duration is not None and duration > 0:
+            return max_value > duration + 1.0
+        return max_value > 300
+
     def update_task_markers(
         self,
         bag_path: Path,
         task_markers: List[Dict],
         trim_points: Optional[Dict] = None,
         exclude_regions: Optional[List[Dict]] = None,
+        segments: Optional[List[Dict]] = None,
     ) -> Dict:
         """
         Update task markers, trim points, and exclude regions.
@@ -202,6 +382,7 @@ class MetadataManager:
             task_markers: List of task marker dictionaries
             trim_points: Optional dict with 'start' and 'end' trim point info
             exclude_regions: Optional list of exclude region dicts
+            segments: Optional episode_info.json segments in relative seconds
 
         Returns:
             Result dictionary with success status and message
@@ -210,43 +391,55 @@ class MetadataManager:
         bag_path = Path(bag_path)
         config_path = bag_path / "robot_config.yaml"
 
-        # Load existing config or create new
+        saved_config = False
         if config_path.exists():
             config = self.load_robot_config(bag_path) or {}
-        else:
-            config = {}
 
-        # Sort markers by frame and update
-        sorted_markers = sorted(task_markers, key=lambda m: m.get("frame", 0))
-        config["task_markers"] = sorted_markers
+            # Sort markers by frame and update legacy replay annotations.
+            sorted_markers = sorted(task_markers, key=lambda m: m.get("frame", 0))
+            config["task_markers"] = sorted_markers
 
-        # Update trim points
-        if trim_points is not None:
-            if trim_points:
-                config["trim_points"] = trim_points
-            elif "trim_points" in config:
-                del config["trim_points"]
+            # Update trim points
+            if trim_points is not None:
+                if trim_points:
+                    config["trim_points"] = trim_points
+                elif "trim_points" in config:
+                    del config["trim_points"]
 
-        # Update exclude regions
-        if exclude_regions is not None:
-            if exclude_regions:
-                sorted_regions = sorted(
-                    exclude_regions, key=lambda r: r.get("start", {}).get("time", 0)
-                )
-                config["exclude_regions"] = sorted_regions
-            elif "exclude_regions" in config:
-                del config["exclude_regions"]
+            # Update exclude regions
+            if exclude_regions is not None:
+                if exclude_regions:
+                    sorted_regions = sorted(
+                        exclude_regions,
+                        key=lambda r: r.get("start", {}).get("time", 0),
+                    )
+                    config["exclude_regions"] = sorted_regions
+                elif "exclude_regions" in config:
+                    del config["exclude_regions"]
 
-        # Save config
-        if self.save_robot_config(bag_path, config):
-            result["success"] = True
-            result["message"] = f"Saved {len(task_markers)} task markers"
-            if trim_points:
-                result["message"] += ", trim points"
-            if exclude_regions:
-                result["message"] += f", {len(exclude_regions)} exclude regions"
-        else:
-            result["message"] = "Failed to save config"
+            if not self.save_robot_config(bag_path, config):
+                result["message"] = "Failed to save config"
+                return result
+            saved_config = True
+
+        if segments is not None and not self.update_episode_segments(
+            bag_path, segments
+        ):
+            result["message"] = "Failed to save episode segments"
+            return result
+
+        result["success"] = True
+        result["message"] = (
+            f"Saved {len(task_markers)} task markers"
+            if saved_config
+            else "Skipped robot_config.yaml"
+        )
+        if trim_points:
+            result["message"] += ", trim points"
+        if exclude_regions:
+            result["message"] += f", {len(exclude_regions)} exclude regions"
+        if segments is not None:
+            result["message"] += f", {len(segments)} segments"
 
         return result
 
