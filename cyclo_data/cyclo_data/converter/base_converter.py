@@ -1566,9 +1566,8 @@ class RosbagToLerobotConverterBase:
         finished would silently drop those — so we refuse and log a
         clear actionable error per status.
 
-        Pre-v2 episodes (no ``transcoding_status`` field, no
-        ``recorder_format_version`` field) are accepted unconditionally
-        for backward compatibility.
+        Pre-v2 episodes (no ``transcoding_status`` field) are accepted
+        unconditionally for backward compatibility.
         """
         info = bag_path / "episode_info.json"
         if not info.exists():

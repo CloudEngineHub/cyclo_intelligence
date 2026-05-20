@@ -594,10 +594,11 @@ class VideoFileHandler(SimpleHTTPRequestHandler):
             task_markers = data.get('task_markers', [])
             trim_points = data.get('trim_points', None)
             exclude_regions = data.get('exclude_regions', None)
+            segments = data.get('segments', None)
 
             # Update task markers, trim points, and exclude regions
             result = handler.update_task_markers(
-                bag_path, task_markers, trim_points, exclude_regions
+                bag_path, task_markers, trim_points, exclude_regions, segments
             )
 
             # Send response

@@ -65,6 +65,7 @@ const initialState = {
   recordingDate: null,
   fileSizeBytes: 0,
   taskMarkers: [],
+  segments: [],
   frameCounts: {},
 
   // MCAP direct streaming
@@ -117,6 +118,7 @@ const replaySlice = createSlice({
       state.recordingDate = data.recording_date || null;
       state.fileSizeBytes = data.file_size_bytes || 0;
       state.taskMarkers = data.task_markers || [];
+      state.segments = data.segments || [];
       state.frameCounts = data.frame_counts || {};
       // MCAP direct streaming
       state.hasRawImages = data.has_raw_images || false;
@@ -131,6 +133,9 @@ const replaySlice = createSlice({
     },
     setTaskMarkers: (state, action) => {
       state.taskMarkers = action.payload;
+    },
+    setSegments: (state, action) => {
+      state.segments = action.payload;
     },
     setError: (state, action) => {
       state.error = action.payload;
@@ -160,6 +165,7 @@ export const {
   setLoading,
   setReplayData,
   setTaskMarkers,
+  setSegments,
   setError,
   setCurrentTime,
   setIsPlaying,

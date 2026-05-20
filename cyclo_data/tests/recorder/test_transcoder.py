@@ -130,8 +130,6 @@ def _make_episode(
             "robot_type": "test_robot",
             "episode_index": 0,
             "format_version": "robotis_v2",
-            "recorder_format_version": 2,
-            "video_files": {cam: f"videos/{cam}.mp4" for cam in cameras},
             "camera_rotations": dict(rotations or {}),
             "transcoding_status": initial_status,
         }
@@ -353,7 +351,6 @@ class TestRecovery:
             (tmp_path / "Task_X" / str(ep_idx) / "episode_info.json").write_text(
                 json.dumps({
                     "transcoding_status": STATUS_PENDING,
-                    "video_files": {"cam0": "videos/cam0.mp4"},
                 })
             )
         # An episode already marked done must NOT be re-queued.

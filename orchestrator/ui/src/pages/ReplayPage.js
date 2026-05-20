@@ -31,6 +31,7 @@ import {
   setLoading,
   setReplayData,
   setTaskMarkers,
+  setSegments,
   setError,
   setCurrentTime,
   setIsPlaying,
@@ -52,6 +53,50 @@ import Viewer3DPanel from '../components/replay/Viewer3DPanel';
 import JointDataPanel from '../components/replay/JointDataPanel';
 import SidebarPanel from '../components/replay/SidebarPanel';
 import TimelineControls from '../components/replay/TimelineControls';
+
+const frameFromTime = (time, fps) => Math.round(time * (fps || 30));
+
+const annotationsFromSegments = (segments, fps) => {
+  if (!Array.isArray(segments) || segments.length === 0) {
+    return { trimStart: null, trimEnd: null, taskMarkers: [] };
+  }
+
+  const sortedSegments = [...segments]
+    .filter((segment) => Array.isArray(segment.frame_duration) && segment.frame_duration.length === 2)
+    .sort((a, b) => a.frame_duration[0] - b.frame_duration[0]);
+
+  if (sortedSegments.length === 0) {
+    return { trimStart: null, trimEnd: null, taskMarkers: [] };
+  }
+
+  const first = sortedSegments[0];
+  const last = sortedSegments[sortedSegments.length - 1];
+  const trimStartTime = Number(first.frame_duration[0]) || 0;
+  const trimEndTime = Number(last.frame_duration[1]) || trimStartTime;
+
+  return {
+    trimStart: {
+      time: trimStartTime,
+      frame: frameFromTime(trimStartTime, fps),
+      instruction: first.sub_task_instruction || 'Start',
+    },
+    trimEnd: {
+      time: trimEndTime,
+      frame: frameFromTime(trimEndTime, fps),
+    },
+    taskMarkers: sortedSegments.slice(1).map((segment) => {
+      const time = Number(segment.frame_duration[0]) || 0;
+      const fallbackIndex = Number.isInteger(segment.sub_task_index)
+        ? segment.sub_task_index + 1
+        : sortedSegments.indexOf(segment) + 1;
+      return {
+        time,
+        frame: frameFromTime(time, fps),
+        instruction: segment.sub_task_instruction || `Segment ${fallbackIndex}`,
+      };
+    }),
+  };
+};
 
 function ReplayPage({ isActive }) {
   const dispatch = useDispatch();
@@ -84,6 +129,7 @@ function ReplayPage({ isActive }) {
     recordingDate,
     fileSizeBytes,
     taskMarkers,
+    segments: replaySegments,
     frameCounts,
     // MCAP direct streaming
     hasRawImages,
@@ -399,6 +445,105 @@ function ReplayPage({ isActive }) {
     setExpandedJoints(new Set());
   }, []);
 
+  const restoreReplayEditingState = useCallback((result) => {
+    const hasSavedMarkers = Array.isArray(result.task_markers) && result.task_markers.length > 0;
+    const hasTrimPoints = Boolean(result.trim_points);
+
+    if (hasTrimPoints) {
+      const tp = result.trim_points;
+      if (tp.start) {
+        setTrimStart({
+          time: tp.start.time,
+          frame: tp.start.frame,
+          instruction: tp.start.instruction || 'Start',
+        });
+      }
+      if (tp.end) {
+        setTrimEnd({ time: tp.end.time, frame: tp.end.frame });
+      }
+    } else if (!hasSavedMarkers && Array.isArray(result.segments) && result.segments.length > 0) {
+      const restored = annotationsFromSegments(result.segments, result.video_fps?.[0] || 30);
+      if (restored.trimStart) {
+        setTrimStart(restored.trimStart);
+      }
+      if (restored.trimEnd) {
+        setTrimEnd(restored.trimEnd);
+      }
+      if (restored.taskMarkers.length > 0) {
+        dispatch(setTaskMarkers(restored.taskMarkers));
+      }
+    }
+
+    if (result.exclude_regions && result.exclude_regions.length > 0) {
+      setExcludeRegions(result.exclude_regions);
+    }
+  }, [dispatch]);
+
+  const buildSegmentsForSave = useCallback(() => {
+    const anchors = [];
+    if (trimStart) {
+      anchors.push({
+        time: trimStart.time,
+        instruction: trimStart.instruction || 'Start',
+      });
+    }
+    [...taskMarkers]
+      .sort((a, b) => a.time - b.time)
+      .forEach((marker) => {
+        anchors.push({
+          time: marker.time,
+          instruction: marker.instruction || '',
+        });
+      });
+
+    if (anchors.length === 0) {
+      return replaySegments.length > 0 ? [] : null;
+    }
+
+    const finalEnd = trimEnd?.time ?? duration;
+    return anchors
+      .map((anchor, index) => {
+        const next = anchors[index + 1];
+        const end = next ? next.time : finalEnd;
+        return {
+          sub_task_index: index,
+          sub_task_description: '',
+          sub_task_instruction: anchor.instruction,
+          frame_duration: [anchor.time, end],
+        };
+      })
+      .filter((segment) => segment.frame_duration[1] >= segment.frame_duration[0]);
+  }, [duration, replaySegments.length, taskMarkers, trimEnd, trimStart]);
+
+  const buildSaveData = useCallback(() => {
+    const saveData = { task_markers: taskMarkers };
+
+    if (trimStart || trimEnd) {
+      saveData.trim_points = {
+        start: trimStart ? {
+          time: trimStart.time,
+          frame: trimStart.frame,
+          instruction: trimStart.instruction,
+        } : null,
+        end: trimEnd ? { time: trimEnd.time, frame: trimEnd.frame } : null,
+      };
+    }
+
+    if (excludeRegions.length > 0) {
+      saveData.exclude_regions = excludeRegions.map((region) => ({
+        start: { time: region.start.time, frame: region.start.frame },
+        end: { time: region.end.time, frame: region.end.frame },
+      }));
+    }
+
+    const segments = buildSegmentsForSave();
+    if (segments !== null) {
+      saveData.segments = segments;
+    }
+
+    return saveData;
+  }, [buildSegmentsForSave, excludeRegions, taskMarkers, trimEnd, trimStart]);
+
   // Handle bag selection
   const handleSelectBag = async (path) => {
     setShowFileBrowser(false);
@@ -446,20 +591,7 @@ function ReplayPage({ isActive }) {
           toast('Restored cached markers');
         }
         dispatch(setReplayData(result));
-        // Restore trim points from saved data
-        if (result.trim_points) {
-          const tp = result.trim_points;
-          if (tp.start) {
-            setTrimStart({ time: tp.start.time, frame: tp.start.frame, instruction: tp.start.instruction || 'Start' });
-          }
-          if (tp.end) {
-            setTrimEnd({ time: tp.end.time, frame: tp.end.frame });
-          }
-        }
-        // Restore exclude regions from saved data
-        if (result.exclude_regions && result.exclude_regions.length > 0) {
-          setExcludeRegions(result.exclude_regions);
-        }
+        restoreReplayEditingState(result);
         toast.success('Replay data loaded successfully');
       } else {
         dispatch(setError(result.message));
@@ -513,18 +645,7 @@ function ReplayPage({ isActive }) {
             toast('Restored cached markers');
           }
           dispatch(setReplayData(result));
-          if (result.trim_points) {
-            const tp = result.trim_points;
-            if (tp.start) {
-              setTrimStart({ time: tp.start.time, frame: tp.start.frame, instruction: tp.start.instruction || 'Start' });
-            }
-            if (tp.end) {
-              setTrimEnd({ time: tp.end.time, frame: tp.end.frame });
-            }
-          }
-          if (result.exclude_regions && result.exclude_regions.length > 0) {
-            setExcludeRegions(result.exclude_regions);
-          }
+          restoreReplayEditingState(result);
           toast.success(`Loaded: ${newBag.name}`);
         } else {
           dispatch(setError(result.message));
@@ -537,7 +658,7 @@ function ReplayPage({ isActive }) {
         setTimeout(() => { isLoadingBagRef.current = false; }, 500);
       }
     },
-    [rosbagList, currentBagIndex, isDownloading, dispatch, getReplayData, bagPath, taskMarkers]
+    [rosbagList, currentBagIndex, isDownloading, dispatch, getReplayData, bagPath, taskMarkers, restoreReplayEditingState]
   );
 
   // Handle video events
@@ -948,21 +1069,7 @@ function ReplayPage({ isActive }) {
 
     setIsSavingMarkers(true);
     try {
-      const saveData = { task_markers: taskMarkers };
-
-      if (trimStart || trimEnd) {
-        saveData.trim_points = {
-          start: trimStart ? { time: trimStart.time, frame: trimStart.frame, instruction: trimStart.instruction } : null,
-          end: trimEnd ? { time: trimEnd.time, frame: trimEnd.frame } : null,
-        };
-      }
-
-      if (excludeRegions.length > 0) {
-        saveData.exclude_regions = excludeRegions.map((region) => ({
-          start: { time: region.start.time, frame: region.start.frame },
-          end: { time: region.end.time, frame: region.end.frame },
-        }));
-      }
+      const saveData = buildSaveData();
 
       const response = await fetch(
         `/data-api/task-markers${bagPath}`,
@@ -975,6 +1082,9 @@ function ReplayPage({ isActive }) {
 
       const result = await response.json();
       if (result.success) {
+        if (saveData.segments) {
+          dispatch(setSegments(saveData.segments));
+        }
         toast.success('Data saved to file');
       } else {
         toast.error(result.message || 'Failed to save');
@@ -984,7 +1094,7 @@ function ReplayPage({ isActive }) {
     } finally {
       setIsSavingMarkers(false);
     }
-  }, [bagPath, taskMarkers, trimStart, trimEnd, excludeRegions]);
+  }, [bagPath, buildSaveData, dispatch]);
 
   // Auto-save: debounced save whenever editing data changes
   useEffect(() => {
@@ -993,7 +1103,7 @@ function ReplayPage({ isActive }) {
     // Skip if no bag loaded
     if (!bagPath) return;
     // Skip if nothing to save
-    const hasData = taskMarkers.length > 0 || trimStart || trimEnd || excludeRegions.length > 0;
+    const hasData = taskMarkers.length > 0 || trimStart || trimEnd || excludeRegions.length > 0 || replaySegments.length > 0;
     if (!hasData) return;
 
     // Debounce: save 2 seconds after last change
@@ -1002,19 +1112,7 @@ function ReplayPage({ isActive }) {
     }
     autoSaveTimerRef.current = setTimeout(async () => {
       try {
-        const saveData = { task_markers: taskMarkers };
-        if (trimStart || trimEnd) {
-          saveData.trim_points = {
-            start: trimStart ? { time: trimStart.time, frame: trimStart.frame, instruction: trimStart.instruction } : null,
-            end: trimEnd ? { time: trimEnd.time, frame: trimEnd.frame } : null,
-          };
-        }
-        if (excludeRegions.length > 0) {
-          saveData.exclude_regions = excludeRegions.map((region) => ({
-            start: { time: region.start.time, frame: region.start.frame },
-            end: { time: region.end.time, frame: region.end.frame },
-          }));
-        }
+        const saveData = buildSaveData();
         const response = await fetch(`/data-api/task-markers${bagPath}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
@@ -1022,6 +1120,9 @@ function ReplayPage({ isActive }) {
         });
         const result = await response.json();
         if (result.success) {
+          if (saveData.segments) {
+            dispatch(setSegments(saveData.segments));
+          }
           console.log('[AutoSave] Saved markers/trim/exclude');
         }
       } catch (err) {
@@ -1034,7 +1135,7 @@ function ReplayPage({ isActive }) {
         clearTimeout(autoSaveTimerRef.current);
       }
     };
-  }, [bagPath, taskMarkers, trimStart, trimEnd, excludeRegions]);
+  }, [bagPath, buildSaveData, dispatch, excludeRegions.length, replaySegments.length, taskMarkers.length, trimEnd, trimStart]);
 
   const savePaletteToStorage = useCallback((newPalette) => {
     setInstructionPalette(newPalette);
