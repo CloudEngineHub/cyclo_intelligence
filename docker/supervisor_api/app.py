@@ -181,16 +181,12 @@ _BACKENDS: Dict[str, Dict[str, str]] = {
     "lerobot": {
         "service": "lerobot",
         "container": "lerobot_server",
-        "image": f"robotis/lerobot-zenoh:1.0.0-{_BACKEND_ARCH}",
-        # Local robot/dev deployments may carry the unversioned tag until the
-        # release tag is pushed. Treat either as a usable local image; pull
-        # still targets the canonical release tag above.
-        "image_alt": f"robotis/lerobot-zenoh:{_BACKEND_ARCH}",
+        "image": f"robotis/lerobot-zenoh:1.0.1-{_BACKEND_ARCH}",
     },
     "groot": {
         "service": "groot",
         "container": "groot_server",
-        "image": f"robotis/groot-zenoh:1.2.0-{_BACKEND_ARCH}",
+        "image": f"robotis/groot-zenoh:1.2.1-{_BACKEND_ARCH}",
     },
 }
 
