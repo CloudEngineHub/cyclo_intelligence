@@ -2,10 +2,13 @@
 Changelog for package cyclo-ui
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-0.1.2 (2026-05-19)
+0.1.2 (2026-05-20)
 ------------------
 * Added Cyclo Manager shortcuts and navigation.
 * Added light/dark theme controls and supporting UI styles.
+* Fixed dataset conversion folder selection so nested paths such as Temp/<dataset> are preserved.
+* Set Hugging Face upload/download folder browser defaults to /workspace.
+* Added replay segment restore/save support backed by timestamp-based episode_info.json segments.
 * Contributors: kimtaehyeong99
 
 0.1.1 (2026-05-15)
