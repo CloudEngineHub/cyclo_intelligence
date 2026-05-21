@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 
-import importlib.util
+import importlib
 import sys
-import types
 import unittest
 from pathlib import Path
 
@@ -10,17 +9,15 @@ import numpy as np
 
 
 ENGINE_DIR = Path(__file__).resolve().parents[1] / "green_vla_engine"
-package = types.ModuleType("green_vla_engine")
-package.__path__ = [str(ENGINE_DIR)]
-sys.modules.setdefault("green_vla_engine", package)
+ENGINE_ROOT = ENGINE_DIR.parent
+POLICY_ROOT = ENGINE_ROOT.parent
+RUNTIME_ROOT = POLICY_ROOT / "common" / "runtime"
 
-spec = importlib.util.spec_from_file_location(
-    "green_vla_engine.io_mapping",
-    ENGINE_DIR / "io_mapping.py",
-)
-io_mapping = importlib.util.module_from_spec(spec)
-sys.modules[spec.name] = io_mapping
-spec.loader.exec_module(io_mapping)
+for path in (ENGINE_ROOT, RUNTIME_ROOT):
+    if str(path) not in sys.path:
+        sys.path.insert(0, str(path))
+
+io_mapping = importlib.import_module("green_vla_engine.io_mapping")
 
 
 class GreenVLACameraMappingTest(unittest.TestCase):
