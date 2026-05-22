@@ -89,12 +89,44 @@ COMMAND_STAGES = {
             'command': SendCommandSrv.Request.FINISH,
             'target_phase': InferenceStatus.READY,
             'timeout': 10.0,
-            'with_task_info': False,
+            'with_task_info': True,
         },
     ],
 }
 
 SERVICE_CALL_TIMEOUT_SEC = 30.0
+
+MODEL_SERVICE_TYPES = {
+    'groot': 'groot',
+    'groot:n17': 'groot',
+    'n17': 'groot',
+    'n1.7': 'groot',
+    'lerobot': 'lerobot',
+    'lerobot:act': 'lerobot',
+    'lerobot:smolvla': 'lerobot',
+    'lerobot:xvla': 'lerobot',
+    'lerobot:pi0': 'lerobot',
+    'lerobot:pi05': 'lerobot',
+    'lerobot:diffusion': 'lerobot',
+    'act': 'lerobot',
+    'smolvla': 'lerobot',
+    'xvla': 'lerobot',
+    'pi0': 'lerobot',
+    'pi05': 'lerobot',
+    'diffusion': 'lerobot',
+}
+
+
+def _service_type_from_model(model: str) -> str:
+    """Map UI model selections onto TaskInfo.service_type backends."""
+    value = (model or '').strip().lower()
+    if not value:
+        return ''
+    if value in MODEL_SERVICE_TYPES:
+        return MODEL_SERVICE_TYPES[value]
+    if ':' in value:
+        return value.split(':', 1)[0].strip()
+    return value
 
 
 class SendCommand(BaseAction):
@@ -119,7 +151,7 @@ class SendCommand(BaseAction):
         action = cls(
             node=context.node,
             command=params.get('command', 'LOAD'),
-            model=params.get('model', 'groot'),
+            model=params.get('model', 'lerobot:act'),
             policy_path=params.get('policy_path', ''),
             task_instruction=task_instruction,
             inference_hz=params.get('inference_hz', 15),
@@ -134,10 +166,11 @@ class SendCommand(BaseAction):
         node: 'Node',
         command: str = 'LOAD',
         # BT-facing name "model" matches the Inference UI's labeling.
-        # Internally this rides on TaskInfo.service_type, which the
-        # orchestrator's _determine_service_prefix reads to pick the
-        # backend container ("groot" / "lerobot" / ...).
-        model: str = 'groot',
+        # Values may be legacy backend names ("groot" / "lerobot") or
+        # Inference UI composite choices ("lerobot:act", "groot:n17").
+        # Internally this is normalized to TaskInfo.service_type, which
+        # orchestrator reads to pick the backend container.
+        model: str = 'lerobot:act',
         policy_path: str = '',
         task_instruction: str = '',
         inference_hz: int = 15,
@@ -311,8 +344,9 @@ class SendCommand(BaseAction):
 
     def _build_task_info(self) -> TaskInfo:
         ti = TaskInfo()
+        ti.task_type = 'inference'
         ti.policy_path = self.policy_path
-        ti.service_type = self.model
+        ti.service_type = _service_type_from_model(self.model)
         if self.control_hz:
             ti.control_hz = self.control_hz
         if self.inference_hz:

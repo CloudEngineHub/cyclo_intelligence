@@ -38,7 +38,17 @@ const BOOL_PARAMS = new Set(['enable_head', 'enable_arms', 'enable_lift']);
 // the Python action definitions (send_command.COMMAND_MAP).
 const ENUM_PARAMS = {
   command: ['LOAD', 'RESUME', 'STOP', 'CLEAR'],
-  model: ['groot', 'lerobot'],
+  model: [
+    'lerobot:act',
+    'lerobot:smolvla',
+    'lerobot:xvla',
+    'lerobot:pi0',
+    'lerobot:pi05',
+    'lerobot:diffusion',
+    'groot:n17',
+    'groot',
+    'lerobot',
+  ],
 };
 
 // SendCommand inputs that are meaningful per command. Anything outside

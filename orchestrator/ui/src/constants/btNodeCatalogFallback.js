@@ -61,7 +61,7 @@ export const FALLBACK_CATALOG = [
     category: 'action',
     ports: [
       { name: 'command', type: 'string', default: 'LOAD' },
-      { name: 'model', type: 'string', default: 'groot' },
+      { name: 'model', type: 'string', default: 'lerobot:act' },
       { name: 'policy_path', type: 'string', default: '' },
       { name: 'task_instruction', type: 'string', default: '' },
       { name: 'inference_hz', type: 'number', default: '15' },
