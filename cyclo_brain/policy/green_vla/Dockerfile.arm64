@@ -1,0 +1,139 @@
+# GreenVLA Docker Container for Jetson (ARM64).
+#
+# This image extends the working LeRobot Zenoh runtime with GreenVLA's
+# userland dependencies and source tree. It intentionally preserves the
+# CUDA-enabled Jetson PyTorch stack from the base image.
+#
+# Build context: cyclo_brain/policy/
+# Usage:         docker build -f green_vla/Dockerfile.arm64 \
+#                  -t robotis/green-vla-zenoh:0.1.0-arm64 .
+
+ARG BASE_IMAGE=robotis/lerobot-zenoh:1.0.1-arm64
+FROM ${BASE_IMAGE}
+
+SHELL ["/bin/bash", "-c"]
+
+ARG GREEN_VLA_REPO=https://github.com/greenvla/GreenVLA.git
+ARG GREEN_VLA_REF=952a80c3f57880b7db4fb9280d1a4ef27b12f843
+
+ENV PIP_INDEX_URL=https://pypi.org/simple
+ENV PIP_EXTRA_INDEX_URL=
+
+WORKDIR /opt
+
+RUN git clone "${GREEN_VLA_REPO}" GreenVLA \
+    && cd /opt/GreenVLA \
+    && git checkout "${GREEN_VLA_REF}"
+
+# Install GreenVLA userland dependencies while preserving the Jetson CUDA
+# torch / torchvision stack already present in robotis/lerobot-zenoh.
+# Do not use upstream project sync here: upstream pyproject pins torch==2.7.1 and
+# torchvision==0.22.1, which can replace Jetson-compatible wheels.
+RUN pip install --no-cache-dir \
+      "datasets>=2.19.0" \
+      "diffusers>=0.27.2" \
+      "draccus==0.11.5" \
+      "einops>=0.8.0" \
+      "huggingface-hub[hf-transfer,cli]>=0.27.1,<1.0" \
+      "imageio[ffmpeg]>=2.34.0" \
+      "jsonlines>=4.0.0" \
+      "omegaconf>=2.3.0" \
+      "opencv-python-headless>=4.9.0" \
+      "packaging>=24.2" \
+      "av>=14.2.0" \
+      "pyzmq>=26.2.1" \
+      "rerun-sdk>=0.21.0" \
+      "termcolor>=2.4.0" \
+      "safetensors==0.5.3" \
+      "zarr>=2.17.0" \
+      "accelerate==1.4.0" \
+      "etils==1.12.2" \
+      "tyro==0.9.19" \
+      "importlib_resources==6.5.2" \
+      "sentencepiece==0.2.0" \
+      "transformers==4.57.3" \
+      "boto3==1.38.1" \
+      "types-boto3-s3==1.38.0" \
+      "tqdm_loggable==0.2" \
+      "numpydantic==1.6.8" \
+      "pydantic==2.10.6" \
+      "pydantic_core==2.27.2" \
+      "scipy==1.15.3" \
+      "hydra-core==1.3.2" \
+      "albumentations==2.0.8" \
+      "humanfriendly==10.0" \
+      "clearml==2.0.2" \
+      "matplotlib==3.10.6" \
+      "ffmpeg-python==0.2.0" \
+      rich_argparse
+
+# GreenVLA imports torchcodec unconditionally, but upstream excludes
+# torchcodec on Linux ARM64. Make torchcodec optional and let video decoding
+# fall back to pyav on Jetson.
+RUN python - <<'PY'
+from pathlib import Path
+
+path = Path("/opt/GreenVLA/lerobot/common/datasets/video_utils.py")
+text = path.read_text()
+text = text.replace(
+    "from torchcodec.decoders import VideoDecoder\n",
+    "try:\n"
+    "    from torchcodec.decoders import VideoDecoder\n"
+    "except Exception:\n"
+    "    VideoDecoder = None\n",
+)
+text = text.replace(
+    '    if importlib.util.find_spec("torchcodec"):\n'
+    '        return "torchcodec"\n',
+    '    if importlib.util.find_spec("torchcodec") and VideoDecoder is not None:\n'
+    '        return "torchcodec"\n',
+)
+text = text.replace(
+    "def decode_video_frames_torchcodec(\n"
+    "    video_path: Path | str,\n",
+    "def decode_video_frames_torchcodec(\n"
+    "    video_path: Path | str,\n",
+)
+needle = "    \"\"\"Loads frames associated to the requested timestamps of a video using torchcodec.\n"
+if needle in text:
+    text = text.replace(
+        needle,
+        "    if VideoDecoder is None:\n"
+        "        raise ImportError(\"torchcodec is not available; use backend='pyav'\")\n\n"
+        + needle,
+        1,
+    )
+path.write_text(text)
+PY
+
+RUN python - <<'PY'
+import torch
+import torchvision
+
+print("torch", torch.__version__, "cuda", torch.version.cuda, "available", torch.cuda.is_available())
+print("torchvision", torchvision.__version__)
+PY
+
+COPY green_vla/green_vla_engine/ /app/green_vla_engine/
+COPY green_vla/scripts/ /app/scripts/
+COPY common/runtime/ /policy_runtime/
+
+ENV HF_HOME=/root/.cache/huggingface
+ENV HUGGINGFACE_HUB_CACHE=/root/.cache/huggingface/hub
+ENV TRANSFORMERS_CACHE=/root/.cache/huggingface/hub
+ENV TORCH_HOME=/root/.cache/torch
+
+ENV POLICY_BACKEND=green_vla
+ENV POLICY_ENGINE_MODULE=green_vla_engine
+ENV PYTHONPATH=/opt/GreenVLA:/app:/policy_runtime
+
+WORKDIR /opt/GreenVLA
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
+    CMD S6_SVSTAT="$(ls /package/admin/s6-*/command/s6-svstat 2>/dev/null | head -1)" \
+     && [ -n "$S6_SVSTAT" ] \
+     && "$S6_SVSTAT" /run/service/main-runtime 2>&1 | grep -q "up" \
+     && "$S6_SVSTAT" /run/service/engine-process 2>&1 | grep -q "up" \
+     || exit 1
+
+ENTRYPOINT ["/init"]

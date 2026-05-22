@@ -1,6 +1,6 @@
 # cyclo_intelligence — Docker Compose
 #
-# Two services:
+# Core services:
 #   cyclo_intelligence   main image (PLAN §4.5) — orchestrator +
 #                         cyclo_data + UI + nginx + s6-agent. Always
 #                         started first.
@@ -8,6 +8,11 @@
 #                         started on demand by the UI via
 #                         supervisor_api. May be brought up manually
 #                         for Step 4 verification.
+#   green_vla            policy container for GreenVLA model-load and
+#                         runtime smoke tests. Kept isolated from
+#                         lerobot because GreenVLA carries a forked
+#                         LeRobot dependency stack.
+#   groot                policy container for Isaac GR00T N1.7 runtime.
 #
 # Usage: prefer the container.sh wrapper — it auto-detects ARCH from
 # `uname -m` and sets the compose env:
@@ -226,6 +231,90 @@ services:
       # URDF + meshes under one robot-description tree). The mount destination
       # /orchestrator_config stays because RobotClient reads robot configs
       # from that mount.
+      - ../shared/shared/robot_configs:/orchestrator_config:ro
+      - /etc/timezone:/etc/timezone:ro
+      - /etc/localtime:/etc/localtime:ro
+
+    restart: unless-stopped
+    runtime: nvidia
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "S6_SVSTAT=$$(ls /package/admin/s6-*/command/s6-svstat 2>/dev/null | head -1); [ -n \"$$S6_SVSTAT\" ] && \"$$S6_SVSTAT\" /run/service/main-runtime | grep -q up && \"$$S6_SVSTAT\" /run/service/engine-process | grep -q up",
+        ]
+      interval: 30s
+      timeout: 10s
+      start_period: 30s
+      retries: 3
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              capabilities: [gpu]
+
+  # ============================================================
+  # GreenVLA two-process policy container.
+  # Isolated from LeRobot so GreenVLA's forked dependencies can be
+  # tested without disturbing the production LeRobot backend.
+  # ============================================================
+  green_vla:
+    container_name: green_vla_server
+    image: robotis/green-vla-zenoh:0.1.0-${ARCH:-arm64}
+    build:
+      context: ../cyclo_brain/policy
+      dockerfile: green_vla/Dockerfile.${ARCH:-arm64}
+      network: host
+      args:
+        GREEN_VLA_REF: ${GREEN_VLA_REF:-952a80c3f57880b7db4fb9280d1a4ef27b12f843}
+
+    cap_add:
+      - SYS_NICE
+    ulimits:
+      rtprio: 99
+      rttime: -1
+      memlock: 8428281856
+
+    network_mode: host
+    ipc: host
+
+    environment:
+      - ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-30}
+      - ZENOH_ROUTER_IP=127.0.0.1
+      - ZENOH_ROUTER_PORT=7447
+      - ZENOH_SDK_PATH=/zenoh_sdk
+      - ZENOH_CONFIG_OVERRIDE=transport/shared_memory/enabled=true
+      - ZENOH_TRANSPORT_SHM_ENABLED=true
+      - ZENOH_SHM_ENABLED=true
+      - ROBOT_CLIENT_SDK_PATH=/robot_client_sdk
+      - ACTION_CHUNK_PROCESSING_SDK_PATH=/action_chunk_processing_sdk
+      - POLICY_BACKEND=green_vla
+      - POLICY_ENGINE_MODULE=green_vla_engine
+      - HF_HOME=/root/.cache/huggingface
+      - HUGGINGFACE_HUB_CACHE=/root/.cache/huggingface/hub
+      - TRANSFORMERS_CACHE=/root/.cache/huggingface/hub
+      - PYTHONPATH=/opt/GreenVLA:/app:/policy_runtime
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=all
+      - PYTHONUNBUFFERED=1
+
+    volumes:
+      - /dev:/dev
+      - /dev/shm:/dev/shm
+      - ./workspace:/workspace
+      - ./huggingface:/root/.cache/huggingface
+      - ../cyclo_brain/policy/green_vla/checkpoints:/policy_checkpoints/green_vla:rw
+      - ../cyclo_brain/sdk/zenoh_ros2_sdk:/zenoh_sdk:ro
+      - ../cyclo_brain/sdk/robot_client:/robot_client_sdk:ro
+      - ../cyclo_brain/sdk/action_chunk_processing:/action_chunk_processing_sdk:ro
+      - ../cyclo_brain/policy/common/runtime:/policy_runtime:ro
+      - ../cyclo_brain/policy/common/s6-services/main-runtime:/etc/s6-overlay/s6-rc.d/main-runtime:ro
+      - ../cyclo_brain/policy/common/s6-services/engine-process:/etc/s6-overlay/s6-rc.d/engine-process:ro
+      - ../cyclo_brain/policy/common/s6-services/user/contents.d:/etc/s6-overlay/s6-rc.d/user/contents.d:ro
+      - ../cyclo_brain/policy/green_vla/green_vla_engine:/app/green_vla_engine:ro
+      - ../cyclo_brain/policy/green_vla/scripts:/app/scripts:ro
+      - ./zenoh_cache:/root/.cache/zenoh_ros2_sdk:rw
       - ../shared/shared/robot_configs:/orchestrator_config:ro
       - /etc/timezone:/etc/timezone:ro
       - /etc/localtime:/etc/localtime:ro
