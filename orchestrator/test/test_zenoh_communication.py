@@ -89,7 +89,7 @@ class TestContainerServiceClient(unittest.TestCase):
 
         client = ContainerServiceClient(node=None, service_prefix="/groot")
         self.assertIsNotNone(client)
-        self.assertEqual(client.timeout_sec, 30.0)
+        self.assertEqual(client.timeout_sec, 180.0)
         self.assertFalse(client._connected)
         print("PASS: ContainerServiceClient created with default parameters")
 

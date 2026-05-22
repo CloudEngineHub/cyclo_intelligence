@@ -18,6 +18,7 @@
 
 """Unit tests for RosbagToLerobotConverter."""
 
+import importlib
 import json
 import os
 import shutil
@@ -30,18 +31,42 @@ from unittest.mock import MagicMock, patch
 
 import numpy as np
 
-# Mock ROS2 modules that are not available outside Docker
+
+def _import_or_stub(mod_name):
+    """Import a module when available, otherwise register a lightweight stub."""
+    try:
+        return importlib.import_module(mod_name)
+    except ImportError:
+        module = types.ModuleType(mod_name)
+        sys.modules[mod_name] = module
+        if "." in mod_name:
+            parent_name, child_name = mod_name.rsplit(".", 1)
+            parent = _import_or_stub(parent_name)
+            setattr(parent, child_name, module)
+        return module
+
+
+# Mock ROS2 modules that are not available outside Docker.
 for mod_name in [
-    "rosbag2_py", "rclpy", "rclpy.serialization",
-    "sensor_msgs", "sensor_msgs.msg",
-    "trajectory_msgs", "trajectory_msgs.msg",
-    "nav_msgs", "nav_msgs.msg",
-    "geometry_msgs", "geometry_msgs.msg",
-    "rosbag_recorder", "rosbag_recorder.msg",
-    "mcap", "mcap.reader", "mcap_ros2", "mcap_ros2.decoder",
+    "rosbag2_py",
+    "rclpy",
+    "rclpy.serialization",
+    "sensor_msgs",
+    "sensor_msgs.msg",
+    "trajectory_msgs",
+    "trajectory_msgs.msg",
+    "nav_msgs",
+    "nav_msgs.msg",
+    "geometry_msgs",
+    "geometry_msgs.msg",
+    "rosbag_recorder",
+    "rosbag_recorder.msg",
+    "mcap",
+    "mcap.reader",
+    "mcap_ros2",
+    "mcap_ros2.decoder",
 ]:
-    if mod_name not in sys.modules:
-        sys.modules[mod_name] = types.ModuleType(mod_name)
+    _import_or_stub(mod_name)
 
 # Add mock classes to sensor_msgs.msg etc.
 sys.modules["sensor_msgs.msg"].JointState = MagicMock
@@ -477,8 +502,12 @@ class TestRosbagToLerobotV30VideoConcat(unittest.TestCase):
         self.input_a.touch()
         self.input_b.touch()
 
+    @patch(
+        "cyclo_data.converter.to_lerobot_v30._h264_encoder",
+        return_value=("libx264", ["-preset", "ultrafast", "-crf", "23"]),
+    )
     @patch("cyclo_data.converter.to_lerobot_v30.subprocess.run")
-    def test_concatenate_videos_uses_cfr_reencode(self, mock_run):
+    def test_concatenate_videos_uses_cfr_reencode(self, mock_run, _mock_encoder):
         mock_run.return_value = MagicMock(returncode=0, stderr="")
         self.converter._get_video_frame_count = MagicMock(return_value=5)
         self.converter._probe_video_fps = MagicMock(return_value=15.0)
@@ -500,7 +529,7 @@ class TestRosbagToLerobotV30VideoConcat(unittest.TestCase):
         self.assertNotIn("copy", cmd)
 
     @patch("cyclo_data.converter.to_lerobot_v30.subprocess.run")
-    def test_single_video_also_uses_reencode_path(self, mock_run):
+    def test_single_video_uses_validated_link_fast_path(self, mock_run):
         mock_run.return_value = MagicMock(returncode=0, stderr="")
         self.converter._get_video_frame_count = MagicMock(return_value=2)
         self.converter._probe_video_fps = MagicMock(return_value=15.0)
@@ -513,12 +542,19 @@ class TestRosbagToLerobotV30VideoConcat(unittest.TestCase):
             [(0, self.input_a, 0.0)],
         )
 
-        cmd = mock_run.call_args.args[0]
-        self.assertIn("libx264", cmd)
-        self.assertNotIn("copy", cmd)
+        output_path = (
+            Path(self.temp_dir)
+            / "videos/observation.images.cam_head_left/chunk-000/file-000.mp4"
+        )
+        self.assertTrue(output_path.exists())
+        mock_run.assert_not_called()
 
+    @patch(
+        "cyclo_data.converter.to_lerobot_v30._h264_encoder",
+        return_value=("libx264", ["-preset", "ultrafast", "-crf", "23"]),
+    )
     @patch("cyclo_data.converter.to_lerobot_v30.subprocess.run")
-    def test_ffmpeg_failure_raises_with_stderr(self, mock_run):
+    def test_ffmpeg_failure_raises_with_stderr(self, mock_run, _mock_encoder):
         mock_run.return_value = MagicMock(returncode=1, stderr="bad concat")
 
         with self.assertRaisesRegex(RuntimeError, "bad concat"):
@@ -527,7 +563,7 @@ class TestRosbagToLerobotV30VideoConcat(unittest.TestCase):
                 "observation.images.cam_head_left",
                 0,
                 0,
-                [(0, self.input_a, 0.0)],
+                [(0, self.input_a, 0.0), (1, self.input_b, 0.0)],
             )
 
     def test_validate_aggregated_video_rejects_frame_mismatch(self):

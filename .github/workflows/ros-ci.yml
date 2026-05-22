@@ -1,0 +1,103 @@
+name: CI
+
+"on":
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  ROS_CI:
+    name: ROS_CI (${{ matrix.ros_distribution }})
+    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        ros_distribution:
+          - jazzy
+        include:
+          - docker_image: ubuntu:noble
+            ros_distribution: jazzy
+    container:
+      image: ${{ matrix.docker_image }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          path: repo
+
+      - name: Setup ROS environment
+        uses: ros-tooling/setup-ros@v0.7
+        with:
+          required-ros-distributions: ${{ matrix.ros_distribution }}
+
+      - name: Create focused ROS workspace
+        run: |
+          mkdir -p ros_ws/src
+          ln -s "${GITHUB_WORKSPACE}/repo/orchestrator" ros_ws/src/orchestrator
+          ln -s "${GITHUB_WORKSPACE}/repo/cyclo_data" ros_ws/src/cyclo_data
+          ln -s "${GITHUB_WORKSPACE}/repo/cyclo_data/recorder/rosbag_recorder" ros_ws/src/rosbag_recorder
+          ln -s "${GITHUB_WORKSPACE}/repo/interfaces" ros_ws/src/interfaces
+          ln -s "${GITHUB_WORKSPACE}/repo/shared" ros_ws/src/shared
+
+      - name: Install ROS dependencies
+        run: |
+          set -eo pipefail
+          source /opt/ros/${{ matrix.ros_distribution }}/setup.bash
+          rosdep update
+          rosdep install \
+            --from-paths ros_ws/src \
+            --ignore-src \
+            --rosdistro ${{ matrix.ros_distribution }} \
+            -y -r
+          rosdep check \
+            --from-paths ros_ws/src \
+            --ignore-src \
+            --rosdistro ${{ matrix.ros_distribution }}
+
+      - name: Install Python test dependencies
+        run: |
+          set -eo pipefail
+          apt-get update
+          apt-get install -y --no-install-recommends ffmpeg python3-pip
+          python3 -m pip install --no-cache-dir --break-system-packages \
+            setuptools==68.1.2 \
+            'numpy<2' \
+            psutil \
+            matplotlib \
+            pandas \
+            huggingface_hub \
+            mcap \
+            mcap-ros2-support \
+            pyarrow \
+            pytest \
+            pillow
+
+      - name: Build and test
+        run: |
+          set -eo pipefail
+          source /opt/ros/${{ matrix.ros_distribution }}/setup.bash
+          cd ros_ws
+          colcon build \
+            --symlink-install \
+            --paths \
+              src/orchestrator \
+              src/cyclo_data \
+              src/rosbag_recorder \
+              src/interfaces \
+              src/shared \
+            --cmake-args -DCMAKE_BUILD_TYPE=Release
+          source install/setup.bash
+          colcon test \
+            --paths \
+              src/orchestrator \
+              src/cyclo_data \
+              src/rosbag_recorder \
+              src/interfaces \
+              src/shared \
+            --event-handlers console_cohesion+
+          colcon test-result --verbose
