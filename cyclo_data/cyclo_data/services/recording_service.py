@@ -229,7 +229,16 @@ class RecordingService:
             'Episode archive started',
         )
         try:
-            data_manager.finish_full_episode()
+            archived_dir = data_manager.finish_full_episode()
+            if archived_dir is not None:
+                archived_dir = Path(archived_dir)
+                info = DataManager._read_episode_info(archived_dir)
+                status = info.get('transcoding_status')
+                if (
+                    status == 'pending'
+                    or (status is None and (archived_dir / 'videos').exists())
+                ):
+                    self._submit_transcode(archived_dir)
         except Exception as exc:  # noqa: BLE001
             self._node.get_logger().error(
                 f'FINISH_EPISODE archive failed: {exc!r}')
@@ -242,7 +251,7 @@ class RecordingService:
             self._publish_umbrella_status(
                 DataOperationStatus.COMPLETED,
                 'FINISH_EPISODE',
-                'Episode finished',
+                'Episode archived',
             )
         finally:
             with self._finish_episode_lock:

@@ -17,6 +17,7 @@
 # Author: Dongyun Kim, Seongwoo Kim
 
 import json
+import errno
 import os
 from pathlib import Path
 import queue
@@ -543,19 +544,20 @@ class DataManager:
             self._current_subtask_index = bounded
             self._current_scenario_number = bounded
 
-    def finish_full_episode(self):
+    def finish_full_episode(self) -> Optional[Path]:
         """Advance the full-episode cursor after all planned subtasks saved."""
         if not self._segmented_storage_mode:
-            return
+            return None
         with self._state_lock:
             current_full = self._current_full_episode_index
-        self._archive_full_episode(current_full)
+        archived_dir = self._archive_full_episode(current_full)
         with self._state_lock:
             if self._current_full_episode_index != current_full:
-                return
+                return archived_dir
             self._current_full_episode_index += 1
             self._current_subtask_index = 0
             self._current_scenario_number = 0
+        return archived_dir
 
     def _episode_dirs_for_full_subtask(self, full_idx: int, subtask_idx: int | None = None):
         matches = []
@@ -657,13 +659,26 @@ class DataManager:
         full_dir.mkdir(parents=True, exist_ok=True)
         return full_dir / 'segments' / str(subtask_idx)
 
-    def _archive_full_episode(self, full_idx: int) -> None:
+    @staticmethod
+    def _move_file(src: Path, dst: Path) -> None:
+        """Move a file, preferring atomic rename within the same filesystem."""
+        src = Path(src)
+        dst = Path(dst)
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            src.replace(dst)
+        except OSError as exc:
+            if getattr(exc, 'errno', None) != errno.EXDEV:
+                raise
+            shutil.move(str(src), str(dst))
+
+    def _archive_full_episode(self, full_idx: int) -> Optional[Path]:
         if not self._segmented_storage_mode:
-            return
+            return None
 
         subtask_dirs = self._episode_dirs_for_full_subtask(full_idx)
         if not subtask_dirs:
-            return
+            return None
         subtask_dirs = sorted(
             subtask_dirs,
             key=lambda path: int(
@@ -687,8 +702,6 @@ class DataManager:
         out_dir.mkdir(parents=True, exist_ok=True)
         ordered = [by_subtask[idx] for idx in range(self._physical_segment_total)]
 
-        for old_mcap in out_dir.glob('*.mcap'):
-            old_mcap.unlink(missing_ok=True)
         for stale in ('metadata.yaml', 'episode_info.json'):
             (out_dir / stale).unlink(missing_ok=True)
 
@@ -704,7 +717,13 @@ class DataManager:
 
         for subtask_idx, seg_dir in enumerate(ordered):
             seg_info = self._read_episode_info(seg_dir)
-            mcaps = sorted(seg_dir.glob('*.mcap'))
+            src_mcaps = sorted(seg_dir.glob('*.mcap'))
+            dst_prefix = f'{full_idx}_{subtask_idx}'
+            archived_mcaps = (
+                sorted(out_dir.glob(f'{dst_prefix}.mcap'))
+                + sorted(out_dir.glob(f'{dst_prefix}_*.mcap'))
+            )
+            mcaps = src_mcaps or archived_mcaps
             if not mcaps:
                 raise FileNotFoundError(f'No .mcap file in {seg_dir}')
             meta_path = seg_dir / 'metadata.yaml'
@@ -722,7 +741,8 @@ class DataManager:
                     dst_name += f'_{split_idx}'
                 dst_name += src_mcap.suffix
                 dst_path = out_dir / dst_name
-                shutil.copy2(src_mcap, dst_path)
+                if src_mcap.resolve() != dst_path.resolve():
+                    self._move_file(src_mcap, dst_path)
                 output_files.append(dst_path)
 
                 file_info = files_info[split_idx] if split_idx < len(files_info) else {}
@@ -819,12 +839,19 @@ class DataManager:
                 'ros_distro': ros_distro,
             }
         }
+        expected_mcaps = {path.resolve() for path in output_files}
+        for old_mcap in out_dir.glob('*.mcap'):
+            if old_mcap.resolve() not in expected_mcaps:
+                old_mcap.unlink(missing_ok=True)
         with open(out_dir / 'metadata.yaml', 'w', encoding='utf-8') as f:
             yaml.safe_dump(unified, f, default_flow_style=False, sort_keys=False)
 
         self._copy_episode_sidecars(ordered, out_dir)
-        _, video_warnings = self._archive_episode_videos(
+        video_segments, video_warnings = self._archive_episode_videos(
             ordered, out_dir, full_idx,
+        )
+        has_transcodable_videos = any(
+            bool(segment.get('cameras')) for segment in video_segments
         )
 
         summary = {
@@ -837,6 +864,9 @@ class DataManager:
             'timestamp': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
             'format_version': 'robotis_v2',
             'segments': segments_meta,
+            'transcoding_status': (
+                'pending' if has_transcodable_videos else 'not_required'
+            ),
         }
         if video_warnings:
             summary['video_warnings'] = video_warnings
@@ -847,27 +877,12 @@ class DataManager:
 
         segments_root = out_dir / 'segments'
         if segments_root.exists():
-            if video_warnings:
-                archive_root = (
-                    Path(self._save_rosbag_path)
-                    / '.subtasks_archive'
-                    / f'full_{full_idx:06d}'
-                )
-                if archive_root.exists():
-                    shutil.rmtree(archive_root, ignore_errors=True)
-                archive_root.parent.mkdir(parents=True, exist_ok=True)
-                shutil.move(str(segments_root), str(archive_root))
-                print(
-                    f'[ROBOTIS] Preserved raw subtask segments for '
-                    f'full_episode={full_idx} at {archive_root} '
-                    'because video archive had warnings'
-                )
-            else:
-                shutil.rmtree(segments_root, ignore_errors=True)
+            shutil.rmtree(segments_root, ignore_errors=True)
         print(
             f'[ROBOTIS] Archived full episode {full_idx}: '
             f'{len(ordered)} segment(s), {len(output_files)} mcap file(s)'
         )
+        return out_dir
 
     @staticmethod
     def _copy_episode_sidecars(subtask_dirs: list[Path], out_dir: Path) -> None:
@@ -961,93 +976,12 @@ class DataManager:
             return {}
 
     @staticmethod
-    def _probe_mp4_dimensions(path: Path) -> tuple[int, int]:
-        try:
-            result = subprocess.run(
-                [
-                    'ffprobe', '-v', 'error',
-                    '-select_streams', 'v:0',
-                    '-show_entries', 'stream=width,height',
-                    '-of', 'json',
-                    str(path),
-                ],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                check=True,
-            )
-            streams = json.loads(result.stdout or '{}').get('streams') or []
-            if not streams:
-                return 0, 0
-            return (
-                int(streams[0].get('width') or 0),
-                int(streams[0].get('height') or 0),
-            )
-        except Exception:
-            return 0, 0
-
-    @staticmethod
-    def _rotation_filter(rotation_deg: int) -> str | None:
-        deg = int(rotation_deg or 0) % 360
-        if deg == 90:
-            return 'transpose=1'
-        if deg == 180:
-            return 'transpose=2,transpose=2'
-        if deg == 270:
-            return 'transpose=2'
-        return None
-
-    @staticmethod
-    def _transcode_episode_video(
-        src: Path,
-        dst: Path,
-        *,
-        rotation_deg: int = 0,
-        needs_pad: bool = False,
-    ) -> None:
-        from cyclo_data.converter.video_sync import _ffmpeg
-
-        dst.parent.mkdir(parents=True, exist_ok=True)
-        tmp = dst.with_suffix(dst.suffix + '.tmp')
-        filters = []
-        rot_filter = DataManager._rotation_filter(rotation_deg)
-        if rot_filter:
-            filters.append(rot_filter)
-        if needs_pad:
-            filters.append('pad=ceil(iw/2)*2:ceil(ih/2)*2')
-        cmd = [
-            _ffmpeg(), '-hide_banner', '-loglevel', 'warning', '-y',
-            '-i', str(src),
-            '-c:v', 'libx264',
-            '-preset', 'ultrafast',
-            '-crf', '23',
-            '-pix_fmt', 'yuv420p',
-            '-movflags', '+faststart',
-            '-an',
-            '-fps_mode', 'passthrough',
-            '-f', 'mp4',
-            str(tmp),
-        ]
-        if filters:
-            cmd[cmd.index('-c:v'):cmd.index('-c:v')] = ['-vf', ','.join(filters)]
-        try:
-            subprocess.run(
-                cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                text=True, check=True,
-            )
-            tmp.replace(dst)
-        finally:
-            tmp.unlink(missing_ok=True)
-
-    @staticmethod
     def _archive_episode_videos(
         subtask_dirs: list[Path],
         out_dir: Path,
         full_idx: int,
     ) -> tuple[list[dict], dict[str, dict[str, str]]]:
         dst_videos = out_dir / 'videos'
-        if dst_videos.exists():
-            shutil.rmtree(dst_videos, ignore_errors=True)
         dst_videos.mkdir(parents=True, exist_ok=True)
 
         video_segments = []
@@ -1055,7 +989,6 @@ class DataManager:
         for subtask_idx, seg_dir in enumerate(subtask_dirs):
             prefix = f'{full_idx}_{subtask_idx}'
             seg_info = DataManager._read_episode_info(seg_dir)
-            camera_rotations = DataManager._read_camera_metadata_rotations(seg_dir)
             seg_videos = seg_dir / 'videos'
             expected_cameras = set()
             if seg_videos.exists():
@@ -1072,27 +1005,24 @@ class DataManager:
             segment_warnings = {}
             for camera in sorted(expected_cameras):
                 src = seg_videos / f'{camera}.mp4'
+                sidecar = seg_videos / f'{camera}_timestamps.parquet'
+                dst = dst_segment_dir / f'{camera}.mp4'
+                dst_sidecar = dst_segment_dir / f'{camera}_timestamps.parquet'
                 if not src.exists() or src.stat().st_size <= 0:
+                    if dst.exists() and dst_sidecar.exists():
+                        segment_cameras.append(camera)
+                        continue
                     segment_warnings[camera] = 'missing video file'
                     continue
-                width, height = DataManager._probe_mp4_dimensions(src)
-                if width < 2 or height < 2:
-                    segment_warnings[camera] = f'invalid dimensions {width}x{height}'
+                if not sidecar.exists() or sidecar.stat().st_size <= 0:
+                    if dst.exists() and dst_sidecar.exists():
+                        segment_cameras.append(camera)
+                        continue
+                    segment_warnings[camera] = 'missing timestamp sidecar'
                     continue
-                dst = dst_segment_dir / f'{camera}.mp4'
                 try:
-                    DataManager._transcode_episode_video(
-                        src,
-                        dst,
-                        rotation_deg=int(camera_rotations.get(camera, 0) or 0),
-                        needs_pad=bool(width % 2 or height % 2),
-                    )
-                    sidecar = seg_videos / f'{camera}_timestamps.parquet'
-                    if sidecar.exists():
-                        shutil.copy2(
-                            sidecar,
-                            dst_segment_dir / f'{camera}_timestamps.parquet',
-                        )
+                    DataManager._move_file(src, dst)
+                    DataManager._move_file(sidecar, dst_sidecar)
                     segment_cameras.append(camera)
                 except Exception as exc:
                     segment_warnings[camera] = repr(exc)

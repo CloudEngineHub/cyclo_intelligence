@@ -138,6 +138,13 @@ class TranscodeResult:
     error: Optional[str] = None
 
 
+@dataclass(frozen=True)
+class _CameraJob:
+    camera_id: str
+    camera_name: str
+    videos_dir: Path
+
+
 class _SkipCamera(Exception):
     """Camera stream is unusable for this episode but should not fail it."""
 
@@ -269,10 +276,10 @@ class TranscodeWorker:
         videos_dir = episode_dir / "videos"
         if not videos_dir.exists():
             return
-        for stale in videos_dir.glob("*.h264.tmp"):
+        for stale in videos_dir.rglob("*.h264.tmp"):
             try:
                 stale.unlink()
-                self._log_info(f"transcode: cleaned orphan {stale.name}")
+                self._log_info(f"transcode: cleaned orphan {stale}")
             except OSError:
                 pass
 
@@ -343,17 +350,9 @@ class TranscodeWorker:
         # (see TranscodeWorker._cleanup_orphan_tmps) so this worker
         # thread can skip the per-job glob.
 
-        # Discover cameras: any <cam>.mp4 that has a paired sidecar.
-        cameras: list[str] = []
-        if videos_dir.exists():
-            for mp4 in sorted(videos_dir.glob("*.mp4")):
-                cam = mp4.stem
-                if cam.endswith("_synced"):
-                    continue  # converter-side derivative, never transcode
-                if (videos_dir / f"{cam}_timestamps.parquet").exists():
-                    cameras.append(cam)
+        camera_jobs = self._discover_camera_jobs(videos_dir)
 
-        if not cameras:
+        if not camera_jobs:
             self._log_info(
                 f"transcode: {episode_dir.name} has no cameras; marking not_required"
             )
@@ -368,26 +367,26 @@ class TranscodeWorker:
         done: list[str] = []
         skipped: dict[str, str] = {}
         failed: dict[str, str] = {}
-        for cam in cameras:
+        for job in camera_jobs:
             try:
                 self._transcode_camera(
-                    cam_name=cam,
-                    videos_dir=videos_dir,
+                    cam_name=job.camera_name,
+                    videos_dir=job.videos_dir,
                     encoder_name=encoder_name,
                     encoder_opts=encoder_opts,
-                    rotation_deg=rotations.get(cam, 0),
+                    rotation_deg=rotations.get(job.camera_name, 0),
                 )
-                done.append(cam)
+                done.append(job.camera_id)
             except _SkipCamera as exc:
                 self._log_warn(
-                    f"transcode {episode_dir.name}/{cam}: skipped: {exc}"
+                    f"transcode {episode_dir.name}/{job.camera_id}: skipped: {exc}"
                 )
-                skipped[cam] = str(exc)
+                skipped[job.camera_id] = str(exc)
             except Exception as exc:
                 self._log_error(
-                    f"transcode {episode_dir.name}/{cam}: {exc!r}"
+                    f"transcode {episode_dir.name}/{job.camera_id}: {exc!r}"
                 )
-                failed[cam] = repr(exc)
+                failed[job.camera_id] = repr(exc)
 
         elapsed = time.time() - t0
         success = len(failed) == 0
@@ -405,6 +404,31 @@ class TranscodeWorker:
             episode_dir=episode_dir, success=success, elapsed_sec=elapsed,
             encoder=encoder_name, cameras_done=done, cameras_failed=failed,
         )
+
+    @staticmethod
+    def _discover_camera_jobs(videos_dir: Path) -> list[_CameraJob]:
+        """Find flat and segmented camera MP4s that have timestamp sidecars."""
+        if not videos_dir.exists():
+            return []
+
+        jobs: list[_CameraJob] = []
+
+        for mp4 in sorted(videos_dir.glob("*.mp4")):
+            cam = mp4.stem
+            if cam.endswith("_synced"):
+                continue
+            if (videos_dir / f"{cam}_timestamps.parquet").exists():
+                jobs.append(_CameraJob(cam, cam, videos_dir))
+
+        for mp4 in sorted(videos_dir.glob("*/*.mp4")):
+            cam = mp4.stem
+            if cam.endswith("_synced"):
+                continue
+            segment_dir = mp4.parent
+            if (segment_dir / f"{cam}_timestamps.parquet").exists():
+                jobs.append(_CameraJob(f"{segment_dir.name}/{cam}", cam, segment_dir))
+
+        return jobs
 
     @staticmethod
     def _transpose_filter(rotation_deg: int) -> Optional[str]:
@@ -650,19 +674,18 @@ def _patch_status(
     except Exception:
         info = {}
     info["transcoding_status"] = status
-    if encoder is not None:
-        info["transcoding_encoder"] = encoder
-    if elapsed_sec is not None:
-        info["transcoding_elapsed_sec"] = round(elapsed_sec, 3)
-    if cameras_done is not None:
-        info["transcoding_cameras_done"] = list(cameras_done)
     if cameras_failed is not None:
         info["transcoding_cameras_failed"] = dict(cameras_failed)
-    if cameras_skipped is not None:
-        info["transcoding_cameras_skipped"] = dict(cameras_skipped)
-    info["transcoding_updated"] = time.strftime(
-        "%Y-%m-%dT%H:%M:%SZ", time.gmtime()
-    )
+    else:
+        info.setdefault("transcoding_cameras_failed", {})
+    for stale_key in (
+        "transcoding_encoder",
+        "transcoding_elapsed_sec",
+        "transcoding_cameras_done",
+        "transcoding_cameras_skipped",
+        "transcoding_updated",
+    ):
+        info.pop(stale_key, None)
     tmp = info_path.with_suffix(".json.tmp")
     tmp.write_text(json.dumps(info, indent=2))
     os.replace(tmp, info_path)
