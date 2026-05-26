@@ -192,6 +192,11 @@ _BACKENDS: Dict[str, Dict[str, str]] = {
     },
 }
 
+_REQUIRED_BACKEND_MOUNTS: Dict[str, tuple[str, ...]] = {
+    "lerobot": ("/policy_checkpoints/lerobot",),
+    "groot": ("/policy_checkpoints/groot",),
+}
+
 
 def _docker_client() -> docker.DockerClient:
     return docker.from_env()
@@ -281,6 +286,34 @@ def _container_raw_state(container) -> str:
     except DockerException:
         pass
     return container.attrs.get("State", {}).get("Status", "unknown")
+
+
+def _missing_required_mounts(name: str, container) -> List[str]:
+    required_mounts = _REQUIRED_BACKEND_MOUNTS.get(name, ())
+    if not required_mounts:
+        return []
+    mounted_destinations = {
+        mount.get("Destination")
+        for mount in container.attrs.get("Mounts", [])
+    }
+    return [
+        destination for destination in required_mounts
+        if destination not in mounted_destinations
+    ]
+
+
+def _missing_required_mounts(name: str, container) -> List[str]:
+    required_mounts = _REQUIRED_BACKEND_MOUNTS.get(name, ())
+    if not required_mounts:
+        return []
+    mounted_destinations = {
+        mount.get("Destination")
+        for mount in container.attrs.get("Mounts", [])
+    }
+    return [
+        destination for destination in required_mounts
+        if destination not in mounted_destinations
+    ]
 
 
 def _backend_service_statuses(
@@ -564,6 +597,11 @@ async def _ensure_backend_running(name: str, spec: Dict[str, str]) -> ActionResu
             return False, f"inspect failed: {e}"
 
         try:
+            missing_mounts = _missing_required_mounts(name, ctr)
+            if missing_mounts:
+                ctr.remove(force=True)
+                return None, "missing_required_mounts=" + ",".join(missing_mounts)
+
             state = _container_raw_state(ctr)
             if state == "paused":
                 ctr.unpause()
@@ -579,6 +617,7 @@ async def _ensure_backend_running(name: str, spec: Dict[str, str]) -> ActionResu
     handled, msg = await asyncio.to_thread(_start_or_restart_existing)
     if handled is not None:
         return ActionResult(ok=handled, message=msg)
+    compose_reason = msg
 
     # Container is absent. Pre-flight the image so compose up never starts an
     # implicit pull/build path from a simple ON click.
@@ -602,7 +641,13 @@ async def _ensure_backend_running(name: str, spec: Dict[str, str]) -> ActionResu
     ok = result.rc == 0
     msg = result.stderr or result.stdout or f"rc={result.rc}"
     if ok:
-        msg = f"{spec['container']} created/started using local image {local_image}. {msg}"
+        reason = ""
+        if compose_reason.startswith("missing_required_mounts="):
+            reason = f" after recreating stale container ({compose_reason})"
+        msg = (
+            f"{spec['container']} created/started{reason} "
+            f"using local image {local_image}. {msg}"
+        )
     return ActionResult(ok=ok, message=msg)
 
 

@@ -337,15 +337,16 @@ class GR00TInference:
                 joints[modality_key] = group
         self.robot_info["joints"] = joints
 
-        # Sensor-backed state modalities. The training pipeline may store
-        # mobile/odometry as joint-like 3-dim modalities, but robot_client keeps
-        # odom/cmd_vel as sensors. Bridge those names here.
+        # Sensor-backed state modalities. Training runs have used both
+        # ``mobile`` and ``odometry`` for the same 3-dim base velocity slice,
+        # while robot_client keeps /odom as a sensor instead of a joint group.
+        # Bridge either policy key to the odom sensor here.
         sensor_states = {}
         sensors_cfg = self.robot._config.get("sensors", {})
-        if "mobile" in self.policy_info["state"] and "odom" in sensors_cfg:
-            sensor_states["mobile"] = "odom"
-        if "odometry" in self.policy_info["state"] and "odom" in sensors_cfg:
-            sensor_states["odometry"] = "odom"
+        if "odom" in sensors_cfg:
+            for modality_key in ("mobile", "odometry"):
+                if modality_key in self.policy_info["state"]:
+                    sensor_states[modality_key] = "odom"
         self.robot_info["sensor_states"] = sensor_states
 
         self.logger.info("Robot info: %s", self.robot_info)
