@@ -796,6 +796,7 @@ export function useRosServiceCaller() {
           recording_date: result.recording_date || null,
           file_size_bytes: result.file_size_bytes || 0,
           task_markers: result.task_markers || [],
+          segments: result.segments || [],
           trim_points: result.trim_points || null,
           exclude_regions: result.exclude_regions || [],
           frame_counts: result.frame_counts || {},

@@ -1,10 +1,16 @@
-# Copyright 2026 ROBOTIS CO., LTD.
+# Copyright 2025 ROBOTIS CO., LTD.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
 #
 #     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 
 """Exhaustive tests for the background MJPEG → H.264 transcoder.
 
@@ -130,8 +136,6 @@ def _make_episode(
             "robot_type": "test_robot",
             "episode_index": 0,
             "format_version": "robotis_v2",
-            "recorder_format_version": 2,
-            "video_files": {cam: f"videos/{cam}.mp4" for cam in cameras},
             "camera_rotations": dict(rotations or {}),
             "transcoding_status": initial_status,
         }
@@ -353,7 +357,6 @@ class TestRecovery:
             (tmp_path / "Task_X" / str(ep_idx) / "episode_info.json").write_text(
                 json.dumps({
                     "transcoding_status": STATUS_PENDING,
-                    "video_files": {"cam0": "videos/cam0.mp4"},
                 })
             )
         # An episode already marked done must NOT be re-queued.

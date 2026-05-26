@@ -395,7 +395,8 @@ class DataManager:
         Args:
             urdf_path: Path to URDF file to copy.
             video_stats: ``{cam_name: {frames_received, frames_written, ...}}`` from VideoRecorder.
-            camera_info_files: ``{cam_name: yaml_path}`` from CameraInfoSnapshot.
+            camera_info_files: Deprecated; camera info files are discovered
+                from the episode's camera_info/ directory when needed.
         """
         rosbag_path = self.get_save_rosbag_path()
         if rosbag_path is None:
@@ -436,29 +437,19 @@ class DataManager:
         # Recording format v2 (images-as-MP4 + camera_info-as-yaml + MCAP
         # without images). format_version: 'robotis_v2'. Older recordings
         # used 'robotis_v1' (images embedded in MCAP) — the converter
-        # branches on this field. video_files / camera_info_files are
-        # paths relative to the episode dir so the manifest survives a
-        # move of the parent workspace tree.
+        # branches on this field. Per-camera files are discovered from
+        # videos/ and camera_info/ directly, so episode_info stays focused
+        # on semantic metadata and recording diagnostics.
         videos_dir = os.path.join(rosbag_path, 'videos')
-        video_files = {}
-        if os.path.isdir(videos_dir):
-            for entry in sorted(os.listdir(videos_dir)):
-                full = os.path.join(videos_dir, entry)
-                if entry.endswith('.mp4') and os.path.isfile(full):
-                    cam = entry[:-4]
-                    video_files[cam] = os.path.relpath(full, rosbag_path)
-        camera_info_rel = {}
-        if camera_info_files:
-            for cam, path in camera_info_files.items():
-                try:
-                    camera_info_rel[cam] = os.path.relpath(path, rosbag_path)
-                except ValueError:
-                    camera_info_rel[cam] = path
+        has_videos = (
+            os.path.isdir(videos_dir)
+            and any(entry.endswith('.mp4') for entry in os.listdir(videos_dir))
+        )
 
         # ``transcoding_status`` default depends on whether this episode
         # actually has any cameras to transcode. The TranscodeWorker
         # patches this field again once it runs.
-        initial_status = 'pending' if video_files else 'not_required'
+        initial_status = 'pending' if has_videos else 'not_required'
 
         meta_data = {
             'task_instruction': self.current_instruction,
@@ -466,10 +457,7 @@ class DataManager:
             'episode_index': self._record_episode_count,
             'timestamp': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
             'format_version': 'robotis_v2',
-            'recorder_format_version': 2,
             'device_serial': socket.gethostname(),
-            'video_files': video_files,
-            'camera_info_files': camera_info_rel,
             'video_stats': video_stats or {},
             # ``camera_rotations`` is ``{cam_name: degrees}`` (0/90/180/270)
             # straight from the robot config yaml. The background
@@ -611,7 +599,7 @@ class DataManager:
     # UI so the user can pick where downloads land.
     DEFAULT_DOWNLOAD_PATHS = {
         'dataset': Path('/workspace/rosbag2'),
-        'model': Path('/workspace/model'),
+        'model': Path('/policy_checkpoints/lerobot'),
     }
 
     @staticmethod

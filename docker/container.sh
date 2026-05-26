@@ -19,13 +19,20 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 COMPOSE="docker compose -f ${SCRIPT_DIR}/docker-compose.yml"
+# Standard docker-compose override convention. Auto-discovery is
+# disabled when -f is passed explicitly (above), so we re-enable it
+# manually: if a sibling docker-compose.override.yml exists, layer it
+# on top. Lets developers shadow image tags / mounts locally without
+# editing the canonical compose file.
+[ -f "${SCRIPT_DIR}/docker-compose.override.yml" ] \
+    && COMPOSE="${COMPOSE} -f ${SCRIPT_DIR}/docker-compose.override.yml"
 
 MAIN_SERVICE="cyclo_intelligence"
 MAIN_CONTAINER="cyclo_intelligence"
 LEROBOT_SERVICE="lerobot"
-LEROBOT_CONTAINER="lerobot_server"
+LEROBOT_CONTAINER="${LEROBOT_CONTAINER_NAME:-lerobot_server}"
 GROOT_SERVICE="groot"
-GROOT_CONTAINER="groot_server"
+GROOT_CONTAINER="${GROOT_CONTAINER_NAME:-groot_server}"
 
 # Auto-detect host architecture for Dockerfile / image tag selection
 MACHINE_ARCH=$(uname -m)
@@ -51,10 +58,18 @@ set -- "${NEW_ARGS[@]}"
 
 # Pre-create host bind-mount targets so docker doesn't auto-create them
 # as root-owned directories (which then can't be written to from the
-# host without sudo).
-for d in workspace huggingface; do
-    [ -d "${SCRIPT_DIR}/${d}" ] || mkdir -p "${SCRIPT_DIR}/${d}"
-done
+# host without sudo). Include the user-facing default browser locations
+# used by Cyclo Data and Cyclo Brain.
+ensure_host_dir() {
+    [ -d "$1" ] || mkdir -p "$1"
+}
+
+ensure_host_dir "${SCRIPT_DIR}/workspace"
+ensure_host_dir "${SCRIPT_DIR}/workspace/rosbag2"
+ensure_host_dir "${SCRIPT_DIR}/workspace/lerobot"
+ensure_host_dir "${SCRIPT_DIR}/huggingface"
+ensure_host_dir "${SCRIPT_DIR}/../cyclo_brain/policy/lerobot/checkpoints"
+ensure_host_dir "${SCRIPT_DIR}/../cyclo_brain/policy/groot/checkpoints"
 CYCLO_AGENT_SOCKETS_DIR="${CYCLO_AGENT_SOCKETS_DIR:-/var/run/robotis/agent_sockets/cyclo_intelligence}"
 export CYCLO_AGENT_SOCKETS_DIR
 mkdir -p "$CYCLO_AGENT_SOCKETS_DIR" 2>/dev/null \
@@ -89,7 +104,7 @@ LeRobot policy container:
   enter-lerobot    Open an interactive bash in lerobot_server
 
 GR00T policy container:
-  start-groot      Build + start groot (N1.6 baseline). Same boot-idle
+  start-groot      Build + start groot (N1.7 baseline). Same boot-idle
                    + LOAD-time configure pattern as lerobot.
   enter-groot      Open an interactive bash in groot_server
 
@@ -106,7 +121,7 @@ Flags (any start* command):
 
 Environment:
   GPU_ARCH         default | blackwell   (optional, amd64 only)
-  VERSION          image tag version (default: 0.1.1 for cyclo)
+  VERSION          image tag version (default: 0.1.4 for cyclo)
   ROS_DOMAIN_ID    default 30
 EOF
 }
