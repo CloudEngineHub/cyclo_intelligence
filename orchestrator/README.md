@@ -14,7 +14,7 @@ orchestrator/
 │   ├── orchestrator.launch.py          OrchestratorNode only.
 │   ├── orchestrator_bringup.launch.py  OrchestratorNode + rosbridge
 │   │                                   + rosbag_recorder +
-│   │                                   web_video_server.
+│   │                                   gst_webrtc_cam.
 │   └── bt_node.launch.py      BT node bringup.
 ├── config/                    Robot-specific YAML
 │                              (ffw_sg2_rev1_config.yaml, etc.).

@@ -10,7 +10,7 @@
 
 """Single-command bringup for cyclo_intelligence.
 
-Launches orchestrator (+ rosbridge / rosbag_recorder / web_video_server)
+Launches orchestrator (+ rosbridge / rosbag_recorder / gst_webrtc_cam)
 and cyclo_data_node together so cyclo_manager / s6-agent can treat the
 pair as one unit. ``cyclo_data`` and ``orchestrator`` aliases still work
 when only one half needs to come up (debugging).

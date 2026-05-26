@@ -18,7 +18,7 @@
 
 Thin FastAPI layer sitting between the UI (via nginx /api/) and:
   (a) the s6-rc service manager inside this container, for the ROS2
-      longruns (orchestrator / cyclo_data / web_video_server), and
+      longruns (cyclo_intelligence / orchestrator / cyclo_data), and
   (b) the host Docker daemon, for policy containers that ship
       out-of-image (lerobot — and groot once D10-groot lands).
 
@@ -63,9 +63,9 @@ logger = logging.getLogger("supervisor_api")
 # Names the UI may start/stop. Kept explicit so a stray POST can't
 # poke at s6-agent or the log pipelines.
 _USER_SERVICES: tuple[str, ...] = (
+    "cyclo_intelligence",
     "orchestrator",
     "cyclo_data",
-    "web_video_server",
 )
 
 

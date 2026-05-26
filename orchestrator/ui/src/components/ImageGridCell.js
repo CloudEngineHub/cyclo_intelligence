@@ -14,10 +14,10 @@
 //
 // Author: Kiwoong Park
 
-import React, { useCallback, useEffect, useRef } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import clsx from 'clsx';
 import { MdClose, MdScreenRotation } from 'react-icons/md';
-import { useSelector } from 'react-redux';
+import { buildWebRtcWsUrl, toWebRtcCameraLabel } from '../utils/cameraStreamTopics';
 
 const classCell = (topic) =>
   clsx(
@@ -53,6 +53,22 @@ const classRotateBtn = clsx(
   'hover:bg-opacity-70', 'z-20'
 );
 
+const classStatus = clsx(
+  'absolute', 'bottom-2', 'right-2',
+  'text-[10px]', 'text-white',
+  'bg-black', 'bg-opacity-50',
+  'px-2', 'py-1', 'rounded', 'z-10'
+);
+
+const isWebRtcStatsDebugEnabled = () => {
+  try {
+    return typeof window !== 'undefined'
+      && window.localStorage?.getItem('cyclo_webrtc_debug') === '1';
+  } catch (_error) {
+    return false;
+  }
+};
+
 export default function ImageGridCell({
   topic,
   aspect,
@@ -65,159 +81,283 @@ export default function ImageGridCell({
   style = {},
 }) {
   const rotate = rotationDegrees !== 0;
-  const rosHost = useSelector((state) => state.ros.rosHost);
-  const containerRef = useRef(null);
-  const currentImgRef = useRef(null);
-  const isCreatingRef = useRef(false);
-  const cancelRef = useRef(false);
+  const videoRef = useRef(null);
+  const wsRef = useRef(null);
+  const pcRef = useRef(null);
   const retryTimerRef = useRef(null);
-  const retryCountRef = useRef(0);
-  const MAX_RETRIES = 5;
+  const statsTimerRef = useRef(null);
+  const previousStatsRef = useRef(null);
+  const reconnectCountRef = useRef(0);
+  const streamIdRef = useRef(0);
+  const [status, setStatus] = useState('');
+  const cameraLabel = useMemo(() => toWebRtcCameraLabel(topic), [topic]);
 
-  const destroyImage = useCallback(() => {
-    // Signal any in-flight createImage waiting on the staggered delay to bail.
-    cancelRef.current = true;
+  const cleanupStream = useCallback(() => {
+    streamIdRef.current += 1;
+
     if (retryTimerRef.current) {
       clearTimeout(retryTimerRef.current);
       retryTimerRef.current = null;
     }
-    if (currentImgRef.current) {
-      const el = currentImgRef.current;
-      const img = el.tagName === 'IMG' ? el : el.querySelector('img');
-      if (img) {
-        // Detach handlers BEFORE clearing src so the late-fired onerror that
-        // src='' triggers can't schedule a retry that revives the stream.
-        img.onerror = null;
-        img.onload = null;
-        img.src = '';
-      }
-      if (el.parentNode) el.parentNode.removeChild(el);
-      currentImgRef.current = null;
+
+    if (statsTimerRef.current) {
+      clearInterval(statsTimerRef.current);
+      statsTimerRef.current = null;
+      previousStatsRef.current = null;
+    }
+
+    if (wsRef.current) {
+      wsRef.current.onclose = null;
+      wsRef.current.onerror = null;
+      wsRef.current.onmessage = null;
+      wsRef.current.close();
+      wsRef.current = null;
+    }
+
+    if (pcRef.current) {
+      pcRef.current.onicecandidate = null;
+      pcRef.current.oniceconnectionstatechange = null;
+      pcRef.current.ontrack = null;
+      pcRef.current.close();
+      pcRef.current = null;
+    }
+
+    if (videoRef.current) {
+      videoRef.current.srcObject = null;
     }
   }, []);
 
-  const createImage = useCallback(async () => {
-    if (!topic || !topic.trim() || !isActive || !containerRef.current) return;
-    if (isCreatingRef.current) return;
-
-    isCreatingRef.current = true;
-    destroyImage();
-    // Clear cancel flag raised by destroyImage; later destroys will set it again.
-    cancelRef.current = false;
-
-    try {
-      const staggeredDelay = (idx === 0 || idx === 2) ? 300 : 0;
-      if (staggeredDelay > 0) {
-        await new Promise((resolve) => setTimeout(resolve, staggeredDelay));
-      }
-
-      if (cancelRef.current || !topic || !topic.trim() || !isActive || !containerRef.current) return;
-
-      const img = document.createElement('img');
-      const timestamp = Date.now();
-      // web_video_server expects base topic (e.g. .../image_raw); use default_transport=compressed to subscribe to CompressedImage
-      // Do not encode slashes: server rejects %2F and expects literal /
-      const streamTopic = topic.endsWith('/compressed') ? topic.slice(0, -11) : topic;
-      img.src = `http://${rosHost}:8085/stream?quality=50&type=ros_compressed&default_transport=compressed&topic=${streamTopic}&t=${timestamp}`;
-      img.alt = topic;
-
-      img.onclick = (e) => e.stopPropagation();
-      img.onerror = () => {
-        // Late-fired error after destroyImage (src='' triggers onerror) must
-        // not schedule a retry — cancelRef tells us we're already torn down.
-        if (cancelRef.current) return;
-        if (retryCountRef.current >= MAX_RETRIES) {
-          console.error(`Image stream failed after ${MAX_RETRIES} retries for idx ${idx}, topic: ${topic}`);
-          return;
-        }
-        retryCountRef.current += 1;
-        const delay = Math.min(1000 * Math.pow(2, retryCountRef.current - 1), 8000);
-        console.warn(`Image stream error for idx ${idx}, retrying in ${delay}ms (${retryCountRef.current}/${MAX_RETRIES})`);
-        retryTimerRef.current = setTimeout(() => {
-          if (cancelRef.current) return;
-          if (isActive && topic && containerRef.current) {
-            destroyImage();
-            isCreatingRef.current = false;
-            createImage();
-          }
-        }, delay);
-      };
-      img.onload = () => {
-        retryCountRef.current = 0;
-      };
-
-      if (rotate) {
-        // Wrapper div handles rotation; img inside handles fitting.
-        // For 3:4 container (W x H where H=4W/3):
-        //   wrapper pre-rotation: width=H, height=W (landscape box)
-        //   after rotate(-90deg): visual bounding box = W x H (matches container)
-        const wrapper = document.createElement('div');
-        wrapper.style.position = 'absolute';
-        wrapper.style.width = '133.33%';   // container height = 4W/3 = 133.33% of W
-        wrapper.style.height = '75%';      // container width  = 3H/4 = 75% of H
-        wrapper.style.top = '50%';
-        wrapper.style.left = '50%';
-        wrapper.style.transform = `translate(-50%, -50%) rotate(${rotationDegrees}deg)`;
-        wrapper.style.transformOrigin = 'center center';
-        wrapper.style.overflow = 'hidden';
-
-        img.style.width = '100%';
-        img.style.height = '100%';
-        img.style.objectFit = 'cover';
-        img.style.display = 'block';
-
-        wrapper.appendChild(img);
-
-        if (containerRef.current && !cancelRef.current) {
-          containerRef.current.appendChild(wrapper);
-          currentImgRef.current = wrapper;
-        }
-      } else {
-        img.className = 'w-full h-full object-cover bg-gray-100';
-
-        if (containerRef.current && !cancelRef.current) {
-          containerRef.current.appendChild(img);
-          currentImgRef.current = img;
-        }
-      }
-    } finally {
-      isCreatingRef.current = false;
-    }
-  }, [topic, isActive, rosHost, idx, rotate, rotationDegrees, destroyImage]);
-
-  useEffect(() => {
-    retryCountRef.current = 0;
-    if (topic && topic.trim() !== '' && isActive) {
-      createImage().catch((error) => {
-        console.error(`Error creating image stream for idx ${idx}:`, error);
-        isCreatingRef.current = false;
-      });
-    } else {
-      destroyImage();
+  const connectStream = useCallback(() => {
+    if (!topic || !isActive || !cameraLabel) {
+      cleanupStream();
+      setStatus(cameraLabel ? '' : 'unmapped');
+      return;
     }
 
-    return () => {
-      isCreatingRef.current = false;
-      retryCountRef.current = 0;
-      destroyImage();
+    cleanupStream();
+    setStatus('connecting');
+    const streamId = streamIdRef.current + 1;
+    streamIdRef.current = streamId;
+
+    const wsUrl = buildWebRtcWsUrl(cameraLabel);
+    const ws = new WebSocket(wsUrl);
+    wsRef.current = ws;
+    const isStaleStream = () => streamIdRef.current !== streamId || wsRef.current !== ws;
+
+    const scheduleReconnect = () => {
+      if (isStaleStream() || !isActive || !topic || !cameraLabel) return;
+      const attempt = reconnectCountRef.current + 1;
+      reconnectCountRef.current = attempt;
+      const delay = Math.min(1000 * Math.pow(2, attempt - 1), 8000);
+      setStatus(`retry ${attempt}`);
+      retryTimerRef.current = setTimeout(connectStream, delay);
     };
-  }, [topic, isActive, rosHost, idx, createImage, destroyImage]);
+
+    const startStatsLogging = (pc) => {
+      if (!isWebRtcStatsDebugEnabled()) return;
+
+      previousStatsRef.current = null;
+      statsTimerRef.current = setInterval(async () => {
+        if (isStaleStream() || pcRef.current !== pc) return;
+
+        try {
+          const reports = await pc.getStats();
+          let inboundVideo = null;
+          let selectedPair = null;
+
+          reports.forEach((report) => {
+            if (report.type === 'inbound-rtp'
+                && (report.kind === 'video' || report.mediaType === 'video')
+                && !report.isRemote) {
+              inboundVideo = report;
+            }
+            if (report.type === 'candidate-pair'
+                && (report.selected || (report.nominated && report.state === 'succeeded'))) {
+              selectedPair = report;
+            }
+          });
+
+          if (!inboundVideo) return;
+
+          const previous = previousStatsRef.current;
+          previousStatsRef.current = {
+            packetsReceived: inboundVideo.packetsReceived || 0,
+            packetsLost: inboundVideo.packetsLost || 0,
+            framesDecoded: inboundVideo.framesDecoded || 0,
+            framesDropped: inboundVideo.framesDropped || 0,
+            freezeCount: inboundVideo.freezeCount || 0,
+          };
+
+          const delta = previous
+            ? {
+                packetsReceived: (inboundVideo.packetsReceived || 0) - previous.packetsReceived,
+                packetsLost: (inboundVideo.packetsLost || 0) - previous.packetsLost,
+                framesDecoded: (inboundVideo.framesDecoded || 0) - previous.framesDecoded,
+                framesDropped: (inboundVideo.framesDropped || 0) - previous.framesDropped,
+                freezeCount: (inboundVideo.freezeCount || 0) - previous.freezeCount,
+              }
+            : {};
+
+          console.info(`[webrtc-stats:${cameraLabel}]`, {
+            jitterMs: inboundVideo.jitter != null ? Math.round(inboundVideo.jitter * 1000) : undefined,
+            packetsLost: inboundVideo.packetsLost,
+            framesPerSecond: inboundVideo.framesPerSecond,
+            framesDecoded: inboundVideo.framesDecoded,
+            framesDropped: inboundVideo.framesDropped,
+            freezeCount: inboundVideo.freezeCount,
+            keyFramesDecoded: inboundVideo.keyFramesDecoded,
+            roundTripTimeMs: selectedPair?.currentRoundTripTime != null
+              ? Math.round(selectedPair.currentRoundTripTime * 1000)
+              : undefined,
+            delta,
+          });
+        } catch (error) {
+          console.warn(`[webrtc-stats:${cameraLabel}] failed`, error);
+        }
+      }, 1000);
+    };
+
+    ws.onmessage = async (event) => {
+      if (isStaleStream()) return;
+
+      let msg;
+      try {
+        msg = JSON.parse(event.data);
+      } catch (_error) {
+        setStatus('signal error');
+        return;
+      }
+
+      if (msg.type === 'offer') {
+        if (statsTimerRef.current) {
+          clearInterval(statsTimerRef.current);
+          statsTimerRef.current = null;
+          previousStatsRef.current = null;
+        }
+        if (pcRef.current) {
+          pcRef.current.close();
+        }
+        const pc = new RTCPeerConnection();
+        pcRef.current = pc;
+        startStatsLogging(pc);
+
+        pc.ontrack = (trackEvent) => {
+          if (isStaleStream() || pcRef.current !== pc) return;
+          if (videoRef.current) {
+            videoRef.current.srcObject = trackEvent.streams[0];
+          }
+          reconnectCountRef.current = 0;
+          setStatus('streaming');
+        };
+
+        pc.onicecandidate = (candidateEvent) => {
+          if (!isStaleStream() && candidateEvent.candidate && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({
+              type: 'ice',
+              candidate: candidateEvent.candidate.candidate,
+              sdpMLineIndex: candidateEvent.candidate.sdpMLineIndex,
+            }));
+          }
+        };
+
+        pc.oniceconnectionstatechange = () => {
+          if (isStaleStream() || pcRef.current !== pc) return;
+          if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
+            reconnectCountRef.current = 0;
+            setStatus('streaming');
+          } else if (pc.iceConnectionState === 'failed' || pc.iceConnectionState === 'disconnected') {
+            setStatus(pc.iceConnectionState);
+          }
+        };
+
+        try {
+          await pc.setRemoteDescription({ type: 'offer', sdp: msg.sdp });
+          const answer = await pc.createAnswer();
+          await pc.setLocalDescription(answer);
+          if (!isStaleStream() && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: 'answer', sdp: answer.sdp }));
+          }
+        } catch (_error) {
+          if (!isStaleStream()) {
+            setStatus('signal error');
+          }
+        }
+      } else if (msg.type === 'ice' && pcRef.current) {
+        try {
+          await pcRef.current.addIceCandidate({
+            candidate: msg.candidate,
+            sdpMLineIndex: msg.sdpMLineIndex,
+          });
+        } catch (_error) {
+          if (!isStaleStream()) {
+            setStatus('ice error');
+          }
+        }
+      }
+    };
+
+    ws.onopen = () => {
+      if (isStaleStream()) return;
+      setStatus('signaling');
+    };
+    ws.onerror = () => {
+      if (isStaleStream()) return;
+      setStatus('error');
+    };
+    ws.onclose = () => {
+      scheduleReconnect();
+    };
+  }, [cameraLabel, cleanupStream, isActive, topic]);
 
   useEffect(() => {
-    return () => { destroyImage(); };
-  }, [idx, destroyImage]);
+    reconnectCountRef.current = 0;
+    connectStream();
+    return cleanupStream;
+  }, [connectStream, cleanupStream]);
 
   const handleClose = (e) => {
     e.stopPropagation();
-    destroyImage();
+    cleanupStream();
     onClose(idx);
+  };
+
+  const mediaWrapperStyle = rotate
+    ? {
+        position: 'absolute',
+        width: '133.33%',
+        height: '75%',
+        top: '50%',
+        left: '50%',
+        transform: `translate(-50%, -50%) rotate(${rotationDegrees}deg)`,
+        transformOrigin: 'center center',
+      }
+    : {
+        position: 'absolute',
+        width: '100%',
+        height: '100%',
+        inset: 0,
+      };
+
+  const videoStyle = {
+    width: '100%',
+    height: '100%',
+    objectFit: 'cover',
+    display: 'block',
   };
 
   return (
     <div
       className={classCell(topic)}
       onClick={!topic ? () => onPlusClick(idx) : undefined}
-      style={{ cursor: !topic ? 'pointer' : 'default', aspectRatio: aspect, ...style }}
+      style={{
+        cursor: !topic ? 'pointer' : 'default',
+        aspectRatio: aspect,
+        contain: 'layout paint style',
+        willChange: 'transform',
+        transform: 'translateZ(0)',
+        isolation: 'isolate',
+        ...style,
+      }}
     >
       {topic && topic.trim() !== '' && (
         <>
@@ -232,10 +372,24 @@ export default function ImageGridCell({
           <button type="button" className={classCloseBtn} onClick={handleClose}>
             <MdClose size={20} />
           </button>
+          {status && <div className={classStatus}>{status}</div>}
         </>
       )}
-      <div ref={containerRef} className="w-full h-full relative overflow-hidden rounded-3xl flex items-center justify-center">
-        {(!topic || !isActive) && <div className="text-6xl text-gray-400 font-light">+</div>}
+      <div className="w-full h-full relative overflow-hidden rounded-3xl flex items-center justify-center bg-gray-100">
+        {topic && cameraLabel && isActive ? (
+          <div style={mediaWrapperStyle}>
+            <video
+              ref={videoRef}
+              className="bg-black"
+              style={videoStyle}
+              autoPlay
+              playsInline
+              muted
+            />
+          </div>
+        ) : (
+          <div className="text-6xl text-gray-400 font-light">+</div>
+        )}
       </div>
     </div>
   );

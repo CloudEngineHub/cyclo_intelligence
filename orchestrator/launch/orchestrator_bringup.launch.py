@@ -27,6 +27,12 @@ from launch_ros.actions import Node
 
 def generate_launch_description():
     pkg_dir = get_package_share_directory('orchestrator')
+    gst_webrtc_pkg_dir = get_package_share_directory('gst_webrtc_cam')
+    gst_webrtc_config = os.path.join(
+        gst_webrtc_pkg_dir,
+        'config',
+        'stream_params.yaml',
+    )
 
     # Include orchestrator.launch.py
     orchestrator_launch = IncludeLaunchDescription(
@@ -56,18 +62,30 @@ def generate_launch_description():
         output='screen'
     )
 
-    # web_video_server node
-    web_video_server_node = Node(
-        package='web_video_server',
-        executable='web_video_server',
-        name='web_video_server',
+    # C++ GStreamer HW H.264 WebRTC media bridge. Recording keeps the
+    # high-quality compressed ROS camera topics, while browser monitoring uses
+    # raw images encoded to low-bandwidth H.264. Python only handles HTTP and
+    # WebSocket signaling so the UI route remains unchanged.
+    gst_webrtc_media_node = Node(
+        package='gst_webrtc_cam',
+        executable='cpp_media_bridge',
+        name='gst_webrtc_cpp_media_bridge',
         output='screen',
-        parameters=[{'port': 8085}]
+        parameters=[gst_webrtc_config]
+    )
+
+    gst_webrtc_proxy_node = Node(
+        package='gst_webrtc_cam',
+        executable='bridge_proxy_node',
+        name='gst_webrtc_bridge_proxy',
+        output='screen',
+        parameters=[gst_webrtc_config]
     )
 
     return LaunchDescription([
         orchestrator_launch,
         rosbridge_websocket_node,
         rosbag_recorder_node,
-        web_video_server_node
+        gst_webrtc_media_node,
+        gst_webrtc_proxy_node
     ])

@@ -38,7 +38,7 @@ services:
   # cyclo_intelligence main container (PLAN §4.5).
   # Multi-stage image (docker/Dockerfile.{arm64,amd64}) carries the
   # UI static assets, the ROS2 workspace (orchestrator + cyclo_data
-  # + interfaces + shared), nginx, rosbridge, web_video_server, and
+  # + interfaces + shared), nginx, rosbridge, gst_webrtc_cam, and
   # the s6-agent / supervisor_api control plane.
   # ============================================================
   cyclo_intelligence:

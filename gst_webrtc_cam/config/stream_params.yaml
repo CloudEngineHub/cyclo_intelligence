@@ -1,0 +1,27 @@
+gst_webrtc_cpp_media_bridge:
+  ros__parameters:
+    cameras:
+      - /zed/zed_node/left/image_rect_color
+      - /zed/zed_node/right/image_rect_color
+      - /camera_left/camera_left/color/image_rect_raw
+      - /camera_right/camera_right/color/image_rect_raw
+    cam_labels:
+      - cam_head_left
+      - cam_head_right
+      - cam_wrist_left
+      - cam_wrist_right
+    bitrate: 1800000
+    iframeinterval: 5
+    idrinterval: 5
+    preset: 1
+    framerate: 15
+
+gst_webrtc_bridge_proxy:
+  ros__parameters:
+    cam_labels:
+      - cam_head_left
+      - cam_head_right
+      - cam_wrist_left
+      - cam_wrist_right
+    signaling_host: 0.0.0.0
+    signaling_port: 8443
