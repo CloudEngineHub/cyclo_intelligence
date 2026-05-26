@@ -360,8 +360,13 @@ class DataManager:
         try:
             for item in os.listdir(rosbag_dir):
                 item_path = os.path.join(rosbag_dir, item)
-                if os.path.isdir(item_path) and item.isdigit():
-                    existing_episodes.append(int(item))
+                if not (os.path.isdir(item_path) and item.isdigit()):
+                    continue
+                if self._segmented_storage_mode and not self._episode_dir_has_data(
+                    Path(item_path)
+                ):
+                    continue
+                existing_episodes.append(int(item))
             for info_path in Path(rosbag_dir).rglob('episode_info.json'):
                 if self._skip_scan_path(info_path.parent.relative_to(rosbag_dir)):
                     continue
@@ -382,6 +387,17 @@ class DataManager:
         print(f'[DataManager] Found existing episodes {sorted(existing_episodes)}, '
               f'starting from episode {next_episode}')
         return next_episode
+
+    def _episode_dir_has_data(self, episode_dir: Path) -> bool:
+        """Return True when a numeric episode folder contains real data."""
+        episode_dir = Path(episode_dir)
+        if self._is_rosbag_leaf(episode_dir):
+            return True
+        for info_path in episode_dir.rglob('episode_info.json'):
+            rel_parent = info_path.parent.relative_to(episode_dir)
+            if not self._skip_scan_path(rel_parent):
+                return True
+        return any(episode_dir.rglob('*.mcap'))
 
     @staticmethod
     def _get_main_task_instruction(task_info) -> str:
@@ -567,6 +583,8 @@ class DataManager:
         for episode_dir in self._episode_dirs_for_full_subtask(full_idx, int(subtask_idx)):
             shutil.rmtree(episode_dir, ignore_errors=True)
             deleted += 1
+        if not self._episode_dirs_for_full_subtask(full_idx):
+            shutil.rmtree(self._full_episode_dir(full_idx), ignore_errors=True)
         with self._state_lock:
             self._record_episode_count = self._find_next_episode_number()
             self._current_subtask_index = int(subtask_idx)
@@ -583,6 +601,7 @@ class DataManager:
         for episode_dir in self._episode_dirs_for_full_subtask(full_idx):
             shutil.rmtree(episode_dir, ignore_errors=True)
             deleted += 1
+        shutil.rmtree(self._full_episode_dir(full_idx), ignore_errors=True)
         with self._state_lock:
             self._record_episode_count = self._find_next_episode_number()
             self._current_subtask_index = 0

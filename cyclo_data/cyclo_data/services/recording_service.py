@@ -120,6 +120,8 @@ class RecordingService:
         # _session_lock just brackets the pointer reads/writes — DataManager
         # has its own internal _state_lock so we never need to nest locks.
         self._session_lock = threading.Lock()
+        self._finish_episode_lock = threading.Lock()
+        self._finish_episode_thread: Optional[threading.Thread] = None
 
         # Idle-state metrics: filled into the 5 Hz status publish before any
         # session_manager exists so the UI's CPU/RAM/Storage panel keeps
@@ -195,6 +197,57 @@ class RecordingService:
                     f'TranscodeWorker.shutdown failed: {exc}')
             self._transcoder = None
         self._rosbag.shutdown()
+
+    # ------------------------------------------------------------------
+    # Background episode archive
+    # ------------------------------------------------------------------
+
+    def _finish_episode_in_progress(self) -> bool:
+        with self._finish_episode_lock:
+            thread = self._finish_episode_thread
+            return thread is not None and thread.is_alive()
+
+    def _start_finish_episode_thread(self, data_manager: DataManager) -> bool:
+        with self._finish_episode_lock:
+            thread = self._finish_episode_thread
+            if thread is not None and thread.is_alive():
+                return False
+            thread = threading.Thread(
+                target=self._finish_episode_worker,
+                args=(data_manager,),
+                name='cyclo_finish_episode',
+                daemon=True,
+            )
+            self._finish_episode_thread = thread
+            thread.start()
+            return True
+
+    def _finish_episode_worker(self, data_manager: DataManager) -> None:
+        self._publish_umbrella_status(
+            DataOperationStatus.RUNNING,
+            'FINISH_EPISODE',
+            'Episode archive started',
+        )
+        try:
+            data_manager.finish_full_episode()
+        except Exception as exc:  # noqa: BLE001
+            self._node.get_logger().error(
+                f'FINISH_EPISODE archive failed: {exc!r}')
+            self._publish_umbrella_status(
+                DataOperationStatus.FAILED,
+                'FINISH_EPISODE',
+                f'Episode finish failed: {exc}',
+            )
+        else:
+            self._publish_umbrella_status(
+                DataOperationStatus.COMPLETED,
+                'FINISH_EPISODE',
+                'Episode finished',
+            )
+        finally:
+            with self._finish_episode_lock:
+                if self._finish_episode_thread is threading.current_thread():
+                    self._finish_episode_thread = None
 
     # ------------------------------------------------------------------
     # DataManager management
@@ -475,6 +528,10 @@ class RecordingService:
         return image_topics, camera_info_topics, rotations
 
     def _do_start(self, request, response):
+        if self._finish_episode_in_progress():
+            response.success = False
+            response.message = 'START blocked: episode archive still running'
+            return response
         if not request.robot_type:
             response.success = False
             response.message = 'START requires robot_type'
@@ -698,7 +755,7 @@ class RecordingService:
             )
         )
         if is_segmented_storage and finishes_full_episode:
-            self._data_manager.finish_full_episode()
+            self._start_finish_episode_thread(self._data_manager)
         self._rosbag.publish_action_event(event)
 
         self._publish_umbrella_status(
@@ -719,6 +776,12 @@ class RecordingService:
         if self._data_manager is None:
             response.success = False
             response.message = 'DISCARD_SEGMENT: no DataManager yet'
+            return response
+        if self._finish_episode_in_progress():
+            response.success = False
+            response.message = (
+                'DISCARD_SEGMENT: episode archive still running'
+            )
             return response
         if self._data_manager.is_recording():
             response.success = False
@@ -745,12 +808,12 @@ class RecordingService:
             response.success = False
             response.message = 'FINISH_EPISODE: save active subtask first'
             return response
-        self._data_manager.finish_full_episode()
+        if not self._start_finish_episode_thread(self._data_manager):
+            response.success = True
+            response.message = 'Episode finish already in progress'
+            return response
         response.success = True
-        response.message = 'Episode finished'
-        self._publish_umbrella_status(
-            DataOperationStatus.COMPLETED, 'FINISH_EPISODE',
-            response.message)
+        response.message = 'Episode finish started'
         return response
 
     def _do_discard_episode(self, request, response):
@@ -758,8 +821,23 @@ class RecordingService:
             response.success = False
             response.message = 'DISCARD_EPISODE: no DataManager yet'
             return response
+        if self._finish_episode_in_progress():
+            response.success = False
+            response.message = 'DISCARD_EPISODE: episode archive still running'
+            return response
         if self._data_manager.is_recording():
-            return self._do_discard(request, response, event='cancel')
+            response = self._do_discard(request, response, event='cancel')
+            if not response.success:
+                return response
+            deleted = self._data_manager.discard_current_full_episode()
+            response.message = (
+                f'Episode discarded ({deleted} saved subtask(s) removed)'
+                if deleted else 'Episode discarded'
+            )
+            self._publish_umbrella_status(
+                DataOperationStatus.CANCELLED, 'DISCARD_EPISODE',
+                response.message)
+            return response
         deleted = self._data_manager.discard_current_full_episode()
         response.success = True
         response.message = (
