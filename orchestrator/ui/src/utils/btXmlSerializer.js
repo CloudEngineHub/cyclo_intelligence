@@ -15,6 +15,21 @@
 const INDENT = '  ';
 const WRAP_THRESHOLD = 100;
 
+const SEND_COMMAND_PARAMS_BY_COMMAND = {
+  LOAD: new Set([
+    'command',
+    'model',
+    'policy_path',
+    'task_instruction',
+    'inference_hz',
+    'control_hz',
+    'chunk_align_window_s',
+  ]),
+  RESUME: new Set(['command', 'task_instruction']),
+  STOP: new Set(['command']),
+  CLEAR: new Set(['command']),
+};
+
 function escapeAttr(value) {
   return String(value)
     .replace(/&/g, '&amp;')
@@ -62,6 +77,22 @@ function attrPairs(el) {
     pairs.push(`${attr.name}="${escapeAttr(attr.value)}"`);
   }
   return pairs;
+}
+
+function paramsForXml(tag, params = {}) {
+  if (tag !== 'SendCommand') return params;
+
+  const command = String(params.command || 'LOAD').toUpperCase();
+  const allowed = SEND_COMMAND_PARAMS_BY_COMMAND[command] || new Set(['command']);
+  const out = { command };
+
+  Object.entries(params).forEach(([key, value]) => {
+    if (key === 'command' || !allowed.has(key)) return;
+    if (value === undefined || value === null || value === '') return;
+    out[key] = value;
+  });
+
+  return out;
 }
 
 function serializeElement(el, depth, lines) {
@@ -157,8 +188,8 @@ function serializeElement(el, depth, lines) {
  * The node with in-degree 0 that has children (or is a control type) becomes
  * the main tree root.  Nodes not reachable from the main root are stored in a
  * separate <BehaviorTree ID="__pending__"> section that BT.cpp ignores.
- * Positions are saved as bt_x / bt_y attributes so the next load restores the
- * free-form layout instead of running dagre.
+ * XML output intentionally omits UI layout coordinates. When reloaded, the
+ * editor computes a fresh dagre layout from the tree structure.
  */
 export function serializeFromGraph(nodes, edges, nodeDataMap) {
   const nodeById = new Map(nodes.map((n) => [n.id, n]));
@@ -212,17 +243,14 @@ export function serializeFromGraph(nodes, edges, nodeDataMap) {
     const { tag, name, params, collapsed } = data;
     const el = xmlDoc.createElement(tag);
     el.setAttribute('name', name);
-    const node = nodeById.get(nodeId);
-    if (node) {
-      el.setAttribute('bt_x', Math.round(node.position.x).toString());
-      el.setAttribute('bt_y', Math.round(node.position.y).toString());
-    }
     // UI-only metadata: persist collapsed Control nodes so reload picks the
     // same state. Default false → omit the attribute to keep XML compact.
     if (collapsed === true) {
       el.setAttribute('bt_collapsed', 'true');
     }
-    Object.entries(params).forEach(([k, v]) => el.setAttribute(k, v));
+    Object.entries(paramsForXml(tag, params)).forEach(([k, v]) => {
+      el.setAttribute(k, v);
+    });
     (children.get(nodeId) ?? []).forEach((childId) => {
       const childEl = buildEl(childId);
       if (childEl) el.appendChild(childEl);

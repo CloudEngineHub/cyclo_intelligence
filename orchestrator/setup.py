@@ -23,7 +23,7 @@ author_emails = ', '.join(email for _, email in authors_info)
 #   ├── orchestrator/        ← Python package (D17)
 #   │   ├── __init__.py
 #   │   ├── orchestrator_node.py
-#   │   ├── bt/              (incl. bt/trees/, bt/bringup/ — data co-located with code)
+#   │   ├── bt/              (incl. bt/trees/ — data co-located with code)
 #   │   ├── internal/
 #   │   ├── timer/
 #   │   └── training/
@@ -67,16 +67,12 @@ setup(
         # resolves them via get_package_share_directory('shared') +
         # 'robot_configs'.
         # BT assets live next to the orchestrator.bt Python package. The
-        # trees / bringup data dirs are installed to the package share tree.
+        # tree data dir is installed to the package share tree.
         # Share install path stays the same so `get_package_share_directory(
         # 'orchestrator') / 'bt' / 'trees'` keeps working.
         (
             'share/' + package_name + '/bt/trees',
             glob(f'{package_name}/bt/trees/*.xml'),
-        ),
-        (
-            'share/' + package_name + '/bt/bringup',
-            glob(f'{package_name}/bt/bringup/*.yaml'),
         ),
         (
             'share/' + package_name + '/bt/templates',

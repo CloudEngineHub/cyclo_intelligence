@@ -55,7 +55,7 @@ class BehaviorTreeNode(Node):
         self.main_tree_path = None
 
         self.declare_parameter('robot_type', 'ffw_sg2_rev1')
-        self.declare_parameter('tree_xml', 'ffw_test.xml')
+        self.declare_parameter('tree_xml', '')
         self.declare_parameter('tick_rate', 30.0)
 
         robot_type = self.get_parameter('robot_type').value
@@ -68,17 +68,6 @@ class BehaviorTreeNode(Node):
 
         pkg_share = get_package_share_directory('orchestrator')
 
-        self.main_tree_path = os.path.join(pkg_share, 'bt', 'trees', tree_xml)
-        if not os.path.exists(self.main_tree_path):
-            # In-tree fallback for editable checkouts; installed packages
-            # resolve through share/orchestrator/bt/trees above.
-            self.main_tree_path = os.path.join(
-                os.path.dirname(os.path.dirname(__file__)),
-                'bt',
-                'trees',
-                tree_xml
-            )
-
         self.tree_loader = TreeLoader(
             self,
             joint_names=self.joint_names,
@@ -86,26 +75,46 @@ class BehaviorTreeNode(Node):
         )
 
         self.root = None
-        try:
-            self.get_logger().info(
-                f'Loading main tree: {self.main_tree_path}'
+        if tree_xml:
+            self.main_tree_path = os.path.join(
+                pkg_share, 'bt', 'trees', tree_xml
             )
-            if os.path.exists(self.main_tree_path):
-                tree_file = self.main_tree_path
-                self.root = self.tree_loader.load_tree_from_file(tree_file)
-                self.tree_execution_mode = 'stopped'
+            if not os.path.exists(self.main_tree_path):
+                # In-tree fallback for editable checkouts; installed packages
+                # resolve through share/orchestrator/bt/trees above.
+                self.main_tree_path = os.path.join(
+                    os.path.dirname(os.path.dirname(__file__)),
+                    'bt',
+                    'trees',
+                    tree_xml
+                )
+
+            try:
                 self.get_logger().info(
-                    f'Main tree loaded successfully: {self.root.name}'
+                    f'Loading main tree: {self.main_tree_path}'
                 )
-            else:
+                if os.path.exists(self.main_tree_path):
+                    tree_file = self.main_tree_path
+                    self.root = self.tree_loader.load_tree_from_file(tree_file)
+                    self.tree_execution_mode = 'stopped'
+                    self.get_logger().info(
+                        f'Main tree loaded successfully: {self.root.name}'
+                    )
+                else:
+                    self.get_logger().error(
+                        f'Main tree file not found: {self.main_tree_path}'
+                    )
+                    self.tree_execution_mode = 'stopped'
+            except Exception as e:
                 self.get_logger().error(
-                    f'Main tree file not found: {self.main_tree_path}'
+                    f'Failed to load main tree: {str(e)}'
                 )
+                self.root = None
                 self.tree_execution_mode = 'stopped'
-        except Exception as e:
-            self.get_logger().error(f'Failed to load main tree: {str(e)}')
-            self.root = None
-            self.tree_execution_mode = 'stopped'
+        else:
+            self.get_logger().info(
+                'No default main tree configured; waiting for load_and_run'
+            )
 
         self.timer = self.create_timer(1.0 / tick_rate, self.tick_callback)
 
@@ -146,13 +155,13 @@ class BehaviorTreeNode(Node):
 
         self.get_logger().info('Behavior Tree Node initialized')
         self.get_logger().info(f'Robot type: {robot_type}')
-        self.get_logger().info(f'Main tree XML: {tree_xml}')
+        self.get_logger().info(f'Main tree XML: {tree_xml or "<none>"}')
         if self.root:
             self.get_logger().info(
                 'Tree loaded, waiting for start command'
             )
         else:
-            self.get_logger().error('Tree failed to load')
+            self.get_logger().info('No tree loaded yet')
         self.get_logger().info(f'Tick rate: {tick_rate} Hz')
 
     def _load_joint_order(self, robot_type: str) -> list:
