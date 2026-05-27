@@ -291,6 +291,9 @@ services:
       - ACTION_CHUNK_PROCESSING_SDK_PATH=/action_chunk_processing_sdk
       - POLICY_BACKEND=green_vla
       - POLICY_ENGINE_MODULE=green_vla_engine
+      - GREEN_VLA_DATA_CONFIG_NAME=cyclo
+      - GREEN_VLA_CONTROL_MODE=joint_position
+      - GREEN_VLA_EMBODIMENT_NAME=cyclo
       - HF_HOME=/root/.cache/huggingface
       - HUGGINGFACE_HUB_CACHE=/root/.cache/huggingface/hub
       - TRANSFORMERS_CACHE=/root/.cache/huggingface/hub
