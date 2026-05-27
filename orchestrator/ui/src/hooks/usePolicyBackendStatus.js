@@ -4,8 +4,10 @@ const API_BASE = '/api';
 const DEFAULT_POLL_MS = 2000;
 export const BACKEND_WARMUP_MIN_UPTIME_S = 45;
 
+const POLICY_BACKENDS = new Set(['lerobot', 'groot', 'green_vla']);
+
 export const getPolicyBackendName = (serviceType) => (
-  serviceType === 'groot' ? 'groot' : 'lerobot'
+  POLICY_BACKENDS.has(serviceType) ? serviceType : 'lerobot'
 );
 
 async function readJsonResponse(response) {

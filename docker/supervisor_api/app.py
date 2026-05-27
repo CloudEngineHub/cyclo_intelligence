@@ -188,6 +188,11 @@ _BACKENDS: Dict[str, Dict[str, str]] = {
         "container": "groot_server",
         "image": f"robotis/groot-zenoh:1.2.1-{_BACKEND_ARCH}",
     },
+    "green_vla": {
+        "service": "green_vla",
+        "container": "green_vla_server",
+        "image": f"robotis/green-vla-zenoh:0.1.0-{_BACKEND_ARCH}",
+    },
 }
 
 

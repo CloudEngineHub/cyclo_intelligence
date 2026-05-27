@@ -37,6 +37,7 @@ export const DEFAULT_PATHS = {
   POLICY_CHECKPOINTS_PATH: '/policy_checkpoints',
   LEROBOT_CHECKPOINTS_PATH: '/policy_checkpoints/lerobot',
   GROOT_CHECKPOINTS_PATH: '/policy_checkpoints/groot',
+  GREEN_VLA_CHECKPOINTS_PATH: '/policy_checkpoints/green_vla',
   DATASET_PATH: `${DOT_CACHE_PATH}/huggingface/lerobot/`,
   ROSBAG2_PATH: '/workspace/rosbag2/',
   BT_TREES_PATH: `${BASE_WORKSPACE_PATH}/orchestrator/bt/trees/`,

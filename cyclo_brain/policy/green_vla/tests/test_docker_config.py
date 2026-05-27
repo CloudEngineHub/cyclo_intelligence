@@ -74,6 +74,16 @@ class GreenVLADockerConfigTest(unittest.TestCase):
             volumes,
         )
 
+    def test_main_ui_container_mounts_green_vla_checkpoint_dropbox(self):
+        compose = yaml.safe_load(COMPOSE_FILE.read_text())
+        service = compose["services"]["cyclo_intelligence"]
+
+        volumes = set(service["volumes"])
+        self.assertIn(
+            "../cyclo_brain/policy/green_vla/checkpoints:/policy_checkpoints/green_vla:rw",
+            volumes,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

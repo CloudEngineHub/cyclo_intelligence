@@ -11,7 +11,10 @@ import clsx from 'clsx';
 import toast from 'react-hot-toast';
 import { MdPowerSettingsNew, MdRefresh, MdStop } from 'react-icons/md';
 import Tooltip from './Tooltip';
-import { getPolicyBackendReadiness } from '../hooks/usePolicyBackendStatus';
+import {
+  getPolicyBackendName,
+  getPolicyBackendReadiness,
+} from '../hooks/usePolicyBackendStatus';
 
 const API_BASE = '/api';
 
@@ -27,8 +30,9 @@ const processLabels = {
   'engine-process': 'Engine',
 };
 
-const getBackendLabel = (serviceType) => {
+export const getBackendLabel = (serviceType) => {
   if (serviceType === 'groot') return 'GR00T Docker';
+  if (serviceType === 'green_vla') return 'GreenVLA Docker';
   if (serviceType === 'lerobot') return 'LeRobot Docker';
   return 'Policy Docker';
 };
@@ -44,7 +48,7 @@ async function readJsonResponse(response) {
 }
 
 export default function PolicyBackendControl({ serviceType }) {
-  const backend = serviceType === 'groot' ? 'groot' : 'lerobot';
+  const backend = getPolicyBackendName(serviceType);
   const label = useMemo(
     () => getBackendLabel(serviceType),
     [serviceType]

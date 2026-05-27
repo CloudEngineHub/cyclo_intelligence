@@ -89,9 +89,10 @@ services:
       - ./huggingface:/root/.cache/huggingface
       # Policy checkpoint dropboxes. These paths intentionally match the
       # policy containers so a path selected in the UI can be sent directly
-      # to /lerobot or /groot without translation.
+      # to /lerobot, /groot, or /green_vla without translation.
       - ../cyclo_brain/policy/lerobot/checkpoints:/policy_checkpoints/lerobot:rw
       - ../cyclo_brain/policy/groot/checkpoints:/policy_checkpoints/groot:rw
+      - ../cyclo_brain/policy/green_vla/checkpoints:/policy_checkpoints/green_vla:rw
       - /tmp/.X11-unix:/tmp/.X11-unix:rw
       # Live-edit the ROS2 workspace at runtime so a 'colcon build'
       # inside the container sees host-side edits. The container copy
@@ -106,7 +107,7 @@ services:
       # bind-mounted at request time (not baked).
       - ../shared/shared/robot_configs/urdf:/usr/share/nginx/html/urdf/urdf:ro
       - ../shared/shared/robot_configs/ffw_description:/usr/share/nginx/html/urdf/ffw_description:ro
-      # supervisor_api manages lerobot / groot lifecycle via Docker SDK
+      # supervisor_api manages policy backend lifecycle via Docker SDK
       # (PLAN §4.8). Socket mount makes that possible without DinD.
       - /var/run/docker.sock:/var/run/docker.sock
       # s6-agent UDS — cyclo_manager FastAPI listens here for

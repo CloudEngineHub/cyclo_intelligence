@@ -29,6 +29,12 @@ import { setTaskInfo } from '../features/tasks/taskSlice';
 import { useRosServiceCaller } from '../hooks/useRosServiceCaller';
 import { requiresInstruction } from '../constants/policyCapabilities';
 
+export const getPolicyBrowserPath = (serviceType) => {
+  if (serviceType === 'groot') return DEFAULT_PATHS.GROOT_CHECKPOINTS_PATH;
+  if (serviceType === 'green_vla') return DEFAULT_PATHS.GREEN_VLA_CHECKPOINTS_PATH;
+  return DEFAULT_PATHS.LEROBOT_CHECKPOINTS_PATH;
+};
+
 const InferencePanel = () => {
   const dispatch = useDispatch();
 
@@ -96,10 +102,7 @@ const InferencePanel = () => {
     setShowPolicyBrowser(false);
   }, [isEditable, info, dispatch]);
 
-  const policyBrowserPath =
-    info.serviceType === 'groot'
-      ? DEFAULT_PATHS.GROOT_CHECKPOINTS_PATH
-      : DEFAULT_PATHS.LEROBOT_CHECKPOINTS_PATH;
+  const policyBrowserPath = getPolicyBrowserPath(info.serviceType);
 
   // Update isEditable state when the disabled prop changes
   useEffect(() => {

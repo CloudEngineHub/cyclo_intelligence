@@ -22,6 +22,7 @@ export const POLICY_REQUIRES_INSTRUCTION = {
   'lerobot:pi0': true,
   'lerobot:pi05': true,
   'lerobot:diffusion': false,
+  'green_vla:greenvla': true,
 };
 
 export const DEFAULT_REQUIRES_INSTRUCTION = false;

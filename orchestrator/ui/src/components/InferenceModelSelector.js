@@ -41,15 +41,19 @@ const MODEL_GROUPS = [
     ],
   },
   {
-    label: 'Coming Soon',
+    label: 'GreenVLA',
     options: [
       {
-        value: 'future:greenvla',
+        value: 'green_vla:greenvla',
         label: 'GreenVLA',
-        serviceType: 'future',
+        serviceType: 'green_vla',
         policyType: 'greenvla',
-        comingSoon: true,
       },
+    ],
+  },
+  {
+    label: 'Coming Soon',
+    options: [
       {
         value: 'future:openpi',
         label: 'OpenPI',
