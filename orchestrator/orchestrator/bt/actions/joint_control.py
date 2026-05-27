@@ -93,6 +93,8 @@ def _coerce_positions(value) -> Optional[list[float]]:
     """
     if value is None:
         return None
+    if isinstance(value, str):
+        return [float(x.strip()) for x in value.split(',') if x.strip()]
     if isinstance(value, (list, tuple)):
         return [float(x) for x in value]
     return [float(value)]

@@ -122,6 +122,14 @@ def _annotation_to_port_type(annotation, default) -> str:
     if isinstance(default, (int, float)) and not isinstance(default, bool):
         return 'number'
 
+    if isinstance(annotation, str):
+        annotation = annotation.lower()
+        if 'bool' in annotation:
+            return 'bool'
+        if 'int' in annotation or 'float' in annotation:
+            return 'number'
+        return 'string'
+
     origin = get_origin(annotation)
     args = get_args(annotation)
     candidates = set(args if origin is not None else [annotation])

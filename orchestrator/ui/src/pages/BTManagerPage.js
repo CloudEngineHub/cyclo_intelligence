@@ -345,15 +345,15 @@ export default function BTManagerPage({ isActive = true }) {
   // ── Manual edge connection ────────────────────────────────────────────────
   const handleConnect = useCallback((connection) => {
     captureHistory();
-    setEdges((prev) => {
-      const nextEdges = addEdge({ ...connection, type: 'smoothstep', animated: false }, prev);
-      // After the new edge lands the topology changed, so re-flow nodes
-      // around it. setNodes runs separately because we need the latest
-      // edge list to compute the layout.
-      const laidOut = layoutVisibleOnly(nodesRef.current, nextEdges);
-      setNodes(laidOut);
-      return nextEdges;
-    });
+    const nextEdges = addEdge(
+      { ...connection, type: 'smoothstep', animated: false },
+      edgesRef.current
+    );
+    // After the new edge lands the topology changed, so re-flow nodes
+    // around it using the same edge list that will be committed.
+    const laidOut = layoutVisibleOnly(nodesRef.current, nextEdges);
+    setEdges(nextEdges);
+    setNodes(laidOut);
   }, [captureHistory, setEdges, setNodes]);
 
   // ── Node drag stop: just capture history (ReactFlow updates position) ─────
