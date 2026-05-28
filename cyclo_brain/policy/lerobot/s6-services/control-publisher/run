@@ -5,4 +5,19 @@
 # (or is still loading a model), so we don't strictly need an s6
 # dependency on inference-server — both can start in parallel.
 
+mark_zenoh_cache_safe() {
+    local repo
+    command -v git >/dev/null 2>&1 || return 0
+    for repo in /root/.cache/zenoh_ros2_sdk/common_interfaces \
+                /root/.cache/zenoh_ros2_sdk/rcl_interfaces; do
+        [ -d "${repo}/.git" ] || continue
+        git config --global --get-all safe.directory \
+            | grep -Fxq "${repo}" \
+            || git config --global --add safe.directory "${repo}" \
+            || true
+    done
+}
+
+mark_zenoh_cache_safe
+
 exec python3 /app/runtime/control_publisher.py

@@ -8,6 +8,22 @@ export const getPolicyBackendName = (serviceType) => (
   serviceType === 'groot' ? 'groot' : 'lerobot'
 );
 
+export const POLICY_BACKEND_PROCESSES = {
+  lerobot: [
+    { name: 'inference-server', label: 'Inference' },
+    { name: 'control-publisher', label: 'Control' },
+  ],
+  groot: [
+    { name: 'inference-server', label: 'Inference' },
+    { name: 'control-publisher', label: 'Control' },
+  ],
+};
+
+export const getPolicyBackendProcesses = (serviceType) => (
+  POLICY_BACKEND_PROCESSES[getPolicyBackendName(serviceType)] ||
+  POLICY_BACKEND_PROCESSES.lerobot
+);
+
 async function readJsonResponse(response) {
   const text = await response.text();
   if (!text) return {};
@@ -43,9 +59,14 @@ export function getPolicyBackendReadiness(status, options = {}) {
   }
 
   const services = status.services || [];
-  const main = services.find((service) => service.name === 'main-runtime');
-  const engine = services.find((service) => service.name === 'engine-process');
-  if (main?.state !== 'up' || engine?.state !== 'up') {
+  const serviceByName = Object.fromEntries(
+    services.map((service) => [service.name, service])
+  );
+  const processes = getPolicyBackendProcesses(status.name);
+  const hasStartingProcess = processes.some(
+    (process) => serviceByName[process.name]?.state !== 'up'
+  );
+  if (hasStartingProcess) {
     return {
       ready: false,
       state: 'warming',
@@ -53,13 +74,14 @@ export function getPolicyBackendReadiness(status, options = {}) {
     };
   }
 
-  const mainUptime = Number(main.uptime_s || 0);
-  if (mainUptime < minMainUptimeS) {
-    const waitS = Math.max(1, Math.ceil(minMainUptimeS - mainUptime));
+  const primary = serviceByName[processes[0].name];
+  const primaryUptime = Number(primary?.uptime_s || 0);
+  if (primaryUptime < minMainUptimeS) {
+    const waitS = Math.max(1, Math.ceil(minMainUptimeS - primaryUptime));
     return {
       ready: false,
       state: 'warming',
-      message: `Backend warming up... ${waitS}s`,
+      message: `Processes are up. Backend stabilizing... ${waitS}s`,
     };
   }
 

@@ -205,8 +205,8 @@ WORKDIR /gr00t
 
 # Healthcheck — both supervised processes must be up.
 HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
-    CMD s6-svstat /run/service/inference-server 2>&1 | grep -q "up" \
-     && s6-svstat /run/service/control-publisher 2>&1 | grep -q "up" \
+    CMD s6-svstat /run/service/inference-server 2>&1 | grep -q "^up " \
+     && s6-svstat /run/service/control-publisher 2>&1 | grep -q "^up " \
      || exit 1
 
 # s6-overlay init — launches both supervised services in parallel.

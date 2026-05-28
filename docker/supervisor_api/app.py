@@ -34,8 +34,6 @@ Environment overrides:
     CYCLO_SUPERVISOR_API_PORT         bind port (default 8100)
     CYCLO_SUPERVISOR_API_REPO_MOUNT   in-container path of the repo bind-mount
                                       (default /root/ros2_ws/src/cyclo_intelligence)
-    CYCLO_SUPERVISOR_API_COMPOSE_FILE absolute path to docker-compose.yml inside
-                                      this container (default <repo-mount>/docker/docker-compose.yml)
 """
 
 from __future__ import annotations
@@ -49,6 +47,7 @@ from typing import Dict, List, Literal, Optional
 
 import docker
 from docker.errors import DockerException, ImageNotFound, NotFound
+from docker.types import Ulimit
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
@@ -155,14 +154,7 @@ _CYCLO_REPO_MOUNT = os.environ.get(
     "CYCLO_SUPERVISOR_API_REPO_MOUNT",
     "/root/ros2_ws/src/cyclo_intelligence",
 )
-_COMPOSE_FILE_IN_CONTAINER = os.environ.get(
-    "CYCLO_SUPERVISOR_API_COMPOSE_FILE",
-    f"{_CYCLO_REPO_MOUNT}/docker/docker-compose.yml",
-)
-_COMPOSE_OVERRIDE_IN_CONTAINER = os.path.join(
-    os.path.dirname(_COMPOSE_FILE_IN_CONTAINER),
-    "docker-compose.override.yml",
-)
+_DEFAULT_ROS_DOMAIN_ID = os.environ.get("ROS_DOMAIN_ID", "30")
 
 
 def _detect_arch() -> str:
@@ -175,14 +167,14 @@ _BACKEND_ARCH = os.environ.get("ARCH", _detect_arch())
 
 # Image versions are hardcoded per backend below since each service has
 # its own release cadence. ARCH still falls back to a uname-based sniff
-# because compose only interpolates env vars on the host invocation, so
-# inside the container the env var isn't set.
-_BACKENDS: Dict[str, Dict[str, str]] = {
+# because this supervisor may run inside the main container without the
+# host shell's ARCH export.
+_BACKENDS: Dict[str, dict] = {
     "lerobot": {
         "service": "lerobot",
         "container": "lerobot_server",
         "image": f"robotis/lerobot-zenoh:1.0.1-{_BACKEND_ARCH}",
-        "services": ["main-runtime", "engine-process"],
+        "services": ["inference-server", "control-publisher"],
     },
     "groot": {
         "service": "groot",
@@ -215,51 +207,256 @@ _HOST_PROJECT_DIR_CACHE: Optional[str] = None
 
 
 def _host_project_dir() -> Optional[str]:
-    """Resolve the host-side path to cyclo_intelligence/docker/ by
-    inspecting our own container's mounts.
+    """Resolve the host-side path to cyclo_intelligence/docker/.
 
-    compose CLI invoked from inside a container still talks to the host
-    docker daemon, so any relative path in docker-compose.yml
-    (./workspace, ../cyclo_brain/sdk/...) must resolve to the host
-    filesystem — not the bind-mount path inside us. We pass this dir
-    via --project-directory so compose's relative-path resolution
-    points at the host tree even though we're calling from inside.
+    The Docker daemon sees host paths, not this container's bind-mount paths.
+    Policy containers created through the Docker SDK therefore need the host
+    path equivalent of every compose-relative bind mount.
     """
     global _HOST_PROJECT_DIR_CACHE
     if _HOST_PROJECT_DIR_CACHE is not None:
         return _HOST_PROJECT_DIR_CACHE
-    own_id = os.environ.get("HOSTNAME")
-    if not own_id:
-        return None
-    try:
-        ctr = _docker_client().containers.get(own_id)
-    except DockerException as e:
-        logger.warning("self-inspect failed: %s", e)
-        return None
-    for mount in ctr.attrs.get("Mounts", []):
-        if mount.get("Destination") == _CYCLO_REPO_MOUNT:
-            host_repo = mount.get("Source")
-            if host_repo:
-                _HOST_PROJECT_DIR_CACHE = os.path.join(host_repo, "docker")
-                return _HOST_PROJECT_DIR_CACHE
+    client = _docker_client()
+    containers = []
+    for candidate in (
+        os.environ.get("CYCLO_SUPERVISOR_CONTAINER"),
+        os.environ.get("HOSTNAME"),
+        "cyclo_intelligence",
+    ):
+        if not candidate:
+            continue
+        try:
+            containers.append(client.containers.get(candidate))
+        except DockerException as e:
+            logger.debug("self-inspect candidate %s failed: %s", candidate, e)
+
+    if not containers:
+        try:
+            containers = client.containers.list(all=True)
+        except DockerException as e:
+            logger.warning("container scan failed: %s", e)
+            return None
+
+    for ctr in containers:
+        try:
+            mounts = ctr.attrs.get("Mounts", [])
+        except DockerException:
+            continue
+        for mount in mounts:
+            if mount.get("Destination") == _CYCLO_REPO_MOUNT:
+                host_repo = mount.get("Source")
+                if host_repo:
+                    _HOST_PROJECT_DIR_CACHE = os.path.join(host_repo, "docker")
+                    return _HOST_PROJECT_DIR_CACHE
+
+    # Last resort for dev images that only expose the docker/ subdir mount.
+    for ctr in containers:
+        try:
+            mounts = ctr.attrs.get("Mounts", [])
+        except DockerException:
+            continue
+        for mount in mounts:
+            if mount.get("Destination") == "/workspace":
+                host_workspace = mount.get("Source")
+                if host_workspace:
+                    _HOST_PROJECT_DIR_CACHE = os.path.dirname(host_workspace)
+                    return _HOST_PROJECT_DIR_CACHE
+
     logger.warning(
-        "no mount found for %s — compose CLI relative paths will resolve "
-        "against the in-container path, which the host docker daemon "
-        "cannot satisfy",
+        "no mount found for %s — policy container bind paths cannot be "
+        "resolved for the host docker daemon",
         _CYCLO_REPO_MOUNT,
     )
     return None
 
 
-def _compose_base_cmd() -> List[str]:
-    cmd = ["docker", "compose"]
+def _host_path(relative_to_docker_dir: str) -> str:
     project_dir = _host_project_dir()
-    if project_dir:
-        cmd += ["--project-directory", project_dir]
-    cmd += ["-f", _COMPOSE_FILE_IN_CONTAINER]
-    if os.path.exists(_COMPOSE_OVERRIDE_IN_CONTAINER):
-        cmd += ["-f", _COMPOSE_OVERRIDE_IN_CONTAINER]
-    return cmd
+    if not project_dir:
+        raise DockerException(
+            f"cannot resolve host project dir from mount {_CYCLO_REPO_MOUNT}"
+        )
+    return os.path.normpath(os.path.join(project_dir, relative_to_docker_dir))
+
+
+def _bind(
+    source: str,
+    target: str,
+    mode: str = "rw",
+    *,
+    relative_to_docker_dir: bool = True,
+) -> str:
+    host_source = _host_path(source) if relative_to_docker_dir else source
+    return f"{host_source}:{target}:{mode}"
+
+
+def _policy_healthcheck() -> dict:
+    cmd = (
+        "S6_SVSTAT=$(ls /package/admin/s6-*/command/s6-svstat 2>/dev/null | head -1); "
+        '[ -n "$S6_SVSTAT" ] && '
+        '"$S6_SVSTAT" /run/service/inference-server | grep -q "^up " && '
+        '"$S6_SVSTAT" /run/service/control-publisher | grep -q "^up "'
+    )
+    return {
+        "test": ["CMD-SHELL", cmd],
+        "interval": 30_000_000_000,
+        "timeout": 10_000_000_000,
+        "start_period": 30_000_000_000,
+        "retries": 3,
+    }
+
+
+def _policy_ulimits() -> list[Ulimit]:
+    return [
+        Ulimit(name="rtprio", soft=99, hard=99),
+        Ulimit(name="rttime", soft=-1, hard=-1),
+        Ulimit(name="memlock", soft=8428281856, hard=8428281856),
+    ]
+
+
+def _policy_environment(name: str) -> Dict[str, str]:
+    env = {
+        "ROS_DOMAIN_ID": _DEFAULT_ROS_DOMAIN_ID,
+        "ZENOH_ROUTER_IP": "127.0.0.1",
+        "ZENOH_ROUTER_PORT": "7447",
+        "ZENOH_SDK_PATH": "/zenoh_sdk",
+        "ZENOH_CONFIG_OVERRIDE": "transport/shared_memory/enabled=true",
+        "ZENOH_TRANSPORT_SHM_ENABLED": "true",
+        "ZENOH_SHM_ENABLED": "true",
+        "ROBOT_CLIENT_SDK_PATH": "/robot_client_sdk",
+        "ACTION_CHUNK_PROCESSING_SDK_PATH": "/action_chunk_processing_sdk",
+        "POLICY_BACKEND": name,
+        "POLICY_ENGINE_MODULE": f"{name}_engine",
+        "NVIDIA_VISIBLE_DEVICES": "all",
+        "NVIDIA_DRIVER_CAPABILITIES": "all",
+        "PYTHONUNBUFFERED": "1",
+    }
+    if name == "groot":
+        env.update({
+            "GROOT_TRT_ENABLED": "false",
+            "CONTROL_HZ": "15",
+            "INFERENCE_HZ": "15",
+            "TARGET_CHUNK_SIZE": "none",
+            "CMD_VEL_LINEAR_DEADBAND": "0.02",
+            "CMD_VEL_ANGULAR_DEADBAND": "0.02",
+            "HF_HOME": "/root/.cache/huggingface",
+            "HUGGINGFACE_HUB_CACHE": "/root/.cache/huggingface/hub",
+            "TRANSFORMERS_CACHE": "/root/.cache/huggingface/hub",
+        })
+    return env
+
+
+def _policy_binds(name: str) -> list[str]:
+    common = [
+        _bind("/dev", "/dev", relative_to_docker_dir=False),
+        _bind("/dev/shm", "/dev/shm", relative_to_docker_dir=False),
+        _bind("./workspace", "/workspace"),
+        _bind("./huggingface", "/root/.cache/huggingface"),
+        _bind("../cyclo_brain/sdk/zenoh_ros2_sdk", "/zenoh_sdk", "ro"),
+        _bind("../cyclo_brain/sdk/robot_client", "/robot_client_sdk", "ro"),
+        _bind(
+            "../cyclo_brain/sdk/action_chunk_processing",
+            "/action_chunk_processing_sdk",
+            "ro",
+        ),
+        _bind("./zenoh_cache", "/root/.cache/zenoh_ros2_sdk"),
+        _bind("../shared/shared/robot_configs", "/orchestrator_config", "ro"),
+        _bind("/etc/timezone", "/etc/timezone", "ro", relative_to_docker_dir=False),
+        _bind("/etc/localtime", "/etc/localtime", "ro", relative_to_docker_dir=False),
+    ]
+
+    if name == "lerobot":
+        return common + [
+            _bind(
+                "../cyclo_brain/policy/lerobot/checkpoints",
+                "/policy_checkpoints/lerobot",
+            ),
+            _bind(
+                "../cyclo_brain/policy/lerobot/s6-services/inference-server",
+                "/etc/s6-overlay/s6-rc.d/inference-server",
+                "ro",
+            ),
+            _bind(
+                "../cyclo_brain/policy/lerobot/s6-services/control-publisher",
+                "/etc/s6-overlay/s6-rc.d/control-publisher",
+                "ro",
+            ),
+            _bind(
+                "../cyclo_brain/policy/lerobot/s6-services/user/contents.d",
+                "/etc/s6-overlay/s6-rc.d/user/contents.d",
+                "ro",
+            ),
+            _bind(
+                "../cyclo_brain/policy/lerobot/lerobot_engine",
+                "/app/lerobot_engine",
+                "ro",
+            ),
+            _bind("../cyclo_brain/policy/lerobot/runtime", "/app/runtime", "ro"),
+        ]
+
+    if name == "groot":
+        return common + [
+            _bind(
+                "../cyclo_brain/policy/groot/checkpoints",
+                "/policy_checkpoints/groot",
+            ),
+            _bind(
+                "../cyclo_brain/policy/common/runtime",
+                "/policy_runtime",
+                "ro",
+            ),
+            _bind(
+                "../cyclo_brain/policy/groot/s6-services/inference-server",
+                "/etc/s6-overlay/s6-rc.d/inference-server",
+                "ro",
+            ),
+            _bind(
+                "../cyclo_brain/policy/groot/s6-services/control-publisher",
+                "/etc/s6-overlay/s6-rc.d/control-publisher",
+                "ro",
+            ),
+            _bind(
+                "../cyclo_brain/policy/groot/s6-services/user/contents.d",
+                "/etc/s6-overlay/s6-rc.d/user/contents.d",
+                "ro",
+            ),
+            _bind("../cyclo_brain/policy/groot/groot_engine", "/app/groot_engine", "ro"),
+            _bind("../cyclo_brain/policy/groot/runtime", "/app/runtime", "ro"),
+        ]
+
+    raise DockerException(f"no SDK create config for backend {name}")
+
+
+def _create_backend_container(
+    client: docker.DockerClient,
+    name: str,
+    spec: dict,
+    image: str,
+) -> str:
+    host_config = client.api.create_host_config(
+        binds=_policy_binds(name),
+        cap_add=["SYS_NICE"],
+        ipc_mode="host",
+        network_mode="host",
+        restart_policy={"Name": "unless-stopped"},
+        runtime="nvidia",
+        ulimits=_policy_ulimits(),
+    )
+    result = client.api.create_container(
+        image=image,
+        name=spec["container"],
+        environment=_policy_environment(name),
+        detach=True,
+        host_config=host_config,
+        healthcheck=_policy_healthcheck(),
+        labels={
+            "com.robotis.cyclo_intelligence.backend": name,
+            "com.robotis.cyclo_intelligence.managed-by": "supervisor_api",
+        },
+    )
+    container_id = result.get("Id")
+    client.api.start(container=container_id)
+    return container_id
 
 
 def _backend_image_candidates(spec: Dict[str, str]) -> List[str]:
@@ -489,10 +686,9 @@ async def service_stop(name: str) -> ActionResult:
 # Hybrid wiring (matches PLAN §4.8 example):
 #   - pull   → docker-py client.api.pull(stream=True), SSE per layer
 #   - start  → restart an existing running container, start an existing
-#              stopped container, or 'docker compose up -d --no-build
-#              <service>' when the container does not exist. No build is
-#              attempted from the UI path; missing images are reported so the
-#              user can pull/install first.
+#              stopped container, or create it with Docker SDK when absent.
+#              No build is attempted from the UI path; missing images are
+#              reported so the user can pull/install first.
 #   - stop   → docker-py container.stop(), keeping the container for reuse.
 #   - restart → hard reset an existing backend, or create/start it when absent.
 #   - status → docker-py images.get + containers.get
@@ -617,10 +813,10 @@ async def _ensure_backend_running(name: str, spec: Dict[str, str]) -> ActionResu
     handled, msg = await asyncio.to_thread(_start_or_restart_existing)
     if handled is not None:
         return ActionResult(ok=handled, message=msg)
-    compose_reason = msg
+    recreate_reason = msg
 
-    # Container is absent. Pre-flight the image so compose up never starts an
-    # implicit pull/build path from a simple ON click.
+    # Container is absent. Pre-flight the image so a simple ON click never
+    # starts an implicit pull/build path.
     def _find_local_image() -> Optional[str]:
         try:
             return _local_backend_image(_docker_client(), spec)
@@ -636,18 +832,24 @@ async def _ensure_backend_running(name: str, spec: Dict[str, str]) -> ActionResu
             f"Connect internet and call /backends/{name}/pull first.",
         )
 
-    cmd = _compose_base_cmd() + ["up", "-d", "--no-build", spec["service"]]
-    result = await _run(*cmd, timeout=60.0)
-    ok = result.rc == 0
-    msg = result.stderr or result.stdout or f"rc={result.rc}"
-    if ok:
+    def _create_with_sdk() -> tuple[bool, str]:
+        try:
+            client = _docker_client()
+            container_id = _create_backend_container(client, name, spec, local_image)
+        except DockerException as e:
+            return False, f"Docker SDK create failed: {e}"
+
         reason = ""
-        if compose_reason.startswith("missing_required_mounts="):
-            reason = f" after recreating stale container ({compose_reason})"
-        msg = (
+        if recreate_reason.startswith("missing_required_mounts="):
+            reason = f" after recreating stale container ({recreate_reason})"
+        short_id = (container_id or "")[:12]
+        return (
+            True,
             f"{spec['container']} created/started{reason} "
-            f"using local image {local_image}. {msg}"
+            f"using local image {local_image} ({short_id})",
         )
+
+    ok, msg = await asyncio.to_thread(_create_with_sdk)
     return ActionResult(ok=ok, message=msg)
 
 

@@ -3,4 +3,19 @@
 # s6-overlay restarts this on exit; fail-fast with `exec` so exit
 # codes propagate and the backoff kicks in.
 
+mark_zenoh_cache_safe() {
+    local repo
+    command -v git >/dev/null 2>&1 || return 0
+    for repo in /root/.cache/zenoh_ros2_sdk/common_interfaces \
+                /root/.cache/zenoh_ros2_sdk/rcl_interfaces; do
+        [ -d "${repo}/.git" ] || continue
+        git config --global --get-all safe.directory \
+            | grep -Fxq "${repo}" \
+            || git config --global --add safe.directory "${repo}" \
+            || true
+    done
+}
+
+mark_zenoh_cache_safe
+
 exec python3 /app/runtime/inference_server.py

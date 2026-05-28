@@ -88,6 +88,20 @@ container_running() {
     docker ps --format '{{.Names}}' | grep -q "^$1\$"
 }
 
+policy_services_for_container() {
+    case "$1" in
+        "$LEROBOT_CONTAINER")
+            echo "inference-server control-publisher"
+            ;;
+        "$GROOT_CONTAINER")
+            echo "inference-server control-publisher"
+            ;;
+        *)
+            echo ""
+            ;;
+    esac
+}
+
 show_help() {
     cat <<EOF
 Usage: $0 <command>
@@ -215,12 +229,19 @@ show_status() {
             # has PID 1 running executor.py directly). Detect /run/service
             # first; fall back to top-level process list otherwise.
             if docker exec "$cont" sh -c '[ -d /run/service ]' 2>/dev/null; then
-                echo "=== ${cont} s6 services ==="
+                local policy_services
+                policy_services="$(policy_services_for_container "$cont")"
+                echo "=== ${cont} policy services ==="
                 docker exec "$cont" sh -c "
                     ${svstat_setup}
-                    for svc in /run/service/*/; do
-                        name=\$(basename \"\$svc\")
-                        printf '  %-30s %s\n' \"\$name\" \"\$(\$S6_SVSTAT \"\$svc\" 2>&1)\"
+                    for name in ${policy_services}; do
+                        svc=\"/run/service/\$name\"
+                        if [ -d \"\$svc\" ]; then
+                            raw=\$(\$S6_SVSTAT \"\$svc\" 2>&1)
+                        else
+                            raw='not registered'
+                        fi
+                        printf '  %-30s %s\n' \"\$name\" \"\$raw\"
                     done
                 " || true
             else
@@ -232,11 +253,12 @@ show_status() {
 }
 
 stop_all() {
-    echo "Warning: this will stop and remove all compose-managed containers."
+    echo "Warning: this will stop and remove cyclo_intelligence containers."
     read -p "Are you sure? [y/N] " -n 1 -r
     echo
     if [[ $REPLY =~ ^[Yy]$ ]]; then
         $COMPOSE down
+        docker rm -f "$LEROBOT_CONTAINER" "$GROOT_CONTAINER" >/dev/null 2>&1 || true
     else
         echo "Cancelled."
     fi
