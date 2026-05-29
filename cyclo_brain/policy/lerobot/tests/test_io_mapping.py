@@ -27,7 +27,7 @@ IoMappingMixin = io_mapping.IoMappingMixin
 
 
 class IoMappingCameraAliasTest(unittest.TestCase):
-    def test_maps_rgb_side_part_cameras_to_part_side_policy_keys(self):
+    def test_maps_rgb_prefixed_cameras_to_policy_keys(self):
         robot_cameras = [
             "rgb.cam_left_head",
             "rgb.cam_right_head",
@@ -35,19 +35,19 @@ class IoMappingCameraAliasTest(unittest.TestCase):
             "rgb.cam_right_wrist",
         ]
         policy_keys = {
-            "observation.images.cam_head_left",
-            "observation.images.cam_head_right",
-            "observation.images.cam_wrist_left",
-            "observation.images.cam_wrist_right",
+            "observation.images.cam_left_head",
+            "observation.images.cam_right_head",
+            "observation.images.cam_left_wrist",
+            "observation.images.cam_right_wrist",
         }
 
         self.assertEqual(
             IoMappingMixin._resolve_camera_mappings(robot_cameras, policy_keys),
             {
-                "rgb.cam_left_head": "observation.images.cam_head_left",
-                "rgb.cam_right_head": "observation.images.cam_head_right",
-                "rgb.cam_left_wrist": "observation.images.cam_wrist_left",
-                "rgb.cam_right_wrist": "observation.images.cam_wrist_right",
+                "rgb.cam_left_head": "observation.images.cam_left_head",
+                "rgb.cam_right_head": "observation.images.cam_right_head",
+                "rgb.cam_left_wrist": "observation.images.cam_left_wrist",
+                "rgb.cam_right_wrist": "observation.images.cam_right_wrist",
             },
         )
 
@@ -55,7 +55,7 @@ class IoMappingCameraAliasTest(unittest.TestCase):
         robot_cameras = ["rgb.cam_left_head"]
         policy_keys = {
             "observation.images.rgb.cam_left_head",
-            "observation.images.cam_head_left",
+            "observation.images.cam_left_head",
         }
 
         with self.assertRaisesRegex(RuntimeError, "Missing camera mappings"):

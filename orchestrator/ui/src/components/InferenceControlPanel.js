@@ -28,7 +28,7 @@ import {
 } from 'react-icons/md';
 import { useRosServiceCaller } from '../hooks/useRosServiceCaller';
 import Tooltip from './Tooltip';
-import { InferencePhase } from '../constants/taskPhases';
+import { InferencePhase, RecordPhase } from '../constants/taskPhases';
 import { setInferenceStatus } from '../features/tasks/taskSlice';
 import { requiresInstruction } from '../constants/policyCapabilities';
 import usePolicyBackendStatus, {
@@ -56,15 +56,14 @@ export default function InferenceControlPanel() {
   const dispatch = useDispatch();
   const taskInfo = useSelector((state) => state.tasks.taskInfo);
   const inferenceStatus = useSelector((state) => state.tasks.inferenceStatus);
+  const recordStatus = useSelector((state) => state.tasks.recordStatus);
   const rosHost = useSelector((state) => state.ros.rosHost);
 
   const [hovered, setHovered] = useState(null);
   const [pressed, setPressed] = useState(null);
-  const [isRecording, setIsRecording] = useState(false);
+  const [localRecording, setLocalRecording] = useState(false);
   const [lastPolicyPath, setLastPolicyPath] = useState('');
   const [spinnerIndex, setSpinnerIndex] = useState(0);
-
-  const isRecordingRef = useRef(isRecording);
 
   const { sendRecordCommand } = useRosServiceCaller();
 
@@ -78,6 +77,11 @@ export default function InferenceControlPanel() {
   const isPaused = phase === InferencePhase.PAUSED;
   const isModelLoaded = isInferencing || isPaused;
   const shouldCheckBackend = isIdle || isPaused;
+  const serverRecording =
+    recordStatus.recordPhase === RecordPhase.RECORDING ||
+    Boolean(recordStatus.running);
+  const isRecording = serverRecording || localRecording;
+  const isRecordingRef = useRef(isRecording);
 
   const {
     readiness: backendReadiness,
@@ -118,7 +122,7 @@ export default function InferenceControlPanel() {
 
   useEffect(() => {
     if (isIdle && isRecordingRef.current) {
-      setIsRecording(false);
+      setLocalRecording(false);
     }
   }, [isIdle]);
 
@@ -222,7 +226,7 @@ export default function InferenceControlPanel() {
   const handleClear = useCallback(async () => {
     if (isRecording) {
       await executeCommand('Cancel Recording', 'cancel_inference_record');
-      setIsRecording(false);
+      setLocalRecording(false);
     }
     await executeCommand('Clear', 'finish');
     setLastPolicyPath('');
@@ -231,21 +235,21 @@ export default function InferenceControlPanel() {
   const handleRecordStart = useCallback(async () => {
     const result = await executeCommand('Record Start', 'start_inference_record');
     if (result && result.success) {
-      setIsRecording(true);
+      setLocalRecording(true);
     }
   }, [executeCommand]);
 
   const handleRecordSave = useCallback(async () => {
     const result = await executeCommand('Record Save', 'stop_inference_record');
     if (result && result.success) {
-      setIsRecording(false);
+      setLocalRecording(false);
     }
   }, [executeCommand]);
 
   const handleRecordDiscard = useCallback(async () => {
     const result = await executeCommand('Record Discard', 'cancel_inference_record');
     if (result && result.success) {
-      setIsRecording(false);
+      setLocalRecording(false);
     }
   }, [executeCommand]);
 

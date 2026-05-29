@@ -2,6 +2,19 @@
 Changelog for package interfaces
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+0.1.7 (2026-05-27)
+------------------
+* None
+
+0.1.6 (2026-05-27)
+------------------
+* Added behavior tree node catalog and tree list service definitions.
+* Contributors: kimtaehyeong99, Seongoo
+
+0.1.5 (2026-05-26)
+------------------
+* None
+
 0.1.4 (2026-05-22)
 ------------------
 * None

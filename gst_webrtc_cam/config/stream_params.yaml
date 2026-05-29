@@ -10,9 +10,9 @@ gst_webrtc_cpp_media_bridge:
       - cam_head_right
       - cam_wrist_left
       - cam_wrist_right
-    bitrate: 1200000
-    iframeinterval: 10
-    idrinterval: 10
+    bitrate: 1800000
+    iframeinterval: 15
+    idrinterval: 15
     preset: 1
     framerate: 15
 

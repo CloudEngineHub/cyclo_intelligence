@@ -18,10 +18,9 @@ def resolve_camera_mappings(
 ) -> Dict[str, str]:
     """Map RobotClient camera names to GR00T policy video keys.
 
-    The canonical Cyclo camera names are ``cam_<part>_<side>`` such as
-    ``cam_head_left``. Some older runtime configs or checkpoints may still
-    expose ``rgb.`` prefixes or ``cam_<side>_<part>`` ordering. Treat those
-    as inference-time aliases while keeping exact matches preferred.
+    The canonical Cyclo camera names are ``cam_<side>_<part>`` such as
+    ``cam_left_head``. Some runtime configs or checkpoints may expose
+    ``rgb.`` prefixes; exact matches remain preferred.
     """
     camera_names = list(robot_camera_names)
     policy_keys = set(policy_video_keys)

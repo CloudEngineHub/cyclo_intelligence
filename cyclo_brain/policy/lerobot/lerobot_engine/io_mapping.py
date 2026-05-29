@@ -129,10 +129,9 @@ class IoMappingMixin:
     ) -> Dict[str, str]:
         """Map RobotClient camera names to policy image feature keys.
 
-        The canonical Cyclo camera names are ``cam_<part>_<side>`` such as
-        ``cam_head_left``. Some older runtime configs or checkpoints may still
-        expose ``rgb.`` prefixes or ``cam_<side>_<part>`` ordering. Treat those
-        as inference-time aliases while keeping exact matches preferred.
+        The canonical Cyclo camera names are ``cam_<side>_<part>`` such as
+        ``cam_left_head``. Some runtime configs or checkpoints may expose
+        ``rgb.`` prefixes; exact matches remain preferred.
         """
         camera_names = list(robot_camera_names)
         if not policy_image_keys:

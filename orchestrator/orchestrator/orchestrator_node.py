@@ -133,6 +133,7 @@ class OrchestratorNode(Node):
 
         self.params = None
         self.robot_section = None
+        self.robot_type = ''
         self.on_recording = False
         self.on_inference = False
 
@@ -149,6 +150,11 @@ class OrchestratorNode(Node):
         # "what task are we configured for?" (cyclo_data owns the live
         # DataManager separately).
         self._current_task_name: Optional[str] = None
+        self._last_ui_task_info: Optional[TaskInfo] = None
+        self._prepared_record_task_info: Optional[TaskInfo] = None
+        self._prepared_inference_task_info: Optional[TaskInfo] = None
+        self._trigger_record_active_segment_index = 0
+        self._trigger_record_next_segment_index = 0
 
         self._init_core_components()
 
@@ -174,6 +180,7 @@ class OrchestratorNode(Node):
         # cycle + 100 Hz control loop (§5.5); orchestrator only dispatches
         # LOAD / START / PAUSE / RESUME / STOP / UNLOAD from UI commands.
         self.container_service_client: Optional[ContainerServiceClient] = None
+        self._loaded_inference_policy_path: str = ''
 
         # HF endpoint registry — orchestrator-owned because the
         # set/get/list/select_hf_endpoint services also read and mutate
@@ -267,7 +274,8 @@ class OrchestratorNode(Node):
             response.message = cd_result.message or 'cyclo_data call failed'
 
     def _forward_recording(self, command: int, task_info=None,
-                           include_topics: bool = False):
+                           include_topics: bool = False,
+                           segment_index: int = 0):
         """DRY helper for every recording forwarder site.
 
         Populates topics + urdf_path from orchestrator-owned state
@@ -283,9 +291,10 @@ class OrchestratorNode(Node):
         return self._cyclo_data.send_recording_command(
             command=command,
             task_info=task_info if task_info is not None else self._last_ui_task_info,
-            robot_type=self.robot_type,
+            robot_type=getattr(self, 'robot_type', ''),
             topics=topics,
             urdf_path=urdf_path,
+            segment_index=segment_index,
         )
 
     def _data_operation_status_callback(self, msg: DataOperationStatus):
@@ -948,6 +957,13 @@ class OrchestratorNode(Node):
 
                 task_info = request.task_info
                 self._last_ui_task_info = task_info
+                is_inference_prepare = task_info.task_type == 'inference'
+                if is_inference_prepare:
+                    self._prepared_inference_task_info = task_info
+                else:
+                    self._prepared_record_task_info = task_info
+                    self._trigger_record_active_segment_index = 0
+                    self._trigger_record_next_segment_index = 0
                 task_name = f'{self.robot_type}_{task_info.task_name}'
                 need_new_config = (
                     getattr(self, '_current_task_name', None) != task_name
@@ -1037,6 +1053,110 @@ class OrchestratorNode(Node):
                 else:
                     self._apply_cyclo_data_response(cd_result, response)
 
+            elif request.command == SendCommand.Request.START_SEGMENT:
+                task_info = request.task_info
+                self._last_ui_task_info = task_info
+                task_name = f'{self.robot_type}_{task_info.task_name}'
+
+                need_new_config = (
+                    getattr(self, '_current_task_name', None) != task_name
+                )
+                if need_new_config:
+                    self.get_logger().info('Initializing new recording session')
+                    self.init_robot_control_parameters_from_user_task(task_info)
+                    self._current_task_name = task_name
+                if self.timer_manager:
+                    self.timer_manager.start(timer_name='collection')
+
+                if self.communicator is None:
+                    response.success = False
+                    response.message = 'Communicator not initialized'
+                    return response
+                cd_result = self._forward_recording(
+                    RecordingCommand.Request.START_SEGMENT,
+                    task_info=task_info,
+                    include_topics=True,
+                    segment_index=int(request.segment_index),
+                )
+                if (cd_result.success
+                        and cd_result.response is not None
+                        and cd_result.response.success):
+                    self._trigger_record_active_segment_index = int(request.segment_index)
+                    self._set_session_active(
+                        on_recording=True,
+                        start_time=time.perf_counter(),
+                    )
+                    response.success = True
+                    response.message = cd_result.response.message or 'Segment started'
+                else:
+                    self._apply_cyclo_data_response(cd_result, response)
+
+            elif request.command == SendCommand.Request.SET_TASK_INFO:
+                self._last_ui_task_info = request.task_info
+                cd_result = self._forward_recording(
+                    RecordingCommand.Request.SET_TASK_INFO,
+                    task_info=request.task_info,
+                )
+                self._apply_cyclo_data_response(cd_result, response)
+
+            elif request.command in (
+                SendCommand.Request.STOP_SEGMENT,
+                SendCommand.Request.CANCEL_SEGMENT,
+            ):
+                recording_command = (
+                    RecordingCommand.Request.STOP_SEGMENT
+                    if request.command == SendCommand.Request.STOP_SEGMENT
+                    else RecordingCommand.Request.CANCEL_SEGMENT
+                )
+                cd_result = self._forward_recording(
+                    recording_command,
+                    task_info=request.task_info,
+                    segment_index=int(request.segment_index),
+                )
+                if (cd_result.success
+                        and cd_result.response is not None
+                        and cd_result.response.success):
+                    self._set_session_active(on_recording=False)
+                    if request.command == SendCommand.Request.STOP_SEGMENT:
+                        self._advance_trigger_record_cursor_after_save(
+                            int(request.segment_index)
+                        )
+                    else:
+                        self._trigger_record_next_segment_index = int(request.segment_index)
+                self._apply_cyclo_data_response(cd_result, response)
+
+            elif request.command in (
+                SendCommand.Request.DISCARD_SEGMENT,
+                SendCommand.Request.FINISH_EPISODE,
+                SendCommand.Request.DISCARD_EPISODE,
+            ):
+                command_map = {
+                    SendCommand.Request.DISCARD_SEGMENT:
+                        RecordingCommand.Request.DISCARD_SEGMENT,
+                    SendCommand.Request.FINISH_EPISODE:
+                        RecordingCommand.Request.FINISH_EPISODE,
+                    SendCommand.Request.DISCARD_EPISODE:
+                        RecordingCommand.Request.DISCARD_EPISODE,
+                }
+                cd_result = self._forward_recording(
+                    command_map[request.command],
+                    task_info=request.task_info,
+                    segment_index=int(request.segment_index),
+                )
+                if (cd_result.success
+                        and cd_result.response is not None
+                        and cd_result.response.success):
+                    if request.command == SendCommand.Request.FINISH_EPISODE:
+                        self._trigger_record_active_segment_index = 0
+                        self._trigger_record_next_segment_index = 0
+                    elif request.command == SendCommand.Request.DISCARD_EPISODE:
+                        self._set_session_active(on_recording=False)
+                        self._trigger_record_active_segment_index = 0
+                        self._trigger_record_next_segment_index = 0
+                    elif request.command == SendCommand.Request.DISCARD_SEGMENT:
+                        self._trigger_record_next_segment_index = int(request.segment_index)
+                self._apply_cyclo_data_response(cd_result, response)
+
             elif request.command == SendCommand.Request.START_INFERENCE:
                 task_info = request.task_info
 
@@ -1047,50 +1167,73 @@ class OrchestratorNode(Node):
                 )
                 service_prefix = self._determine_service_prefix(task_info)
 
-                # If a policy is already loaded on this container, treat
-                # START_INFERENCE as RESUME. The policy container may have
-                # been restarted outside orchestrator, though; in that case
-                # the cached client is stale and the container replies with
-                # "not running" or "LOAD first". Fall back to a fresh
-                # LOAD -> START instead of surfacing that confusing error.
+                # If the requested policy is already loaded on this
+                # container, treat START_INFERENCE as RESUME. If the user
+                # selected a different checkpoint on the same backend, tear
+                # down first so START performs a real fresh LOAD.
+                #
+                # The policy container may have been restarted outside
+                # orchestrator, though; in that case the cached client is
+                # stale and the container replies with "not running" or
+                # "LOAD first". Fall back to a fresh LOAD -> START instead
+                # of surfacing that confusing error.
                 # Snapshot the client so a concurrent _teardown_inference_client
                 # cannot null it between the prefix check and the call.
+                requested_policy_path = self._normalize_policy_path(
+                    task_info.policy_path
+                )
                 with self._state_lock:
                     existing_client = self.container_service_client
+                    loaded_policy_path = self._loaded_inference_policy_path
                 start_handled = False
                 if (
                     existing_client is not None
                     and existing_client._service_prefix == service_prefix
                 ):
-                    resume_result = existing_client.inference_command(
-                        ContainerServiceClient.CMD_RESUME,
-                        task_instruction=task_instruction,
-                    )
-                    if resume_result.success:
-                        self._set_session_active(
-                            on_inference=True,
-                            start_time=time.perf_counter(),
+                    if (
+                        requested_policy_path
+                        and loaded_policy_path
+                        and requested_policy_path != loaded_policy_path
+                    ):
+                        self.get_logger().info(
+                            'Requested inference policy changed '
+                            f'({loaded_policy_path} -> {requested_policy_path}); '
+                            'reloading policy'
                         )
-                        self._publish_inference_phase(InferenceStatus.INFERENCING)
-                        response.success = True
-                        response.message = 'Inference resumed (model already loaded)'
-                        start_handled = True
+                        self._teardown_inference_client()
                     else:
-                        resume_message = resume_result.message or ''
-                        if resume_message in ('not running', 'LOAD first'):
-                            self.get_logger().warning(
-                                'Cached inference client for '
-                                f'{service_prefix} is stale '
-                                f'({resume_message}); reloading policy'
+                        resume_result = existing_client.inference_command(
+                            ContainerServiceClient.CMD_RESUME,
+                            task_instruction=task_instruction,
+                        )
+                        if resume_result.success:
+                            self._set_session_active(
+                                on_inference=True,
+                                start_time=time.perf_counter(),
                             )
-                            self._teardown_inference_client()
-                        else:
-                            response.success = False
-                            response.message = resume_message
+                            self._publish_inference_phase(
+                                InferenceStatus.INFERENCING)
+                            response.success = True
+                            response.message = (
+                                'Inference resumed (model already loaded)'
+                            )
                             start_handled = True
-                    self.get_logger().info(
-                        f'RESUME inference result: {resume_result.message}'
-                    )
+                        else:
+                            resume_message = resume_result.message or ''
+                            if resume_message in ('not running', 'LOAD first'):
+                                self.get_logger().warning(
+                                    'Cached inference client for '
+                                    f'{service_prefix} is stale '
+                                    f'({resume_message}); reloading policy'
+                                )
+                                self._teardown_inference_client()
+                            else:
+                                response.success = False
+                                response.message = resume_message
+                                start_handled = True
+                        self.get_logger().info(
+                            f'RESUME inference result: {resume_result.message}'
+                        )
                 if not start_handled:
                     # Fresh start. LOAD on the policy container can take 10+
                     # minutes the first time (model load to GPU + on-disk
@@ -1125,8 +1268,8 @@ class OrchestratorNode(Node):
                     # FINISH wipes container_service_client), so the thread
                     # operates on the client we just created.
                     client = new_client
-                    record_inference_mode = task_info.record_inference_mode
                     model_path = task_info.policy_path
+                    normalized_model_path = requested_policy_path
                     robot_type = self.robot_type
 
                     def _load_and_start():
@@ -1167,10 +1310,14 @@ class OrchestratorNode(Node):
                                 return
 
                             self._set_session_active(
-                                on_recording=True if record_inference_mode else None,
                                 on_inference=True,
                                 start_time=time.perf_counter(),
                             )
+                            with self._state_lock:
+                                if self.container_service_client is client:
+                                    self._loaded_inference_policy_path = (
+                                        normalized_model_path
+                                    )
                             self._publish_inference_phase(InferenceStatus.INFERENCING)
                         except Exception as e:
                             self.get_logger().error(
@@ -1430,6 +1577,7 @@ class OrchestratorNode(Node):
                                 task_instruction=task_instruction,
                             )
                             if result.success:
+                                self.on_inference = True
                                 self._publish_inference_phase(InferenceStatus.INFERENCING)
                             response.success = result.success
                             response.message = result.message or 'Inference resumed'
@@ -1993,6 +2141,14 @@ class OrchestratorNode(Node):
         'smolvla', 'xvla', 'sac',
     }
 
+    @staticmethod
+    def _normalize_policy_path(policy_path: str) -> str:
+        """Normalize policy paths for same-checkpoint comparisons."""
+        value = (policy_path or '').strip()
+        if not value:
+            return ''
+        return os.path.normpath(value)
+
     def _determine_service_prefix(self, task_info) -> str:
         """Determine inference service prefix from task_info or policy config.
 
@@ -2049,6 +2205,7 @@ class OrchestratorNode(Node):
         with self._state_lock:
             client = self.container_service_client
             self.container_service_client = None
+            self._loaded_inference_policy_path = ''
         if client is None:
             return
 
@@ -2067,95 +2224,256 @@ class OrchestratorNode(Node):
 
         threading.Thread(target=_cleanup, daemon=True).start()
 
-    def handle_joystick_trigger(self, joystick_mode: str):
-        """
-        Handle joystick trigger for simplified recording control.
+    def _record_trigger_total_segments(self) -> int:
+        task_info = self._prepared_record_task_info
+        if task_info is None:
+            return 1
+        subtasks = [
+            item for item in (task_info.subtask_instruction or [])
+            if str(item).strip()
+        ]
+        return max(1, len(subtasks))
 
-        - Right button: Toggle Start/Finish
-          - If no session: Auto-create session and start recording
-          - If idle: Start recording
-          - If recording: Finish and save
-        - Left button: Cancel (only during recording)
-          - Discards current recording
-        """
-        self.get_logger().info(f'Joystick trigger: {joystick_mode}')
+    def _advance_trigger_record_cursor_after_save(self, saved_index: int) -> None:
+        total = self._record_trigger_total_segments()
+        if saved_index >= total - 1:
+            self._trigger_record_active_segment_index = 0
+            self._trigger_record_next_segment_index = 0
+            return
+        next_index = min(saved_index + 1, total - 1)
+        self._trigger_record_active_segment_index = next_index
+        self._trigger_record_next_segment_index = next_index
 
-        # Joystick operations forward to cyclo_data (Part C2d-5). orchestrator
-        # only tracks on_recording / timer_manager session state; DataManager
-        # + rosbag + action_event live in cyclo_data.
-        snapshot_on_recording, _ = self._snapshot_session_state()
-        if joystick_mode == 'right':
-            if not snapshot_on_recording:
-                if self._last_ui_task_info is None:
-                    # No task_info yet — auto-create path needs a cached
-                    # task_info to derive folder naming. Match the prior
-                    # behaviour's hard error.
-                    self.get_logger().error(
-                        'Joystick right ignored: start the first episode from '
-                        'the UI so task info (Task Num / Task Name) is set.')
-                    return
-                self.get_logger().info('Right button: Starting recording (forwarder)')
-                # Re-init params (joint_order etc.) for the cached task. Cheap
-                # if the task hasn't changed; sets up the 'collection' timer
-                # slot every time so .start() below succeeds.
-                self.init_robot_control_parameters_from_user_task(
-                    self._last_ui_task_info)
-                if self.timer_manager:
-                    self.timer_manager.start(timer_name='collection')
-                cd_result = self._forward_recording(
-                    RecordingCommand.Request.START,
-                    task_info=self._last_ui_task_info,
-                    include_topics=True,
-                )
-                if (cd_result.success
-                        and cd_result.response is not None
-                        and cd_result.response.success):
-                    self._set_session_active(
-                        on_recording=True,
-                        start_time=time.perf_counter(),
-                    )
-                else:
-                    self.get_logger().error(
-                        f'Joystick START forward failed: '
-                        f'{cd_result.response.message if cd_result.response else cd_result.message}'
-                    )
-            else:
-                self.get_logger().info('Right button: Finishing recording (forwarder)')
-                cd_result = self._forward_recording(
-                    RecordingCommand.Request.STOP,
-                    task_info=self._last_ui_task_info,
-                )
-                # Flip on_recording back to False so the next right press
-                # takes the START branch. Without this, on_recording stays
-                # True forever and every subsequent right press goes to
-                # STOP — which cyclo_data treats as a no-op once its
-                # DataManager has flipped to idle.
-                if (cd_result.success
-                        and cd_result.response is not None
-                        and cd_result.response.success):
-                    self._set_session_active(on_recording=False)
-                else:
-                    self.get_logger().error(
-                        f'Joystick STOP forward failed: '
-                        f'{cd_result.response.message if cd_result.response else cd_result.message}'
-                    )
+    def _start_record_trigger_segment(self, segment_index: int) -> bool:
+        task_info = self._prepared_record_task_info
+        if task_info is None:
+            self.get_logger().warning(
+                'Trigger record start ignored: prepare the Record session first')
+            return False
+        if not self.robot_type:
+            self.get_logger().warning(
+                'Trigger record start ignored: robot_type is not set')
+            return False
 
-        elif joystick_mode == 'left':
-            # cyclo_data's CANCEL handler picks the right mode: cancel-with-
-            # review if actively recording, toggle-review otherwise. Also
-            # publishes the right action_event (cancel / review_on / review_off).
-            self.get_logger().info('Left button: forwarding CANCEL')
-            cd_result = self._forward_recording(
-                RecordingCommand.Request.CANCEL,
-                task_info=self._last_ui_task_info,
+        if self.timer_manager:
+            self.timer_manager.start(timer_name='collection')
+
+        self.get_logger().info(
+            f'Trigger: START_SEGMENT segment={segment_index}')
+        cd_result = self._forward_recording(
+            RecordingCommand.Request.START_SEGMENT,
+            task_info=task_info,
+            include_topics=True,
+            segment_index=segment_index,
+        )
+        if (cd_result.success
+                and cd_result.response is not None
+                and cd_result.response.success):
+            self._trigger_record_active_segment_index = segment_index
+            self._set_session_active(
+                on_recording=True,
+                start_time=time.perf_counter(),
             )
-            # Same reason as STOP above — after CANCEL the cyclo_data
-            # session is idle, so orchestrator's on_recording must follow
-            # or the next right press is stuck in the STOP branch.
+            return True
+        message = (
+            cd_result.response.message
+            if cd_result.response is not None else cd_result.message
+        )
+        self.get_logger().error(f'Trigger START_SEGMENT failed: {message}')
+        return False
+
+    def _stop_record_trigger_segment(self) -> None:
+        task_info = self._prepared_record_task_info
+        if task_info is None:
+            self.get_logger().warning(
+                'Trigger record save ignored: prepare the Record session first')
+            return
+        segment_index = int(self._trigger_record_active_segment_index)
+        total = self._record_trigger_total_segments()
+
+        self.get_logger().info(
+            f'Trigger: STOP_SEGMENT segment={segment_index}')
+        cd_result = self._forward_recording(
+            RecordingCommand.Request.STOP_SEGMENT,
+            task_info=task_info,
+            segment_index=segment_index,
+        )
+        if not (cd_result.success
+                and cd_result.response is not None
+                and cd_result.response.success):
+            message = (
+                cd_result.response.message
+                if cd_result.response is not None else cd_result.message
+            )
+            self.get_logger().error(f'Trigger STOP_SEGMENT failed: {message}')
+            return
+
+        self._set_session_active(on_recording=False)
+        if segment_index >= total - 1:
+            self.get_logger().info('Trigger: FINISH_EPISODE')
+            finish_result = self._forward_recording(
+                RecordingCommand.Request.FINISH_EPISODE,
+                task_info=task_info,
+            )
+            if (finish_result.success
+                    and finish_result.response is not None
+                    and finish_result.response.success):
+                self._trigger_record_active_segment_index = 0
+                self._trigger_record_next_segment_index = 0
+            else:
+                message = (
+                    finish_result.response.message
+                    if finish_result.response is not None
+                    else finish_result.message
+                )
+                self.get_logger().error(f'Trigger FINISH_EPISODE failed: {message}')
+            return
+
+        next_index = segment_index + 1
+        self._trigger_record_next_segment_index = next_index
+        self._start_record_trigger_segment(next_index)
+
+    def _cancel_record_trigger_segment(self) -> None:
+        task_info = self._prepared_record_task_info
+        if task_info is None:
+            self.get_logger().warning(
+                'Trigger record cancel ignored: prepare the Record session first')
+            return
+        segment_index = int(self._trigger_record_active_segment_index)
+        self.get_logger().info(
+            f'Trigger: CANCEL_SEGMENT segment={segment_index}')
+        cd_result = self._forward_recording(
+            RecordingCommand.Request.CANCEL_SEGMENT,
+            task_info=task_info,
+            segment_index=segment_index,
+        )
+        if (cd_result.success
+                and cd_result.response is not None
+                and cd_result.response.success):
+            self._set_session_active(on_recording=False)
+            self._trigger_record_next_segment_index = segment_index
+            return
+        message = (
+            cd_result.response.message
+            if cd_result.response is not None else cd_result.message
+        )
+        self.get_logger().error(f'Trigger CANCEL_SEGMENT failed: {message}')
+
+    def _toggle_inference_trigger_recording(self, is_recording: bool) -> None:
+        task_info = self._prepared_inference_task_info
+        if task_info is None:
+            self.get_logger().warning(
+                'Inference trigger ignored: prepare the Inference record session first')
+            return
+        if is_recording:
+            self.get_logger().info('Trigger: STOP inference recording')
+            cd_result = self._forward_recording(
+                RecordingCommand.Request.STOP,
+                task_info=task_info,
+            )
             if (cd_result.success
                     and cd_result.response is not None
                     and cd_result.response.success):
                 self._set_session_active(on_recording=False)
+            else:
+                message = (
+                    cd_result.response.message
+                    if cd_result.response is not None else cd_result.message
+                )
+                self.get_logger().error(
+                    f'Trigger inference STOP failed: {message}')
+            return
+
+        self.get_logger().info('Trigger: START inference recording')
+        cd_result = self._forward_recording(
+            RecordingCommand.Request.START,
+            task_info=task_info,
+            include_topics=True,
+        )
+        if (cd_result.success
+                and cd_result.response is not None
+                and cd_result.response.success):
+            self._set_session_active(
+                on_recording=True,
+                start_time=time.perf_counter(),
+            )
+        else:
+            message = (
+                cd_result.response.message
+                if cd_result.response is not None else cd_result.message
+            )
+            self.get_logger().error(f'Trigger inference START failed: {message}')
+
+    def _cancel_inference_trigger_recording(self) -> None:
+        task_info = self._prepared_inference_task_info
+        if task_info is None:
+            self.get_logger().warning(
+                'Inference trigger cancel ignored: prepare the Inference record session first')
+            return
+        self.get_logger().info('Trigger: CANCEL inference recording')
+        cd_result = self._forward_recording(
+            RecordingCommand.Request.CANCEL,
+            task_info=task_info,
+        )
+        if (cd_result.success
+                and cd_result.response is not None
+                and cd_result.response.success):
+            self._set_session_active(on_recording=False)
+        else:
+            message = (
+                cd_result.response.message
+                if cd_result.response is not None else cd_result.message
+            )
+            self.get_logger().error(f'Trigger inference CANCEL failed: {message}')
+
+    def handle_joystick_trigger(self, joystick_mode: str):
+        """
+        Handle leader tact triggers as backend-owned recording controls.
+
+        ``right`` toggles start/save. ``left`` cancels the active recording.
+        """
+        self.get_logger().info(f'Joystick trigger: {joystick_mode}')
+
+        if self.communicator is None:
+            self.get_logger().warning(
+                f'Joystick trigger ignored without communicator: {joystick_mode}')
+            return
+
+        if joystick_mode in ('right', 'left'):
+            snapshot_on_recording, snapshot_on_inference = (
+                self._snapshot_session_state()
+            )
+            if snapshot_on_inference:
+                if self._prepared_inference_task_info is None:
+                    self.get_logger().warning(
+                        'Inference trigger ignored: prepare the Inference '
+                        'record session first')
+                    return
+                if joystick_mode == 'right':
+                    self._toggle_inference_trigger_recording(snapshot_on_recording)
+                elif snapshot_on_recording:
+                    self._cancel_inference_trigger_recording()
+                else:
+                    self.get_logger().debug(
+                        'Inference trigger cancel ignored: no active recording')
+                return
+
+            if self._prepared_record_task_info is None:
+                self.get_logger().warning(
+                    'Record trigger ignored: prepare the Record session first')
+                return
+            if joystick_mode == 'right':
+                if snapshot_on_recording:
+                    self._stop_record_trigger_segment()
+                else:
+                    self._start_record_trigger_segment(
+                        int(self._trigger_record_next_segment_index)
+                    )
+            elif snapshot_on_recording:
+                self._cancel_record_trigger_segment()
+            else:
+                self.get_logger().debug(
+                    'Record trigger cancel ignored: no active recording')
 
         elif joystick_mode == 'right_long_time':
             self.get_logger().info('Right long press - reserved for future use')

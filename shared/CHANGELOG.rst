@@ -2,6 +2,19 @@
 Changelog for package shared
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+0.1.7 (2026-05-27)
+------------------
+* None
+
+0.1.6 (2026-05-27)
+------------------
+* None
+
+0.1.5 (2026-05-26)
+------------------
+* Renamed robot configuration camera keys to canonical ``cam_<side>_<part>`` names.
+* Contributors: kimtaehyeong99
+
 0.1.4 (2026-05-22)
 ------------------
 * None

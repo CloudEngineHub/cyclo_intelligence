@@ -24,8 +24,9 @@ import { setTaskInfo } from '../features/tasks/taskSlice';
 import { useRosServiceCaller } from '../hooks/useRosServiceCaller';
 import Tooltip from './Tooltip';
 
-const InfoPanel = () => {
+const InfoPanel = ({ variant = 'card' }) => {
   const dispatch = useDispatch();
+  const embedded = variant === 'embedded';
 
   const info = useSelector((state) => state.tasks.taskInfo);
   const recordStatus = useSelector((state) => state.tasks.recordStatus);
@@ -60,12 +61,12 @@ const InfoPanel = () => {
     setIsEditable(!disabled);
   }, [disabled]);
 
-  // Re-arm the prepare button whenever the task identity changes so the
+  // Re-arm the prepare button whenever the task definition changes so the
   // user has to re-confirm. Solo-recording flow relies on this — editing
-  // task_num/name mid-session should not silently keep an old prep.
+  // task fields mid-session should not silently keep an old prep.
   useEffect(() => {
     setIsPrepared(false);
-  }, [info.taskNum, info.taskName]);
+  }, [info.taskNum, info.taskName, info.taskInstruction, info.subtaskInstruction]);
 
   const canPrepare =
     !disabled &&
@@ -124,19 +125,21 @@ const InfoPanel = () => {
 
   const classLabel = clsx('text-sm', 'text-gray-600', 'w-28', 'flex-shrink-0', 'font-medium');
 
-  const classInfoPanel = clsx(
-    'bg-white',
-    'border',
-    'border-gray-200',
-    'rounded-2xl',
-    'shadow-md',
-    'p-4',
-    'w-full',
-    'max-w-[350px]',
-    'relative',
-    'overflow-y-auto',
-    'scrollbar-thin'
-  );
+  const classInfoPanel = embedded
+    ? clsx('rounded-lg', 'p-2', 'border', 'border-gray-200')
+    : clsx(
+        'bg-white',
+        'border',
+        'border-gray-200',
+        'rounded-2xl',
+        'shadow-md',
+        'p-4',
+        'w-full',
+        'max-w-[350px]',
+        'relative',
+        'overflow-y-auto',
+        'scrollbar-thin'
+      );
 
   const classTaskNameTextarea = clsx(
     'text-sm',
@@ -181,26 +184,30 @@ const InfoPanel = () => {
 
   return (
     <div className={classInfoPanel}>
-      <div className={clsx('text-lg', 'font-semibold', 'mb-3', 'text-gray-800')}>
-        Task Information
-      </div>
+      {!embedded && (
+        <div className={clsx('text-lg', 'font-semibold', 'mb-3', 'text-gray-800')}>
+          Task Information
+        </div>
+      )}
 
       {/* Edit mode indicator */}
-      <div
-        className={clsx('mb-3', 'p-2', 'rounded-md', 'text-sm', 'font-medium', {
-          'bg-green-100 text-green-800': isEditable,
-          'bg-gray-100 text-gray-600': !isEditable,
-        })}
-      >
-        {isEditable ? (
-          'Edit mode'
-        ) : (
-          <div className="leading-tight">
-            <div>Read only</div>
-            <div className="text-xs mt-1 opacity-80">task is running or robot is not connected</div>
-          </div>
-        )}
-      </div>
+      {!embedded && (
+        <div
+          className={clsx('mb-3', 'p-2', 'rounded-md', 'text-sm', 'font-medium', {
+            'bg-green-100 text-green-800': isEditable,
+            'bg-gray-100 text-gray-600': !isEditable,
+          })}
+        >
+          {isEditable ? (
+            'Edit mode'
+          ) : (
+            <div className="leading-tight">
+              <div>Read only</div>
+              <div className="text-xs mt-1 opacity-80">task is running or robot is not connected</div>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Task Num */}
       <div className={clsx('flex', 'items-center', 'mb-2.5')}>
@@ -238,11 +245,9 @@ const InfoPanel = () => {
         />
       </div>
 
-      {/* ROBOTIS license stamp — opt-in. Default off because recording
-          outputs are the user's intellectual property, not ROBOTIS'.
-          Tick on for ROBOTIS-internal captures so the Apache 2.0
-          header rides through to HF Hub. */}
       <div className={clsx('flex', 'items-center', 'mb-2.5')}>
+        {/* ROBOTIS license stamp — opt-in. Default off because recording
+            outputs are the user's intellectual property, not ROBOTIS'. */}
         <div className={clsx(classLabel, 'flex', 'items-center', 'gap-1')}>
           <Tooltip
             content={
