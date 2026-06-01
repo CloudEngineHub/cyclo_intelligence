@@ -2,6 +2,10 @@
 Changelog for package orchestrator
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+0.1.8 (2026-06-01)
+------------------
+* None
+
 0.1.7 (2026-05-27)
 ------------------
 * Moved leader trigger recording control into the orchestrator backend using right and left tact trigger events.
