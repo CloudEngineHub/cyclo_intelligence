@@ -43,6 +43,9 @@ _VIDEO_SYNC_DISABLE_COPY_FASTPATH_ENV = "CYCLO_VIDEO_SYNC_DISABLE_COPY_FASTPATH"
 _VIDEO_SYNC_ENABLE_FFMPEG_PIPE_ENV = "CYCLO_VIDEO_SYNC_ENABLE_FFMPEG_PIPE"
 _VIDEO_SYNC_ENABLE_OPENCV_WRITER_ENV = "CYCLO_VIDEO_SYNC_ENABLE_OPENCV_WRITER"
 _VIDEO_SYNC_DISABLE_OPENCV_WRITER_ENV = "CYCLO_VIDEO_SYNC_DISABLE_OPENCV_WRITER"
+_VIDEO_SYNC_DISABLE_GSTREAMER_DECODE_PIPE_ENV = (
+    "CYCLO_VIDEO_SYNC_DISABLE_GSTREAMER_DECODE_PIPE"
+)
 _VIDEO_SYNC_DISABLE_YUV420_PIPE_ENV = "CYCLO_VIDEO_SYNC_DISABLE_YUV420_PIPE"
 _VIDEO_SYNC_STRICT_FFMPEG_DECODE_ENV = "CYCLO_VIDEO_SYNC_STRICT_FFMPEG_DECODE"
 _VIDEO_STATS_SAMPLES_ENV = "CYCLO_VIDEO_STATS_SAMPLES"
@@ -338,6 +341,26 @@ def _gstreamer_h264_command(
     ]
 
 
+def _gstreamer_h264_decoder_command(
+    *,
+    input_mp4: Path,
+    output_fd: int,
+) -> list[str]:
+    gst = _gstreamer_bin("gst-launch-1.0")
+    if gst is None:
+        raise RuntimeError("gst-launch-1.0 not found")
+    return [
+        gst, "-q",
+        "filesrc", f"location={str(input_mp4)}",
+        "!", "qtdemux",
+        "!", "h264parse",
+        "!", "nvv4l2decoder",
+        "!", "nvvidconv",
+        "!", "video/x-raw,format=I420",
+        "!", "fdsink", f"fd={int(output_fd)}",
+    ]
+
+
 @lru_cache(maxsize=8)
 def _try_gstreamer_h264_encoder(width: int, height: int, fps: int) -> bool:
     if _gstreamer_bin("gst-launch-1.0") is None:
@@ -388,6 +411,50 @@ def _try_gstreamer_h264_encoder(width: int, height: int, fps: int) -> bool:
         except Exception as exc:
             _warn_gstreamer_probe(repr(exc))
     return False
+
+
+@lru_cache(maxsize=1)
+def _try_gstreamer_h264_decoder() -> bool:
+    if _gstreamer_bin("gst-launch-1.0") is None:
+        _warn_gstreamer_probe("gst-launch-1.0 not found")
+        return False
+    required_plugins = (
+        "filesrc",
+        "qtdemux",
+        "h264parse",
+        "nvv4l2decoder",
+        "nvvidconv",
+        "fdsink",
+    )
+    missing = [plugin for plugin in required_plugins if not _gst_inspect_has(plugin)]
+    if missing:
+        _warn_gstreamer_probe(f"missing decode plugin(s): {', '.join(missing)}")
+        return False
+    return True
+
+
+def _open_gstreamer_h264_decoder_stdout(input_mp4: Path) -> tuple[subprocess.Popen, Any]:
+    read_fd, write_fd = os.pipe()
+    try:
+        cmd = _gstreamer_h264_decoder_command(
+            input_mp4=input_mp4,
+            output_fd=write_fd,
+        )
+        process = subprocess.Popen(
+            cmd,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            pass_fds=(write_fd,),
+            close_fds=True,
+            bufsize=0,
+            env=_gstreamer_env(),
+        )
+    except Exception:
+        os.close(read_fd)
+        os.close(write_fd)
+        raise
+    os.close(write_fd)
+    return process, os.fdopen(read_fd, "rb", buffering=0)
 
 
 @lru_cache(maxsize=4)
@@ -1464,6 +1531,27 @@ def _remux_selected_frames_streaming(
     ffmpeg: str,
 ) -> VideoSyncResult:
     """Decode input once and stream selected BGR frames to ffmpeg."""
+    if not os.environ.get(_VIDEO_SYNC_DISABLE_GSTREAMER_DECODE_PIPE_ENV):
+        try:
+            return _remux_selected_frames_gstreamer_yuv420_pipe(
+                input_mp4=input_mp4,
+                frame_indices=frame_indices,
+                output_mp4=output_mp4,
+                target_fps=target_fps,
+                rotation_deg=rotation_deg,
+                image_resize=image_resize,
+                ffmpeg=ffmpeg,
+            )
+        except Exception as exc:
+            import sys as _sys
+            if "GStreamer decode pipe is not eligible" not in str(exc):
+                print(
+                    f"video_sync[{input_mp4.name}]: GStreamer decode pipe path "
+                    f"failed ({exc!r}); falling back to YUV420 ffmpeg pipe",
+                    file=_sys.stderr,
+                )
+            output_mp4.unlink(missing_ok=True)
+
     if not os.environ.get(_VIDEO_SYNC_DISABLE_YUV420_PIPE_ENV):
         try:
             return _remux_selected_frames_ffmpeg_yuv420_pipe(
@@ -1853,6 +1941,145 @@ def _validate_stream_encoded_output(
         ffmpeg=ffmpeg,
         label="streaming",
     )
+
+
+def _remux_selected_frames_gstreamer_yuv420_pipe(
+    *,
+    input_mp4: Path,
+    frame_indices: Sequence[int],
+    output_mp4: Path,
+    target_fps: int,
+    rotation_deg: int,
+    image_resize: "tuple[int, int] | None",
+    ffmpeg: str,
+) -> VideoSyncResult:
+    """Decode H.264 via Jetson GStreamer and encode selected I420 frames."""
+    if any(i < 0 for i in frame_indices):
+        raise ValueError("frame_indices must be non-negative")
+    if any(b < a for a, b in zip(frame_indices, frame_indices[1:])):
+        raise ValueError("streaming sync requires non-decreasing frame_indices")
+    if not _running_on_jetson():
+        raise RuntimeError("GStreamer decode pipe is not eligible on this host")
+
+    width, height = _quick_video_dimensions(input_mp4)
+    if not _use_yuv420_pipe(width, height, rotation_deg, image_resize):
+        raise RuntimeError("GStreamer decode pipe is not eligible for this video")
+    stream = _probe_video_stream(input_mp4)
+    if not stream or stream.get("codec_name") != "h264":
+        raise RuntimeError("GStreamer decode pipe is not eligible for non-H.264 input")
+    if not _try_gstreamer_h264_decoder():
+        raise RuntimeError("GStreamer decode pipe is not eligible: decoder unavailable")
+
+    encoder, enc_opts = _h264_encoder(
+        ffmpeg,
+        width=width,
+        height=height,
+        allow_gstreamer=True,
+    )
+    if not _is_gstreamer_encoder(encoder):
+        raise RuntimeError("GStreamer decode pipe is not eligible: encoder unavailable")
+    encoder_cmd = _gstreamer_h264_command(
+        input_pix_fmt="yuv420p",
+        width=width,
+        height=height,
+        fps=int(target_fps),
+        output_mp4=output_mp4,
+        opts=enc_opts,
+    )
+
+    frame_size = width * height * 3 // 2
+    decoder: subprocess.Popen | None = None
+    decoder_stdout = None
+    encoder_process: subprocess.Popen | None = None
+    last_frame: bytes | None = None
+    current_idx = -1
+    clamped_count = 0
+    sample_positions = _video_stats_sample_positions(len(frame_indices))
+    stats = _StreamingRgbStats()
+    try:
+        decoder, decoder_stdout = _open_gstreamer_h264_decoder_stdout(input_mp4)
+        encoder_process = subprocess.Popen(
+            encoder_cmd,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            bufsize=0,
+            env=_gstreamer_env(),
+        )
+        assert encoder_process.stdin is not None
+
+        for out_idx, requested_idx in enumerate(frame_indices):
+            while current_idx < requested_idx:
+                frame = _read_exact(decoder_stdout, frame_size)
+                if len(frame) != frame_size:
+                    if last_frame is None:
+                        raise RuntimeError(
+                            f"no frames decoded from {input_mp4.name}"
+                        )
+                    clamped_count += 1
+                    break
+                current_idx += 1
+                last_frame = frame
+
+            if last_frame is None:
+                raise RuntimeError(f"no frame available for {input_mp4.name}")
+
+            _write_frame_bytes(encoder_process.stdin, last_frame)
+            if out_idx in sample_positions:
+                _add_frame_yuv420p_for_stats(
+                    stats,
+                    last_frame,
+                    width=width,
+                    height=height,
+                )
+
+        encoder_process.stdin.close()
+        stderr = (
+            encoder_process.stderr.read().decode(errors="replace")
+            if encoder_process.stderr is not None else ""
+        )
+        rc = encoder_process.wait(timeout=300)
+        if rc != 0:
+            raise RuntimeError(f"gstreamer encode rc={rc}: {stderr[-500:]}")
+
+        produced_frames = _validate_stream_encoded_output(
+            output_mp4,
+            expected_frames=len(frame_indices),
+            target_fps=target_fps,
+            ffmpeg=ffmpeg,
+        )
+
+        if clamped_count:
+            import sys as _sys
+            print(
+                f"video_sync[{input_mp4.name}]: clamped {clamped_count} "
+                f"selected indices beyond decoded frames to last frame",
+                file=_sys.stderr,
+            )
+
+        return VideoSyncResult(
+            frame_count=int(produced_frames),
+            stats=stats.to_stats(),
+            used_fallback=False,
+            mode="gstreamer_decode_encode",
+            output_height=height,
+            output_width=width,
+        )
+    finally:
+        if decoder_stdout is not None:
+            try:
+                decoder_stdout.close()
+            except Exception:
+                pass
+        if decoder is not None and decoder.poll() is None:
+            decoder.kill()
+        if encoder_process is not None and encoder_process.poll() is None:
+            try:
+                if encoder_process.stdin and not encoder_process.stdin.closed:
+                    encoder_process.stdin.close()
+            except Exception:
+                pass
+            encoder_process.kill()
 
 
 def _remux_selected_frames_ffmpeg_yuv420_pipe(
