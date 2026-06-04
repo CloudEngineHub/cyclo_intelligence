@@ -288,6 +288,17 @@ class OrchestratorNode(Node):
             else []
         )
         urdf_path = self.params.get('urdf_path', '') if self.params else ''
+        timeout_sec = 120.0 if command in {
+            RecordingCommand.Request.STOP,
+            RecordingCommand.Request.MOVE_TO_NEXT,
+            RecordingCommand.Request.FINISH,
+            RecordingCommand.Request.STOP_SEGMENT,
+            RecordingCommand.Request.CANCEL_SEGMENT,
+            RecordingCommand.Request.FINISH_EPISODE,
+            RecordingCommand.Request.CANCEL,
+            RecordingCommand.Request.RERECORD,
+            RecordingCommand.Request.DISCARD_EPISODE,
+        } else 5.0
         return self._cyclo_data.send_recording_command(
             command=command,
             task_info=task_info if task_info is not None else self._last_ui_task_info,
@@ -295,6 +306,7 @@ class OrchestratorNode(Node):
             topics=topics,
             urdf_path=urdf_path,
             segment_index=segment_index,
+            timeout_sec=timeout_sec,
         )
 
     @staticmethod

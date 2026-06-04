@@ -1006,8 +1006,12 @@ class DataManager:
             for camera in sorted(expected_cameras):
                 src = seg_videos / f'{camera}.mp4'
                 sidecar = seg_videos / f'{camera}_timestamps.parquet'
+                stats = seg_videos / f'{camera}_recorder_stats.json'
+                diagnostics = seg_videos / f'{camera}_diagnostics.parquet'
                 dst = dst_segment_dir / f'{camera}.mp4'
                 dst_sidecar = dst_segment_dir / f'{camera}_timestamps.parquet'
+                dst_stats = dst_segment_dir / f'{camera}_recorder_stats.json'
+                dst_diagnostics = dst_segment_dir / f'{camera}_diagnostics.parquet'
                 if not src.exists() or src.stat().st_size <= 0:
                     if dst.exists() and dst_sidecar.exists():
                         segment_cameras.append(camera)
@@ -1023,6 +1027,10 @@ class DataManager:
                 try:
                     DataManager._move_file(src, dst)
                     DataManager._move_file(sidecar, dst_sidecar)
+                    if stats.exists() and stats.stat().st_size > 0:
+                        DataManager._move_file(stats, dst_stats)
+                    if diagnostics.exists() and diagnostics.stat().st_size > 0:
+                        DataManager._move_file(diagnostics, dst_diagnostics)
                     segment_cameras.append(camera)
                 except Exception as exc:
                     segment_warnings[camera] = repr(exc)

@@ -6,35 +6,41 @@
 #
 #     http://www.apache.org/licenses/LICENSE-2.0
 
-"""Per-camera MP4 recorder for recording format v2.
+"""Per-camera raw-spool recorder for recording format v2.
 
-Each camera gets a dedicated ffmpeg subprocess that takes the raw
-CompressedImage payload (JPEG bytes) on stdin and remuxes it into an
-MP4 container with ``-c:v copy`` — no decode, no re-encode. A worker
-thread sits between the ROS callback and ffmpeg's stdin so the ROS
-executor never blocks on pipe write/backpressure.
+Recording-time work is intentionally tiny: the ROS callback copies the
+CompressedImage payload into a bounded queue, and the camera video worker
+appends those JPEG bytes to ``videos/<cam>.mjpeg.tmp``. ffmpeg and
+Parquet writes stay off the video hot path so pipe backpressure and
+pyarrow warm-up cannot make the camera queue backlog.
 
-A Parquet sidecar (``videos/<cam>_timestamps.parquet``) tracks the
-``header.stamp`` (publisher clock) and ``recv`` (subscriber clock) of
-every frame written. LeRobot resampling maps the synced grid to MP4
-frame indices using ``recv_ns`` by default, matching MCAP ``log_time``
-semantics; ``header_stamp_ns`` stays available for diagnostics.
+On STOP, each raw MJPEG spool is remuxed into ``videos/<cam>.mp4`` with
+``-c:v copy`` and the spool is removed only after frame-count validation
+passes. A Parquet sidecar (``videos/<cam>_timestamps.parquet``) still
+tracks ``header.stamp`` (publisher clock) and ``recv_ns`` (subscriber
+clock) for every frame written. LeRobot resampling maps the synced grid
+to MP4 frame indices using ``header_stamp_ns`` by default so transport
+delay does not shift image selection; ``recv_ns`` stays available for
+diagnostics and legacy fallback.
 
-Subscriptions are created once at ``__init__`` (= when the robot_type
-is first selected) and persist until ``close()``. Episode boundaries
-toggle a ``_recording_active`` gate that the ROS callback checks before
+Subscriptions are created once at ``__init__`` (= when the robot_type is
+first selected) and persist until ``close()``. Episode boundaries toggle
+a ``_recording_active`` gate that the ROS callback checks before
 enqueuing a frame, so creating subs no longer fires on every START.
 """
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from pathlib import Path
-from queue import Empty, Full, Queue
+from queue import Empty, Queue
+import json
 import os
 import shutil
 import subprocess
 import threading
+import time
 from typing import Dict, Optional
 
 import pyarrow as pa
@@ -45,9 +51,6 @@ from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPo
 from sensor_msgs.msg import CompressedImage
 
 
-# ROS image subscribers default to sensor data semantics: high depth,
-# best-effort delivery, volatile durability. Matches camera driver
-# publishers (zed_node, realsense2_camera).
 _SUB_QOS = QoSProfile(
     depth=200,
     reliability=ReliabilityPolicy.BEST_EFFORT,
@@ -55,11 +58,21 @@ _SUB_QOS = QoSProfile(
     history=HistoryPolicy.KEEP_LAST,
 )
 
-# Bounded per-camera queue. Large enough to absorb several seconds of
-# bursty publishing on Jetson while ffmpeg warms up — when full we drop
-# the newest frame and bump a counter, never blocking the ROS callback.
 _DEFAULT_QUEUE_MAX = 256
 _QUEUE_MAX_ENV = "CYCLO_VIDEO_RECORDER_QUEUE_MAX"
+_DIAGNOSTICS_ENV = "CYCLO_VIDEO_RECORDER_DIAGNOSTICS"
+_REMUX_WORKERS_ENV = "CYCLO_VIDEO_RECORDER_REMUX_WORKERS"
+
+_SOFT_CALLBACK_QUEUE_FRAMES_ENV = "CYCLO_VIDEO_RECORDER_SOFT_CALLBACK_QUEUE_FRAMES"
+_SOFT_CALLBACK_QUEUE_MB_ENV = "CYCLO_VIDEO_RECORDER_SOFT_CALLBACK_QUEUE_MB"
+_SOFT_RAW_QUEUE_FRAMES_ENV = "CYCLO_VIDEO_RECORDER_SOFT_RAW_QUEUE_FRAMES"
+_SOFT_RAW_QUEUE_MB_ENV = "CYCLO_VIDEO_RECORDER_SOFT_RAW_QUEUE_MB"
+_SOFT_METADATA_QUEUE_ROWS_ENV = "CYCLO_VIDEO_RECORDER_SOFT_METADATA_QUEUE_ROWS"
+
+_DEFAULT_SOFT_CALLBACK_QUEUE_MB = 128
+_DEFAULT_SOFT_RAW_QUEUE_MB = 256
+_DEFAULT_SOFT_METADATA_QUEUE_ROWS = 16_384
+_PRESSURE_WARN_INTERVAL_NS = 1_000_000_000
 
 
 def _resolve_queue_max() -> int:
@@ -71,27 +84,73 @@ def _resolve_queue_max() -> int:
     except ValueError:
         return _DEFAULT_QUEUE_MAX
 
-# JPEG SOI marker. Some sims emit corrupted payloads; we skip those so
-# ffmpeg's mjpeg demuxer doesn't desync.
+
+def _resolve_positive_int_env(name: str, default: int) -> int:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    try:
+        return max(1, int(raw))
+    except ValueError:
+        return default
+
+
+def _resolve_diagnostics_mode() -> str:
+    raw = os.environ.get(_DIAGNOSTICS_ENV, "summary").strip().lower()
+    if raw in {"0", "false", "no", "off"}:
+        return "off"
+    if raw in {"1", "true", "yes", "on", "detailed", "full"}:
+        return "detailed"
+    return "summary"
+
+
+def _resolve_diagnostics_enabled() -> bool:
+    return _resolve_diagnostics_mode() == "detailed"
+
+
+def _resolve_remux_workers(camera_count: int) -> int:
+    default = max(1, min(camera_count, 4))
+    return min(camera_count, _resolve_positive_int_env(_REMUX_WORKERS_ENV, default))
+
+
 _JPEG_SOI = b"\xff\xd8"
 
-# Non-decodable trailer written into ffmpeg's stdin right before close()
-# so the demuxer can finalise the last real frame without emitting an
-# extra fake image.
-#
-# Why: ffmpeg's image2pipe+mjpeg demuxer only commits frame N to the
-# muxer when it sees frame N+1's SOI marker — it uses the next SOI as
-# the byte-boundary for the previous frame. On EOF the last buffered
-# frame is dropped, which makes mp4 frame_count = sidecar rows - 1.
-# Feeding one extra SOI marker before close lets the real last frame
-# get demuxed. A complete JPEG here is unsafe: ffmpeg can mux it as a
-# visible gray final frame with no matching timestamp row.
+# Trailing SOI lets ffmpeg's image2pipe/mjpeg demuxer finalize the last
+# real frame without muxing a visible synthetic frame.
 _JPEG_SENTINEL = _JPEG_SOI
 
 _TIMESTAMP_SCHEMA = pa.schema([
     ("frame_index", pa.int32()),
     ("header_stamp_ns", pa.int64()),
     ("recv_ns", pa.int64()),
+])
+
+_DIAGNOSTICS_SCHEMA = pa.schema([
+    ("frame_index", pa.int32()),
+    ("header_stamp_ns", pa.int64()),
+    ("callback_enter_ns", pa.int64()),
+    ("header_read_ns", pa.int64()),
+    ("bytes_copy_start_ns", pa.int64()),
+    ("bytes_copy_done_ns", pa.int64()),
+    ("recv_ns", pa.int64()),
+    ("enqueue_start_ns", pa.int64()),
+    ("enqueue_done_ns", pa.int64()),
+    ("video_dequeue_ns", pa.int64()),
+    ("raw_dequeue_ns", pa.int64()),
+    ("raw_write_start_ns", pa.int64()),
+    ("raw_write_done_ns", pa.int64()),
+    ("metadata_enqueue_start_ns", pa.int64()),
+    ("metadata_enqueue_done_ns", pa.int64()),
+    ("metadata_dequeue_ns", pa.int64()),
+    ("timestamp_flush_start_ns", pa.int64()),
+    ("timestamp_flush_done_ns", pa.int64()),
+    ("diagnostics_flush_start_ns", pa.int64()),
+    ("diagnostics_flush_done_ns", pa.int64()),
+    ("queue_size_before", pa.int32()),
+    ("queue_size_after", pa.int32()),
+    ("metadata_queue_size_before", pa.int32()),
+    ("metadata_queue_size_after", pa.int32()),
+    ("frame_size_bytes", pa.int32()),
 ])
 
 
@@ -102,33 +161,54 @@ class _CameraStream:
 
     # Persistent — created in __init__/reconfigure, lives until close().
     subscription: Optional[object] = None
-    queue: Queue = field(default_factory=lambda: Queue(maxsize=_DEFAULT_QUEUE_MAX))
+    queue: Queue = field(default_factory=Queue)
+    raw_queue: Queue = field(default_factory=Queue)
+    metadata_queue: Queue = field(default_factory=Queue)
+    state_lock: threading.Lock = field(default_factory=threading.Lock)
 
     # Per-episode — populated by start_episode, cleared by stop_episode.
     mp4_path: Optional[Path] = None
+    raw_path: Optional[Path] = None
     sidecar_path: Optional[Path] = None
-    process: Optional[subprocess.Popen] = None
+    diagnostics_path: Optional[Path] = None
+    stats_path: Optional[Path] = None
+    raw_fd: Optional[int] = None
     writer: Optional[pq.ParquetWriter] = None
+    diagnostics_writer: Optional[pq.ParquetWriter] = None
     writer_lock: threading.Lock = field(default_factory=threading.Lock)
+    diagnostics_writer_lock: threading.Lock = field(default_factory=threading.Lock)
     worker: Optional[threading.Thread] = None
+    raw_worker: Optional[threading.Thread] = None
+    metadata_worker: Optional[threading.Thread] = None
 
     frames_received: int = 0
     frames_written: int = 0
+    frames_metadata_written: int = 0
+    frames_remuxed: int = 0
     frames_dropped_queue: int = 0
     frames_dropped_invalid: int = 0
-    ffmpeg_error: Optional[str] = None
+    raw_write_error: Optional[str] = None
+    metadata_error: Optional[str] = None
+    remux_error: Optional[str] = None
+    first_recv_ns: Optional[int] = None
+    last_recv_ns: Optional[int] = None
+    callback_queued_bytes: int = 0
+    raw_queued_bytes: int = 0
+    max_callback_queue_items: int = 0
+    max_raw_queue_items: int = 0
+    max_metadata_queue_items: int = 0
+    max_callback_queue_bytes: int = 0
+    max_raw_queue_bytes: int = 0
+    max_enqueue_wait_ns: int = 0
+    max_raw_write_ns: int = 0
+    max_metadata_flush_ns: int = 0
+    pressure_warning_count: int = 0
+    last_pressure_warn_monotonic_ns: int = 0
+    remux_duration_ns: int = 0
 
 
 class VideoRecorder:
-    """Manages MP4 + Parquet sidecar writers for every camera in an episode.
-
-    Subscriptions are created up-front in ``__init__`` and persist until
-    ``close()`` (or a ``reconfigure()`` that swaps the camera set). Each
-    episode's MP4/parquet/worker lifecycle is bracketed by
-    ``start_episode`` / ``stop_episode`` — those toggle the
-    ``_recording_active`` gate that the ROS callback consults to decide
-    whether to enqueue a frame.
-    """
+    """Manages raw MJPEG spools + MP4 remux + sidecars for every camera."""
 
     def __init__(
         self,
@@ -142,19 +222,49 @@ class VideoRecorder:
         self._cameras_spec = dict(cameras)
         self._cb_group = callback_group or ReentrantCallbackGroup()
         self._ffmpeg_bin = shutil.which(ffmpeg_bin) or ffmpeg_bin
+        self._ffprobe_bin = shutil.which("ffprobe") or "ffprobe"
         self._framerate_hint = framerate_hint
         self._queue_max = _resolve_queue_max()
+        self._soft_callback_queue_frames = _resolve_positive_int_env(
+            _SOFT_CALLBACK_QUEUE_FRAMES_ENV, self._queue_max,
+        )
+        self._soft_callback_queue_bytes = (
+            _resolve_positive_int_env(
+                _SOFT_CALLBACK_QUEUE_MB_ENV, _DEFAULT_SOFT_CALLBACK_QUEUE_MB,
+            )
+            * 1024
+            * 1024
+        )
+        self._soft_raw_queue_frames = _resolve_positive_int_env(
+            _SOFT_RAW_QUEUE_FRAMES_ENV, self._queue_max,
+        )
+        self._soft_raw_queue_bytes = (
+            _resolve_positive_int_env(
+                _SOFT_RAW_QUEUE_MB_ENV, _DEFAULT_SOFT_RAW_QUEUE_MB,
+            )
+            * 1024
+            * 1024
+        )
+        self._soft_metadata_queue_rows = _resolve_positive_int_env(
+            _SOFT_METADATA_QUEUE_ROWS_ENV, _DEFAULT_SOFT_METADATA_QUEUE_ROWS,
+        )
+        self._diagnostics_mode = _resolve_diagnostics_mode()
+        self._diagnostics_enabled = self._diagnostics_mode == "detailed"
 
         self._streams: Dict[str, _CameraStream] = {}
-        # Simple bool — read in the ROS callback on every frame, flipped
-        # by start_episode/stop_episode. GIL covers the read/write so no
-        # lock needed.
-        self._recording_active = False
+        self._recording_active = threading.Event()
+        self._lifecycle_lock = threading.Lock()
+        self._callback_cond = threading.Condition()
+        self._active_callbacks = 0
 
         self._build_streams(self._cameras_spec)
         self._node.get_logger().info(
             f"VideoRecorder: configured {len(self._streams)} camera(s), "
-            f"queue_max={self._queue_max}"
+            f"soft_callback_queue={self._soft_callback_queue_frames} frames/"
+            f"{self._soft_callback_queue_bytes // (1024 * 1024)} MiB, "
+            f"soft_raw_queue={self._soft_raw_queue_frames} frames/"
+            f"{self._soft_raw_queue_bytes // (1024 * 1024)} MiB, "
+            f"backend=raw-spool, diagnostics={self._diagnostics_mode}"
         )
 
     # ------------------------------------------------------------------
@@ -162,139 +272,128 @@ class VideoRecorder:
     # ------------------------------------------------------------------
 
     def start_episode(self, episode_dir: Path) -> None:
-        """Open MP4/parquet writers and worker threads for the next episode.
+        """Open raw spools/parquet writers and start per-camera workers."""
+        with self._lifecycle_lock:
+            if self._recording_active.is_set():
+                raise RuntimeError("VideoRecorder already recording an episode")
+            videos_dir = Path(episode_dir) / "videos"
+            videos_dir.mkdir(parents=True, exist_ok=True)
 
-        Subscriptions are already live from ``__init__`` — this only spins
-        up the per-episode ffmpeg/parquet/worker triple and flips the
-        gate so the callback starts enqueuing frames.
-        """
-        if self._recording_active:
-            raise RuntimeError("VideoRecorder already recording an episode")
-        videos_dir = Path(episode_dir) / "videos"
-        videos_dir.mkdir(parents=True, exist_ok=True)
+            for cam_name, stream in self._streams.items():
+                self._drain_queue(stream.queue)
+                self._drain_queue(stream.raw_queue)
+                self._drain_queue(stream.metadata_queue)
 
-        for cam_name, stream in self._streams.items():
-            # Reset per-episode state. Drain any stale items from the
-            # queue — should be empty since the gate was off, but a
-            # callback in flight from before the gate flipped could have
-            # raced through.
-            try:
-                while True:
-                    stream.queue.get_nowait()
-            except Empty:
-                pass
-            stream.mp4_path = videos_dir / f"{cam_name}.mp4"
-            stream.sidecar_path = videos_dir / f"{cam_name}_timestamps.parquet"
-            stream.frames_received = 0
-            stream.frames_written = 0
-            stream.frames_dropped_queue = 0
-            stream.frames_dropped_invalid = 0
-            stream.ffmpeg_error = None
+                stream.mp4_path = videos_dir / f"{cam_name}.mp4"
+                stream.raw_path = videos_dir / f"{cam_name}.mjpeg.tmp"
+                stream.sidecar_path = videos_dir / f"{cam_name}_timestamps.parquet"
+                stream.diagnostics_path = videos_dir / f"{cam_name}_diagnostics.parquet"
+                stream.stats_path = videos_dir / f"{cam_name}_recorder_stats.json"
+                self._reset_stream_state(stream)
 
-            self._spawn_ffmpeg(stream)
-            stream.writer = pq.ParquetWriter(
-                stream.sidecar_path, _TIMESTAMP_SCHEMA, compression="zstd",
-            )
-            stream.worker = threading.Thread(
-                target=self._worker_loop, args=(stream,),
-                name=f"video-{cam_name}", daemon=True,
-            )
-            stream.worker.start()
-            self._node.get_logger().info(
-                f"VideoRecorder: {cam_name} <- {stream.topic} -> {stream.mp4_path.name}"
-            )
+                if stream.raw_path.exists():
+                    stream.raw_path.unlink()
+                stream.raw_fd = os.open(
+                    stream.raw_path,
+                    os.O_CREAT | os.O_TRUNC | os.O_WRONLY | getattr(os, "O_CLOEXEC", 0),
+                    0o644,
+                )
+                stream.writer = pq.ParquetWriter(
+                    stream.sidecar_path, _TIMESTAMP_SCHEMA, compression="zstd",
+                )
+                if self._diagnostics_enabled:
+                    stream.diagnostics_writer = pq.ParquetWriter(
+                        stream.diagnostics_path,
+                        _DIAGNOSTICS_SCHEMA,
+                        compression="zstd",
+                    )
 
-        self._recording_active = True
+                stream.metadata_worker = threading.Thread(
+                    target=self._metadata_worker_loop, args=(stream,),
+                    name=f"video-{cam_name}-metadata", daemon=True,
+                )
+                stream.raw_worker = threading.Thread(
+                    target=self._raw_worker_loop, args=(stream,),
+                    name=f"video-{cam_name}-raw", daemon=True,
+                )
+                stream.worker = threading.Thread(
+                    target=self._video_worker_loop, args=(stream,),
+                    name=f"video-{cam_name}", daemon=True,
+                )
+                stream.metadata_worker.start()
+                stream.raw_worker.start()
+                stream.worker.start()
+                self._node.get_logger().info(
+                    f"VideoRecorder: {cam_name} <- {stream.topic} -> "
+                    f"{stream.mp4_path.name} (raw spool)"
+                )
+
+            self._recording_active.set()
 
     def stop_episode(self) -> Dict[str, Dict[str, int]]:
-        """Drain queues, finalize ffmpeg + parquet writers, return stats.
+        """Drain workers, close sidecars, remux spools, and return stats."""
+        with self._lifecycle_lock:
+            if not self._recording_active.is_set():
+                return {}
 
-        Subscriptions stay alive for the next episode — only the
-        per-episode writers/workers are torn down. The recording gate is
-        flipped first so no further frames enter the queues while we
-        drain.
-        """
-        if not self._recording_active:
-            return {}
+            self._recording_active.clear()
+            self._wait_for_active_callbacks()
+            streams = list(self._streams.values())
+            stats: Dict[str, Dict[str, int]] = {}
 
-        # Close the gate first so the ROS callback stops enqueuing.
-        self._recording_active = False
+            try:
+                for stream in streams:
+                    self._enqueue_stop_sentinel(stream)
+                for stream in streams:
+                    self._join_worker(stream, timeout=10.0, phase="dispatcher drain")
 
-        streams = list(self._streams.values())
-        stats: Dict[str, Dict[str, int]] = {}
+                for stream in streams:
+                    self._enqueue_raw_stop_sentinel(stream)
+                for stream in streams:
+                    self._join_raw_worker(stream, timeout=10.0, phase="raw drain")
 
-        try:
-            # Push sentinels so each worker drains its queue and exits.
-            for stream in streams:
-                self._enqueue_stop_sentinel(stream)
+                for stream in streams:
+                    self._enqueue_metadata_stop_sentinel(stream)
+                for stream in streams:
+                    self._join_metadata_worker(
+                        stream, timeout=10.0, phase="metadata drain",
+                    )
+            finally:
+                for stream in streams:
+                    self._close_raw_fd(stream)
+                for stream in streams:
+                    self._close_writer(stream)
+                    self._close_diagnostics_writer(stream)
 
-            # First drain window: in the healthy path workers consume the
-            # sentinel, flush their final parquet batch, and return before
-            # we close ffmpeg stdin.
-            for stream in streams:
-                self._join_worker(stream, timeout=10.0, phase="drain")
-        finally:
-            # The ffmpeg + parquet cleanup must always run so subprocesses
-            # never leak and parquet writers always flush, even if an
-            # earlier phase raised. ffmpeg without stdin.close() would
-            # block forever waiting for EOF, exceeding the ~30s service
-            # deadline.
-            #
-            # Trail one SOI marker into each ffmpeg before close so
-            # the mjpeg image2pipe demuxer can finalise the real last
-            # frame (see _JPEG_SENTINEL docstring for the demuxer quirk
-            # this avoids) without muxing a fake final image.
-            for stream in streams:
-                self._write_ffmpeg_sentinel(stream)
-            for stream in streams:
-                self._close_ffmpeg_stdin(stream)
-            for stream in streams:
-                if stream.process is not None:
-                    try:
-                        self._close_ffmpeg(stream)
-                    except Exception as exc:  # pragma: no cover - defensive
-                        self._node.get_logger().error(
-                            f"VideoRecorder: {stream.name} ffmpeg close failed: {exc!r}"
-                        )
-            for stream in streams:
-                self._join_worker(stream, timeout=2.0, phase="final")
+                self._remux_streams(streams)
 
-            for stream in streams:
-                self._close_writer(stream)
-                stats[stream.name] = {
-                    "frames_received": stream.frames_received,
-                    "frames_written": stream.frames_written,
-                    "frames_dropped_queue": stream.frames_dropped_queue,
-                    "frames_dropped_invalid": stream.frames_dropped_invalid,
-                }
-                self._node.get_logger().info(
-                    f"VideoRecorder: {stream.name} stats {stats[stream.name]}"
-                )
-                # Reset per-episode references so the next start_episode
-                # spins fresh ffmpeg/worker. Subscription + queue stay.
-                stream.worker = None
-                stream.process = None
-                stream.mp4_path = None
-                stream.sidecar_path = None
+                for stream in streams:
+                    self._write_stats_json(stream)
+                    stats[stream.name] = self._public_stats(stream)
+                    self._node.get_logger().info(
+                        f"VideoRecorder: {stream.name} stats {stats[stream.name]}"
+                    )
+                    stream.worker = None
+                    stream.raw_worker = None
+                    stream.metadata_worker = None
+                    stream.mp4_path = None
+                    stream.raw_path = None
+                    stream.sidecar_path = None
+                    stream.diagnostics_path = None
+                    stream.stats_path = None
 
-        return stats
+            return stats
 
     def reconfigure(self, cameras: Dict[str, str]) -> None:
-        """Swap the camera set — destroy current subs, build new ones.
-
-        Only called when the active robot_type changes. Refuses if an
-        episode is in flight; the caller (RecordingService) is responsible
-        for ensuring stop_episode ran first.
-        """
-        if self._recording_active:
-            raise RuntimeError("Cannot reconfigure while recording")
-        self._teardown_subscriptions()
-        self._cameras_spec = dict(cameras)
-        self._build_streams(self._cameras_spec)
+        with self._lifecycle_lock:
+            if self._recording_active.is_set():
+                raise RuntimeError("Cannot reconfigure while recording")
+            self._teardown_subscriptions()
+            self._cameras_spec = dict(cameras)
+            self._build_streams(self._cameras_spec)
 
     def close(self) -> None:
-        """Tear down all subscriptions — called on node shutdown."""
-        if self._recording_active:
+        if self._recording_active.is_set():
             try:
                 self.stop_episode()
             except Exception as exc:  # pragma: no cover - defensive
@@ -308,12 +407,13 @@ class VideoRecorder:
     # ------------------------------------------------------------------
 
     def _build_streams(self, cameras: Dict[str, str]) -> None:
-        """Create one _CameraStream + subscription per camera."""
         for cam_name, topic in cameras.items():
             stream = _CameraStream(
                 name=cam_name,
                 topic=topic,
-                queue=Queue(maxsize=self._queue_max),
+                queue=Queue(),
+                raw_queue=Queue(),
+                metadata_queue=Queue(),
             )
             stream.subscription = self._node.create_subscription(
                 CompressedImage,
@@ -327,24 +427,22 @@ class VideoRecorder:
                 f"VideoRecorder: {cam_name} <- {topic} subscribed (idle)"
             )
 
-    def _enqueue_stop_sentinel(self, stream: _CameraStream) -> None:
-        """Ensure a worker sees its stop sentinel even if the queue is full."""
+    @staticmethod
+    def _drain_queue(queue: Queue) -> None:
         try:
-            stream.queue.put(None, timeout=2.0)
-            return
-        except Full:
-            pass
-        try:
-            stream.queue.get_nowait()
+            while True:
+                queue.get_nowait()
         except Empty:
-            pass
-        try:
-            stream.queue.put_nowait(None)
-        except Full:
-            self._node.get_logger().error(
-                f"VideoRecorder: {stream.name} queue stayed full; "
-                "worker may need ffmpeg close to exit"
-            )
+            return
+
+    def _enqueue_stop_sentinel(self, stream: _CameraStream) -> None:
+        stream.queue.put(None)
+
+    def _enqueue_metadata_stop_sentinel(self, stream: _CameraStream) -> None:
+        stream.metadata_queue.put(None)
+
+    def _enqueue_raw_stop_sentinel(self, stream: _CameraStream) -> None:
+        stream.raw_queue.put(None)
 
     def _join_worker(
         self, stream: _CameraStream, *, timeout: float, phase: str,
@@ -359,22 +457,72 @@ class VideoRecorder:
                 f"{phase} join ({timeout:.1f}s)"
             )
 
-    def _write_ffmpeg_sentinel(self, stream: _CameraStream) -> None:
-        if stream.process is None or stream.process.stdin is None:
+    def _join_metadata_worker(
+        self, stream: _CameraStream, *, timeout: float, phase: str,
+    ) -> None:
+        worker = stream.metadata_worker
+        if worker is None:
             return
-        try:
-            if not stream.process.stdin.closed:
-                stream.process.stdin.write(_JPEG_SENTINEL)
-        except (BrokenPipeError, OSError):
-            pass
+        worker.join(timeout=timeout)
+        if worker.is_alive():
+            self._node.get_logger().error(
+                f"VideoRecorder: {stream.name} metadata worker did not exit during "
+                f"{phase} join ({timeout:.1f}s)"
+            )
 
-    def _close_ffmpeg_stdin(self, stream: _CameraStream) -> None:
-        if stream.process is None or stream.process.stdin is None:
+    def _join_raw_worker(
+        self, stream: _CameraStream, *, timeout: float, phase: str,
+    ) -> None:
+        worker = stream.raw_worker
+        if worker is None:
+            return
+        worker.join(timeout=timeout)
+        if worker.is_alive():
+            self._node.get_logger().error(
+                f"VideoRecorder: {stream.name} raw worker did not exit during "
+                f"{phase} join ({timeout:.1f}s)"
+            )
+
+    def _reset_stream_state(self, stream: _CameraStream) -> None:
+        with stream.state_lock:
+            stream.frames_received = 0
+            stream.frames_written = 0
+            stream.frames_metadata_written = 0
+            stream.frames_remuxed = 0
+            stream.frames_dropped_queue = 0
+            stream.frames_dropped_invalid = 0
+            stream.raw_write_error = None
+            stream.metadata_error = None
+            stream.remux_error = None
+            stream.first_recv_ns = None
+            stream.last_recv_ns = None
+            stream.callback_queued_bytes = 0
+            stream.raw_queued_bytes = 0
+            stream.max_callback_queue_items = 0
+            stream.max_raw_queue_items = 0
+            stream.max_metadata_queue_items = 0
+            stream.max_callback_queue_bytes = 0
+            stream.max_raw_queue_bytes = 0
+            stream.max_enqueue_wait_ns = 0
+            stream.max_raw_write_ns = 0
+            stream.max_metadata_flush_ns = 0
+            stream.pressure_warning_count = 0
+            stream.last_pressure_warn_monotonic_ns = 0
+            stream.remux_duration_ns = 0
+
+    def _wait_for_active_callbacks(self) -> None:
+        with self._callback_cond:
+            while self._active_callbacks > 0:
+                self._callback_cond.wait(timeout=0.1)
+
+    def _close_raw_fd(self, stream: _CameraStream) -> None:
+        fd = stream.raw_fd
+        stream.raw_fd = None
+        if fd is None:
             return
         try:
-            if not stream.process.stdin.closed:
-                stream.process.stdin.close()
-        except (BrokenPipeError, OSError):
+            os.close(fd)
+        except OSError:
             pass
 
     def _close_writer(self, stream: _CameraStream) -> None:
@@ -392,6 +540,141 @@ class VideoRecorder:
                 )
             stream.writer = None
 
+    def _close_diagnostics_writer(self, stream: _CameraStream) -> None:
+        if stream.diagnostics_writer is None:
+            return
+        with stream.diagnostics_writer_lock:
+            writer = stream.diagnostics_writer
+            if writer is None:
+                return
+            try:
+                writer.close()
+            except Exception as exc:  # pragma: no cover - defensive
+                self._node.get_logger().error(
+                    f"VideoRecorder: {stream.name} diagnostics parquet close failed: {exc!r}"
+                )
+            stream.diagnostics_writer = None
+
+    def _now_ns(self) -> int:
+        try:
+            return int(self._node.get_clock().now().nanoseconds)
+        except AttributeError:
+            return time.perf_counter_ns()
+
+    @staticmethod
+    def _queue_size(queue: Queue) -> int:
+        try:
+            return int(queue.qsize())
+        except (AttributeError, NotImplementedError):
+            return -1
+
+    def _pressure_warning(self, stream: _CameraStream, message: str) -> None:
+        now_ns = time.monotonic_ns()
+        should_log = False
+        with stream.state_lock:
+            stream.pressure_warning_count += 1
+            if (
+                now_ns - stream.last_pressure_warn_monotonic_ns
+                >= _PRESSURE_WARN_INTERVAL_NS
+            ):
+                stream.last_pressure_warn_monotonic_ns = now_ns
+                should_log = True
+        if should_log:
+            self._node.get_logger().warn(message)
+
+    def _note_callback_enqueue(
+        self,
+        stream: _CameraStream,
+        *,
+        frame_size: int,
+        enqueue_wait_ns: int,
+        queue_items_after: int,
+    ) -> None:
+        warning: Optional[str] = None
+        with stream.state_lock:
+            stream.callback_queued_bytes += frame_size
+            stream.max_enqueue_wait_ns = max(
+                stream.max_enqueue_wait_ns, enqueue_wait_ns,
+            )
+            if queue_items_after >= 0:
+                stream.max_callback_queue_items = max(
+                    stream.max_callback_queue_items, queue_items_after,
+                )
+            stream.max_callback_queue_bytes = max(
+                stream.max_callback_queue_bytes, stream.callback_queued_bytes,
+            )
+            if (
+                (
+                    queue_items_after >= self._soft_callback_queue_frames
+                    and queue_items_after >= 0
+                )
+                or stream.callback_queued_bytes >= self._soft_callback_queue_bytes
+            ):
+                warning = (
+                    f"VideoRecorder: {stream.name} callback queue pressure "
+                    f"items={queue_items_after} bytes={stream.callback_queued_bytes}"
+                )
+        if warning is not None:
+            self._pressure_warning(stream, warning)
+
+    def _note_callback_dequeue(self, stream: _CameraStream, frame_size: int) -> None:
+        with stream.state_lock:
+            stream.callback_queued_bytes = max(
+                0, stream.callback_queued_bytes - frame_size,
+            )
+
+    def _note_raw_enqueue(
+        self,
+        stream: _CameraStream,
+        frame_size: int,
+        *,
+        queue_items_after: int,
+    ) -> None:
+        warning: Optional[str] = None
+        with stream.state_lock:
+            stream.raw_queued_bytes += frame_size
+            if queue_items_after >= 0:
+                stream.max_raw_queue_items = max(
+                    stream.max_raw_queue_items, queue_items_after,
+                )
+            stream.max_raw_queue_bytes = max(
+                stream.max_raw_queue_bytes, stream.raw_queued_bytes,
+            )
+            if (
+                (
+                    queue_items_after >= self._soft_raw_queue_frames
+                    and queue_items_after >= 0
+                )
+                or stream.raw_queued_bytes >= self._soft_raw_queue_bytes
+            ):
+                warning = (
+                    f"VideoRecorder: {stream.name} raw queue pressure "
+                    f"items={queue_items_after} bytes={stream.raw_queued_bytes}"
+                )
+        if warning is not None:
+            self._pressure_warning(stream, warning)
+
+    def _note_raw_dequeue(self, stream: _CameraStream, frame_size: int) -> None:
+        with stream.state_lock:
+            stream.raw_queued_bytes = max(0, stream.raw_queued_bytes - frame_size)
+
+    def _note_metadata_enqueue(
+        self, stream: _CameraStream, *, queue_items_after: int,
+    ) -> None:
+        warning: Optional[str] = None
+        with stream.state_lock:
+            if queue_items_after >= 0:
+                stream.max_metadata_queue_items = max(
+                    stream.max_metadata_queue_items, queue_items_after,
+                )
+                if queue_items_after >= self._soft_metadata_queue_rows:
+                    warning = (
+                        f"VideoRecorder: {stream.name} metadata queue pressure "
+                        f"items={queue_items_after}"
+                    )
+        if warning is not None:
+            self._pressure_warning(stream, warning)
+
     def _teardown_subscriptions(self) -> None:
         for stream in self._streams.values():
             if stream.subscription is not None:
@@ -402,123 +685,205 @@ class VideoRecorder:
                 stream.subscription = None
         self._streams.clear()
 
-    def _spawn_ffmpeg(self, stream: _CameraStream) -> None:
-        # Output dir must exist before ffmpeg opens the file — defend
-        # against any third party (e.g. rosbag_recorder) that may rewrite
-        # the episode dir between our mkdir in ``start`` and the moment
-        # ffmpeg actually does open().
-        stream.mp4_path.parent.mkdir(parents=True, exist_ok=True)
-        cmd = [
-            self._ffmpeg_bin,
-            "-hide_banner", "-loglevel", "warning",
-            "-y",
-            # Skip the long input-probing phase: we know the stream is
-            # MJPEG, one frame per packet, so feed the demuxer minimum
-            # bytes / zero analyzeduration for near-zero startup latency.
-            # Do not use ``-fflags +nobuffer`` here: with image2pipe+mjpeg
-            # it can drop the final packet at close, leaving sidecar rows
-            # one larger than the MP4 frame count.
-            "-probesize", "32",
-            "-analyzeduration", "0",
-            # Use the time at which each packet arrives on the pipe as
-            # its PTS. ROS image topics are variable-rate (camera FPS
-            # drifts, missed publications), so any fixed ``-framerate``
-            # hint produces a wrong-duration MP4 (e.g. 30fps stamp on a
-            # 15Hz stream plays 2x fast). Wall-clock stamps let the
-            # container record VFR with realistic per-frame timing.
-            "-use_wallclock_as_timestamps", "1",
-            "-f", "image2pipe",
-            "-vcodec", "mjpeg",
-            "-i", "pipe:0",
-            "-c:v", "copy",
-            "-an",
-            # Pass packet PTS through unchanged so the container's
-            # duration matches reality. ``cfr`` would force a fixed
-            # rate; ``passthrough`` is the right mode for VFR sources.
-            "-fps_mode", "passthrough",
-            # Pin the mp4 video-track timescale to 90000 (H.264 RTP
-            # standard). The default ~12800Hz timebase only has ~78μs
-            # resolution, so adjacent frames arriving in the same tick
-            # collide and ffmpeg spams "Non-monotonic DTS ... changing
-            # to N+1" warnings. 90000 also matches what
-            # converter/video_sync.py writes for the final lerobot mp4,
-            # so raw / transcoded / final all share one timescale.
-            "-video_track_timescale", "90000",
-            # Don't use +faststart for live capture — it forces ffmpeg to
-            # buffer the entire stream in memory or a temp file so it can
-            # move the moov atom to the front. Trail the moov instead
-            # (the default), which keeps memory flat and lets the file
-            # finalise in O(N) seek at close.
-            str(stream.mp4_path),
-        ]
-        stream.process = subprocess.Popen(
-            cmd,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.PIPE,
-            bufsize=0,
-        )
-        # Drain stderr in a side thread so it never fills its pipe and
-        # so we can surface ffmpeg messages alongside the ROS log.
-        threading.Thread(
-            target=self._drain_stderr, args=(stream,),
-            name=f"video-{stream.name}-stderr", daemon=True,
-        ).start()
-
-    def _drain_stderr(self, stream: _CameraStream) -> None:
-        proc = stream.process
-        if proc is None or proc.stderr is None:
-            return
-        for raw in iter(proc.stderr.readline, b""):
-            line = raw.decode("utf-8", errors="replace").rstrip()
-            if not line:
-                continue
-            self._node.get_logger().warn(f"ffmpeg[{stream.name}]: {line}")
-        proc.stderr.close()
-
     def _on_frame(self, stream: _CameraStream, msg: CompressedImage) -> None:
-        # Subscription is persistent (created in __init__) but the ROS
-        # callback runs whenever a publisher emits, including between
-        # episodes. Drop frames when no episode is active — we don't
-        # want them in the queue.
-        if not self._recording_active:
-            return
-        stream.frames_received += 1
-        data = bytes(msg.data)
-        if len(data) < 2 or data[:2] != _JPEG_SOI:
-            stream.frames_dropped_invalid += 1
-            return
-        header_ns = (
-            int(msg.header.stamp.sec) * 1_000_000_000
-            + int(msg.header.stamp.nanosec)
-        )
-        recv_ns = self._node.get_clock().now().nanoseconds
+        with self._callback_cond:
+            if not self._recording_active.is_set():
+                return
+            self._active_callbacks += 1
         try:
-            stream.queue.put_nowait((data, header_ns, recv_ns))
-        except Full:
-            stream.frames_dropped_queue += 1
-            if stream.frames_dropped_queue % 30 == 1:
-                self._node.get_logger().warn(
-                    f"VideoRecorder: {stream.name} queue full, dropped "
-                    f"{stream.frames_dropped_queue} frame(s) total"
-                )
+            callback_enter_ns = self._now_ns()
+            with stream.state_lock:
+                stream.frames_received += 1
+            bytes_copy_start_ns = self._now_ns()
+            data = bytes(msg.data)
+            bytes_copy_done_ns = self._now_ns()
+            if len(data) < 2 or data[:2] != _JPEG_SOI:
+                with stream.state_lock:
+                    stream.frames_dropped_invalid += 1
+                return
+            header_ns = (
+                int(msg.header.stamp.sec) * 1_000_000_000
+                + int(msg.header.stamp.nanosec)
+            )
+            header_read_ns = self._now_ns()
+            recv_ns = header_read_ns
+            queue_size_before = self._queue_size(stream.queue)
+            enqueue_start_ns = self._now_ns()
+            diagnostics = {
+                "callback_enter_ns": callback_enter_ns,
+                "header_read_ns": header_read_ns,
+                "bytes_copy_start_ns": bytes_copy_start_ns,
+                "bytes_copy_done_ns": bytes_copy_done_ns,
+                "enqueue_start_ns": enqueue_start_ns,
+                "enqueue_done_ns": enqueue_start_ns,
+                "queue_size_before": queue_size_before,
+                "queue_size_after": queue_size_before,
+                "frame_size_bytes": len(data),
+            }
+            queue_items_after = (
+                -1 if queue_size_before < 0 else queue_size_before + 1
+            )
+            self._note_callback_enqueue(
+                stream,
+                frame_size=len(data),
+                enqueue_wait_ns=(
+                    self._now_ns() - diagnostics["enqueue_start_ns"]
+                ),
+                queue_items_after=queue_items_after,
+            )
+            stream.queue.put((data, header_ns, recv_ns, diagnostics))
+            diagnostics["enqueue_done_ns"] = self._now_ns()
+            diagnostics["queue_size_after"] = queue_items_after
+        finally:
+            with self._callback_cond:
+                self._active_callbacks -= 1
+                if self._active_callbacks <= 0:
+                    self._callback_cond.notify_all()
 
-    def _worker_loop(self, stream: _CameraStream) -> None:
-        # Batch sidecar writes — round-trip per row is too chatty for parquet.
-        BATCH = 32
-        idxs: list[int] = []
-        hdrs: list[int] = []
-        recvs: list[int] = []
+    def _video_worker_loop(self, stream: _CameraStream) -> None:
         next_index = 0
+        while True:
+            item = stream.queue.get()
+            if item is None:
+                return
+
+            video_dequeue_ns = self._now_ns()
+            data, header_ns, recv_ns, diagnostics = item
+            self._note_callback_dequeue(stream, len(data))
+            with stream.state_lock:
+                if stream.first_recv_ns is None:
+                    stream.first_recv_ns = recv_ns
+                stream.last_recv_ns = recv_ns
+
+            metadata = {
+                "frame_index": next_index,
+                "header_stamp_ns": header_ns,
+                "recv_ns": recv_ns,
+                "callback_enter_ns": diagnostics["callback_enter_ns"],
+                "header_read_ns": diagnostics["header_read_ns"],
+                "bytes_copy_start_ns": diagnostics["bytes_copy_start_ns"],
+                "bytes_copy_done_ns": diagnostics["bytes_copy_done_ns"],
+                "enqueue_start_ns": diagnostics["enqueue_start_ns"],
+                "enqueue_done_ns": diagnostics.get(
+                    "enqueue_done_ns", diagnostics["enqueue_start_ns"]
+                ),
+                "video_dequeue_ns": video_dequeue_ns,
+                "queue_size_before": diagnostics["queue_size_before"],
+                "queue_size_after": diagnostics.get(
+                    "queue_size_after", diagnostics["queue_size_before"]
+                ),
+                "frame_size_bytes": diagnostics["frame_size_bytes"],
+            }
+            raw_queue_size_before = self._queue_size(stream.raw_queue)
+            raw_queue_items_after = (
+                -1 if raw_queue_size_before < 0 else raw_queue_size_before + 1
+            )
+            self._note_raw_enqueue(
+                stream, len(data), queue_items_after=raw_queue_items_after,
+            )
+            stream.raw_queue.put((data, metadata))
+            next_index += 1
+
+    def _raw_worker_loop(self, stream: _CameraStream) -> None:
+        try:
+            while True:
+                item = stream.raw_queue.get()
+                if item is None:
+                    self._write_raw_sentinel(stream)
+                    return
+                raw_dequeue_ns = self._now_ns()
+                data, metadata = item
+                self._note_raw_dequeue(stream, len(data))
+                fd = stream.raw_fd
+                if fd is None:
+                    with stream.state_lock:
+                        stream.raw_write_error = "raw fd closed before write"
+                    self._node.get_logger().error(
+                        f"VideoRecorder: {stream.name} raw fd closed before write"
+                    )
+                    return
+                try:
+                    raw_write_start_ns = self._now_ns()
+                    self._write_all(fd, data)
+                    raw_write_done_ns = self._now_ns()
+                except OSError as exc:
+                    with stream.state_lock:
+                        stream.raw_write_error = repr(exc)
+                    self._node.get_logger().error(
+                        f"VideoRecorder: {stream.name} raw spool write failed: {exc!r}"
+                    )
+                    return
+                with stream.state_lock:
+                    stream.max_raw_write_ns = max(
+                        stream.max_raw_write_ns,
+                        raw_write_done_ns - raw_write_start_ns,
+                    )
+
+                metadata_queue_size_before = self._queue_size(stream.metadata_queue)
+                metadata_enqueue_start_ns = self._now_ns()
+                metadata.update({
+                    "raw_dequeue_ns": raw_dequeue_ns,
+                    "raw_write_start_ns": raw_write_start_ns,
+                    "raw_write_done_ns": raw_write_done_ns,
+                    "metadata_enqueue_start_ns": metadata_enqueue_start_ns,
+                    "metadata_enqueue_done_ns": metadata_enqueue_start_ns,
+                    "metadata_queue_size_before": metadata_queue_size_before,
+                    "metadata_queue_size_after": (
+                        -1 if metadata_queue_size_before < 0
+                        else metadata_queue_size_before + 1
+                    ),
+                })
+                metadata_queue_items_after = (
+                    -1 if metadata_queue_size_before < 0
+                    else metadata_queue_size_before + 1
+                )
+                self._note_metadata_enqueue(
+                    stream, queue_items_after=metadata_queue_items_after,
+                )
+                stream.metadata_queue.put(metadata)
+                with stream.state_lock:
+                    stream.frames_written += 1
+        finally:
+            self._close_raw_fd(stream)
+
+    def _write_raw_sentinel(self, stream: _CameraStream) -> None:
+        fd = stream.raw_fd
+        if fd is None:
+            return
+        try:
+            self._write_all(fd, _JPEG_SENTINEL)
+        except OSError:
+            pass
+
+    @staticmethod
+    def _write_all(fd: int, data: bytes) -> None:
+        view = memoryview(data)
+        total = 0
+        while total < len(view):
+            written = os.write(fd, view[total:])
+            if written <= 0:
+                raise OSError("os.write returned 0 bytes")
+            total += written
+
+    def _metadata_worker_loop(self, stream: _CameraStream) -> None:
+        BATCH = 128
+        rows: list[dict] = []
 
         def flush() -> None:
-            if not idxs:
+            if not rows:
                 return
+            timestamp_flush_start_ns = self._now_ns()
             table = pa.table(
                 {
-                    "frame_index": pa.array(idxs, type=pa.int32()),
-                    "header_stamp_ns": pa.array(hdrs, type=pa.int64()),
-                    "recv_ns": pa.array(recvs, type=pa.int64()),
+                    "frame_index": pa.array(
+                        [row["frame_index"] for row in rows], type=pa.int32(),
+                    ),
+                    "header_stamp_ns": pa.array(
+                        [row["header_stamp_ns"] for row in rows], type=pa.int64(),
+                    ),
+                    "recv_ns": pa.array(
+                        [row["recv_ns"] for row in rows], type=pa.int64(),
+                    ),
                 },
                 schema=_TIMESTAMP_SCHEMA,
             )
@@ -527,57 +892,384 @@ class VideoRecorder:
                 with stream.writer_lock:
                     if stream.writer is writer:
                         writer.write_table(table)
-            idxs.clear()
-            hdrs.clear()
-            recvs.clear()
+            timestamp_flush_done_ns = self._now_ns()
 
-        while True:
-            try:
-                item = stream.queue.get(timeout=1.0)
-            except Empty:
-                flush()
-                continue
-            if item is None:
-                flush()
-                return
-            data, header_ns, recv_ns = item
-            proc = stream.process
-            if proc is None or proc.stdin is None:
-                stream.frames_dropped_queue += 1
-                continue
-            try:
-                proc.stdin.write(data)
-            except (BrokenPipeError, OSError) as exc:
-                stream.ffmpeg_error = repr(exc)
-                self._node.get_logger().error(
-                    f"VideoRecorder: {stream.name} ffmpeg pipe broke: {exc!r}"
+            diagnostics_flush_start_ns = timestamp_flush_done_ns
+            diagnostics_flush_done_ns = diagnostics_flush_start_ns
+            diagnostics_writer = stream.diagnostics_writer
+            if diagnostics_writer is not None:
+                diag_table = self._build_diagnostics_table(
+                    rows,
+                    timestamp_flush_start_ns,
+                    timestamp_flush_done_ns,
+                    diagnostics_flush_start_ns,
+                    diagnostics_flush_done_ns,
                 )
-                flush()
-                return
-            idxs.append(next_index)
-            hdrs.append(header_ns)
-            recvs.append(recv_ns)
-            stream.frames_written += 1
-            next_index += 1
-            if len(idxs) >= BATCH:
-                flush()
+                diagnostics_flush_start_ns = self._now_ns()
+                with stream.diagnostics_writer_lock:
+                    if stream.diagnostics_writer is diagnostics_writer:
+                        diagnostics_writer.write_table(diag_table)
+                diagnostics_flush_done_ns = self._now_ns()
 
-    def _close_ffmpeg(self, stream: _CameraStream) -> None:
-        proc = stream.process
-        if proc is None:
-            return
+            flush_ns = max(
+                timestamp_flush_done_ns - timestamp_flush_start_ns,
+                diagnostics_flush_done_ns - diagnostics_flush_start_ns,
+            )
+            with stream.state_lock:
+                stream.max_metadata_flush_ns = max(
+                    stream.max_metadata_flush_ns, flush_ns,
+                )
+                stream.frames_metadata_written += len(rows)
+            rows.clear()
+
         try:
+            while True:
+                try:
+                    item = stream.metadata_queue.get(timeout=1.0)
+                except Empty:
+                    flush()
+                    continue
+                if item is None:
+                    flush()
+                    return
+                item["metadata_dequeue_ns"] = self._now_ns()
+                rows.append(item)
+                if len(rows) >= BATCH:
+                    flush()
+        except Exception as exc:  # noqa: BLE001
+            with stream.state_lock:
+                stream.metadata_error = repr(exc)
+            self._node.get_logger().error(
+                f"VideoRecorder: {stream.name} metadata worker failed: {exc!r}"
+            )
+
+    def _build_diagnostics_table(
+        self,
+        rows: list[dict],
+        timestamp_flush_start_ns: int,
+        timestamp_flush_done_ns: int,
+        diagnostics_flush_start_ns: int,
+        diagnostics_flush_done_ns: int,
+    ):
+        return pa.table(
+            {
+                "frame_index": pa.array(
+                    [row["frame_index"] for row in rows], type=pa.int32(),
+                ),
+                "header_stamp_ns": pa.array(
+                    [row["header_stamp_ns"] for row in rows], type=pa.int64(),
+                ),
+                "callback_enter_ns": pa.array(
+                    [row["callback_enter_ns"] for row in rows], type=pa.int64(),
+                ),
+                "header_read_ns": pa.array(
+                    [row["header_read_ns"] for row in rows], type=pa.int64(),
+                ),
+                "bytes_copy_start_ns": pa.array(
+                    [row["bytes_copy_start_ns"] for row in rows], type=pa.int64(),
+                ),
+                "bytes_copy_done_ns": pa.array(
+                    [row["bytes_copy_done_ns"] for row in rows], type=pa.int64(),
+                ),
+                "recv_ns": pa.array(
+                    [row["recv_ns"] for row in rows], type=pa.int64(),
+                ),
+                "enqueue_start_ns": pa.array(
+                    [row["enqueue_start_ns"] for row in rows], type=pa.int64(),
+                ),
+                "enqueue_done_ns": pa.array(
+                    [row["enqueue_done_ns"] for row in rows], type=pa.int64(),
+                ),
+                "video_dequeue_ns": pa.array(
+                    [row["video_dequeue_ns"] for row in rows], type=pa.int64(),
+                ),
+                "raw_dequeue_ns": pa.array(
+                    [row["raw_dequeue_ns"] for row in rows], type=pa.int64(),
+                ),
+                "raw_write_start_ns": pa.array(
+                    [row["raw_write_start_ns"] for row in rows], type=pa.int64(),
+                ),
+                "raw_write_done_ns": pa.array(
+                    [row["raw_write_done_ns"] for row in rows], type=pa.int64(),
+                ),
+                "metadata_enqueue_start_ns": pa.array(
+                    [row["metadata_enqueue_start_ns"] for row in rows],
+                    type=pa.int64(),
+                ),
+                "metadata_enqueue_done_ns": pa.array(
+                    [row["metadata_enqueue_done_ns"] for row in rows],
+                    type=pa.int64(),
+                ),
+                "metadata_dequeue_ns": pa.array(
+                    [row["metadata_dequeue_ns"] for row in rows], type=pa.int64(),
+                ),
+                "timestamp_flush_start_ns": pa.array(
+                    [timestamp_flush_start_ns] * len(rows), type=pa.int64(),
+                ),
+                "timestamp_flush_done_ns": pa.array(
+                    [timestamp_flush_done_ns] * len(rows), type=pa.int64(),
+                ),
+                "diagnostics_flush_start_ns": pa.array(
+                    [diagnostics_flush_start_ns] * len(rows), type=pa.int64(),
+                ),
+                "diagnostics_flush_done_ns": pa.array(
+                    [diagnostics_flush_done_ns] * len(rows), type=pa.int64(),
+                ),
+                "queue_size_before": pa.array(
+                    [row["queue_size_before"] for row in rows], type=pa.int32(),
+                ),
+                "queue_size_after": pa.array(
+                    [row["queue_size_after"] for row in rows], type=pa.int32(),
+                ),
+                "metadata_queue_size_before": pa.array(
+                    [row["metadata_queue_size_before"] for row in rows],
+                    type=pa.int32(),
+                ),
+                "metadata_queue_size_after": pa.array(
+                    [row["metadata_queue_size_after"] for row in rows],
+                    type=pa.int32(),
+                ),
+                "frame_size_bytes": pa.array(
+                    [row["frame_size_bytes"] for row in rows], type=pa.int32(),
+                ),
+            },
+            schema=_DIAGNOSTICS_SCHEMA,
+        )
+
+    def _stream_stats_snapshot(self, stream: _CameraStream) -> dict:
+        with stream.state_lock:
+            return {
+                "name": stream.name,
+                "topic": stream.topic,
+                "diagnostics_mode": self._diagnostics_mode,
+                "frames_received": stream.frames_received,
+                "frames_written": stream.frames_written,
+                "frames_metadata_written": stream.frames_metadata_written,
+                "frames_remuxed": stream.frames_remuxed,
+                "frames_dropped_queue": stream.frames_dropped_queue,
+                "frames_dropped_invalid": stream.frames_dropped_invalid,
+                "raw_write_error": stream.raw_write_error,
+                "metadata_error": stream.metadata_error,
+                "remux_error": stream.remux_error,
+                "first_recv_ns": stream.first_recv_ns,
+                "last_recv_ns": stream.last_recv_ns,
+                "callback_queue_bytes_current": stream.callback_queued_bytes,
+                "raw_queue_bytes_current": stream.raw_queued_bytes,
+                "max_callback_queue_items": stream.max_callback_queue_items,
+                "max_raw_queue_items": stream.max_raw_queue_items,
+                "max_metadata_queue_items": stream.max_metadata_queue_items,
+                "max_callback_queue_bytes": stream.max_callback_queue_bytes,
+                "max_raw_queue_bytes": stream.max_raw_queue_bytes,
+                "max_enqueue_wait_ns": stream.max_enqueue_wait_ns,
+                "max_raw_write_ns": stream.max_raw_write_ns,
+                "max_metadata_flush_ns": stream.max_metadata_flush_ns,
+                "pressure_warning_count": stream.pressure_warning_count,
+                "remux_duration_ns": stream.remux_duration_ns,
+                "soft_callback_queue_frames": self._soft_callback_queue_frames,
+                "soft_callback_queue_bytes": self._soft_callback_queue_bytes,
+                "soft_raw_queue_frames": self._soft_raw_queue_frames,
+                "soft_raw_queue_bytes": self._soft_raw_queue_bytes,
+                "soft_metadata_queue_rows": self._soft_metadata_queue_rows,
+            }
+
+    def _public_stats(self, stream: _CameraStream) -> Dict[str, int]:
+        snapshot = self._stream_stats_snapshot(stream)
+        return {
+            "frames_received": int(snapshot["frames_received"]),
+            "frames_written": int(snapshot["frames_written"]),
+            "frames_metadata_written": int(snapshot["frames_metadata_written"]),
+            "frames_dropped_queue": int(snapshot["frames_dropped_queue"]),
+            "frames_dropped_invalid": int(snapshot["frames_dropped_invalid"]),
+            "frames_remuxed": int(snapshot["frames_remuxed"]),
+            "pressure_warning_count": int(snapshot["pressure_warning_count"]),
+            "max_callback_queue_items": int(snapshot["max_callback_queue_items"]),
+            "max_raw_queue_items": int(snapshot["max_raw_queue_items"]),
+            "max_metadata_queue_items": int(snapshot["max_metadata_queue_items"]),
+            "max_callback_queue_bytes": int(snapshot["max_callback_queue_bytes"]),
+            "max_raw_queue_bytes": int(snapshot["max_raw_queue_bytes"]),
+        }
+
+    def _write_stats_json(self, stream: _CameraStream) -> None:
+        if self._diagnostics_mode == "off" or stream.stats_path is None:
+            return
+        payload = self._stream_stats_snapshot(stream)
+        payload.update({
+            "mp4_path": str(stream.mp4_path) if stream.mp4_path else None,
+            "raw_path": str(stream.raw_path) if stream.raw_path else None,
+            "sidecar_path": str(stream.sidecar_path) if stream.sidecar_path else None,
+            "diagnostics_path": (
+                str(stream.diagnostics_path)
+                if self._diagnostics_enabled and stream.diagnostics_path
+                else None
+            ),
+        })
+        try:
+            stream.stats_path.write_text(
+                json.dumps(payload, indent=2, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+        except OSError as exc:
+            self._node.get_logger().warning(
+                f"VideoRecorder: {stream.name} stats json write failed: {exc!r}"
+            )
+
+    def _remux_streams(self, streams: list[_CameraStream]) -> None:
+        active_streams = [stream for stream in streams if stream.frames_written > 0]
+        if not active_streams:
+            for stream in streams:
+                self._remux_raw_spool(stream)
+            return
+        max_workers = _resolve_remux_workers(len(active_streams))
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {
+                executor.submit(self._remux_raw_spool, stream): stream
+                for stream in active_streams
+            }
+            for future in as_completed(futures):
+                stream = futures[future]
+                try:
+                    future.result()
+                except Exception as exc:  # pragma: no cover - defensive
+                    with stream.state_lock:
+                        stream.remux_error = repr(exc)
+                    self._node.get_logger().error(
+                        f"VideoRecorder: {stream.name} remux raised: {exc!r}"
+                    )
+        for stream in streams:
+            if stream.frames_written <= 0:
+                self._remux_raw_spool(stream)
+
+    def _remux_raw_spool(self, stream: _CameraStream) -> None:
+        raw_path = stream.raw_path
+        mp4_path = stream.mp4_path
+        if raw_path is None or mp4_path is None:
+            return
+        with stream.state_lock:
+            frames_written = stream.frames_written
+        if frames_written <= 0:
             try:
-                rc = proc.wait(timeout=10.0)
-            except subprocess.TimeoutExpired:
-                self._node.get_logger().error(
-                    f"VideoRecorder: {stream.name} ffmpeg did not exit; killing"
+                if raw_path.exists():
+                    raw_path.unlink()
+            except OSError:
+                pass
+            return
+        if not raw_path.exists():
+            with stream.state_lock:
+                stream.remux_error = "raw spool missing"
+            self._node.get_logger().error(
+                f"VideoRecorder: {stream.name} raw spool missing: {raw_path}"
+            )
+            return
+
+        tmp_mp4 = mp4_path.with_name(f"{mp4_path.stem}.remuxing.mp4")
+        if tmp_mp4.exists():
+            try:
+                tmp_mp4.unlink()
+            except OSError:
+                pass
+        fps = self._estimate_framerate(stream)
+        cmd = [
+            self._ffmpeg_bin,
+            "-hide_banner", "-loglevel", "error",
+            "-y",
+            "-probesize", "32",
+            "-analyzeduration", "0",
+            "-framerate", f"{fps:.6f}",
+            "-f", "image2pipe",
+            "-vcodec", "mjpeg",
+            "-i", str(raw_path),
+            "-c:v", "copy",
+            "-an",
+            "-fps_mode", "passthrough",
+            "-video_track_timescale", "90000",
+            str(tmp_mp4),
+        ]
+        start_ns = self._now_ns()
+        result = subprocess.run(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+        done_ns = self._now_ns()
+        with stream.state_lock:
+            stream.remux_duration_ns = done_ns - start_ns
+        if result.returncode != 0:
+            with stream.state_lock:
+                stream.remux_error = result.stderr.decode("utf-8", errors="replace")
+            self._node.get_logger().error(
+                f"VideoRecorder: {stream.name} remux failed: {stream.remux_error}"
+            )
+            return
+
+        frames = self._probe_frame_count(tmp_mp4)
+        with stream.state_lock:
+            stream.frames_remuxed = frames
+            frames_written = stream.frames_written
+        if frames != frames_written:
+            with stream.state_lock:
+                stream.remux_error = (
+                    f"frame count mismatch mp4={frames} sidecar={frames_written}"
                 )
-                proc.kill()
-                rc = proc.wait(timeout=5.0)
-            if rc != 0:
-                self._node.get_logger().error(
-                    f"VideoRecorder: {stream.name} ffmpeg exit={rc}"
-                )
-        finally:
-            stream.process = None
+            self._node.get_logger().error(
+                f"VideoRecorder: {stream.name} {stream.remux_error}; "
+                f"raw spool preserved at {raw_path}"
+            )
+            return
+
+        os.replace(tmp_mp4, mp4_path)
+        try:
+            raw_path.unlink()
+        except OSError as exc:
+            self._node.get_logger().warning(
+                f"VideoRecorder: {stream.name} raw spool cleanup failed: {exc!r}"
+            )
+        self._node.get_logger().info(
+            f"VideoRecorder: {stream.name} remuxed {frames} frame(s) "
+            f"in {(done_ns - start_ns) / 1_000_000_000.0:.3f}s"
+        )
+
+    def _estimate_framerate(self, stream: _CameraStream) -> float:
+        with stream.state_lock:
+            frames_written = stream.frames_written
+            first_recv_ns = stream.first_recv_ns
+            last_recv_ns = stream.last_recv_ns
+        if (
+            frames_written > 1
+            and first_recv_ns is not None
+            and last_recv_ns is not None
+            and last_recv_ns > first_recv_ns
+        ):
+            duration_s = (last_recv_ns - first_recv_ns) / 1_000_000_000.0
+            fps = (frames_written - 1) / duration_s
+            if 1.0 <= fps <= 120.0:
+                return fps
+        return float(max(1, self._framerate_hint))
+
+    def _probe_frame_count(self, path: Path) -> int:
+        result = subprocess.run(
+            [
+                self._ffprobe_bin,
+                "-v", "error",
+                "-select_streams", "v:0",
+                "-count_frames",
+                "-show_entries", "stream=nb_read_frames,nb_frames",
+                "-of", "default=nokey=1:noprint_wrappers=1",
+                str(path),
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            check=False,
+        )
+        if result.returncode != 0:
+            return -1
+        for line in result.stdout.splitlines():
+            text = line.strip()
+            if not text or text == "N/A":
+                continue
+            try:
+                return int(text)
+            except ValueError:
+                continue
+        return -1
