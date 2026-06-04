@@ -2,6 +2,11 @@
 Changelog for package orchestrator
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+0.1.10 (2026-06-04)
+-------------------
+* Extended recording service timeouts for STOP, FINISH, cancel, rerecord, and segmented recording operations so post-record remux work can complete.
+* Contributors: kimtaehyeong99
+
 0.1.9 (2026-06-02)
 ------------------
 * Synced prepared recording task information from SET_TASK_INFO so robot-button recordings use the latest folder name and metadata.

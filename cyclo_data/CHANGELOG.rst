@@ -2,6 +2,15 @@
 Changelog for package cyclo_data
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+0.1.10 (2026-06-04)
+-------------------
+* Switched LeRobot camera and observation state synchronization to publisher ``header.stamp`` timestamps while keeping action data on receive/log time.
+* Added ``meta/frame_reuse.parquet`` metadata for LeRobot conversions to record target video frames that reused a previous camera frame.
+* Reworked camera recording to append JPEG payloads to raw MJPEG spools during capture and remux them to MP4 on STOP.
+* Split video and metadata recorder workers, preserved raw spools on remux or frame-count validation failures, and added recorder diagnostics/stat summaries.
+* Added a video diagnostics analysis CLI for callback delay, queue wait, raw write, metadata wait, and flush timing reports.
+* Contributors: kimtaehyeong99
+
 0.1.9 (2026-06-02)
 ------------------
 * Improved LeRobot dataset conversion and merge handling for mixed subtask counts, segmented videos, and v3.0 video aggregation.
