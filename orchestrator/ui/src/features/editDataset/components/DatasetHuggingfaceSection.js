@@ -34,6 +34,7 @@ import SectionSelector from './SectionSelector';
 import { DEFAULT_PATHS, HF_ENDPOINT_PRESETS } from '../../../constants/paths';
 import HFStatus from '../../../constants/HFStatus';
 import {
+  DOWNLOAD_MODEL_BACKENDS,
   getDefaultDownloadPath,
   isManagedDownloadPath,
 } from '../hfDownloadPaths';
@@ -93,11 +94,10 @@ const validateHfRepoName = (repoName) => {
   return { isValid: true, message: '' };
 };
 
-const getDefaultUploadPath = (uploadType) => (
+const getDefaultUploadPath = (uploadType, modelBackend = 'lerobot') =>
   uploadType === 'model'
-    ? DEFAULT_PATHS.HF_MODEL_DOWNLOAD_PATH
-    : DEFAULT_PATHS.HF_DATASET_DOWNLOAD_PATH
-);
+    ? getDefaultDownloadPath('model', modelBackend)
+    : DEFAULT_PATHS.HF_DATASET_DOWNLOAD_PATH;
 
 // Style Classes
 const STYLES = {
@@ -178,23 +178,25 @@ const HuggingfaceSection = () => {
   // or a model; the toggle just changes the HF API repo_type on the wire
   // and the default destination path for download.
   const [uploadType, setUploadType] = useState('dataset');
+  const [uploadModelBackend, setUploadModelBackend] = useState('lerobot');
   const [downloadType, setDownloadType] = useState('model');
+  const [downloadModelBackend, setDownloadModelBackend] = useState('lerobot');
   // Destination directory for HF downloads. Model downloads land in the
-  // shared model folder so Inference can browse them directly.
+  // selected model folder so Inference can browse them directly.
   const [hfLocalDirDownload, setHfLocalDirDownload] = useState(() =>
-    getDefaultDownloadPath('model')
+    getDefaultDownloadPath('model', 'lerobot')
   );
   // When the user toggles type, swap the destination to that type's
   // canonical default — but only if the current value is a known default
   // (i.e. they haven't typed something custom). Custom values stay put.
   useEffect(() => {
     if (isManagedDownloadPath(hfLocalDirDownload)) {
-      setHfLocalDirDownload(getDefaultDownloadPath(downloadType));
+      setHfLocalDirDownload(getDefaultDownloadPath(downloadType, downloadModelBackend));
     }
     // hfLocalDirDownload intentionally omitted — we only react to type flips,
-    // not to the user editing the field.
+    // backend flips, not to the user editing the field.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [downloadType]);
+  }, [downloadType, downloadModelBackend]);
 
   const [showHfDownloadDirBrowserModal, setShowHfDownloadDirBrowserModal] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
@@ -231,12 +233,12 @@ const HuggingfaceSection = () => {
 
   useEffect(() => {
     if (!hfLocalDirUpload || isManagedDownloadPath(hfLocalDirUpload)) {
-      setHfLocalDirUpload(getDefaultUploadPath(uploadType));
+      setHfLocalDirUpload(getDefaultUploadPath(uploadType, uploadModelBackend));
     }
     // hfLocalDirUpload intentionally omitted so custom user paths survive
     // ordinary typing and only reset when they were a known default.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [uploadType]);
+  }, [uploadType, uploadModelBackend]);
 
   const downloadButtonEnabled =
     !isUploading &&
@@ -852,6 +854,44 @@ const HuggingfaceSection = () => {
 
               {/* Upload Dataset Section Content */}
               <div className="w-full flex flex-col gap-3">
+                {uploadType === 'model' && (
+                  <div className="w-full flex flex-col gap-2">
+                    <span className="text-lg font-bold">Model source backend</span>
+                    <div
+                      className="flex w-fit gap-1 rounded-md bg-gray-200 p-0.5"
+                      role="radiogroup"
+                      aria-label="Model source backend"
+                    >
+                      {DOWNLOAD_MODEL_BACKENDS.map((option) => (
+                        <button
+                          key={option.value}
+                          type="button"
+                          role="radio"
+                          aria-checked={uploadModelBackend === option.value}
+                          onClick={() => setUploadModelBackend(option.value)}
+                          disabled={isUploading}
+                          className={clsx(
+                            'px-3 py-1 text-xs font-medium rounded transition-colors',
+                            uploadModelBackend === option.value
+                              ? 'bg-white text-gray-900 shadow-sm'
+                              : 'text-gray-500 hover:text-gray-700',
+                            isUploading && 'cursor-not-allowed opacity-60'
+                          )}
+                        >
+                          {option.label}
+                        </button>
+                      ))}
+                    </div>
+                    <div className="text-xs text-gray-500">
+                      Model uploads default to{' '}
+                      <span className="font-mono text-blue-700">
+                        {getDefaultUploadPath('model', uploadModelBackend)}
+                      </span>
+                      .
+                    </div>
+                  </div>
+                )}
+
                 {/* Local Directory Input */}
                 <div className="w-full flex flex-col gap-2">
                   <span className="text-lg font-bold">Local Directory</span>
@@ -1034,13 +1074,51 @@ const HuggingfaceSection = () => {
 
               {/* Download Dataset Section Content */}
               <div className="w-full flex flex-col gap-3">
-                <div className="text-xs text-gray-500">
-                  Downloaded {downloadType}s are saved under{' '}
-                  <span className="font-mono text-blue-700">
-                    {getDefaultDownloadPath(downloadType)}
-                  </span>
-                  .
-                </div>
+                {downloadType === 'model' ? (
+                  <div className="w-full flex flex-col gap-2">
+                    <span className="text-lg font-bold">Model target backend</span>
+                    <div
+                      className="flex w-fit gap-1 rounded-md bg-gray-200 p-0.5"
+                      role="radiogroup"
+                      aria-label="Model target backend"
+                    >
+                      {DOWNLOAD_MODEL_BACKENDS.map((option) => (
+                        <button
+                          key={option.value}
+                          type="button"
+                          role="radio"
+                          aria-checked={downloadModelBackend === option.value}
+                          onClick={() => setDownloadModelBackend(option.value)}
+                          disabled={isDownloading}
+                          className={clsx(
+                            'px-3 py-1 text-xs font-medium rounded transition-colors',
+                            downloadModelBackend === option.value
+                              ? 'bg-white text-gray-900 shadow-sm'
+                              : 'text-gray-500 hover:text-gray-700',
+                            isDownloading && 'cursor-not-allowed opacity-60'
+                          )}
+                        >
+                          {option.label}
+                        </button>
+                      ))}
+                    </div>
+                    <div className="text-xs text-gray-500">
+                      Downloaded models are saved under{' '}
+                      <span className="font-mono text-blue-700">
+                        {getDefaultDownloadPath('model', downloadModelBackend)}
+                      </span>
+                      .
+                    </div>
+                  </div>
+                ) : (
+                  <div className="text-xs text-gray-500">
+                    Downloaded datasets are saved under{' '}
+                    <span className="font-mono text-blue-700">
+                      {getDefaultDownloadPath('dataset')}
+                    </span>
+                    .
+                  </div>
+                )}
 
                 {/* Repo ID Input */}
                 <div className="w-full flex flex-col gap-2">
@@ -1183,8 +1261,8 @@ const HuggingfaceSection = () => {
         title="Select Local Directory for Upload"
         selectButtonText="Select"
         allowDirectorySelect={true}
-        initialPath={getDefaultUploadPath(uploadType)}
-        defaultPath={getDefaultUploadPath(uploadType)}
+        initialPath={getDefaultUploadPath(uploadType, uploadModelBackend)}
+        defaultPath={getDefaultUploadPath(uploadType, uploadModelBackend)}
         homePath=""
       />
 
@@ -1200,8 +1278,8 @@ const HuggingfaceSection = () => {
         selectButtonText="Select"
         allowDirectorySelect={true}
         allowFileSelect={false}
-        initialPath={getDefaultDownloadPath(downloadType)}
-        defaultPath={getDefaultDownloadPath(downloadType)}
+        initialPath={getDefaultDownloadPath(downloadType, downloadModelBackend)}
+        defaultPath={getDefaultDownloadPath(downloadType, downloadModelBackend)}
         homePath=""
       />
 

@@ -43,8 +43,8 @@ export const DEFAULT_PATHS = {
   // Default destinations for HuggingFace downloads on the robot. The
   // backend (DataManager.download_huggingface_repo) creates these
   // directories on demand if missing — no manual setup needed.
-  HF_MODEL_DOWNLOAD_PATH: '/workspace/model',
-  HF_DATASET_DOWNLOAD_PATH: '/workspace/dataset',
+  HF_MODEL_DOWNLOAD_PATH: '/workspace/model/lerobot',
+  HF_DATASET_DOWNLOAD_PATH: '/workspace/rosbag2',
 };
 
 // Built-in HuggingFace endpoints shown as quick-pick options. Users can also
