@@ -65,6 +65,7 @@ logger = logging.getLogger("supervisor_api")
 _USER_SERVICES: tuple[str, ...] = (
     "orchestrator",
     "cyclo_data",
+    "bt_node",
     "web_video_server",
 )
 
