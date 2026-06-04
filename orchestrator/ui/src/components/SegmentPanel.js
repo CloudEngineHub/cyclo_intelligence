@@ -469,7 +469,7 @@ export default function SegmentPanel() {
             { 'bg-gray-100 cursor-not-allowed text-gray-500': inputDisabled }
           )}
           value={plannedSubTasks[i] || ''}
-          placeholder="sub_task 입력"
+          placeholder="Sub Task Instruction"
           onChange={(e) => handleSubTaskChange(i, e.target.value)}
           disabled={inputDisabled}
         />

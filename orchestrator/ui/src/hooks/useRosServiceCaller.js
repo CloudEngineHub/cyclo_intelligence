@@ -206,9 +206,14 @@ export function useRosServiceCaller() {
         );
         const subtaskInstructionSource =
           options.subtaskInstruction || taskInfo.subtaskInstruction || [];
-        const subtaskInstruction = subtaskInstructionSource.filter(
-          (instruction) => instruction.trim() !== ''
+        const rawSubtaskInstruction = subtaskInstructionSource.map(
+          (instruction) => String(instruction ?? '')
         );
+        const preserveEmptySubtaskSlots =
+          command === 'set_task_info' || command === 'prepare_session';
+        const subtaskInstruction = preserveEmptySubtaskSlots
+          ? rawSubtaskInstruction
+          : rawSubtaskInstruction.filter((instruction) => instruction.trim() !== '');
 
         if (!taskName.trim()) {
           const now = new Date();
