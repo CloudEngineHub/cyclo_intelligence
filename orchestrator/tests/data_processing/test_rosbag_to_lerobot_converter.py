@@ -1123,6 +1123,97 @@ class TestVideoSyncWorkerPolicy(unittest.TestCase):
             self.assertFalse(legacy_jsonl_path.exists())
             self.assertFalse(legacy_gzip_path.exists())
 
+    def test_frame_reuse_metadata_writer_uses_episode_reports(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            converter = RosbagToLerobotConverter(
+                ConversionConfig(repo_id="test/dataset", output_dir=tmp, fps=15)
+            )
+            episode = EpisodeData(
+                episode_index=4,
+                length=3,
+                frame_reuse_reports=[{
+                    "episode_index": 4,
+                    "camera": "cam_left_head",
+                    "target_fps": 15,
+                    "time_source": "header",
+                    "total_target_frames": 3,
+                    "total_source_frames": 2,
+                    "reused_target_frames": 1,
+                    "reuse_ratio": 1 / 3,
+                    "clamped_before_first_count": 0,
+                    "runs": [{
+                        "target_start_frame": 2,
+                        "target_end_frame": 2,
+                        "count": 1,
+                        "source_frame_index": 1,
+                        "source_header_stamp_ns": 100,
+                        "source_recv_ns": 200,
+                    }],
+                }],
+            )
+
+            converter._collect_episode_frame_reuse_reports([episode])
+            converter._write_frame_reuse_metadata(tmp)
+
+            import pyarrow.parquet as pq
+
+            rows = pq.read_table(tmp / "meta" / "frame_reuse.parquet").to_pylist()
+            self.assertEqual(
+                rows,
+                [{
+                    "episode_index": 4,
+                    "camera": "cam_left_head",
+                    "target_frame_index": 2,
+                }],
+            )
+
+    def test_frame_reuse_metadata_accepts_legacy_cached_episode_data(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            converter = RosbagToLerobotConverter(
+                ConversionConfig(repo_id="test/dataset", output_dir=tmp, fps=15)
+            )
+            episode = EpisodeData(episode_index=1, length=3)
+            delattr(episode, "frame_reuse_reports")
+
+            converter._remember_episode_frame_reuse_report(
+                episode,
+                {
+                    "episode_index": 1,
+                    "camera": "cam_left_head",
+                    "target_fps": 15,
+                    "time_source": "header",
+                    "total_target_frames": 3,
+                    "total_source_frames": 2,
+                    "reused_target_frames": 1,
+                    "reuse_ratio": 1 / 3,
+                    "clamped_before_first_count": 0,
+                    "runs": [{
+                        "target_start_frame": 1,
+                        "target_end_frame": 1,
+                        "count": 1,
+                        "source_frame_index": 0,
+                        "source_header_stamp_ns": 100,
+                        "source_recv_ns": 200,
+                    }],
+                },
+            )
+            converter._collect_episode_frame_reuse_reports([episode])
+            converter._write_frame_reuse_metadata(tmp)
+
+            import pyarrow.parquet as pq
+
+            rows = pq.read_table(tmp / "meta" / "frame_reuse.parquet").to_pylist()
+            self.assertEqual(
+                rows,
+                [{
+                    "episode_index": 1,
+                    "camera": "cam_left_head",
+                    "target_frame_index": 1,
+                }],
+            )
+
     def test_conversion_worker_max_profile_caps_at_sixteen(self):
         with patch.dict(
             os.environ,
@@ -1754,6 +1845,155 @@ class TestSubtaskStitching(unittest.TestCase):
         self.assertEqual(
             [float(state[0]) for state in stitched[0].observation_state],
             [1, 2, 3, 4, 5, 6],
+        )
+
+    def test_complete_subtasks_shift_frame_reuse_reports(self):
+        converter = RosbagToLerobotConverter(
+            ConversionConfig(repo_id="test", output_dir=Path("/tmp/out"), fps=10)
+        )
+        episodes = [
+            self._make_subtask_episode(0, 0, 0, 2, [1, 2]),
+            self._make_subtask_episode(1, 0, 1, 2, [3, 4]),
+        ]
+        for ep in episodes:
+            ep.frame_reuse_reports = [{
+                "episode_index": int(ep.episode_index),
+                "camera": "cam_left_head",
+                "target_fps": 10,
+                "time_source": "header",
+                "total_target_frames": 2,
+                "total_source_frames": 1,
+                "reused_target_frames": 1,
+                "reuse_ratio": 0.5,
+                "clamped_before_first_count": 0,
+                "runs": [{
+                    "target_start_frame": 1,
+                    "target_end_frame": 1,
+                    "count": 1,
+                    "source_frame_index": 0,
+                    "source_header_stamp_ns": 100,
+                    "source_recv_ns": 200,
+                }],
+            }]
+
+        stitched = converter.prepare_episodes_for_writing(episodes)
+
+        self.assertEqual(len(stitched), 1)
+        reports = stitched[0].frame_reuse_reports
+        self.assertEqual(len(reports), 1)
+        self.assertEqual(reports[0]["episode_index"], 0)
+        self.assertEqual(reports[0]["camera"], "cam_left_head")
+        self.assertEqual(reports[0]["total_target_frames"], 4)
+        self.assertEqual(reports[0]["reused_target_frames"], 2)
+        self.assertEqual(
+            [
+                (
+                    run["target_start_frame"],
+                    run["target_end_frame"],
+                )
+                for run in reports[0]["runs"]
+            ],
+            [(1, 1), (3, 3)],
+        )
+
+    def test_complete_subtasks_shift_frame_reuse_reports_without_off_by_one(self):
+        converter = RosbagToLerobotConverter(
+            ConversionConfig(repo_id="test", output_dir=Path("/tmp/out"), fps=10)
+        )
+
+        def make_episode(raw_idx, sub_idx, length):
+            return EpisodeData(
+                episode_index=raw_idx,
+                timestamps=[idx / 10.0 for idx in range(length)],
+                observation_state=[
+                    np.array([idx], dtype=np.float32) for idx in range(length)
+                ],
+                action=[
+                    np.array([idx + 10], dtype=np.float32) for idx in range(length)
+                ],
+                tasks=["main task"],
+                length=length,
+                recording_mode="subtask",
+                full_episode_index=0,
+                subtask_index=sub_idx,
+                subtask_total=2,
+                subtask_instruction=f"subtask {sub_idx}",
+            )
+
+        episodes = [
+            make_episode(0, 0, 100),
+            make_episode(1, 1, 140),
+        ]
+        episodes[0].frame_reuse_reports = [{
+            "episode_index": 0,
+            "camera": "cam_left_head",
+            "target_fps": 10,
+            "time_source": "header",
+            "total_target_frames": 100,
+            "total_source_frames": 99,
+            "reused_target_frames": 1,
+            "reuse_ratio": 0.01,
+            "clamped_before_first_count": 0,
+            "runs": [{
+                "target_start_frame": 99,
+                "target_end_frame": 99,
+                "count": 1,
+                "source_frame_index": 98,
+                "source_header_stamp_ns": 100,
+                "source_recv_ns": 200,
+            }],
+        }]
+        episodes[1].frame_reuse_reports = [{
+            "episode_index": 1,
+            "camera": "cam_left_head",
+            "target_fps": 10,
+            "time_source": "header",
+            "total_target_frames": 140,
+            "total_source_frames": 137,
+            "reused_target_frames": 4,
+            "reuse_ratio": 4 / 140,
+            "clamped_before_first_count": 0,
+            "runs": [
+                {
+                    "target_start_frame": 70,
+                    "target_end_frame": 72,
+                    "count": 3,
+                    "source_frame_index": 69,
+                    "source_header_stamp_ns": 300,
+                    "source_recv_ns": 400,
+                },
+                {
+                    "target_start_frame": 139,
+                    "target_end_frame": 139,
+                    "count": 1,
+                    "source_frame_index": 138,
+                    "source_header_stamp_ns": 500,
+                    "source_recv_ns": 600,
+                },
+            ],
+        }]
+
+        stitched = converter.prepare_episodes_for_writing(episodes)
+
+        self.assertEqual(len(stitched), 1)
+        self.assertEqual(stitched[0].length, 240)
+        report = stitched[0].frame_reuse_reports[0]
+        self.assertEqual(report["total_target_frames"], 240)
+        self.assertEqual(report["reused_target_frames"], 5)
+        self.assertEqual(
+            [
+                (
+                    run["target_start_frame"],
+                    run["target_end_frame"],
+                    run["count"],
+                )
+                for run in report["runs"]
+            ],
+            [
+                (99, 99, 1),
+                (170, 172, 3),
+                (239, 239, 1),
+            ],
         )
 
     def test_incomplete_subtask_group_is_skipped(self):

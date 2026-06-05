@@ -2,6 +2,12 @@
 Changelog for package cyclo_data
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+0.1.11 (2026-06-05)
+-------------------
+* Preserved LeRobot camera frame reuse metadata across multi-subtask stitching so target frame indexes are reported in final episode coordinates.
+* Added legacy prepared episode cache handling for LeRobot conversions that restore cached episode objects without frame reuse report fields.
+* Contributors: kimtaehyeong99
+
 0.1.10 (2026-06-04)
 -------------------
 * Switched LeRobot camera and observation state synchronization to publisher ``header.stamp`` timestamps while keeping action data on receive/log time.
