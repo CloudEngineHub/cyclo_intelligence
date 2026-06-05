@@ -2,6 +2,11 @@
 Changelog for package orchestrator
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+0.1.11 (2026-06-05)
+-------------------
+* Added LeRobot converter regression coverage for multi-subtask frame reuse offsets, legacy prepared episode caches, and frame reuse metadata writing.
+* Contributors: kimtaehyeong99
+
 0.1.10 (2026-06-04)
 -------------------
 * Extended recording service timeouts for STOP, FINISH, cancel, rerecord, and segmented recording operations so post-record remux work can complete.

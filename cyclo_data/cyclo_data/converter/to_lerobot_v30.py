@@ -788,6 +788,7 @@ class RosbagToLerobotV30Converter(RosbagToLerobotConverterBase):
         if not episodes_data:
             self._log_error("No complete episodes remained after subtask stitching")
             return False
+        self._collect_episode_frame_reuse_reports(episodes_data)
 
         output_dir = Path(self.config.output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)

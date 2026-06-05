@@ -1604,6 +1604,7 @@ class RosbagToLerobotConverter(RosbagToLerobotConverterBase):
         if not episodes_data:
             self._log_error("No complete episodes remained after subtask stitching")
             return False
+        self._collect_episode_frame_reuse_reports(episodes_data)
 
         self._total_episodes = 0
         self._total_frames = 0

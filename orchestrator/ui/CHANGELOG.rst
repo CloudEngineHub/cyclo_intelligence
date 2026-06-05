@@ -2,6 +2,10 @@
 Changelog for package cyclo-ui
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+0.1.11 (2026-06-05)
+-------------------
+* None
+
 0.1.10 (2026-06-04)
 -------------------
 * Preserved empty planned subtask slots when syncing Record page task information so ``Number of SubTasks`` no longer resets after SET_TASK_INFO echo.

@@ -79,7 +79,7 @@ _EXTRACT_CACHE_DISABLE_ENV = "CYCLO_EXTRACT_CACHE_DISABLE"
 _EXTRACT_CACHE_VERSION = 2
 _RAW_CDR_EXTRACT_DISABLE_ENV = "CYCLO_EXTRACT_DISABLE_RAW_CDR"
 _PREPARED_EPISODE_CACHE_DISABLE_ENV = "CYCLO_PREPARED_EPISODE_CACHE_DISABLE"
-_PREPARED_EPISODE_CACHE_VERSION = 2
+_PREPARED_EPISODE_CACHE_VERSION = 3
 _VIDEO_COPY_MODE_ENV = "CYCLO_VIDEO_COPY_MODE"
 _VIDEO_STATS_SAMPLES_ENV = "CYCLO_VIDEO_STATS_SAMPLES"
 _CONVERTER_INFO_LOGS_ENV = "CYCLO_CONVERTER_INFO_LOGS"
@@ -411,6 +411,7 @@ class EpisodeData:
     # ``timestamps``. Populated by ``_resample_to_fps`` so the video
     # sync step can map per-camera MP4 frames onto the same grid.
     grid_log_times_sec: List[float] = field(default_factory=list)
+    frame_reuse_reports: List[Dict[str, Any]] = field(default_factory=list)
 
 
 class RosbagToLerobotConverterBase:
@@ -533,6 +534,39 @@ class RosbagToLerobotConverterBase:
         with self._frame_reuse_lock:
             self._frame_reuse_reports[key] = report
 
+    def _remember_episode_frame_reuse_report(
+        self,
+        episode: EpisodeData,
+        report: Optional[Dict[str, Any]],
+    ) -> None:
+        if not report:
+            return
+        key = (int(report["episode_index"]), str(report["camera"]))
+        kept: List[Dict[str, Any]] = []
+        replaced = False
+        frame_reuse_reports = self._episode_frame_reuse_reports(episode)
+        for existing in frame_reuse_reports:
+            existing_key = (
+                int(existing.get("episode_index", episode.episode_index)),
+                str(existing.get("camera", "")),
+            )
+            if existing_key == key:
+                kept.append(report)
+                replaced = True
+            else:
+                kept.append(existing)
+        if not replaced:
+            kept.append(report)
+        episode.frame_reuse_reports = kept
+
+    @staticmethod
+    def _episode_frame_reuse_reports(episode: EpisodeData) -> List[Dict[str, Any]]:
+        reports = getattr(episode, "frame_reuse_reports", None)
+        if reports is None:
+            reports = []
+            episode.frame_reuse_reports = reports
+        return reports
+
     def _record_frame_reuse_report(
         self,
         *,
@@ -553,7 +587,100 @@ class RosbagToLerobotConverterBase:
             fps=int(self.config.fps),
             time_source="header",
         )
+        self._remember_episode_frame_reuse_report(episode, report)
         self._remember_frame_reuse_report(report)
+
+    @staticmethod
+    def _shift_frame_reuse_report(
+        report: Dict[str, Any],
+        *,
+        episode_index: int,
+        frame_offset: int,
+    ) -> Dict[str, Any]:
+        shifted = dict(report)
+        shifted["episode_index"] = int(episode_index)
+        shifted_runs: List[Dict[str, Any]] = []
+        for run in report.get("runs") or []:
+            shifted_run = dict(run)
+            shifted_run["target_start_frame"] = (
+                int(shifted_run["target_start_frame"]) + int(frame_offset)
+            )
+            shifted_run["target_end_frame"] = (
+                int(shifted_run["target_end_frame"]) + int(frame_offset)
+            )
+            shifted_runs.append(shifted_run)
+        shifted["runs"] = shifted_runs
+        return shifted
+
+    @staticmethod
+    def _merge_frame_reuse_reports(
+        reports: List[Dict[str, Any]],
+        *,
+        episode_index: int,
+        camera: str,
+        total_target_frames: int,
+    ) -> Optional[Dict[str, Any]]:
+        if not reports:
+            return None
+        reports = sorted(
+            reports,
+            key=lambda item: (
+                min(
+                    [int(run["target_start_frame"]) for run in item.get("runs") or []]
+                    or [0]
+                ),
+                int(item.get("episode_index", episode_index)),
+            ),
+        )
+        runs: List[Dict[str, Any]] = []
+        total_source_frames = 0
+        reused_target_frames = 0
+        clamped_before_first_count = 0
+        time_sources = set()
+        target_frames_from_parts = 0
+        for report in reports:
+            runs.extend([dict(run) for run in report.get("runs") or []])
+            total_source_frames += int(report.get("total_source_frames", 0) or 0)
+            reused_target_frames += int(report.get("reused_target_frames", 0) or 0)
+            clamped_before_first_count += int(
+                report.get("clamped_before_first_count", 0) or 0
+            )
+            target_frames_from_parts += int(report.get("total_target_frames", 0) or 0)
+            time_sources.add(str(report.get("time_source", "header") or "header"))
+        total_target = int(total_target_frames or target_frames_from_parts)
+        reuse_ratio = (
+            float(reused_target_frames) / float(total_target)
+            if total_target > 0 else 0.0
+        )
+        return {
+            "episode_index": int(episode_index),
+            "camera": str(camera),
+            "target_fps": int(reports[0].get("target_fps", 0) or 0),
+            "time_source": "recv" if "recv" in time_sources else "header",
+            "total_target_frames": total_target,
+            "total_source_frames": int(total_source_frames),
+            "reused_target_frames": int(reused_target_frames),
+            "reuse_ratio": reuse_ratio,
+            "clamped_before_first_count": int(clamped_before_first_count),
+            "runs": sorted(
+                runs,
+                key=lambda run: (
+                    int(run["target_start_frame"]),
+                    int(run["target_end_frame"]),
+                    int(run.get("source_frame_index", 0) or 0),
+                ),
+            ),
+        }
+
+    def _collect_episode_frame_reuse_reports(
+        self,
+        episodes_data: List[EpisodeData],
+    ) -> None:
+        for episode in episodes_data:
+            for report in self._episode_frame_reuse_reports(episode):
+                report = dict(report)
+                report["episode_index"] = int(episode.episode_index)
+                self._remember_frame_reuse_report(report)
 
     def _record_frame_reuse_for_video(
         self,
@@ -1547,10 +1674,12 @@ class RosbagToLerobotConverterBase:
         )
 
         frame_cursor = 0
+        frame_reuse_by_camera: Dict[str, List[Dict[str, Any]]] = {}
         for subtask_idx, segment_episode in enumerate(segment_episodes):
             length = int(segment_episode.length)
             if length <= 0:
                 continue
+            start_frame = frame_cursor
             stitched.observation_state.extend(segment_episode.observation_state)
             stitched.action.extend(segment_episode.action)
             stitched.timestamps.extend(
@@ -1570,16 +1699,35 @@ class RosbagToLerobotConverterBase:
                     else f"Subtask {subtask_idx + 1}"
                 )
             )
-            start_frame = frame_cursor
             end_frame = frame_cursor + length
             stitched.subtask_segments.append({
                 "subtask_index": subtask_idx,
                 "sub_task_instruction": instruction,
                 "frame_duration": [start_frame / fps, end_frame / fps],
             })
+            for report in self._episode_frame_reuse_reports(segment_episode):
+                camera = str(report.get("camera", ""))
+                if not camera:
+                    continue
+                frame_reuse_by_camera.setdefault(camera, []).append(
+                    self._shift_frame_reuse_report(
+                        report,
+                        episode_index=episode_index,
+                        frame_offset=start_frame,
+                    )
+                )
             frame_cursor = end_frame
 
         stitched.length = len(stitched.timestamps)
+        for camera, reports in frame_reuse_by_camera.items():
+            merged = self._merge_frame_reuse_reports(
+                reports,
+                episode_index=episode_index,
+                camera=camera,
+                total_target_frames=stitched.length,
+            )
+            if merged is not None:
+                stitched.frame_reuse_reports.append(merged)
         if self.config.use_videos:
             stitched.video_files = self._stitch_subtask_videos(
                 episode_index,
@@ -1938,6 +2086,7 @@ class RosbagToLerobotConverterBase:
         stitched.subtask_indices = []
         stitched.subtask_segments = []
         cursor = 0
+        frame_reuse_by_camera: Dict[str, List[Dict[str, Any]]] = {}
         for idx, ep in enumerate(ordered):
             length = len(ep.timestamps)
             if length <= 0:
@@ -1960,7 +2109,27 @@ class RosbagToLerobotConverterBase:
                 "sub_task_instruction": instruction,
                 "frame_duration": [start_s, end_s],
             })
+            for report in self._episode_frame_reuse_reports(ep):
+                camera = str(report.get("camera", ""))
+                if not camera:
+                    continue
+                frame_reuse_by_camera.setdefault(camera, []).append(
+                    self._shift_frame_reuse_report(
+                        report,
+                        episode_index=full_idx,
+                        frame_offset=start_frame,
+                    )
+                )
             cursor = end_frame
+        for camera, reports in frame_reuse_by_camera.items():
+            merged = self._merge_frame_reuse_reports(
+                reports,
+                episode_index=full_idx,
+                camera=camera,
+                total_target_frames=stitched.length,
+            )
+            if merged is not None:
+                stitched.frame_reuse_reports.append(merged)
         stitched.video_files = self._stitch_subtask_videos(full_idx, ordered)
         self._log_info(
             f"Stitched full_episode={full_idx} from {len(ordered)} subtasks "
