@@ -152,6 +152,38 @@ container_running() {
     docker ps --format '{{.Names}}' | grep -q "^$1\$"
 }
 
+compose_service_image() {
+    local service="$1"
+    $COMPOSE config --format json 2>/dev/null \
+        | python3 -c 'import json, sys; print(json.load(sys.stdin)["services"][sys.argv[1]]["image"])' "$service"
+}
+
+remove_stale_policy_container() {
+    local service="$1"
+    local container="$2"
+    local expected_image
+    local expected_id
+    local current_id
+
+    expected_image="$(compose_service_image "$service" 2>/dev/null || true)"
+    if [ -z "$expected_image" ]; then
+        echo "[container.sh] Warning: could not resolve compose image for $service; skipping stale-container check."
+        return 0
+    fi
+
+    expected_id="$(docker image inspect -f '{{.Id}}' "$expected_image" 2>/dev/null || true)"
+    current_id="$(docker inspect -f '{{.Image}}' "$container" 2>/dev/null || true)"
+    if [ -n "$expected_id" ] && [ -n "$current_id" ] && [ "$expected_id" != "$current_id" ]; then
+        echo "[container.sh] Removing stale $container (expected $expected_image). It will be recreated on next start."
+        docker rm -f "$container" >/dev/null || true
+    fi
+}
+
+remove_stale_policy_containers() {
+    remove_stale_policy_container "$LEROBOT_SERVICE" "$LEROBOT_CONTAINER"
+    remove_stale_policy_container "$GROOT_SERVICE" "$GROOT_CONTAINER"
+}
+
 show_help() {
     cat <<EOF
 Usage: $0 <command>
@@ -200,7 +232,8 @@ start_main() {
     setup_storage
     setup_x11
     echo "[container.sh] Pulling pre-built images (ignoring local-only failures)..."
-    $COMPOSE pull --ignore-pull-failures "$MAIN_SERVICE" || true
+    $COMPOSE pull --ignore-pull-failures "$MAIN_SERVICE" "$LEROBOT_SERVICE" "$GROOT_SERVICE" || true
+    remove_stale_policy_containers
     echo "[container.sh] Starting $MAIN_SERVICE (ARCH=$ARCH${BUILD_FLAG:+, rebuild on})..."
     $COMPOSE up -d $BUILD_FLAG "$MAIN_SERVICE"
     echo "[container.sh] Done. 'docker/container.sh status' to check s6 services."

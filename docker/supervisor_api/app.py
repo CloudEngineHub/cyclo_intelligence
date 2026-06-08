@@ -358,6 +358,30 @@ def _container_raw_state(container) -> str:
     return container.attrs.get("State", {}).get("Status", "unknown")
 
 
+def _backend_container_image_mismatch(
+    client: docker.DockerClient,
+    container,
+    spec: Dict[str, str],
+) -> bool:
+    """Return True when an existing backend container uses an older image ID."""
+    container_image_id = container.attrs.get("Image")
+    if not container_image_id:
+        return False
+
+    found_local_image = False
+    for image in _backend_image_candidates(spec):
+        try:
+            expected_image = client.images.get(image)
+        except ImageNotFound:
+            continue
+        found_local_image = True
+        expected_image_id = getattr(expected_image, "id", None)
+        if expected_image_id and expected_image_id == container_image_id:
+            return False
+
+    return found_local_image
+
+
 def _missing_required_mounts(name: str, container) -> List[str]:
     required_mounts = _REQUIRED_BACKEND_MOUNTS.get(name, ())
     if not required_mounts:
@@ -676,6 +700,9 @@ async def _ensure_backend_running(name: str, spec: Dict[str, str]) -> ActionResu
             if missing_mounts:
                 ctr.remove(force=True)
                 return None, "missing_required_mounts=" + ",".join(missing_mounts)
+            if _backend_container_image_mismatch(client, ctr, spec):
+                ctr.remove(force=True)
+                return None, "image_mismatch"
 
             state = _container_raw_state(ctr)
             if state == "paused":
@@ -717,7 +744,7 @@ async def _ensure_backend_running(name: str, spec: Dict[str, str]) -> ActionResu
     msg = result.stderr or result.stdout or f"rc={result.rc}"
     if ok:
         reason = ""
-        if compose_reason.startswith("missing_required_mounts="):
+        if compose_reason != "not_created":
             reason = f" after recreating stale container ({compose_reason})"
         msg = (
             f"{spec['container']} created/started{reason} "
@@ -739,6 +766,8 @@ async def backend_status(name: str) -> BackendStatus:
             return pulled, "not_created", None, None, []
         except DockerException as e:
             raise HTTPException(500, f"docker inspect failed: {e}")
+        if _backend_container_image_mismatch(client, ctr, spec):
+            return pulled, "exited", ctr.id, "stale_image", []
         raw = _container_raw_state(ctr)
         if raw == "running":
             mapped = "running"
