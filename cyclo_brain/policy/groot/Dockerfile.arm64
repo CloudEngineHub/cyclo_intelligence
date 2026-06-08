@@ -1,8 +1,8 @@
 # NVIDIA Isaac GR00T N1.7 Docker Container with Zenoh Communication Support
 # for ARM64 / NVIDIA Jetson Orin.
 #
-# This image is inference-focused. Training/finetuning should happen on AMD64
-# machines; Jetson is used for deployment and robot-side policy execution.
+# This image is inference-focused. GR00T training/finetuning is owned by the
+# forked Isaac-GR00T repo and its official entrypoints.
 #
 # Build context: cyclo_intelligence/cyclo_brain/policy/groot/
 # Usage:

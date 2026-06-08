@@ -1,6 +1,6 @@
-# NVIDIA Isaac GR00T N1.6 Docker Container with Zenoh Communication Support (AMD64)
-# This container provides isolated GR00T environment with Zenoh-based communication
-# for training (finetuning) and inference commands from orchestrator (ROS2)
+# NVIDIA Isaac GR00T N1.7 Docker Container with Zenoh Communication Support (AMD64)
+# This image is inference-focused. GR00T training/finetuning is owned by the
+# forked Isaac-GR00T repo and its official entrypoints.
 #
 # Based on official NVIDIA GR00T Dockerfile with Cyclo Intelligence integration
 # Build context: cyclo_intelligence/cyclo_brain/policy/groot/
