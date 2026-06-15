@@ -59,9 +59,15 @@ set -- "${NEW_ARGS[@]}"
 
 # Pre-create host bind-mount targets so docker doesn't auto-create them
 # as root-owned directories (which then can't be written to from the
-# host without sudo). In auto mode, prefer SSD-backed storage when it is
-# usable and fall back to repo-local storage on development machines.
+# host without sudo). Compose always mounts docker/workspace and
+# docker/huggingface into the containers; when SSD storage is available,
+# these repo-local paths are turned into symlinks to CYCLO_SSD_ROOT.
 ensure_host_dir() {
+    if [ -L "$1" ] && [ ! -e "$1" ]; then
+        echo "[container.sh] Error: stale symlink: $1" >&2
+        echo "[container.sh] Fix the symlink target or remove it before starting." >&2
+        exit 1
+    fi
     [ -d "$1" ] || mkdir -p "$1"
 }
 
@@ -74,65 +80,226 @@ storage_root_usable() {
     rmdir "$probe" 2>/dev/null || true
 }
 
+canonical_path() {
+    local resolved
+    resolved="$(readlink -f "$1" 2>/dev/null || true)"
+    if [ -n "$resolved" ]; then
+        printf '%s\n' "$resolved"
+    else
+        printf '%s\n' "$1"
+    fi
+}
+
+path_within() {
+    local path="$1"
+    local root="$2"
+    case "$path" in
+        "$root"|"$root"/*) return 0 ;;
+        *)                 return 1 ;;
+    esac
+}
+
+prepare_required_ssd_root() {
+    local root="$1"
+
+    if storage_root_usable "$root"; then
+        return 0
+    fi
+
+    if [ "$(id -u)" -eq 0 ]; then
+        mkdir -p "$root"
+        chown "$(id -u):$(id -g)" "$root" 2>/dev/null || true
+    elif command -v sudo >/dev/null 2>&1; then
+        sudo mkdir -p "$root"
+        sudo chown "$(id -u):$(id -g)" "$root"
+    else
+        return 1
+    fi
+
+    storage_root_usable "$root"
+}
+
+path_is_empty_dir() {
+    [ -d "$1" ] && [ -z "$(find "$1" -mindepth 1 -maxdepth 1 -print -quit)" ]
+}
+
+backup_path_for() {
+    local path="$1"
+    local stamp
+    local candidate
+    local index=0
+
+    stamp="$(date +%Y%m%d-%H%M%S)"
+    candidate="${path}.local-before-ssd-${stamp}"
+    while [ -e "$candidate" ] || [ -L "$candidate" ]; do
+        index=$((index + 1))
+        candidate="${path}.local-before-ssd-${stamp}.${index}"
+    done
+    printf '%s\n' "$candidate"
+}
+
+migrate_local_dir_to_ssd() {
+    local src_path="$1"
+    local target_path="$2"
+    local label="$3"
+
+    if [ ! -d "$src_path" ] || [ -L "$src_path" ]; then
+        return 0
+    fi
+    if path_is_empty_dir "$src_path"; then
+        return 0
+    fi
+    if ! command -v rsync >/dev/null 2>&1; then
+        echo "[container.sh] Error: rsync is required to migrate existing ${label} data to SSD." >&2
+        exit 1
+    fi
+
+    echo "[container.sh] Migrating existing ${label} data to ${target_path} without overwriting SSD files."
+    rsync -aHP --ignore-existing --remove-source-files "$src_path"/ "$target_path"/
+    find "$src_path" -depth -type d -empty -delete || true
+}
+
+prepare_ssd_link() {
+    local link_path="$1"
+    local target_path="$2"
+    local ssd_root="$3"
+    local label="$4"
+    local link_real
+    local target_real
+    local backup_path
+
+    mkdir -p "$target_path"
+    target_real="$(canonical_path "$target_path")"
+
+    if [ -L "$link_path" ] && [ -e "$link_path" ]; then
+        link_real="$(canonical_path "$link_path")"
+        if path_within "$link_real" "$ssd_root"; then
+            return 0
+        fi
+    fi
+
+    if [ -e "$link_path" ] || [ -L "$link_path" ]; then
+        if [ -d "$link_path" ] && [ ! -L "$link_path" ]; then
+            migrate_local_dir_to_ssd "$link_path" "$target_real" "$label"
+        fi
+    fi
+
+    if [ -e "$link_path" ] || [ -L "$link_path" ]; then
+        if path_is_empty_dir "$link_path" && [ ! -L "$link_path" ]; then
+            rmdir "$link_path"
+        elif [ ! -L "$link_path" ]; then
+            backup_path="$(backup_path_for "$link_path")"
+            mv "$link_path" "$backup_path"
+            echo "[container.sh] Preserved remaining local ${label} data at ${backup_path}."
+        else
+            echo "[container.sh] Error: ${link_path} is a symlink outside ${ssd_root}." >&2
+            exit 1
+        fi
+    fi
+
+    ln -s "$target_real" "$link_path"
+}
+
+prepare_ssd_links() {
+    local ssd_root="$1"
+    local workspace_dir="${SCRIPT_DIR}/workspace"
+    local huggingface_dir="${SCRIPT_DIR}/huggingface"
+
+    prepare_ssd_link "$workspace_dir" "${ssd_root}/workspace" "$ssd_root" "workspace"
+    prepare_ssd_link "$huggingface_dir" "${ssd_root}/huggingface" "$ssd_root" "huggingface"
+}
+
+refresh_storage_label() {
+    local ssd_root="$1"
+    local workspace_real="$2"
+    local huggingface_real="$3"
+
+    if path_within "$workspace_real" "$ssd_root" \
+        && path_within "$huggingface_real" "$ssd_root"; then
+        printf '%s\n' "SSD"
+    else
+        printf '%s\n' "repo-local"
+    fi
+}
+
+require_ssd_storage() {
+    local ssd_root="$1"
+    local workspace_dir="$2"
+    local huggingface_dir="$3"
+    local workspace_real
+    local huggingface_real
+
+    if ! prepare_required_ssd_root "$ssd_root"; then
+        echo "[container.sh] Error: SSD storage root is not writable: $ssd_root" >&2
+        echo "[container.sh] Mount/create the SSD path or choose CYCLO_STORAGE_MODE=local." >&2
+        exit 1
+    fi
+
+    prepare_ssd_links "$ssd_root"
+
+    workspace_real="$(canonical_path "$workspace_dir")"
+    huggingface_real="$(canonical_path "$huggingface_dir")"
+    if ! path_within "$workspace_real" "$ssd_root" \
+        || ! path_within "$huggingface_real" "$ssd_root"; then
+        echo "[container.sh] Error: repo-local storage paths do not resolve under $ssd_root." >&2
+        echo "[container.sh] Current workspace:   $workspace_dir -> $workspace_real" >&2
+        echo "[container.sh] Current huggingface: $huggingface_dir -> $huggingface_real" >&2
+        exit 1
+    fi
+}
+
 setup_storage() {
     local storage_mode="${CYCLO_STORAGE_MODE:-auto}"
     local ssd_root="${CYCLO_SSD_ROOT:-/mnt/ssd/cyclo_intelligence}"
-    local local_workspace="${CYCLO_LOCAL_WORKSPACE_DIR:-${SCRIPT_DIR}/workspace}"
-    local local_huggingface="${CYCLO_LOCAL_HUGGINGFACE_DIR:-${SCRIPT_DIR}/huggingface}"
-    local default_workspace
-    local default_huggingface
-    local storage_label
+    local workspace_dir="${SCRIPT_DIR}/workspace"
+    local huggingface_dir="${SCRIPT_DIR}/huggingface"
+    local workspace_real
+    local huggingface_real
+    local storage_label="repo-local"
 
     case "$storage_mode" in
-        auto)
-            if storage_root_usable "$ssd_root"; then
-                default_workspace="${ssd_root}/workspace"
-                default_huggingface="${ssd_root}/huggingface"
-                storage_label="SSD"
-            else
-                default_workspace="$local_workspace"
-                default_huggingface="$local_huggingface"
-                storage_label="local"
-            fi
-            ;;
-        ssd)
-            if ! storage_root_usable "$ssd_root"; then
-                echo "[container.sh] Error: SSD storage root is not writable: $ssd_root" >&2
-                echo "[container.sh] Mount/create the SSD path, choose CYCLO_STORAGE_MODE=local, or set CYCLO_WORKSPACE_DIR/CYCLO_HUGGINGFACE_DIR." >&2
-                exit 1
-            fi
-            default_workspace="${ssd_root}/workspace"
-            default_huggingface="${ssd_root}/huggingface"
-            storage_label="SSD"
-            ;;
-        local)
-            default_workspace="$local_workspace"
-            default_huggingface="$local_huggingface"
-            storage_label="local"
-            ;;
+        auto|ssd|local) ;;
         *)
             echo "[container.sh] Error: unknown CYCLO_STORAGE_MODE='$storage_mode' (expected auto, ssd, or local)" >&2
             exit 1
             ;;
     esac
 
-    CYCLO_WORKSPACE_DIR="${CYCLO_WORKSPACE_DIR:-$default_workspace}"
-    CYCLO_HUGGINGFACE_DIR="${CYCLO_HUGGINGFACE_DIR:-$default_huggingface}"
-    export CYCLO_WORKSPACE_DIR
-    export CYCLO_HUGGINGFACE_DIR
+    if [ -n "${CYCLO_WORKSPACE_DIR:-}" ] || [ -n "${CYCLO_HUGGINGFACE_DIR:-}" ]; then
+        echo "[container.sh] Warning: CYCLO_WORKSPACE_DIR and CYCLO_HUGGINGFACE_DIR are ignored." >&2
+        echo "[container.sh] Compose always mounts docker/workspace and docker/huggingface." >&2
+    fi
 
-    ensure_host_dir "${CYCLO_WORKSPACE_DIR}"
-    ensure_host_dir "${CYCLO_WORKSPACE_DIR}/dataset"
-    ensure_host_dir "${CYCLO_WORKSPACE_DIR}/rosbag2"
-    ensure_host_dir "${CYCLO_WORKSPACE_DIR}/lerobot"
-    ensure_host_dir "${CYCLO_WORKSPACE_DIR}/model"
-    ensure_host_dir "${CYCLO_WORKSPACE_DIR}/model/lerobot"
-    ensure_host_dir "${CYCLO_WORKSPACE_DIR}/model/groot"
-    ensure_host_dir "${CYCLO_HUGGINGFACE_DIR}"
+    ssd_root="$(canonical_path "$ssd_root")"
+
+    if [ "$storage_mode" = "auto" ] && storage_root_usable "$ssd_root"; then
+        prepare_ssd_links "$ssd_root"
+    fi
+
+    if [ "$storage_mode" = "ssd" ]; then
+        require_ssd_storage "$ssd_root" "$workspace_dir" "$huggingface_dir"
+    fi
+
+    ensure_host_dir "$workspace_dir"
+    ensure_host_dir "${workspace_dir}/dataset"
+    ensure_host_dir "${workspace_dir}/rosbag2"
+    ensure_host_dir "${workspace_dir}/lerobot"
+    ensure_host_dir "${workspace_dir}/model"
+    ensure_host_dir "${workspace_dir}/model/lerobot"
+    ensure_host_dir "${workspace_dir}/model/groot"
+    ensure_host_dir "$huggingface_dir"
+
+    workspace_real="$(canonical_path "$workspace_dir")"
+    huggingface_real="$(canonical_path "$huggingface_dir")"
+    storage_label="$(refresh_storage_label "$ssd_root" "$workspace_real" "$huggingface_real")"
+
+    if [ "$storage_mode" = "local" ] && [ "$storage_label" = "SSD" ]; then
+        echo "[container.sh] Warning: CYCLO_STORAGE_MODE=local requested, but repo-local paths resolve under $ssd_root." >&2
+    fi
 
     echo "[container.sh] Using ${storage_label} storage"
-    echo "[container.sh]   workspace:   ${CYCLO_WORKSPACE_DIR}"
-    echo "[container.sh]   huggingface: ${CYCLO_HUGGINGFACE_DIR}"
+    echo "[container.sh]   workspace:   ${workspace_dir} -> ${workspace_real}"
+    echo "[container.sh]   huggingface: ${huggingface_dir} -> ${huggingface_real}"
 }
 
 CYCLO_AGENT_SOCKETS_DIR="${CYCLO_AGENT_SOCKETS_DIR:-/var/run/robotis/agent_sockets/cyclo_intelligence}"
@@ -163,8 +330,8 @@ container_workspace_source() {
     docker inspect -f '{{range .Mounts}}{{if eq .Destination "/workspace"}}{{.Source}}{{end}}{{end}}' "$1" 2>/dev/null || true
 }
 
-canonical_path() {
-    readlink -f "$1" 2>/dev/null || printf '%s' "$1"
+expected_workspace_source() {
+    canonical_path "${SCRIPT_DIR}/workspace"
 }
 
 paths_equal() {
@@ -178,6 +345,7 @@ remove_stale_policy_container() {
     local expected_id
     local current_id
     local current_workspace
+    local expected_workspace
 
     expected_image="$(compose_service_image "$service" 2>/dev/null || true)"
     if [ -z "$expected_image" ]; then
@@ -199,8 +367,9 @@ remove_stale_policy_container() {
         docker rm -f "$container" >/dev/null || true
         return 0
     fi
-    if [ -n "$current_id" ] && ! paths_equal "$current_workspace" "$CYCLO_WORKSPACE_DIR"; then
-        echo "[container.sh] Removing stale $container (/workspace mounted from $current_workspace, expected $CYCLO_WORKSPACE_DIR). It will be recreated on next start."
+    expected_workspace="$(expected_workspace_source)"
+    if [ -n "$current_id" ] && ! paths_equal "$current_workspace" "$expected_workspace"; then
+        echo "[container.sh] Removing stale $container (/workspace mounted from $current_workspace, expected $expected_workspace). It will be recreated on next start."
         docker rm -f "$container" >/dev/null || true
     fi
 }
@@ -253,11 +422,11 @@ Environment:
   VERSION          image tag version (default: 0.1.13 for cyclo)
   ROS_DOMAIN_ID    default 30
   CYCLO_STORAGE_MODE
-                   auto | ssd | local (default auto). Auto uses
-                   /mnt/ssd/cyclo_intelligence when writable, otherwise
-                   docker/workspace and docker/huggingface.
-  CYCLO_WORKSPACE_DIR / CYCLO_HUGGINGFACE_DIR
-                   Override the host bind-mount paths directly.
+                   auto | ssd | local (default auto). Containers always
+                   mount docker/workspace and docker/huggingface. Auto uses
+                   CYCLO_SSD_ROOT when writable and migrates local-only files
+                   without overwriting SSD files.
+  CYCLO_SSD_ROOT   SSD relocation root (default /mnt/ssd/cyclo_intelligence)
   CYCLO_UI_NODE_IMAGE
                    Node image for build-ui/test-ui (default node:22).
 EOF
