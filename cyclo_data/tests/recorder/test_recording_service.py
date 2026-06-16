@@ -40,7 +40,9 @@ class _RecordingStatus:
 class _DataOperationStatus:
     IDLE = 0
     RUNNING = 1
-    CANCELLED = 2
+    COMPLETED = 2
+    FAILED = 3
+    CANCELLED = 4
 
 
 class _RecordingCommand:
@@ -133,9 +135,19 @@ def test_discard_episode_accepts_transitional_target_tag():
 class _Logger:
     def __init__(self):
         self.warnings = []
+        self.errors = []
 
     def warn(self, message):
         self.warnings.append(message)
+
+    def warning(self, message):
+        self.warnings.append(message)
+
+    def info(self, message):
+        pass
+
+    def error(self, message):
+        self.errors.append(message)
 
 
 def _service_with_logger():
@@ -307,6 +319,122 @@ def test_stop_segment_rejects_when_no_active_recording():
     assert result is response
     assert response.success is False
     assert response.message == "STOP_SEGMENT: no active recording"
+
+
+def test_stop_segment_saves_metadata_even_without_urdf_path(tmp_path):
+    service, _ = _service_with_logger()
+    episode_dir = tmp_path / "0" / "segments" / "0"
+    metadata_calls = []
+    stopped = []
+    events = []
+
+    data_manager = SimpleNamespace(
+        _record_episode_count=0,
+        _segmented_storage_mode=True,
+        is_recording=lambda: True,
+        get_current_subtask_index=lambda: 0,
+        get_status=lambda: "recording",
+        get_save_rosbag_path=lambda: str(episode_dir),
+        save_robotis_metadata=lambda **kwargs: metadata_calls.append(kwargs),
+        stop_recording=lambda **kwargs: stopped.append(kwargs),
+    )
+    service._data_manager = data_manager
+    service._rosbag = SimpleNamespace(
+        stop_rosbag=lambda: None,
+        publish_action_event=lambda event: events.append(event),
+    )
+    service._video_recorder = None
+    service._camera_info = None
+    service._last_camera_rotations = {"cam0": 0}
+    service._last_image_topics = {"cam0": "/image"}
+    service._last_camera_info_topics = {"cam0": "/camera_info"}
+    service._publish_umbrella_status = lambda *args, **kwargs: None
+    response = SimpleNamespace(success=True, message="")
+    request = _request(
+        command=_RecordingCommand.Request.STOP_SEGMENT,
+        segment_index=0,
+        urdf_path="",
+    )
+
+    result = service._do_stop_and_save(
+        request,
+        response,
+        "STOP_SEGMENT",
+        event="finish",
+    )
+
+    assert result is response
+    assert response.success is True
+    assert response.message == "Subtask saved"
+    assert len(metadata_calls) == 1
+    assert metadata_calls[0]["urdf_path"] == ""
+    assert metadata_calls[0]["camera_rotations"] == {"cam0": 0}
+    assert stopped == [{"finish_full_episode": False}]
+    assert events == ["finish"]
+
+
+def test_start_segment_rolls_back_rosbag_when_writer_start_fails(tmp_path):
+    service, logger = _service_with_logger()
+    episode_dir = tmp_path / "0" / "segments" / "0"
+    rosbag_calls = []
+    stopped_writers = []
+    started = []
+
+    class FailingVideoRecorder:
+        def start_episode(self, _episode_dir):
+            raise RuntimeError("camera writer boom")
+
+        def stop_episode(self):
+            stopped_writers.append(True)
+            return {}
+
+    data_manager = SimpleNamespace(
+        _segmented_storage_mode=True,
+        is_recording=lambda: False,
+        missing_subtasks_for_full_episode=lambda: [0],
+        set_current_subtask_index=lambda index: None,
+        get_save_rosbag_path=lambda allow_idle=False: str(episode_dir),
+        start_recording=lambda: started.append(True),
+    )
+    service._finish_episode_in_progress = lambda: False
+    service._ensure_data_manager = lambda task_info, robot_type: data_manager
+    service._ensure_video_pipeline = lambda robot_type: None
+    service._last_prepared_topics = ()
+    service._video_recorder = FailingVideoRecorder()
+    service._camera_info = None
+    service._publish_umbrella_status = lambda *args, **kwargs: None
+
+    def start_rosbag(rosbag_uri):
+        rosbag_calls.append(("start", rosbag_uri))
+        episode_dir.mkdir(parents=True, exist_ok=True)
+        (episode_dir / "partial.mcap").write_bytes(b"partial")
+
+    service._rosbag = SimpleNamespace(
+        is_available=lambda: True,
+        start_rosbag=start_rosbag,
+        stop_and_delete_rosbag=lambda: rosbag_calls.append(("stop_delete", None)),
+    )
+    response = SimpleNamespace(success=True, message="")
+    request = _request(
+        command=_RecordingCommand.Request.START_SEGMENT,
+        segment_index=0,
+        robot_type="ffw_sg2_rev1",
+        topics=[],
+    )
+
+    result = service._do_start(request, response)
+
+    assert result is response
+    assert response.success is False
+    assert "camera writer boom" in response.message
+    assert rosbag_calls == [
+        ("start", str(episode_dir)),
+        ("stop_delete", None),
+    ]
+    assert stopped_writers == [True]
+    assert started == []
+    assert not episode_dir.exists()
+    assert logger.errors == [response.message]
 
 
 def test_cancel_segment_rejects_when_no_active_recording():

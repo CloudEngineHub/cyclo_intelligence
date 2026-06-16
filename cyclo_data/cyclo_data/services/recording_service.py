@@ -582,29 +582,46 @@ class RecordingService:
             response.message = 'Failed to resolve rosbag path'
             return response
 
-        # Recording format v2: per-camera MP4 writers + one-shot
-        # camera_info snapshotter live in ``videos/`` and ``camera_info/``
-        # subdirs of the rosbag episode dir. Spin them up AFTER the
-        # rosbag service starts — rosbag_recorder's storage plugin
-        # treats the URI as a fresh bag root and may rewrite it on open,
-        # which would wipe any subdirectory we created first.
-        self._rosbag.start_rosbag(rosbag_uri=rosbag_path)
-
         episode_dir = Path(rosbag_path)
-        episode_dir.mkdir(parents=True, exist_ok=True)
+        rosbag_started = False
+        dm_started = False
+        try:
+            # Recording format v2: per-camera MP4 writers + one-shot
+            # camera_info snapshotter live in ``videos/`` and ``camera_info/``
+            # subdirs of the rosbag episode dir. Spin them up AFTER the
+            # rosbag service starts — rosbag_recorder's storage plugin
+            # treats the URI as a fresh bag root and may rewrite it on open,
+            # which would wipe any subdirectory we created first.
+            self._rosbag.start_rosbag(rosbag_uri=rosbag_path)
+            rosbag_started = True
 
-        # Subscriptions were built up-front in REFRESH_TOPICS, so START
-        # only opens the per-episode writers. Defensive ensure for the
-        # rare case where START arrived without a preceding
-        # REFRESH_TOPICS (tests, recovery paths) — same robot_type re-
-        # entry is a no-op inside _ensure_video_pipeline.
-        self._ensure_video_pipeline(request.robot_type)
-        if self._video_recorder is not None:
-            self._video_recorder.start_episode(episode_dir)
-        if self._camera_info is not None:
-            self._camera_info.start_episode(episode_dir)
+            episode_dir.mkdir(parents=True, exist_ok=True)
 
-        dm.start_recording()
+            # Subscriptions were built up-front in REFRESH_TOPICS, so START
+            # only opens the per-episode writers. Defensive ensure for the
+            # rare case where START arrived without a preceding
+            # REFRESH_TOPICS (tests, recovery paths) — same robot_type re-
+            # entry is a no-op inside _ensure_video_pipeline.
+            self._ensure_video_pipeline(request.robot_type)
+            if self._video_recorder is not None:
+                self._video_recorder.start_episode(episode_dir)
+            if self._camera_info is not None:
+                self._camera_info.start_episode(episode_dir)
+
+            dm.start_recording()
+            dm_started = True
+        except Exception as exc:  # noqa: BLE001
+            self._cleanup_failed_start(
+                episode_dir=episode_dir,
+                data_manager=dm if dm_started else None,
+                rosbag_started=rosbag_started,
+            )
+            response.success = False
+            response.message = f'START failed: {exc}'
+            self._node.get_logger().error(response.message)
+            self._publish_umbrella_status(
+                DataOperationStatus.FAILED, 'START', response.message)
+            return response
         self._rosbag.publish_action_event('start')
 
         self._publish_umbrella_status(
@@ -614,6 +631,48 @@ class RecordingService:
         response.success = True
         response.message = 'Recording started'
         return response
+
+    def _cleanup_failed_start(
+        self,
+        *,
+        episode_dir: Path,
+        data_manager: Optional[DataManager],
+        rosbag_started: bool,
+    ) -> None:
+        """Best-effort rollback for failures after rosbag START.
+
+        START spans multiple resources: rosbag, per-camera writers, and
+        DataManager state. If any writer setup fails after rosbag has opened
+        the directory, leaving the bag active would make the next user action
+        operate on a half-started recording. Roll back everything we may have
+        touched and let the caller return a failed START response.
+        """
+        try:
+            self._stop_episode_writers()
+        except Exception as exc:  # pragma: no cover - defensive
+            self._node.get_logger().warning(
+                f'Failed-start writer cleanup raised: {exc!r}')
+
+        if rosbag_started:
+            try:
+                self._rosbag.stop_and_delete_rosbag()
+            except Exception as exc:  # noqa: BLE001
+                self._node.get_logger().warning(
+                    f'Failed-start rosbag cleanup raised: {exc!r}')
+
+        if episode_dir.exists():
+            try:
+                shutil.rmtree(episode_dir)
+            except Exception as exc:  # noqa: BLE001
+                self._node.get_logger().warning(
+                    f'Failed-start episode cleanup raised: {episode_dir}: {exc!r}')
+
+        if data_manager is not None:
+            try:
+                data_manager.discard_recording(reset_subtask_index=False)
+            except Exception as exc:  # pragma: no cover - defensive
+                self._node.get_logger().warning(
+                    f'Failed-start DataManager cleanup raised: {exc!r}')
 
     def _do_set_task_info(self, request, response):
         if not request.robot_type:
@@ -750,15 +809,14 @@ class RecordingService:
         self._rosbag.stop_rosbag()
         self._stop_episode_writers()
 
-        if request.urdf_path:
-            self._data_manager.save_robotis_metadata(
-                urdf_path=request.urdf_path,
-                video_stats=self._last_video_stats,
-                camera_info_files=self._last_camera_info_files,
-                camera_rotations=self._last_camera_rotations,
-                image_topics=self._last_image_topics,
-                camera_info_topics=self._last_camera_info_topics,
-            )
+        self._data_manager.save_robotis_metadata(
+            urdf_path=getattr(request, 'urdf_path', '') or '',
+            video_stats=self._last_video_stats,
+            camera_info_files=self._last_camera_info_files,
+            camera_rotations=self._last_camera_rotations,
+            image_topics=self._last_image_topics,
+            camera_info_topics=self._last_camera_info_topics,
+        )
 
         is_segmented_storage = bool(
             getattr(self._data_manager, '_segmented_storage_mode', False)

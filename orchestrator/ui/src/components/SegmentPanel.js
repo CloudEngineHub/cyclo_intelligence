@@ -120,7 +120,22 @@ export default function SegmentPanel() {
     if (commandSequenceInProgressRef.current) return;
 
     if (pendingEpisodeResetRef.current) {
-      const resetObserved = !serverRecording && serverSubtaskIndex === 0;
+      const pendingReset = pendingEpisodeResetRef.current;
+      const savedStatusKnown = Array.isArray(serverSavedSubtaskIndices);
+      const noServerSavedSubtasks = (
+        !savedStatusKnown || serverSavedSubtaskIndices.length === 0
+      );
+      const resetObserved = pendingReset.type === 'finish'
+        ? (
+          !serverRecording &&
+          serverSubtaskIndex === 0 &&
+          currentFullEpisodeIndex > pendingReset.fullEpisodeIndex
+        )
+        : (
+          !serverRecording &&
+          serverSubtaskIndex === 0 &&
+          noServerSavedSubtasks
+        );
       if (resetObserved) {
         pendingEpisodeResetRef.current = null;
         setServerResetInProgress(false);
@@ -354,8 +369,18 @@ export default function SegmentPanel() {
 
         const nextPending = updatedSlotMap.findIndex((v) => v === -1);
         if (isLastSlot || nextPending < 0) {
+          const targetFullEpisodeIndex = (
+            episodeFullIndexRef.current === null
+              ? currentFullEpisodeIndex
+              : episodeFullIndexRef.current
+          );
           const finishResult = await runCommand('Finish episode', 'finish_episode');
           if (finishResult && finishResult.success) {
+            pendingEpisodeResetRef.current = {
+              type: 'finish',
+              fullEpisodeIndex: targetFullEpisodeIndex,
+            };
+            setServerResetInProgress(true);
             setEpisodeAcquisitionStarted(false);
             episodeFullIndexRef.current = null;
             dispatch(resetSegmentProgress());
@@ -372,6 +397,7 @@ export default function SegmentPanel() {
     },
     [
       activeSlotIndex,
+      currentFullEpisodeIndex,
       dispatch,
       isRecording,
       isSingleMode,
@@ -443,6 +469,7 @@ export default function SegmentPanel() {
       });
       if (result && result.success) {
         pendingEpisodeResetRef.current = {
+          type: 'discard',
           fullEpisodeIndex: targetFullEpisodeIndex,
         };
         setServerResetInProgress(true);

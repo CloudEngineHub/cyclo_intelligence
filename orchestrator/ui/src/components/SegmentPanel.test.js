@@ -257,4 +257,76 @@ describe('SegmentPanel discard episode target', () => {
     );
   });
 
+  test('does not restore saved checkmarks from stale status while finish is pending', async () => {
+    const sendRecordCommand = jest.fn().mockResolvedValue({
+      success: true,
+      message: 'ok',
+    });
+    const { store } = renderPanel({
+      sendRecordCommand,
+      taskOverrides: {
+        recordStatus: {
+          recordPhase: RecordPhase.RECORDING,
+          running: true,
+          currentEpisodeNumber: 0,
+          currentSubtaskIndex: 2,
+          subtaskCount: 3,
+          savedSubtaskIndices: [0, 1],
+          topicReceived: true,
+        },
+        plannedCount: 3,
+        plannedSubTasks: ['pick', 'place', 'release'],
+        slotToServerIdx: [0, 1, -1],
+        activeSlotIndex: 2,
+      },
+    });
+
+    const saveButton = await screen.findByRole('button', {
+      name: /save subtask 3/i,
+    });
+    fireEvent.click(saveButton);
+
+    await waitFor(() => {
+      expect(sendRecordCommand).toHaveBeenCalledWith(
+        'finish_episode',
+        expect.objectContaining({
+          subtaskInstruction: ['pick', 'place', 'release'],
+        })
+      );
+      expect(store.getState().tasks.slotToServerIdx).toEqual([-1, -1, -1]);
+    });
+
+    await act(async () => {
+      store.dispatch(setRecordStatus({
+        recordPhase: RecordPhase.READY,
+        running: false,
+        currentEpisodeNumber: 0,
+        currentSubtaskIndex: 2,
+        subtaskCount: 3,
+        savedSubtaskIndices: [0, 1, 2],
+        topicReceived: true,
+      }));
+      await Promise.resolve();
+    });
+
+    expect(store.getState().tasks.slotToServerIdx).toEqual([-1, -1, -1]);
+    expect(store.getState().tasks.activeSlotIndex).toBe(0);
+
+    await act(async () => {
+      store.dispatch(setRecordStatus({
+        recordPhase: RecordPhase.READY,
+        running: false,
+        currentEpisodeNumber: 1,
+        currentSubtaskIndex: 0,
+        subtaskCount: 3,
+        savedSubtaskIndices: [],
+        topicReceived: true,
+      }));
+      await Promise.resolve();
+    });
+
+    expect(store.getState().tasks.slotToServerIdx).toEqual([-1, -1, -1]);
+    expect(store.getState().tasks.activeSlotIndex).toBe(0);
+  });
+
 });
