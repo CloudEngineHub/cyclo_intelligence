@@ -34,6 +34,10 @@ import { DEFAULT_PATHS } from '../constants/paths';
 import { setInferenceMode, setTaskInfo } from '../features/tasks/taskSlice';
 import { useRosServiceCaller } from '../hooks/useRosServiceCaller';
 import { requiresInstruction } from '../constants/policyCapabilities';
+import {
+  REMOTE_ZMQ_DEFAULTS,
+  shouldUseRemoteRuntime,
+} from '../utils/inferenceRuntime';
 
 const InferencePanel = () => {
   const dispatch = useDispatch();
@@ -108,6 +112,7 @@ const InferencePanel = () => {
   const currentInstruction = (info.taskInstruction?.[0] || '').trim();
   const canUpdateInstruction =
     isInferencing && currentInstruction !== '' && !isUpdatingInstruction;
+  const showRemoteRuntimeFields = shouldUseRemoteRuntime(info);
   const canPrepareInferenceRecord =
     info.recordInferenceMode &&
     !disabled &&
@@ -180,6 +185,8 @@ const InferencePanel = () => {
   const policyBrowserPath =
     info.serviceType === 'groot'
       ? DEFAULT_PATHS.GROOT_CHECKPOINTS_PATH
+      : info.serviceType === 'rldx'
+        ? DEFAULT_PATHS.RLDX_CHECKPOINTS_PATH
       : DEFAULT_PATHS.LEROBOT_CHECKPOINTS_PATH;
 
   // Update isEditable state when the disabled prop changes
@@ -384,6 +391,57 @@ const InferencePanel = () => {
         </div>
       </div>
 
+      {showRemoteRuntimeFields && (
+        <>
+          <div className={clsx('flex', 'items-center', 'mb-2.5')}>
+            <span className={classLabel}>ZMQ Host</span>
+            <input
+              className={classTextInput}
+              type="text"
+              value={info.remoteHost || ''}
+              onChange={(e) => handleChange('remoteHost', e.target.value)}
+              disabled={!isEditable}
+              placeholder={REMOTE_ZMQ_DEFAULTS.remoteHost}
+            />
+          </div>
+          <div className={clsx('flex', 'items-center', 'mb-2.5')}>
+            <span className={classLabel}>ZMQ Port</span>
+            <input
+              className={classTextInput}
+              type="number"
+              min="1"
+              max="65535"
+              value={info.remotePort || ''}
+              onChange={(e) => {
+                const value = e.target.value;
+                handleChange('remotePort', value === '' ? '' : Number(value));
+              }}
+              disabled={!isEditable}
+              placeholder={String(REMOTE_ZMQ_DEFAULTS.remotePort)}
+            />
+          </div>
+          <div className={clsx('flex', 'items-center', 'mb-2.5')}>
+            <span className={classLabel}>Timeout ms</span>
+            <input
+              className={classTextInput}
+              type="number"
+              min="1"
+              step="1000"
+              value={info.remoteTimeoutMs || ''}
+              onChange={(e) => {
+                const value = e.target.value;
+                handleChange(
+                  'remoteTimeoutMs',
+                  value === '' ? '' : Number(value)
+                );
+              }}
+              disabled={!isEditable}
+              placeholder={String(REMOTE_ZMQ_DEFAULTS.remoteTimeoutMs)}
+            />
+          </div>
+        </>
+      )}
+
       {/* Edit mode indicator */}
       <div
         className={clsx('mb-3', 'p-2', 'rounded-md', 'text-sm', 'font-medium', {
@@ -438,28 +496,33 @@ const InferencePanel = () => {
         </>
       )}
 
-      {/* Policy Path */}
-      <div className={clsx('flex', 'items-start', 'mb-2.5')}>
-        <span className={clsx(classLabel, 'pt-2')}>Policy Path</span>
-        <div className="flex flex-row items-start gap-2 flex-1 min-w-0">
-          <textarea
-            className={classPolicyPathTextarea}
-            value={info.policyPath || ''}
-            onChange={(e) => handleChange('policyPath', e.target.value)}
-            disabled={!isEditable}
-            placeholder="Enter Policy Path or Repo ID"
-          />
-          <button
-            type="button"
-            onClick={() => setShowPolicyBrowser(true)}
-            disabled={!isEditable}
-            className="flex items-center justify-center w-9 h-9 text-blue-500 bg-gray-200 rounded-md hover:text-blue-700 disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
-            aria-label="Browse for policy model folder"
-          >
-            <MdFolderOpen className="w-5 h-5" />
-          </button>
-        </div>
-      </div>
+      {!showRemoteRuntimeFields && (
+        <>
+          {/* Policy Path */}
+          <div className={clsx('flex', 'items-start', 'mb-2.5')}>
+            <span className={clsx(classLabel, 'pt-2')}>Policy Path</span>
+            <div className="flex flex-row items-start gap-2 flex-1 min-w-0">
+              <textarea
+                className={classPolicyPathTextarea}
+                value={info.policyPath || ''}
+                onChange={(e) => handleChange('policyPath', e.target.value)}
+                disabled={!isEditable}
+                placeholder="Enter Policy Path or Repo ID"
+              />
+              <button
+                type="button"
+                onClick={() => setShowPolicyBrowser(true)}
+                disabled={!isEditable}
+                className="flex items-center justify-center w-9 h-9 text-blue-500 bg-gray-200 rounded-md hover:text-blue-700 disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
+                aria-label="Browse for policy model folder"
+                title="Browse for policy model folder"
+              >
+                <MdFolderOpen className="w-5 h-5" />
+              </button>
+            </div>
+          </div>
+        </>
+      )}
 
       <div className="w-full h-1 my-2 border-t border-gray-300"></div>
 

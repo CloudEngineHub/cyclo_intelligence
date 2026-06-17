@@ -67,6 +67,14 @@ async function readJsonResponse(response) {
   }
 }
 
+function getRosbridgeHost(rosbridgeUrl) {
+  try {
+    return new URL(rosbridgeUrl).hostname || 'localhost';
+  } catch {
+    return 'localhost';
+  }
+}
+
 // BFS down the edges to enumerate every node reachable from `rootId`.
 // Used to mark a collapsed Control node's whole subtree as hidden.
 function collectDescendants(rootId, edges) {
@@ -288,8 +296,7 @@ export default function BTManagerPage({ isActive = true }) {
   const handleServerFileSelect = useCallback(async (item) => {
     if (!item || !item.full_path) return;
     try {
-      const urlMatch = rosbridgeUrl.match(/ws:\/\/([^:]+):/);
-      const host = urlMatch ? urlMatch[1] : 'localhost';
+      const host = getRosbridgeHost(rosbridgeUrl);
       const fileUrl = `http://${host}:8082${item.full_path}`;
       const response = await fetch(fileUrl);
       if (!response.ok) throw new Error(`Failed to fetch file: ${response.status}`);
@@ -542,8 +549,7 @@ export default function BTManagerPage({ isActive = true }) {
 
   // ── HTTP base URL helper ──────────────────────────────────────────────────
   const getHttpBaseUrl = useCallback(() => {
-    const urlMatch = rosbridgeUrl.match(/ws:\/\/([^:]+):/);
-    const host = urlMatch ? urlMatch[1] : 'localhost';
+    const host = getRosbridgeHost(rosbridgeUrl);
     return `http://${host}:8082`;
   }, [rosbridgeUrl]);
 

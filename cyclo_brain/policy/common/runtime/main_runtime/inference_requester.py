@@ -53,6 +53,9 @@ class InferenceRequester:
             embodiment_tag=str(getattr(request, "embodiment_tag", "") or ""),
             robot_type=str(getattr(request, "robot_type", "") or ""),
             task_instruction=str(getattr(request, "task_instruction", "") or ""),
+            remote_host=str(getattr(request, "remote_host", "") or ""),
+            remote_port=int(getattr(request, "remote_port", 0) or 0),
+            remote_timeout_ms=int(getattr(request, "remote_timeout_ms", 0) or 0),
         )
         return self._call(
             engine_request,

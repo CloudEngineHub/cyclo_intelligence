@@ -1,0 +1,85 @@
+# RLDX remote-inference container (AMD64).
+#
+# This image intentionally does not install RLDX, PyTorch, or CUDA. The heavy
+# model runs on an external GPU PC via RLDX's official ZMQ PolicyServer. Cyclo's
+# common main-runtime + engine-process supervise lifecycle, buffering, preview,
+# and robot command publishing.
+
+ARG BASE_IMAGE=ubuntu:24.04
+FROM ${BASE_IMAGE}
+
+ARG S6_OVERLAY_VERSION=3.2.0.2
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV LANG=en_US.UTF-8
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    curl \
+    git \
+    locales \
+    python3 \
+    python3-opencv \
+    python3-pip \
+    xz-utils \
+    && locale-gen en_US en_US.UTF-8 \
+    && update-locale LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8 \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN curl -fsSL -o /tmp/s6-overlay-noarch.tar.xz \
+      https://github.com/just-containers/s6-overlay/releases/download/v${S6_OVERLAY_VERSION}/s6-overlay-noarch.tar.xz \
+    && curl -fsSL -o /tmp/s6-overlay-x86_64.tar.xz \
+      https://github.com/just-containers/s6-overlay/releases/download/v${S6_OVERLAY_VERSION}/s6-overlay-x86_64.tar.xz \
+    && tar -C / -Jxpf /tmp/s6-overlay-noarch.tar.xz \
+    && tar -C / -Jxpf /tmp/s6-overlay-x86_64.tar.xz \
+    && rm /tmp/s6-overlay-*.tar.xz
+
+RUN python3 -m pip install --break-system-packages --no-cache-dir \
+    "eclipse-zenoh>=1.6.0,<1.7.0" \
+    "GitPython>=3.1.18" \
+    "json5>=0.9.14" \
+    msgpack \
+    numpy \
+    pyzmq \
+    pyyaml \
+    "rosbags>=0.11.0" \
+    "tqdm>=4.64.0"
+
+RUN mkdir -p /app /policy_runtime /zenoh_sdk /robot_client_sdk \
+             /action_chunk_processing_sdk /orchestrator_config
+
+WORKDIR /app
+
+COPY rldx/rldx_engine/ /app/rldx_engine/
+COPY rldx/s6-services/ /etc/s6-overlay/s6-rc.d/
+RUN chmod +x /etc/s6-overlay/s6-rc.d/main-runtime/run \
+             /etc/s6-overlay/s6-rc.d/engine-process/run
+
+ENV ZENOH_ROUTER_IP=127.0.0.1
+ENV ZENOH_ROUTER_PORT=7447
+ENV ZENOH_SDK_PATH=/zenoh_sdk
+ENV ZENOH_TRANSPORT_SHM_ENABLED=true
+ENV ZENOH_SHM_ENABLED=true
+ENV ROBOT_CLIENT_SDK_PATH=/robot_client_sdk
+ENV ACTION_CHUNK_PROCESSING_SDK_PATH=/action_chunk_processing_sdk
+ENV ORCHESTRATOR_CONFIG_PATH=/orchestrator_config
+ENV POLICY_BACKEND=rldx
+ENV POLICY_ENGINE_MODULE=rldx_engine
+ENV RLDX_ZMQ_HOST=127.0.0.1
+ENV RLDX_ZMQ_PORT=5555
+ENV RLDX_ZMQ_TIMEOUT_MS=300000
+ENV CONTROL_HZ=100
+ENV INFERENCE_HZ=15
+ENV TARGET_CHUNK_SIZE=none
+ENV REFILL_MARGIN_S=0.2
+ENV GET_ACTION_TIMEOUT_S=5.0
+ENV PYTHONUNBUFFERED=1
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
+    CMD S6_SVSTAT=$(ls /package/admin/s6-*/command/s6-svstat 2>/dev/null | head -1); \
+        [ -n "$S6_SVSTAT" ] \
+        && "$S6_SVSTAT" /run/service/main-runtime | grep -q '^up ' \
+        && "$S6_SVSTAT" /run/service/engine-process | grep -q '^up ' \
+        || exit 1
+
+ENTRYPOINT ["/init"]

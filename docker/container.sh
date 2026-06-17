@@ -7,10 +7,15 @@
 #   docker/container.sh start              # → cyclo_intelligence
 #   docker/container.sh start-lerobot      # → lerobot (idle until LOAD)
 #   docker/container.sh start-groot        # → groot (idle until LOAD)
+#   docker/container.sh start-rldx         # → rldx runtime/client (idle until LOAD)
+#   docker/container.sh start-rldx-server  # → local RLDX ZMQ PolicyServer
+#   docker/container.sh start-rldx-stack   # → local server + runtime/client
 #   docker/container.sh enter              # → shell in cyclo_intelligence
 #   docker/container.sh build-ui           # → rebuild React UI only
 #   docker/container.sh enter-lerobot      # → shell in lerobot_server
 #   docker/container.sh enter-groot        # → shell in groot_server
+#   docker/container.sh enter-rldx         # → shell in rldx_runtime
+#   docker/container.sh enter-rldx-server  # → shell in rldx_policy_server
 #   docker/container.sh logs               # → compose logs -f
 #   docker/container.sh status             # → s6 svstat on all containers
 #   docker/container.sh stop               # → compose down
@@ -34,6 +39,11 @@ LEROBOT_SERVICE="lerobot"
 LEROBOT_CONTAINER="${LEROBOT_CONTAINER_NAME:-lerobot_server}"
 GROOT_SERVICE="groot"
 GROOT_CONTAINER="${GROOT_CONTAINER_NAME:-groot_server}"
+RLDX_SERVICE="rldx"
+RLDX_CONTAINER="${RLDX_CONTAINER_NAME:-rldx_runtime}"
+RLDX_LEGACY_CONTAINER="rldx_server"
+RLDX_POLICY_SERVER_SERVICE="rldx_policy_server"
+RLDX_POLICY_SERVER_CONTAINER="${RLDX_POLICY_SERVER_CONTAINER_NAME:-rldx_policy_server}"
 
 # Auto-detect host architecture for Dockerfile / image tag selection
 MACHINE_ARCH=$(uname -m)
@@ -128,6 +138,7 @@ setup_storage() {
     ensure_host_dir "${CYCLO_WORKSPACE_DIR}/model"
     ensure_host_dir "${CYCLO_WORKSPACE_DIR}/model/lerobot"
     ensure_host_dir "${CYCLO_WORKSPACE_DIR}/model/groot"
+    ensure_host_dir "${CYCLO_WORKSPACE_DIR}/model/rldx"
     ensure_host_dir "${CYCLO_HUGGINGFACE_DIR}"
 
     echo "[container.sh] Using ${storage_label} storage"
@@ -208,6 +219,55 @@ remove_stale_policy_container() {
 remove_stale_policy_containers() {
     remove_stale_policy_container "$LEROBOT_SERVICE" "$LEROBOT_CONTAINER"
     remove_stale_policy_container "$GROOT_SERVICE" "$GROOT_CONTAINER"
+    remove_stale_policy_container "$RLDX_SERVICE" "$RLDX_CONTAINER"
+}
+
+remove_legacy_rldx_container() {
+    if [ "$RLDX_CONTAINER" = "$RLDX_LEGACY_CONTAINER" ]; then
+        return 0
+    fi
+    if docker inspect "$RLDX_LEGACY_CONTAINER" >/dev/null 2>&1; then
+        echo "[container.sh] Removing legacy $RLDX_LEGACY_CONTAINER. RLDX runtime container is now $RLDX_CONTAINER."
+        docker rm -f "$RLDX_LEGACY_CONTAINER" >/dev/null || true
+    fi
+}
+
+first_child_dir() {
+    find "$1" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | sort | head -1
+}
+
+setup_rldx_policy_server_paths() {
+    if [ -z "${RLDX_REPO_DIR:-}" ]; then
+        if [ -d "${HOME}/RLDX-1" ]; then
+            RLDX_REPO_DIR="${HOME}/RLDX-1"
+        elif [ -d "${SCRIPT_DIR}/../../../RLDX-1" ]; then
+            RLDX_REPO_DIR="$(canonical_path "${SCRIPT_DIR}/../../../RLDX-1")"
+        else
+            echo "[container.sh] Error: RLDX_REPO_DIR is not set and RLDX-1 was not found." >&2
+            echo "[container.sh] Set RLDX_REPO_DIR=/path/to/RLDX-1." >&2
+            exit 1
+        fi
+        export RLDX_REPO_DIR
+    fi
+
+    if [ -z "${RLDX_MODEL_PATH:-}" ]; then
+        local default_local="${HOME}/rldx_checkpoints/Dongkkka_rldx-1-cyclo-intelligence-test"
+        local first_checkpoint=""
+        if [ -d "${HOME}/rldx_checkpoints" ]; then
+            first_checkpoint="$(first_child_dir "${HOME}/rldx_checkpoints")"
+        fi
+        if [ -d "$default_local" ]; then
+            RLDX_MODEL_PATH="$default_local"
+        elif [ -n "$first_checkpoint" ]; then
+            RLDX_MODEL_PATH="$first_checkpoint"
+        else
+            RLDX_MODEL_PATH="${CYCLO_WORKSPACE_DIR}/model/rldx"
+        fi
+        export RLDX_MODEL_PATH
+    fi
+
+    export RLDX_SERVER_MODEL_PATH="${RLDX_SERVER_MODEL_PATH:-/model/rldx}"
+    export RLDX_ZMQ_PORT="${RLDX_ZMQ_PORT:-5555}"
 }
 
 show_help() {
@@ -229,6 +289,19 @@ GR00T policy container:
   start-groot      Build + start groot (N1.7 baseline). Same boot-idle
                    + LOAD-time configure pattern as lerobot.
   enter-groot      Open an interactive bash in groot_server
+
+RLDX policy bridge:
+  start-rldx       Build + start the Cyclo-side RLDX runtime/client.
+                   Set RLDX_ZMQ_HOST, RLDX_ZMQ_PORT, and
+                   RLDX_ZMQ_TIMEOUT_MS when connecting to a remote GPU PC.
+  start-rldx-server
+                   Start the local GPU-side RLDX ZMQ PolicyServer
+                   container. Uses RLDX_REPO_DIR and RLDX_MODEL_PATH.
+  start-rldx-stack Start local RLDX PolicyServer + Cyclo runtime/client.
+                   This is the convenient one-command 5090-PC setup.
+  enter-rldx       Open an interactive bash in rldx_runtime
+  enter-rldx-server
+                   Open an interactive shell in rldx_policy_server
 
 Lifecycle:
   status           s6-svstat on all containers (when running)
@@ -260,6 +333,12 @@ Environment:
                    Override the host bind-mount paths directly.
   CYCLO_UI_NODE_IMAGE
                    Node image for build-ui/test-ui (default node:22).
+  RLDX_REPO_DIR    Host path to RLDX-1 repo for start-rldx-server
+                   (default: \$HOME/RLDX-1 when it exists).
+  RLDX_MODEL_PATH  Host path to the RLDX checkpoint directory mounted at
+                   /model/rldx for start-rldx-server.
+  RLDX_SERVER_COMPILE
+                   none | submodule | fullgraph (default none).
 EOF
 }
 
@@ -377,6 +456,7 @@ start_main() {
     setup_x11
     echo "[container.sh] Pulling pre-built images (ignoring local-only failures)..."
     $COMPOSE pull --ignore-pull-failures "$MAIN_SERVICE" "$LEROBOT_SERVICE" "$GROOT_SERVICE" || true
+    remove_legacy_rldx_container
     remove_stale_policy_containers
     echo "[container.sh] Starting $MAIN_SERVICE (ARCH=$ARCH${BUILD_FLAG:+, rebuild on})..."
     $COMPOSE up -d $BUILD_FLAG "$MAIN_SERVICE"
@@ -401,6 +481,40 @@ start_groot() {
     remove_stale_policy_container "$GROOT_SERVICE" "$GROOT_CONTAINER"
     echo "[container.sh] Starting $GROOT_SERVICE (ARCH=$ARCH${BUILD_FLAG:+, rebuild on})..."
     $COMPOSE up -d $BUILD_FLAG "$GROOT_SERVICE"
+}
+
+start_rldx() {
+    setup_storage
+    setup_x11
+    echo "[container.sh] Pulling pre-built images..."
+    $COMPOSE pull --ignore-pull-failures "$RLDX_SERVICE" || true
+    remove_legacy_rldx_container
+    remove_stale_policy_container "$RLDX_SERVICE" "$RLDX_CONTAINER"
+    echo "[container.sh] Starting $RLDX_SERVICE (ARCH=$ARCH${BUILD_FLAG:+, rebuild on})..."
+    echo "[container.sh]   RLDX_ZMQ_HOST=${RLDX_ZMQ_HOST:-127.0.0.1}"
+    echo "[container.sh]   RLDX_ZMQ_PORT=${RLDX_ZMQ_PORT:-5555}"
+    echo "[container.sh]   RLDX_ZMQ_TIMEOUT_MS=${RLDX_ZMQ_TIMEOUT_MS:-300000}"
+    $COMPOSE up -d $BUILD_FLAG "$RLDX_SERVICE"
+}
+
+start_rldx_policy_server() {
+    setup_storage
+    setup_rldx_policy_server_paths
+    echo "[container.sh] Pulling RLDX PolicyServer runner image..."
+    $COMPOSE pull --ignore-pull-failures "$RLDX_POLICY_SERVER_SERVICE" || true
+    echo "[container.sh] Starting $RLDX_POLICY_SERVER_SERVICE..."
+    echo "[container.sh]   RLDX_REPO_DIR=${RLDX_REPO_DIR}"
+    echo "[container.sh]   RLDX_MODEL_PATH=${RLDX_MODEL_PATH}"
+    echo "[container.sh]   RLDX_SERVER_EMBODIMENT_TAG=${RLDX_SERVER_EMBODIMENT_TAG:-auto}"
+    echo "[container.sh]   RLDX_ZMQ_PORT=${RLDX_ZMQ_PORT}"
+    echo "[container.sh]   RLDX_SERVER_COMPILE=${RLDX_SERVER_COMPILE:-none}"
+    $COMPOSE up -d "$RLDX_POLICY_SERVER_SERVICE"
+}
+
+start_rldx_stack() {
+    export RLDX_ZMQ_HOST="${RLDX_ZMQ_HOST:-127.0.0.1}"
+    start_rldx_policy_server
+    start_rldx
 }
 
 enter_main() {
@@ -428,6 +542,22 @@ enter_groot() {
     docker exec -it "$GROOT_CONTAINER" bash
 }
 
+enter_rldx() {
+    if ! container_running "$RLDX_CONTAINER"; then
+        echo "Error: $RLDX_CONTAINER is not running. Run 'start-rldx' first." >&2
+        exit 1
+    fi
+    docker exec -it "$RLDX_CONTAINER" bash
+}
+
+enter_rldx_policy_server() {
+    if ! container_running "$RLDX_POLICY_SERVER_CONTAINER"; then
+        echo "Error: $RLDX_POLICY_SERVER_CONTAINER is not running. Run 'start-rldx-server' first." >&2
+        exit 1
+    fi
+    docker exec -it "$RLDX_POLICY_SERVER_CONTAINER" sh
+}
+
 show_logs() {
     $COMPOSE logs -f
 }
@@ -435,7 +565,7 @@ show_logs() {
 show_status() {
     echo "=== Containers ==="
     docker ps --format '{{.Names}}\t{{.Status}}' \
-        | grep -E "^(${MAIN_CONTAINER}|${LEROBOT_CONTAINER}|${GROOT_CONTAINER})\\b" \
+        | grep -E "^(${MAIN_CONTAINER}|${LEROBOT_CONTAINER}|${GROOT_CONTAINER}|${RLDX_CONTAINER}|${RLDX_POLICY_SERVER_CONTAINER})\\b" \
         || echo "(none running)"
 
     # s6-overlay installs s6-svstat under /package/admin/s6-*/command/
@@ -460,7 +590,7 @@ show_status() {
         " || true
     fi
 
-    for cont in "$LEROBOT_CONTAINER" "$GROOT_CONTAINER"; do
+    for cont in "$LEROBOT_CONTAINER" "$GROOT_CONTAINER" "$RLDX_CONTAINER" "$RLDX_POLICY_SERVER_CONTAINER"; do
         if container_running "$cont"; then
             echo ""
             # Not every policy container uses s6-overlay (e.g. lerobot
@@ -498,9 +628,14 @@ case "${1:-help}" in
     start)           start_main ;;
     start-lerobot)   start_lerobot ;;
     start-groot)     start_groot ;;
+    start-rldx)      start_rldx ;;
+    start-rldx-server) start_rldx_policy_server ;;
+    start-rldx-stack) start_rldx_stack ;;
     enter)           enter_main ;;
     enter-lerobot)   enter_lerobot ;;
     enter-groot)     enter_groot ;;
+    enter-rldx)      enter_rldx ;;
+    enter-rldx-server) enter_rldx_policy_server ;;
     build-ui)        build_ui ;;
     test-ui)         shift; test_ui "$@" ;;
     logs)            show_logs ;;

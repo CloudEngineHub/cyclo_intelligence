@@ -17,7 +17,7 @@ const POLICY_BACKEND_SERVICE_GROUPS = [
 ];
 
 export const getPolicyBackendName = (serviceType) => (
-  serviceType === 'groot' ? 'groot' : 'lerobot'
+  serviceType === 'groot' || serviceType === 'rldx' ? serviceType : 'lerobot'
 );
 
 export function getPolicyBackendServiceLabel(name) {
@@ -143,6 +143,9 @@ export default function usePolicyBackendStatus(
   { enabled = true, intervalMs = DEFAULT_POLL_MS } = {}
 ) {
   const backend = useMemo(() => getPolicyBackendName(serviceType), [serviceType]);
+  const readinessOptions = useMemo(() => ({
+    minMainUptimeS: backend === 'rldx' ? 5 : BACKEND_WARMUP_MIN_UPTIME_S,
+  }), [backend]);
   const [status, setStatus] = useState(null);
   const [error, setError] = useState('');
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -186,6 +189,6 @@ export default function usePolicyBackendStatus(
     error,
     isRefreshing,
     refreshStatus,
-    readiness: getPolicyBackendReadiness(status),
+    readiness: getPolicyBackendReadiness(status, readinessOptions),
   };
 }

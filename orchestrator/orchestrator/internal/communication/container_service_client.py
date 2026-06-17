@@ -356,6 +356,9 @@ class ContainerServiceClient:
         robot_type: str = "",
         task_instruction: str = "",
         publish_to_robot: bool = False,
+        remote_host: str = "",
+        remote_port: int = 0,
+        remote_timeout_ms: int = 0,
         timeout_sec: Optional[float] = None,
     ) -> ServiceResponse:
         """Call /{prefix}/inference_command (InferenceCommand.srv).
@@ -379,6 +382,12 @@ class ContainerServiceClient:
         request.task_instruction = task_instruction
         if hasattr(request, "publish_to_robot"):
             request.publish_to_robot = bool(publish_to_robot)
+        if hasattr(request, "remote_host"):
+            request.remote_host = str(remote_host or "").strip()
+        if hasattr(request, "remote_port"):
+            request.remote_port = int(remote_port or 0)
+        if hasattr(request, "remote_timeout_ms"):
+            request.remote_timeout_ms = int(remote_timeout_ms or 0)
 
         if timeout_sec is None:
             timeout_sec = (

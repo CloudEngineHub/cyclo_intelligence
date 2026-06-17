@@ -10,6 +10,7 @@ import React from 'react';
 import { useSelector, useDispatch } from 'react-redux';
 import clsx from 'clsx';
 import { setTaskInfo } from '../features/tasks/taskSlice';
+import { withRuntimeDefaults } from '../utils/inferenceRuntime';
 
 // Inference models. Each option pairs a backend (orchestrator routing
 // via TaskInfo.service_type) with a policy class (drives instruction
@@ -41,6 +42,12 @@ const MODEL_GROUPS = [
     ],
   },
   {
+    label: 'RLDX',
+    options: [
+      { value: 'rldx:rldx1', label: 'RLDX-1', serviceType: 'rldx', policyType: 'rldx1' },
+    ],
+  },
+  {
     label: 'Coming Soon',
     options: [
       {
@@ -55,13 +62,6 @@ const MODEL_GROUPS = [
         label: 'OpenPI',
         serviceType: 'future',
         policyType: 'openpi',
-        comingSoon: true,
-      },
-      {
-        value: 'future:rldx1',
-        label: 'RLDX-1',
-        serviceType: 'future',
-        policyType: 'rldx1',
         comingSoon: true,
       },
     ],
@@ -86,12 +86,13 @@ const InferenceModelSelector = ({ readonly = false }) => {
   const handleChange = (e) => {
     const sel = AVAILABLE_MODEL_OPTIONS.find((o) => o.value === e.target.value);
     if (!sel) return;
+    const nextInfo = {
+      ...info,
+      serviceType: sel.serviceType,
+      policyType: sel.policyType,
+    };
     dispatch(
-      setTaskInfo({
-        ...info,
-        serviceType: sel.serviceType,
-        policyType: sel.policyType,
-      })
+      setTaskInfo(withRuntimeDefaults(nextInfo))
     );
   };
 

@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-export const FALLBACK_SCHEMA_VERSION = '1.0';
+export const FALLBACK_SCHEMA_VERSION = '1.1';
 
 export const FALLBACK_CATALOG = [
   {
@@ -68,6 +68,9 @@ export const FALLBACK_CATALOG = [
       { name: 'inference_hz', type: 'number', default: '15' },
       { name: 'control_hz', type: 'number', default: '100' },
       { name: 'chunk_align_window_s', type: 'number', default: '0.3' },
+      { name: 'remote_host', type: 'string', default: '' },
+      { name: 'remote_port', type: 'number', default: '0' },
+      { name: 'remote_timeout_ms', type: 'number', default: '0' },
     ],
   },
   {

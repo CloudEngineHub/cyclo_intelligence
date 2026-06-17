@@ -62,6 +62,9 @@ string embodiment_tag
 string robot_type
 string task_instruction
 bool publish_to_robot
+string remote_host
+uint16 remote_port
+uint32 remote_timeout_ms
 """
 
 INFERENCE_COMMAND_RESPONSE_DEF = """\
@@ -80,6 +83,9 @@ string model_path
 string embodiment_tag
 string robot_type
 string task_instruction
+string remote_host
+uint16 remote_port
+uint32 remote_timeout_ms
 """
 
 ENGINE_COMMAND_RESPONSE_DEF = """\

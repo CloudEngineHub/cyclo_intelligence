@@ -101,6 +101,10 @@ MODEL_SERVICE_TYPES = {
     'groot:n17': 'groot',
     'n17': 'groot',
     'n1.7': 'groot',
+    'rldx': 'rldx',
+    'rldx:rldx1': 'rldx',
+    'rldx-1': 'rldx',
+    'rldx1': 'rldx',
     'lerobot': 'lerobot',
     'lerobot:act': 'lerobot',
     'lerobot:smolvla': 'lerobot',
@@ -165,6 +169,9 @@ class SendCommand(BaseAction):
             control_hz=params.get('control_hz', 100),
             chunk_align_window_s=params.get('chunk_align_window_s', 0.3),
             inference_mode=inference_mode,
+            remote_host=params.get('remote_host', ''),
+            remote_port=params.get('remote_port', 0),
+            remote_timeout_ms=params.get('remote_timeout_ms', 0),
         )
         action.name = name
         return action
@@ -185,6 +192,9 @@ class SendCommand(BaseAction):
         control_hz: int = 100,
         chunk_align_window_s: float = 0.3,
         inference_mode: str = 'simulation',
+        remote_host: str = '',
+        remote_port: int = 0,
+        remote_timeout_ms: int = 0,
         service_name: str = '/task/command',
     ):
         super().__init__(node, name='SendCommand')
@@ -202,6 +212,9 @@ class SendCommand(BaseAction):
             if self.command_str == 'LOAD'
             else ''
         )
+        self.remote_host = str(remote_host or '').strip()
+        self.remote_port = int(remote_port) if remote_port else 0
+        self.remote_timeout_ms = int(remote_timeout_ms) if remote_timeout_ms else 0
 
         self._client = self.node.create_client(SendCommandSrv, service_name)
 
@@ -377,7 +390,8 @@ class SendCommand(BaseAction):
         ti = TaskInfo()
         ti.task_type = 'inference'
         ti.policy_path = self.policy_path
-        ti.service_type = _service_type_from_model(self.model)
+        service_type = _service_type_from_model(self.model)
+        ti.service_type = service_type
         if self.command_str == 'LOAD' and hasattr(ti, 'inference_mode'):
             ti.inference_mode = self.inference_mode
         ti.tags = (
@@ -391,6 +405,18 @@ class SendCommand(BaseAction):
             ti.inference_hz = self.inference_hz
         if self.chunk_align_window_s:
             ti.chunk_align_window_s = self.chunk_align_window_s
+        if self.remote_host:
+            ti.remote_host = self.remote_host
+        elif service_type == 'rldx':
+            ti.remote_host = '127.0.0.1'
+        if self.remote_port:
+            ti.remote_port = self.remote_port
+        elif service_type == 'rldx':
+            ti.remote_port = 5555
+        if self.remote_timeout_ms:
+            ti.remote_timeout_ms = self.remote_timeout_ms
+        elif service_type == 'rldx':
+            ti.remote_timeout_ms = 300000
         if self.task_instruction:
             if isinstance(self.task_instruction, list):
                 ti.task_instruction = self.task_instruction

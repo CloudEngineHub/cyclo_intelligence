@@ -14,11 +14,15 @@ uint8 command
 # discard late/stale responses after a configurable timeout.
 uint64 seq_id
 
-# LOAD_POLICY fields.
+# LOAD_POLICY fields. model_path is used by local-policy engines. Remote
+# engines such as RLDX may use the optional endpoint fields instead.
 string model_path
 string embodiment_tag
 string robot_type
 string task_instruction
+string remote_host
+uint16 remote_port
+uint32 remote_timeout_ms
 ---
 uint64 seq_id
 bool success

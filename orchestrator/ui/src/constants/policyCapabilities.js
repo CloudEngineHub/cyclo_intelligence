@@ -16,6 +16,7 @@
 // Grow this map one line at a time as policies are validated end-to-end.
 export const POLICY_REQUIRES_INSTRUCTION = {
   'groot:n17': true,
+  'rldx:rldx1': true,
   'lerobot:act': false,
   'lerobot:smolvla': true,
   'lerobot:xvla': true,

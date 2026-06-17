@@ -32,6 +32,9 @@ import {
 
 const API_BASE = '/api';
 const HUGGINGFACE_ENDPOINT = 'https://huggingface.co';
+const BACKEND_WARMUP_S = {
+  rldx: 5,
+};
 
 const stateLabels = {
   running: 'Running',
@@ -42,6 +45,7 @@ const stateLabels = {
 
 const getBackendLabel = (serviceType) => {
   if (serviceType === 'groot') return 'GR00T Docker';
+  if (serviceType === 'rldx') return 'RLDX Docker';
   if (serviceType === 'lerobot') return 'LeRobot Docker';
   return 'Policy Docker';
 };
@@ -116,7 +120,9 @@ async function readPullStream(response, onProgress) {
 }
 
 export default function PolicyBackendControl({ serviceType }) {
-  const backend = serviceType === 'groot' ? 'groot' : 'lerobot';
+  const backend = serviceType === 'groot' || serviceType === 'rldx'
+    ? serviceType
+    : 'lerobot';
   const label = useMemo(
     () => getBackendLabel(serviceType),
     [serviceType]
@@ -279,7 +285,12 @@ export default function PolicyBackendControl({ serviceType }) {
   const showRuntimeControls = !isStaleContainer &&
     (imagePulled || (hasStatus && state !== 'not_created'));
   const showTokenControl = backend === 'groot';
-  const readiness = useMemo(() => getPolicyBackendReadiness(status), [status]);
+  const readiness = useMemo(
+    () => getPolicyBackendReadiness(status, {
+      minMainUptimeS: BACKEND_WARMUP_S[backend],
+    }),
+    [status, backend]
+  );
   const isWarming = isRunning && !readiness.ready &&
     (readiness.state === 'checking' || readiness.state === 'warming');
   const statusLabel = isStaleContainer

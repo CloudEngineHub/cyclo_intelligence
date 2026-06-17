@@ -23,6 +23,7 @@ import TrainingCommand from '../constants/trainingCommand';
 import EditDatasetCommand from '../constants/commands';
 import rosConnectionManager from '../utils/rosConnectionManager';
 import { DEFAULT_PATHS } from '../constants/paths';
+import { buildRuntimeRequestFields } from '../utils/inferenceRuntime';
 
 const DEFAULT_SERVICE_TIMEOUT_MS = 10000;
 const START_INFERENCE_SERVICE_TIMEOUT_MS = 30000;
@@ -296,6 +297,7 @@ export function useRosServiceCaller() {
         const imageResize = options.imageResize || null;
         const inferenceMode = options.inferenceMode || taskInfo.inferenceMode || 'simulation';
         const policyPath = String(taskInfo.policyPath || '').trim();
+        const runtimeFields = buildRuntimeRequestFields(taskInfo);
 
         const request = {
           task_info: {
@@ -317,6 +319,7 @@ export function useRosServiceCaller() {
             include_robotis_license: Boolean(taskInfo.includeRobotisLicense),
             service_type: String(taskInfo.serviceType || ''),
             inference_mode: String(inferenceMode),
+            ...runtimeFields,
           },
           command: Number(command_enum),
           segment_index: Number(options.segmentIndex || 0),

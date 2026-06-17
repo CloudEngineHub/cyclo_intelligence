@@ -23,7 +23,7 @@ import { DEFAULT_PATHS } from '../../constants/paths';
 
 const NUMBER_PARAMS = new Set([
   'duration', 'angle_deg', 'lift_position', 'control_hz', 'inference_hz',
-  'chunk_align_window_s', 'max_iterations',
+  'chunk_align_window_s', 'max_iterations', 'remote_port', 'remote_timeout_ms',
 ]);
 
 // Per-param helper text shown beneath the input. Keep these short — they
@@ -48,7 +48,9 @@ const ENUM_PARAMS = {
     'lerobot:pi05',
     'lerobot:diffusion',
     'groot:n17',
+    'rldx:rldx1',
     'groot',
+    'rldx',
     'lerobot',
   ],
   inference_mode: ['simulation', 'robot'],
@@ -62,6 +64,7 @@ const SEND_COMMAND_ACTIVE_FIELDS = {
   LOAD: new Set([
     'command', 'model', 'policy_path', 'task_instruction',
     'inference_mode', 'inference_hz', 'control_hz', 'chunk_align_window_s',
+    'remote_host', 'remote_port', 'remote_timeout_ms',
   ]),
   // Resume can re-condition language mid-run; output mode is fixed by LOAD.
   RESUME: new Set(['command', 'task_instruction']),
@@ -111,9 +114,9 @@ export default function BTParamPanel({ nodes, selectedNodeId, onParamChange, onN
 
   const policyBrowserPath = useMemo(() => {
     const model = String(localParams.model || '').toLowerCase();
-    return model.startsWith('groot')
-      ? DEFAULT_PATHS.GROOT_CHECKPOINTS_PATH
-      : DEFAULT_PATHS.LEROBOT_CHECKPOINTS_PATH;
+    if (model.startsWith('groot')) return DEFAULT_PATHS.GROOT_CHECKPOINTS_PATH;
+    if (model.startsWith('rldx')) return DEFAULT_PATHS.RLDX_CHECKPOINTS_PATH;
+    return DEFAULT_PATHS.LEROBOT_CHECKPOINTS_PATH;
   }, [localParams.model]);
 
   // Reset local state only when switching to a different node

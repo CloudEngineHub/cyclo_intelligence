@@ -204,11 +204,18 @@ _BACKENDS: Dict[str, Dict[str, str]] = {
         "image": f"robotis/groot-zenoh:1.3.0-{_BACKEND_ARCH}",
         "services": ["main-runtime", "engine-process"],
     },
+    "rldx": {
+        "service": "rldx",
+        "container": "rldx_runtime",
+        "image": f"robotis/rldx-zenoh:0.1.0-{_BACKEND_ARCH}",
+        "services": ["main-runtime", "engine-process"],
+    },
 }
 
 _REQUIRED_BACKEND_MOUNTS: Dict[str, tuple[str, ...]] = {
     "lerobot": ("/workspace",),
     "groot": ("/workspace",),
+    "rldx": ("/workspace",),
 }
 
 

@@ -14,7 +14,7 @@
 //
 // Author: Kiwoong Park
 
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import clsx from 'clsx';
 import toast from 'react-hot-toast';
@@ -23,6 +23,13 @@ import { useRosServiceCaller } from '../hooks/useRosServiceCaller';
 import { RecordPhase, InferencePhase } from '../constants/taskPhases';
 import { selectRobotType } from '../features/tasks/taskSlice';
 import { setRobotTypeList, setIsFirstLoadTrue } from '../features/ui/uiSlice';
+
+const showShortSuccessToast = (message, id, duration = 900) => {
+  toast.success(message, { id, duration });
+  window.setTimeout(() => {
+    toast.remove(id);
+  }, duration + 250);
+};
 
 export default function RobotTypeSelector() {
   const dispatch = useDispatch();
@@ -44,9 +51,10 @@ export default function RobotTypeSelector() {
   const [loading, setLoading] = useState(false);
   const [fetching, setFetching] = useState(false);
   const [selectedRobotType, setSelectedRobotType] = useState('');
+  const initialFetchStartedRef = useRef(false);
 
   // Fetch robot type list
-  const fetchRobotTypes = useCallback(async () => {
+  const fetchRobotTypes = useCallback(async ({ showSuccess = true } = {}) => {
     setFetching(true);
     try {
       const result = await getRobotTypeList();
@@ -54,7 +62,13 @@ export default function RobotTypeSelector() {
 
       if (result && result.robot_types) {
         dispatch(setRobotTypeList(result.robot_types));
-        toast.success('Robot types loaded successfully');
+        if (showSuccess) {
+          showShortSuccessToast(
+            'Robot types loaded successfully',
+            'robot-types-loaded',
+            900
+          );
+        }
       } else {
         toast.error('Failed to get robot types: Invalid response');
       }
@@ -91,7 +105,11 @@ export default function RobotTypeSelector() {
 
       if (result && result.success) {
         dispatch(selectRobotType(selectedRobotType));
-        toast.success(`Robot type set to: ${selectedRobotType}`);
+        showShortSuccessToast(
+          `Robot type set to: ${selectedRobotType}`,
+          'robot-type-set',
+          900
+        );
 
         dispatch(setIsFirstLoadTrue('record'));
       } else {
@@ -107,8 +125,12 @@ export default function RobotTypeSelector() {
 
   // Fetch robot types when component mounts
   useEffect(() => {
-    fetchRobotTypes();
-  }, [fetchRobotTypes]);
+    if (initialFetchStartedRef.current || robotTypeList.length > 0) {
+      return;
+    }
+    initialFetchStartedRef.current = true;
+    fetchRobotTypes({ showSuccess: false });
+  }, [fetchRobotTypes, robotTypeList.length]);
 
   useEffect(() => {
     if (robotType && !selectedRobotType) {
@@ -230,7 +252,7 @@ export default function RobotTypeSelector() {
 
       <button
         className={classRefreshButton}
-        onClick={fetchRobotTypes}
+        onClick={() => fetchRobotTypes({ showSuccess: true })}
         disabled={fetching || loading || taskInProgress}
       >
         <div className="flex items-center justify-center gap-2">

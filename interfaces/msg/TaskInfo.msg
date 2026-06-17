@@ -27,3 +27,9 @@ string service_type
 # preview-only trajectories for the 3D viewer. "robot" permits the policy
 # container Main runtime to publish robot command topics.
 string inference_mode
+
+# Optional remote policy endpoint. Empty fields keep backend/container defaults.
+# RLDX uses these to send observations to an external ZMQ PolicyServer.
+string remote_host
+uint16 remote_port
+uint32 remote_timeout_ms

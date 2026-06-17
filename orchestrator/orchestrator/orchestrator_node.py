@@ -185,6 +185,7 @@ class OrchestratorNode(Node):
         self.container_service_client: Optional[ContainerServiceClient] = None
         self._loaded_inference_policy_path: str = ''
         self._loaded_inference_publish_to_robot: bool = False
+        self._loaded_inference_runtime_key: str = ''
 
         # HF endpoint registry — orchestrator-owned because the
         # set/get/list/select_hf_endpoint services also read and mutate
@@ -1224,22 +1225,33 @@ class OrchestratorNode(Node):
                 requested_policy_path = self._normalize_policy_path(
                     task_info.policy_path
                 )
+                requested_runtime_key = self._inference_runtime_key(task_info)
                 with self._state_lock:
                     existing_client = self.container_service_client
                     loaded_policy_path = self._loaded_inference_policy_path
+                    loaded_runtime_key = self._loaded_inference_runtime_key
                 start_handled = False
                 if (
                     existing_client is not None
                     and existing_client._service_prefix == service_prefix
                 ):
+                    runtime_changed = (
+                        requested_runtime_key
+                        and loaded_runtime_key
+                        and requested_runtime_key != loaded_runtime_key
+                    )
                     if (
-                        requested_policy_path
-                        and loaded_policy_path
-                        and requested_policy_path != loaded_policy_path
+                        (
+                            requested_policy_path
+                            and loaded_policy_path
+                            and requested_policy_path != loaded_policy_path
+                        )
+                        or runtime_changed
                     ):
                         self.get_logger().info(
-                            'Requested inference policy changed '
-                            f'({loaded_policy_path} -> {requested_policy_path}); '
+                            'Requested inference policy/runtime changed '
+                            f'(policy {loaded_policy_path} -> {requested_policy_path}, '
+                            f'runtime {loaded_runtime_key} -> {requested_runtime_key}); '
                             'reloading policy'
                         )
                         self._teardown_inference_client()
@@ -1315,9 +1327,17 @@ class OrchestratorNode(Node):
                     # FINISH wipes container_service_client), so the thread
                     # operates on the client we just created.
                     client = new_client
-                    model_path = task_info.policy_path
+                    model_path = str(task_info.policy_path or '').strip()
                     normalized_model_path = requested_policy_path
                     robot_type = self.robot_type
+                    remote_host = str(
+                        getattr(task_info, 'remote_host', '') or ''
+                    ).strip()
+                    remote_port = int(getattr(task_info, 'remote_port', 0) or 0)
+                    remote_timeout_ms = int(
+                        getattr(task_info, 'remote_timeout_ms', 0) or 0
+                    )
+                    runtime_key = requested_runtime_key
 
                     def _load_and_start():
                         try:
@@ -1328,6 +1348,9 @@ class OrchestratorNode(Node):
                                 robot_type=robot_type,
                                 task_instruction=task_instruction,
                                 publish_to_robot=publish_to_robot,
+                                remote_host=remote_host,
+                                remote_port=remote_port,
+                                remote_timeout_ms=remote_timeout_ms,
                             )
                             if not load_result.success:
                                 self.get_logger().error(
@@ -1370,6 +1393,7 @@ class OrchestratorNode(Node):
                                     self._loaded_inference_publish_to_robot = (
                                         publish_to_robot
                                     )
+                                    self._loaded_inference_runtime_key = runtime_key
                             self._publish_inference_phase(InferenceStatus.INFERENCING)
                         except Exception as e:
                             self.get_logger().error(
@@ -1525,6 +1549,23 @@ class OrchestratorNode(Node):
                 snapshot_on_recording, snapshot_on_inference = (
                     self._snapshot_session_state()
                 )
+                is_inference_clear = (
+                    request.command == SendCommand.Request.FINISH
+                    and request.task_info.task_type == 'inference'
+                )
+                if is_inference_clear:
+                    self.get_logger().info('Clearing inference session')
+                    self._teardown_inference_client()
+                    self._set_session_active(
+                        on_recording=False, on_inference=False,
+                    )
+                    if self.timer_manager:
+                        self.timer_manager.stop(timer_name='collection')
+                    self._publish_inference_phase(InferenceStatus.READY)
+                    response.success = True
+                    response.message = 'Inference cleared'
+                    return response
+
                 if not snapshot_on_recording and not snapshot_on_inference:
                     # Not recording — CANCEL/RERECORD have nothing to
                     # do at idle. Forward anyway so cyclo_data's
@@ -2182,6 +2223,7 @@ class OrchestratorNode(Node):
         'tdmpc', 'diffusion', 'act', 'vqbet', 'pi0', 'pi0_fast', 'pi05',
         'smolvla', 'xvla', 'sac',
     }
+    RLDX_MODEL_TYPES = {'RLDX-1', 'RLDX'}
 
     @staticmethod
     def _normalize_policy_path(policy_path: str) -> str:
@@ -2191,12 +2233,22 @@ class OrchestratorNode(Node):
             return ''
         return os.path.normpath(value)
 
+    @staticmethod
+    def _inference_runtime_key(task_info) -> str:
+        host = str(getattr(task_info, 'remote_host', '') or '').strip()
+        port = int(getattr(task_info, 'remote_port', 0) or 0)
+        timeout_ms = int(getattr(task_info, 'remote_timeout_ms', 0) or 0)
+        if not any((host, port, timeout_ms)):
+            return ''
+        return f'{host}|{port}|{timeout_ms}'
+
     def _determine_service_prefix(self, task_info) -> str:
         """Determine inference service prefix from task_info or policy config.
 
         1. If task_info has service_type field, use it directly.
         2. Otherwise, read policy_path/config.json to detect policy type.
-        3. LeRobot policy types -> "/lerobot", default -> "/groot".
+        3. RLDX config -> "/rldx"; LeRobot policy types -> "/lerobot";
+           default -> "/groot".
         """
         # Check for explicit service_type in task_info
         service_type = getattr(task_info, 'service_type', None)
@@ -2218,6 +2270,18 @@ class OrchestratorNode(Node):
                 try:
                     with open(config_path) as f:
                         config = json.load(f)
+                    model_type = str(config.get('model_type', ''))
+                    architectures = {
+                        str(item) for item in config.get('architectures', [])
+                    }
+                    if (
+                        model_type in self.RLDX_MODEL_TYPES
+                        or architectures.intersection(self.RLDX_MODEL_TYPES)
+                    ):
+                        self.get_logger().info(
+                            f'Detected RLDX policy model_type: {model_type}'
+                        )
+                        return '/rldx'
                     policy_type = config.get('type', '')
                     if policy_type in self.LEROBOT_POLICIES:
                         self.get_logger().info(
@@ -2249,6 +2313,7 @@ class OrchestratorNode(Node):
             self.container_service_client = None
             self._loaded_inference_policy_path = ''
             self._loaded_inference_publish_to_robot = False
+            self._loaded_inference_runtime_key = ''
         if client is None:
             return
 

@@ -46,8 +46,6 @@ class ServiceHandler:
     def _load(self, request):
         if self._session.loaded:
             return self._make_response(False, "policy already loaded - UNLOAD first")
-        if not request.model_path:
-            return self._make_response(False, "model_path is required")
         if not request.robot_type:
             return self._make_response(False, "robot_type is required")
 

@@ -36,6 +36,9 @@ string model_path
 string embodiment_tag
 string robot_type
 string task_instruction
+string remote_host
+uint16 remote_port
+uint32 remote_timeout_ms
 """
 
 ENGINE_COMMAND_RESPONSE_DEF = """\
@@ -57,6 +60,9 @@ class EngineCommandRequest:
     embodiment_tag: str = ""
     robot_type: str = ""
     task_instruction: str = ""
+    remote_host: str = ""
+    remote_port: int = 0
+    remote_timeout_ms: int = 0
 
 
 @dataclass
@@ -79,6 +85,9 @@ def request_from_message(message: Any) -> EngineCommandRequest:
         embodiment_tag=str(getattr(message, "embodiment_tag", "") or ""),
         robot_type=str(getattr(message, "robot_type", "") or ""),
         task_instruction=str(getattr(message, "task_instruction", "") or ""),
+        remote_host=str(getattr(message, "remote_host", "") or ""),
+        remote_port=int(getattr(message, "remote_port", 0) or 0),
+        remote_timeout_ms=int(getattr(message, "remote_timeout_ms", 0) or 0),
     )
 
 
@@ -119,6 +128,9 @@ def request_to_message_kwargs(request: EngineCommandRequest) -> dict:
         "embodiment_tag": str(request.embodiment_tag),
         "robot_type": str(request.robot_type),
         "task_instruction": str(request.task_instruction),
+        "remote_host": str(request.remote_host),
+        "remote_port": int(request.remote_port),
+        "remote_timeout_ms": int(request.remote_timeout_ms),
     }
 
 

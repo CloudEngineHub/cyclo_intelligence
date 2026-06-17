@@ -39,6 +39,30 @@ class InferenceRequesterTests(unittest.TestCase):
 
         self.assertEqual(client.calls[0][1], 7200.0)
 
+    def test_load_policy_forwards_remote_endpoint_fields(self) -> None:
+        client = FakeEngineClient(
+            [EngineCommandResponse(success=True, seq_id=1)]
+        )
+        requester = InferenceRequester(client)
+
+        requester.load_policy(type("Req", (), {
+            "model_path": "",
+            "embodiment_tag": "",
+            "robot_type": "ffw",
+            "task_instruction": "pick",
+            "remote_host": "192.168.0.10",
+            "remote_port": 5555,
+            "remote_timeout_ms": 300000,
+        })())
+
+        request, _timeout_s = client.calls[0]
+        self.assertEqual(request.model_path, "")
+        self.assertEqual(request.robot_type, "ffw")
+        self.assertEqual(request.task_instruction, "pick")
+        self.assertEqual(request.remote_host, "192.168.0.10")
+        self.assertEqual(request.remote_port, 5555)
+        self.assertEqual(request.remote_timeout_ms, 300000)
+
     def test_get_action_uses_monotonic_seq_id(self) -> None:
         client = FakeEngineClient(
             [

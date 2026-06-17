@@ -81,6 +81,9 @@ const initialState = {
     serviceType: 'lerobot',
     policyType: 'act',
     inferenceMode: 'simulation',
+    remoteHost: '127.0.0.1',
+    remotePort: 5555,
+    remoteTimeoutMs: 300000,
   },
 
   taskInfoSync: { ...syncInitialState },

@@ -62,9 +62,11 @@ class InferenceEngine(ABC):
     def load_policy(self, request: Any) -> Dict[str, Any]:
         """Load policy weights + bring up RobotClient.
 
-        ``request`` carries the InferenceCommand srv body:
+        ``request`` carries the EngineCommand request body:
         ``request.model_path``, ``request.robot_type``,
-        ``request.task_instruction``.
+        ``request.task_instruction``, plus optional backend-specific fields
+        such as ``request.remote_host``, ``request.remote_port``, and
+        ``request.remote_timeout_ms``.
         """
 
     @abstractmethod

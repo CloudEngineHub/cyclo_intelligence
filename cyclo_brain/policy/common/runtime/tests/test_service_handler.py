@@ -91,6 +91,24 @@ class ServiceHandlerPublishModeTests(unittest.TestCase):
         self.assertTrue(response.success)
         self.assertEqual(loop.configures[0]["publish_to_robot"], False)
 
+    def test_load_allows_empty_model_path_for_remote_backends(self) -> None:
+        handler, _session, loop = self._handler()
+
+        response = handler.handle(SimpleNamespace(
+            command=CMD_LOAD,
+            model_path="",
+            robot_type="ffw",
+            task_instruction="pick",
+            remote_host="192.168.0.10",
+            remote_port=5555,
+            remote_timeout_ms=300000,
+            publish_to_robot=False,
+        ))
+
+        self.assertTrue(response.success)
+        self.assertEqual(loop.configures[0]["robot_type"], "ffw")
+        self.assertEqual(loop.configures[0]["publish_to_robot"], False)
+
     def test_load_configures_robot_publish_when_requested(self) -> None:
         handler, _session, loop = self._handler()
 

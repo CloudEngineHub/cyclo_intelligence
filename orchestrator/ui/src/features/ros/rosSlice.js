@@ -22,12 +22,22 @@ import { createSlice } from '@reduxjs/toolkit';
 // rosbridge URL — child components mount with a working connection target
 // instead of waiting for an effect-time dispatch.
 const defaultRosHost = typeof window !== 'undefined' ? window.location.hostname : '';
+const defaultRosOrigin = typeof window !== 'undefined' ? window.location.host : '';
+const defaultRosScheme = typeof window !== 'undefined' && window.location.protocol === 'https:' ? 'wss' : 'ws';
+
+const buildRosbridgeUrl = (host) => {
+  if (!host) return '';
+  const hasPort = host.includes(':');
+  const currentPort = typeof window !== 'undefined' ? window.location.port : '';
+  const originHost = hasPort || !currentPort ? host : `${host}:${currentPort}`;
+  return `${defaultRosScheme}://${originHost}/rosbridge`;
+};
 
 const initialState = {
   connected: false,
   connecting: false,
   rosHost: defaultRosHost,
-  rosbridgeUrl: defaultRosHost ? `ws://${defaultRosHost}:9090` : '',
+  rosbridgeUrl: defaultRosOrigin ? `${defaultRosScheme}://${defaultRosOrigin}/rosbridge` : '',
   imageTopicList: [],
   /** Persisted camera topic assignment [left, center, right] so it survives ImageGrid remounts */
   assignedImageTopics: [],
@@ -46,7 +56,7 @@ const rosSlice = createSlice({
     },
     setRosHost: (state, action) => {
       state.rosHost = action.payload;
-      state.rosbridgeUrl = `ws://${action.payload}:9090`;
+      state.rosbridgeUrl = buildRosbridgeUrl(action.payload);
     },
     setRosbridgeUrl: (state, action) => {
       state.rosbridgeUrl = action.payload;
