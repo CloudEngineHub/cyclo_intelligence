@@ -19,6 +19,8 @@ string model_path
 string embodiment_tag
 string robot_type
 string task_instruction
+string acceleration_mode
+string acceleration_engine_path
 ---
 uint64 seq_id
 bool success

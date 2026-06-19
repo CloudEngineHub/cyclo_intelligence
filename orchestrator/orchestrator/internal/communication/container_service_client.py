@@ -356,6 +356,8 @@ class ContainerServiceClient:
         robot_type: str = "",
         task_instruction: str = "",
         publish_to_robot: bool = False,
+        acceleration_mode: str = "",
+        acceleration_engine_path: str = "",
         timeout_sec: Optional[float] = None,
     ) -> ServiceResponse:
         """Call /{prefix}/inference_command (InferenceCommand.srv).
@@ -365,7 +367,8 @@ class ContainerServiceClient:
         other commands. ``task_instruction`` is used by LOAD (training-time
         conditioning) and RESUME (online re-conditioning). ``publish_to_robot``
         gates the policy container's robot command publishers; false is
-        simulation / 3D preview only.
+        simulation / 3D preview only. ``acceleration_mode`` and
+        ``acceleration_engine_path`` are LOAD-time runtime optimization knobs.
 
         Timeout defaults to INFERENCE_LOAD_TIMEOUT_SEC for LOAD (CUDA init,
         weight load, and first-time gated backbone downloads) and 10 s for
@@ -379,6 +382,10 @@ class ContainerServiceClient:
         request.task_instruction = task_instruction
         if hasattr(request, "publish_to_robot"):
             request.publish_to_robot = bool(publish_to_robot)
+        if hasattr(request, "acceleration_mode"):
+            request.acceleration_mode = str(acceleration_mode or "")
+        if hasattr(request, "acceleration_engine_path"):
+            request.acceleration_engine_path = str(acceleration_engine_path or "")
 
         if timeout_sec is None:
             timeout_sec = (

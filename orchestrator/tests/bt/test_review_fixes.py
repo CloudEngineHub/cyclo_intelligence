@@ -52,7 +52,9 @@ def _install_ros_stubs():
         PAUSED = 3
 
     class _TaskInfo:
-        pass
+        inference_mode = ''
+        acceleration_mode = ''
+        acceleration_engine_path = ''
 
     class _SendCommandRequest:
         START_INFERENCE = 1
@@ -128,3 +130,23 @@ def test_resume_send_command_legacy_simulation_ignores_mode():
     )
 
     assert action.inference_mode == ''
+
+
+def test_load_send_command_sets_acceleration_mode():
+    context = types.SimpleNamespace(node=_DummyNode())
+
+    action = SendCommand.from_xml_params(
+        context,
+        'LoadInference',
+        {
+            'command': 'LOAD',
+            'model': 'groot:n17',
+            'acceleration_mode': 'tensorrt',
+            'acceleration_engine_path': 'custom.trt',
+        },
+    )
+    task_info = action._build_task_info()
+
+    assert action.acceleration_mode == 'tensorrt_dit'
+    assert task_info.acceleration_mode == 'tensorrt_dit'
+    assert task_info.acceleration_engine_path == 'custom.trt'

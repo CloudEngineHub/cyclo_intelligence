@@ -54,6 +54,24 @@ const buildRequiredFields = (serviceType, policyType) => {
 };
 
 const spinnerFrames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧'];
+const API_BASE = '/api';
+
+async function readJsonResponse(response) {
+  const text = await response.text();
+  if (!text) return {};
+  try {
+    return JSON.parse(text);
+  } catch {
+    return { detail: text };
+  }
+}
+
+function buildTrtStatusUrl(modelPath, enginePath) {
+  const params = new URLSearchParams();
+  params.set('model_path', modelPath);
+  if (enginePath) params.set('engine_path', enginePath);
+  return `${API_BASE}/backends/groot/trt/status?${params.toString()}`;
+}
 
 export default function InferenceControlPanel() {
   const dispatch = useDispatch();
@@ -154,6 +172,42 @@ export default function InferenceControlPanel() {
     return { isValid: missingFields.length === 0, missingFields };
   }, [taskInfo]);
 
+  const ensureTensorRtReady = useCallback(async () => {
+    if (
+      taskInfo.serviceType !== 'groot' ||
+      taskInfo.accelerationMode !== 'tensorrt_dit'
+    ) {
+      return true;
+    }
+    const policyPath = String(taskInfo.policyPath || '').trim();
+    if (!policyPath) return true;
+    try {
+      const response = await fetch(buildTrtStatusUrl(
+        policyPath,
+        String(taskInfo.accelerationEnginePath || '').trim()
+      ));
+      const data = await readJsonResponse(response);
+      if (!response.ok) {
+        throw new Error(data.detail || data.message || `status failed (${response.status})`);
+      }
+      if (data.status === 'ready') return true;
+      toast.error(
+        data.status === 'building'
+          ? 'TRT engine is still building'
+          : 'Build TRT engine before starting inference'
+      );
+      return false;
+    } catch (error) {
+      toast.error(`TRT engine status failed: ${error.message}`);
+      return false;
+    }
+  }, [
+    taskInfo.serviceType,
+    taskInfo.accelerationMode,
+    taskInfo.policyPath,
+    taskInfo.accelerationEnginePath,
+  ]);
+
   const executeCommand = useCallback(
     async (commandName, commandString, options = {}) => {
       const isStartTimeoutDuringLoading = (message = '') => (
@@ -253,6 +307,13 @@ export default function InferenceControlPanel() {
       };
     }
 
+    if (
+      startIntent.commandString === 'start_inference' &&
+      !(await ensureTensorRtReady())
+    ) {
+      return;
+    }
+
     const inferenceMode = taskInfo.inferenceMode || 'simulation';
     if (inferenceMode === 'robot') {
       setPendingRobotDeployIntent(startIntent);
@@ -268,6 +329,7 @@ export default function InferenceControlPanel() {
     taskInfo.inferenceMode,
     lastPolicyPath,
     executeStartIntent,
+    ensureTensorRtReady,
     validateTaskInfo,
   ]);
 

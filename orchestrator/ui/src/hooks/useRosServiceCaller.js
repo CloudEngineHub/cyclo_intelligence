@@ -296,6 +296,12 @@ export function useRosServiceCaller() {
         const imageResize = options.imageResize || null;
         const inferenceMode = options.inferenceMode || taskInfo.inferenceMode || 'simulation';
         const policyPath = String(taskInfo.policyPath || '').trim();
+        const accelerationMode = taskInfo.serviceType === 'groot'
+          ? String(taskInfo.accelerationMode || 'pytorch').trim()
+          : 'pytorch';
+        const accelerationEnginePath = taskInfo.serviceType === 'groot'
+          ? String(taskInfo.accelerationEnginePath || '').trim()
+          : '';
 
         const request = {
           task_info: {
@@ -317,6 +323,8 @@ export function useRosServiceCaller() {
             include_robotis_license: Boolean(taskInfo.includeRobotisLicense),
             service_type: String(taskInfo.serviceType || ''),
             inference_mode: String(inferenceMode),
+            acceleration_mode: accelerationMode || 'pytorch',
+            acceleration_engine_path: accelerationEnginePath,
           },
           command: Number(command_enum),
           segment_index: Number(options.segmentIndex || 0),

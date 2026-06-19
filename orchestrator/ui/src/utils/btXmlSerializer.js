@@ -25,6 +25,8 @@ const SEND_COMMAND_PARAMS_BY_COMMAND = {
     'inference_hz',
     'control_hz',
     'chunk_align_window_s',
+    'acceleration_mode',
+    'acceleration_engine_path',
   ]),
   RESUME: new Set(['command', 'task_instruction']),
   STOP: new Set(['command']),

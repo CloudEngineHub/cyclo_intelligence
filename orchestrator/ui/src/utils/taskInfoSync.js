@@ -21,6 +21,8 @@ export const normalizeRecordTaskInfo = (taskInfo = {}) => ({
   includeRobotisLicense: Boolean(taskInfo.includeRobotisLicense),
   serviceType: String(taskInfo.serviceType ?? '').trim(),
   inferenceMode: String(taskInfo.inferenceMode ?? 'simulation').trim(),
+  accelerationMode: String(taskInfo.accelerationMode ?? 'pytorch').trim(),
+  accelerationEnginePath: String(taskInfo.accelerationEnginePath ?? '').trim(),
 });
 
 export const getRecordTaskInfoKey = (taskInfo = {}) =>
@@ -36,6 +38,8 @@ export const rosTaskInfoToUiTaskInfo = (taskInfo = {}) => ({
   recordInferenceMode: Boolean(taskInfo.record_inference_mode),
   serviceType: taskInfo.service_type || 'lerobot',
   inferenceMode: taskInfo.inference_mode || 'simulation',
+  accelerationMode: taskInfo.acceleration_mode || 'pytorch',
+  accelerationEnginePath: taskInfo.acceleration_engine_path || '',
   userId: taskInfo.user_id || '',
   controlHz: taskInfo.control_hz || 100,
   inferenceHz: taskInfo.inference_hz || 15,

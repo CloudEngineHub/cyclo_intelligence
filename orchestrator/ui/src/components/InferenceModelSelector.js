@@ -91,6 +91,12 @@ const InferenceModelSelector = ({ readonly = false }) => {
         ...info,
         serviceType: sel.serviceType,
         policyType: sel.policyType,
+        accelerationMode: sel.serviceType === 'groot'
+          ? (info.accelerationMode || 'pytorch')
+          : 'pytorch',
+        accelerationEnginePath: sel.serviceType === 'groot'
+          ? (info.accelerationEnginePath || '')
+          : '',
       })
     );
   };

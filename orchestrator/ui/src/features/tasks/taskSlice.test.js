@@ -12,6 +12,7 @@ describe('taskSlice inference mode', () => {
     const state = reducer(undefined, { type: '@@INIT' });
 
     expect(state.taskInfo.inferenceMode).toBe('simulation');
+    expect(state.taskInfo.accelerationMode).toBe('pytorch');
   });
 
   test('sets inference mode', () => {

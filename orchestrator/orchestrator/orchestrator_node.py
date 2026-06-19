@@ -188,6 +188,8 @@ class OrchestratorNode(Node):
         self.container_service_client: Optional[ContainerServiceClient] = None
         self._loaded_inference_policy_path: str = ''
         self._loaded_inference_publish_to_robot: bool = False
+        self._loaded_inference_acceleration_mode: str = 'pytorch'
+        self._loaded_inference_acceleration_engine_path: str = ''
 
         # HF endpoint registry — orchestrator-owned because the
         # set/get/list/select_hf_endpoint services also read and mutate
@@ -1210,6 +1212,9 @@ class OrchestratorNode(Node):
                 )
                 publish_to_robot = publish_to_robot_from_task_info(task_info)
                 service_prefix = self._determine_service_prefix(task_info)
+                requested_acceleration_mode, requested_acceleration_engine_path = (
+                    self._acceleration_from_task_info(task_info)
+                )
 
                 # If the requested policy is already loaded on this
                 # container, treat START_INFERENCE as RESUME. If the user
@@ -1229,19 +1234,35 @@ class OrchestratorNode(Node):
                 with self._state_lock:
                     existing_client = self.container_service_client
                     loaded_policy_path = self._loaded_inference_policy_path
+                    loaded_acceleration_mode = (
+                        self._loaded_inference_acceleration_mode
+                    )
+                    loaded_acceleration_engine_path = (
+                        self._loaded_inference_acceleration_engine_path
+                    )
                 start_handled = False
                 if (
                     existing_client is not None
                     and existing_client._service_prefix == service_prefix
                 ):
+                    loaded_signature = (
+                        loaded_policy_path,
+                        loaded_acceleration_mode,
+                        loaded_acceleration_engine_path,
+                    )
+                    requested_signature = (
+                        requested_policy_path,
+                        requested_acceleration_mode,
+                        requested_acceleration_engine_path,
+                    )
                     if (
                         requested_policy_path
                         and loaded_policy_path
-                        and requested_policy_path != loaded_policy_path
+                        and requested_signature != loaded_signature
                     ):
                         self.get_logger().info(
-                            'Requested inference policy changed '
-                            f'({loaded_policy_path} -> {requested_policy_path}); '
+                            'Requested inference policy/runtime changed '
+                            f'({loaded_signature} -> {requested_signature}); '
                             'reloading policy'
                         )
                         self._teardown_inference_client()
@@ -1330,6 +1351,10 @@ class OrchestratorNode(Node):
                                 robot_type=robot_type,
                                 task_instruction=task_instruction,
                                 publish_to_robot=publish_to_robot,
+                                acceleration_mode=requested_acceleration_mode,
+                                acceleration_engine_path=(
+                                    requested_acceleration_engine_path
+                                ),
                             )
                             if not load_result.success:
                                 self.get_logger().error(
@@ -1371,6 +1396,12 @@ class OrchestratorNode(Node):
                                     )
                                     self._loaded_inference_publish_to_robot = (
                                         publish_to_robot
+                                    )
+                                    self._loaded_inference_acceleration_mode = (
+                                        requested_acceleration_mode
+                                    )
+                                    self._loaded_inference_acceleration_engine_path = (
+                                        requested_acceleration_engine_path
                                     )
                             self._publish_inference_phase(InferenceStatus.INFERENCING)
                         except Exception as e:
@@ -2191,6 +2222,33 @@ class OrchestratorNode(Node):
             return ''
         return os.path.normpath(value)
 
+    @staticmethod
+    def _normalize_acceleration_mode(value: str) -> str:
+        mode = str(value or '').strip().lower()
+        if mode in {'', 'none', 'off', 'false', 'pytorch', 'eager'}:
+            return 'pytorch'
+        if mode in {'trt', 'tensorrt', 'tensorrt_dit', 'dit', 'dit_only'}:
+            return 'tensorrt_dit'
+        if mode in {
+            'trt_full_pipeline',
+            'tensorrt_full_pipeline',
+            'full_pipeline',
+        }:
+            return 'tensorrt_full_pipeline'
+        return mode
+
+    @classmethod
+    def _acceleration_from_task_info(cls, task_info) -> tuple[str, str]:
+        mode = cls._normalize_acceleration_mode(
+            getattr(task_info, 'acceleration_mode', '')
+        )
+        engine_path = cls._normalize_policy_path(
+            getattr(task_info, 'acceleration_engine_path', '')
+        )
+        if mode == 'pytorch':
+            engine_path = ''
+        return mode, engine_path
+
     def _determine_service_prefix(self, task_info) -> str:
         """Determine inference service prefix from task_info or policy config.
 
@@ -2249,6 +2307,8 @@ class OrchestratorNode(Node):
             self.container_service_client = None
             self._loaded_inference_policy_path = ''
             self._loaded_inference_publish_to_robot = False
+            self._loaded_inference_acceleration_mode = 'pytorch'
+            self._loaded_inference_acceleration_engine_path = ''
         if client is None:
             return
 

@@ -129,5 +129,7 @@ describe('btXmlSerializer', () => {
     expect(xml).not.toContain('inference_hz=');
     expect(xml).not.toContain('control_hz=');
     expect(xml).not.toContain('chunk_align_window_s=');
+    expect(xml).not.toContain('acceleration_mode=');
+    expect(xml).not.toContain('acceleration_engine_path=');
   });
 });

@@ -75,6 +75,8 @@ const initialState = {
     serviceType: 'lerobot',
     policyType: 'act',
     inferenceMode: 'simulation',
+    accelerationMode: 'pytorch',
+    accelerationEnginePath: '',
   },
 
   taskInfoSync: { ...syncInitialState },

@@ -28,6 +28,7 @@ import {
 import FileBrowserModal from './FileBrowserModal';
 import InferenceModelSelector from './InferenceModelSelector';
 import PolicyBackendControl from './PolicyBackendControl';
+import TrtEngineControl from './TrtEngineControl';
 import Tooltip from './Tooltip';
 import { InferencePhase } from '../constants/taskPhases';
 import { DEFAULT_PATHS } from '../constants/paths';
@@ -39,6 +40,7 @@ const InferencePanel = () => {
   const dispatch = useDispatch();
 
   const info = useSelector((state) => state.tasks.taskInfo);
+  const robotType = useSelector((state) => state.tasks.robotType);
   const inferenceStatus = useSelector((state) => state.tasks.inferenceStatus);
   const showInstruction = requiresInstruction(info.serviceType, info.policyType);
 
@@ -55,6 +57,9 @@ const InferencePanel = () => {
     inferenceStatus.inferencePhase === InferencePhase.INFERENCING;
   const inferenceMode = info.inferenceMode || 'simulation';
   const isRobotMode = inferenceMode === 'robot';
+  const isGrootModel = info.serviceType === 'groot';
+  const isTensorRtEnabled = info.accelerationMode === 'tensorrt_dit';
+  const trtTaskInstruction = (info.taskInstruction?.[0] || '').trim();
   const isModeSwitchLocked =
     inferenceStatus.inferencePhase === InferencePhase.LOADING;
   const isModelActive = [
@@ -460,6 +465,47 @@ const InferencePanel = () => {
           </button>
         </div>
       </div>
+
+      {isGrootModel && (
+        <>
+          <div className={clsx('flex', 'items-center', 'mb-2.5')}>
+            <div className={clsx(classLabel, 'flex', 'items-center', 'gap-1')}>
+              <Tooltip content="Run GR00T with DiT TensorRT acceleration." position="bottom">
+                <MdInfoOutline className="text-gray-400 hover:text-gray-600 cursor-help" size={14} />
+              </Tooltip>
+              <span>TensorRT</span>
+            </div>
+            <label className={clsx('flex', 'items-center', 'gap-2', 'text-sm')}>
+              <input
+                type="checkbox"
+                className={clsx('w-4 h-4', {
+                  'cursor-not-allowed opacity-50': !isEditable,
+                  'cursor-pointer': isEditable,
+                })}
+                checked={isTensorRtEnabled}
+                onChange={(e) => handleChange(
+                  'accelerationMode',
+                  e.target.checked ? 'tensorrt_dit' : 'pytorch'
+                )}
+                disabled={!isEditable}
+              />
+              <span className="text-gray-500">
+                {isTensorRtEnabled ? 'Enabled' : 'Disabled'}
+              </span>
+            </label>
+          </div>
+          {isTensorRtEnabled && (
+            <TrtEngineControl
+              modelPath={info.policyPath}
+              enginePath={info.accelerationEnginePath}
+              robotType={robotType}
+              taskInstruction={trtTaskInstruction}
+              disabled={!isEditable}
+              labelClassName={classLabel}
+            />
+          )}
+        </>
+      )}
 
       <div className="w-full h-1 my-2 border-t border-gray-300"></div>
 
