@@ -185,6 +185,7 @@ def _detect_arch() -> str:
 
 
 _BACKEND_ARCH = os.environ.get("ARCH", _detect_arch())
+_RLDX_VERSION = os.environ.get("RLDX_VERSION", "0.1.1")
 
 
 # Image versions are hardcoded per backend below since each service has
@@ -207,7 +208,7 @@ _BACKENDS: Dict[str, Dict[str, str]] = {
     "rldx": {
         "service": "rldx",
         "container": "rldx_runtime",
-        "image": f"robotis/rldx-zenoh:0.1.0-{_BACKEND_ARCH}",
+        "image": f"robotis/rldx-zenoh:{_RLDX_VERSION}-{_BACKEND_ARCH}",
         "services": ["main-runtime", "engine-process"],
     },
 }

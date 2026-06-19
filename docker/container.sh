@@ -4,7 +4,7 @@
 # and manages the main runtime plus optional policy containers.
 #
 # Usage:
-#   docker/container.sh start              # → cyclo_intelligence
+#   docker/container.sh start              # → cyclo_intelligence + rldx runtime
 #   docker/container.sh start-lerobot      # → lerobot (idle until LOAD)
 #   docker/container.sh start-groot        # → groot (idle until LOAD)
 #   docker/container.sh start-rldx         # → rldx runtime/client (idle until LOAD)
@@ -72,7 +72,29 @@ set -- "${NEW_ARGS[@]}"
 # host without sudo). In auto mode, prefer SSD-backed storage when it is
 # usable and fall back to repo-local storage on development machines.
 ensure_host_dir() {
-    [ -d "$1" ] || mkdir -p "$1"
+    local dir="$1"
+    local uid gid
+
+    uid="$(id -u)"
+    gid="$(id -g)"
+
+    if [ ! -d "$dir" ]; then
+        if ! mkdir -p "$dir" 2>/dev/null; then
+            sudo install -d -o "$uid" -g "$gid" "$dir" || true
+        fi
+    fi
+
+    if [ ! -w "$dir" ]; then
+        echo "[container.sh] Fixing host bind-mount directory permissions: $dir"
+        sudo chown "$uid:$gid" "$dir" 2>/dev/null || true
+        sudo chmod u+rwx "$dir" 2>/dev/null || true
+    fi
+
+    if [ ! -d "$dir" ] || [ ! -w "$dir" ]; then
+        echo "[container.sh] Error: host bind-mount directory is not writable: $dir" >&2
+        echo "[container.sh] Run: sudo install -d -o $uid -g $gid '$dir'" >&2
+        exit 1
+    fi
 }
 
 storage_root_usable() {
@@ -275,7 +297,7 @@ show_help() {
 Usage: $0 <command>
 
 Main image (cyclo_intelligence):
-  start            Build (if needed) and start cyclo_intelligence
+  start            Build (if needed) and start cyclo_intelligence + rldx
   enter            Open an interactive bash in cyclo_intelligence
   logs             Tail cyclo_intelligence logs
 
@@ -323,7 +345,8 @@ Flags (any start* command):
 
 Environment:
   GPU_ARCH         default | blackwell   (optional, amd64 only)
-  VERSION          image tag version (default: 0.1.13 for cyclo)
+  VERSION          cyclo image tag version (default: 0.1.15)
+  RLDX_VERSION     rldx client image tag version (default: 0.1.1)
   ROS_DOMAIN_ID    default 30
   CYCLO_STORAGE_MODE
                    auto | ssd | local (default auto). Auto uses
@@ -343,16 +366,22 @@ EOF
 }
 
 ui_dir() {
-    canonical_path "${SCRIPT_DIR}/../orchestrator/ui"
+    canonical_path "${CYCLO_UI_DIR:-${SCRIPT_DIR}/../orchestrator/ui}"
 }
 
 main_ui_dir() {
     printf '%s\n' "/root/ros2_ws/src/cyclo_intelligence/orchestrator/ui"
 }
 
-main_container_has_npm() {
-    container_running "$MAIN_CONTAINER" \
-        && docker exec "$MAIN_CONTAINER" sh -lc 'command -v npm >/dev/null 2>&1'
+main_container_can_run_ui_npm() {
+    container_running "$MAIN_CONTAINER" || return 1
+    docker exec \
+        -u "$(id -u):$(id -g)" \
+        -e HOME=/tmp \
+        -w "$(main_ui_dir)" \
+        "$MAIN_CONTAINER" \
+        sh -lc 'command -v npm >/dev/null 2>&1 && test -w . && node -e "require(\"fs\").readFileSync(process.cwd()+\"/package.json\")"' \
+        >/dev/null 2>&1
 }
 
 run_ui_npm_in_main() {
@@ -377,17 +406,53 @@ run_ui_npm_external() {
 }
 
 run_ui_npm() {
-    if main_container_has_npm; then
+    if main_container_can_run_ui_npm; then
         run_ui_npm_in_main "$@"
     else
         run_ui_npm_external "$@"
     fi
 }
 
+ensure_ui_generated_dirs_writable() {
+    local dir uid gid
+    local -a targets
+    dir="$(ui_dir)"
+    uid="$(id -u)"
+    gid="$(id -g)"
+    targets=()
+
+    if [ -e "${dir}/node_modules" ] \
+        && { [ ! -w "${dir}/node_modules" ] \
+            || { [ -e "${dir}/node_modules/.cache" ] && [ ! -w "${dir}/node_modules/.cache" ]; }; }; then
+        targets+=("node_modules")
+    fi
+    if [ -e "${dir}/build" ] && [ ! -w "${dir}/build" ]; then
+        targets+=("build")
+    fi
+
+    if [ "${#targets[@]}" -eq 0 ]; then
+        return 0
+    fi
+
+    echo "[container.sh] Fixing UI generated directory permissions: ${targets[*]}"
+    docker run --rm --network none \
+        -v "${dir}:/ui" \
+        -w /ui \
+        "${CYCLO_UI_NODE_IMAGE:-node:22}" \
+        sh -c "chown -R ${uid}:${gid} ${targets[*]} && chmod -R u+rwX ${targets[*]}"
+}
+
 ensure_ui_dependencies() {
     local dir
-    if main_container_has_npm; then
-        if docker exec "$MAIN_CONTAINER" test -x "$(main_ui_dir)/node_modules/.bin/react-scripts"; then
+    ensure_ui_generated_dirs_writable
+
+    if main_container_can_run_ui_npm; then
+        if docker exec \
+            -u "$(id -u):$(id -g)" \
+            -e HOME=/tmp \
+            -w "$(main_ui_dir)" \
+            "$MAIN_CONTAINER" \
+            test -x node_modules/.bin/react-scripts; then
             return 0
         fi
 
@@ -435,8 +500,10 @@ build_ui() {
         return 0
     fi
 
-    echo "[container.sh] Copying UI build into ${MAIN_CONTAINER} nginx root..."
+    echo "[container.sh] Copying UI build and nginx config into ${MAIN_CONTAINER}..."
     docker cp "${dir}/build/." "${MAIN_CONTAINER}:/usr/share/nginx/html/"
+    docker cp "${dir}/nginx.conf" "${MAIN_CONTAINER}:/etc/nginx/conf.d/default.conf"
+    docker exec "$MAIN_CONTAINER" nginx -t
     docker exec "$MAIN_CONTAINER" sh -c 'nginx -s reload 2>/dev/null || true'
     echo "[container.sh] UI updated. Refresh the browser to load the new bundle."
 }
@@ -455,11 +522,14 @@ start_main() {
     setup_storage
     setup_x11
     echo "[container.sh] Pulling pre-built images (ignoring local-only failures)..."
-    $COMPOSE pull --ignore-pull-failures "$MAIN_SERVICE" "$LEROBOT_SERVICE" "$GROOT_SERVICE" || true
+    $COMPOSE pull --ignore-pull-failures "$MAIN_SERVICE" "$LEROBOT_SERVICE" "$GROOT_SERVICE" "$RLDX_SERVICE" || true
     remove_legacy_rldx_container
     remove_stale_policy_containers
-    echo "[container.sh] Starting $MAIN_SERVICE (ARCH=$ARCH${BUILD_FLAG:+, rebuild on})..."
-    $COMPOSE up -d $BUILD_FLAG "$MAIN_SERVICE"
+    echo "[container.sh] Starting $MAIN_SERVICE + $RLDX_SERVICE (ARCH=$ARCH${BUILD_FLAG:+, rebuild on})..."
+    echo "[container.sh]   RLDX_ZMQ_HOST=${RLDX_ZMQ_HOST:-127.0.0.1}"
+    echo "[container.sh]   RLDX_ZMQ_PORT=${RLDX_ZMQ_PORT:-5555}"
+    echo "[container.sh]   RLDX_ZMQ_TIMEOUT_MS=${RLDX_ZMQ_TIMEOUT_MS:-300000}"
+    $COMPOSE up -d $BUILD_FLAG "$MAIN_SERVICE" "$RLDX_SERVICE"
     echo "[container.sh] Done. 'docker/container.sh status' to check s6 services."
 }
 

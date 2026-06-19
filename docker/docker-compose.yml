@@ -11,7 +11,7 @@
 #
 # Usage: prefer the container.sh wrapper — it auto-detects ARCH from
 # `uname -m` and sets the compose env:
-#   docker/container.sh start              # → cyclo_intelligence only
+#   docker/container.sh start              # → cyclo_intelligence + rldx runtime
 #   docker/container.sh start-lerobot      # → lerobot (no ROBOT_TYPE
 #                                          #    needed; passed at LOAD)
 #   docker/container.sh enter              # → bash inside cyclo_intelligence
@@ -43,7 +43,7 @@ services:
   # ============================================================
   cyclo_intelligence:
     container_name: cyclo_intelligence
-    image: robotis/cyclo-intelligence:${VERSION:-0.1.13}-${ARCH:-arm64}
+    image: robotis/cyclo-intelligence:${VERSION:-0.1.15}-${ARCH:-arm64}
     build:
       context: ..
       dockerfile: docker/Dockerfile.${ARCH:-arm64}
@@ -76,6 +76,7 @@ services:
       - ZENOH_ROUTER_PORT=7447
       - ZENOH_CONFIG_OVERRIDE=transport/shared_memory/enabled=true
       - CYCLO_UI_PORT=${CYCLO_UI_PORT:-80}
+      - RLDX_VERSION=${RLDX_VERSION:-0.1.1}
       # LOAD may include first-time gated backbone downloads (e.g. Cosmos).
       # Keep this long enough that a real download is not surfaced as a
       # false model-load failure while the container continues downloading.
@@ -381,7 +382,7 @@ services:
   # ============================================================
   rldx:
     container_name: rldx_runtime
-    image: robotis/rldx-zenoh:0.1.0-${ARCH:-arm64}
+    image: robotis/rldx-zenoh:${RLDX_VERSION:-0.1.1}-${ARCH:-arm64}
     build:
       context: ../cyclo_brain/policy
       dockerfile: rldx/Dockerfile.${ARCH:-arm64}
