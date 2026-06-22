@@ -2,6 +2,12 @@
 Changelog for package cyclo-ui
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+0.1.15 (2026-06-22)
+-------------------
+* Added inference action request mode and acceleration controls, including GR00T TensorRT engine build and status UI.
+* Refined inference task and page sync so robot type, policy path, deployment mode, and recording state stay consistent across pages.
+* Contributors: Taehyeong Kim
+
 0.1.14 (2026-06-17)
 -------------------
 * Added camera recording monitor rows, warning toasts, and speech notifications from RecordingStatus diagnostics.
