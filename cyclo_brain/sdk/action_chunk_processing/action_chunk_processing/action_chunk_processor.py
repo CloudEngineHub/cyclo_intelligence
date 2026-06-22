@@ -77,6 +77,7 @@ class ActionChunkProcessor:
         self,
         chunk: np.ndarray,
         scheduled_start_delay_s: Optional[float] = None,
+        align: bool = True,
     ) -> int:
         if chunk.ndim != 2:
             raise ValueError(f"chunk must be 2D (T, D); got shape {chunk.shape}")
@@ -90,7 +91,11 @@ class ActionChunkProcessor:
                     self._last_action = np.asarray(chunk[-1]).copy()
                 return len(chunk)
 
-            aligned = self._align(chunk, anchor, scheduled_start_delay_s)
+            aligned = (
+                self._align(chunk, anchor, scheduled_start_delay_s)
+                if align
+                else chunk
+            )
             if len(aligned) == 0:
                 return 0
 
@@ -108,8 +113,9 @@ class ActionChunkProcessor:
         self,
         actions: np.ndarray,
         scheduled_start_delay_s: Optional[float] = None,
+        align: bool = True,
     ) -> int:
-        return self.push_chunk(actions, scheduled_start_delay_s)
+        return self.push_chunk(actions, scheduled_start_delay_s, align=align)
 
     def pop_action(self) -> Optional[np.ndarray]:
         with self._lock:
@@ -159,18 +165,27 @@ class ActionChunkProcessor:
         if scheduled_start_delay_s is None:
             search_start = 0
             search_stop = min(window_n, len(chunk))
+            late_fallback = False
         else:
             expected_idx = int(
                 round(max(0.0, scheduled_start_delay_s) * self._inference_hz)
             )
+            late_fallback = expected_idx >= len(chunk)
             if expected_idx >= len(chunk):
-                return chunk[:0]
-            search_start = max(0, expected_idx - window_n)
-            search_stop = min(len(chunk), expected_idx + window_n + 1)
+                # The model response arrived after the predicted chunk horizon.
+                # Fall back to joining from the start of the new chunk instead
+                # of dropping the whole response and leaving the robot idle.
+                search_start = 0
+                search_stop = min(window_n, len(chunk))
+            else:
+                search_start = max(0, expected_idx - window_n)
+                search_stop = min(len(chunk), expected_idx + window_n + 1)
         distances = np.linalg.norm(chunk[search_start:search_stop] - anchor, axis=1)
         best_idx = search_start + int(np.argmin(distances))
         start_idx = best_idx + 1
         if start_idx >= len(chunk):
+            if late_fallback:
+                return chunk
             return chunk[:0]
         return chunk[start_idx:]
 

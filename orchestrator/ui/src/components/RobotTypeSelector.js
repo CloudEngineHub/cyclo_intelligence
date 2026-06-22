@@ -14,7 +14,7 @@
 //
 // Author: Kiwoong Park
 
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import clsx from 'clsx';
 import toast from 'react-hot-toast';
@@ -43,7 +43,8 @@ export default function RobotTypeSelector() {
 
   const [loading, setLoading] = useState(false);
   const [fetching, setFetching] = useState(false);
-  const [selectedRobotType, setSelectedRobotType] = useState('');
+  const [selectedRobotType, setSelectedRobotType] = useState(robotType || '');
+  const previousRobotTypeRef = useRef(robotType);
 
   // Fetch robot type list
   const fetchRobotTypes = useCallback(async () => {
@@ -90,7 +91,11 @@ export default function RobotTypeSelector() {
       console.log('Set robot type result:', result);
 
       if (result && result.success) {
-        dispatch(selectRobotType(selectedRobotType));
+        dispatch(selectRobotType({
+          robotType: selectedRobotType,
+          source: 'user',
+          selectedAtMs: Date.now(),
+        }));
         toast.success(`Robot type set to: ${selectedRobotType}`);
 
         dispatch(setIsFirstLoadTrue('record'));
@@ -111,10 +116,11 @@ export default function RobotTypeSelector() {
   }, [fetchRobotTypes]);
 
   useEffect(() => {
-    if (robotType && !selectedRobotType) {
-      setSelectedRobotType(robotType);
+    if (robotType !== previousRobotTypeRef.current) {
+      previousRobotTypeRef.current = robotType;
+      setSelectedRobotType(robotType || '');
     }
-  }, [robotType, selectedRobotType]);
+  }, [robotType]);
 
   const classCard = clsx(
     'bg-white',

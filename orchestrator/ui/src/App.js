@@ -32,7 +32,8 @@ import BTManagerPage from './pages/BTManagerPage';
 import { useRosTopicSubscription } from './hooks/useRosTopicSubscription';
 import rosConnectionManager from './utils/rosConnectionManager';
 import { useDispatch, useSelector } from 'react-redux';
-import { moveToPage } from './features/ui/uiSlice';
+import { moveToPage, persistCurrentPage } from './features/ui/uiSlice';
+import { persistRobotType } from './features/tasks/taskSlice';
 import PageType from './constants/pageType';
 
 function App() {
@@ -47,7 +48,14 @@ function App() {
   const trainingTopicReceived = useSelector((state) => state.training.topicReceived);
 
   const page = useSelector((state) => state.ui.currentPage);
+  const restoredPageFromSession = useSelector(
+    (state) => state.ui.restoredPageFromSession
+  );
   const robotType = useSelector((state) => state.tasks.robotType);
+  const hasSyncedTaskInfo = useSelector((state) => Boolean(
+    state.tasks.taskInfoSync.serverTaskInfo ||
+    state.tasks.inferenceTaskInfoSync.serverTaskInfo
+  ));
   const taskStatusReceived = recordTopicReceived || inferenceTopicReceived;
 
   const isFirstLoad = useRef(true);
@@ -92,7 +100,25 @@ function App() {
   }, []);
 
   useEffect(() => {
-    if (isFirstLoad.current && page === PageType.HOME && taskStatusReceived) {
+    persistCurrentPage(page);
+  }, [page]);
+
+  useEffect(() => {
+    persistRobotType(robotType);
+  }, [robotType]);
+
+  useEffect(() => {
+    if (isFirstLoad.current && restoredPageFromSession) {
+      isFirstLoad.current = false;
+      return;
+    }
+
+    if (
+      isFirstLoad.current &&
+      page === PageType.HOME &&
+      taskStatusReceived &&
+      hasSyncedTaskInfo
+    ) {
       if (taskInfo?.taskType === PageType.RECORD) {
         dispatch(moveToPage(PageType.RECORD));
       } else if (taskInfo?.taskType === PageType.INFERENCE) {
@@ -103,7 +129,15 @@ function App() {
       dispatch(moveToPage(PageType.TRAINING));
       isFirstLoad.current = false;
     }
-  }, [page, taskInfo?.taskType, taskStatusReceived, trainingTopicReceived, dispatch]);
+  }, [
+    dispatch,
+    hasSyncedTaskInfo,
+    page,
+    restoredPageFromSession,
+    taskInfo?.taskType,
+    taskStatusReceived,
+    trainingTopicReceived,
+  ]);
 
   const handleHomePageNavigation = () => {
     isFirstLoad.current = false;

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from threading import RLock
 from types import ModuleType, SimpleNamespace
 import sys
 
@@ -435,6 +436,62 @@ def test_start_segment_rolls_back_rosbag_when_writer_start_fails(tmp_path):
     assert started == []
     assert not episode_dir.exists()
     assert logger.errors == [response.message]
+
+
+def test_refresh_topics_caches_robot_type_for_idle_status():
+    service, _ = _service_with_logger()
+    prepared_topics = []
+    video_robot_types = []
+    published = []
+
+    service._session_lock = RLock()
+    service._robot_type = ''
+    service._data_manager = None
+    service._rosbag = SimpleNamespace(is_available=lambda: True)
+    service._prepare_rosbag_topics = lambda topics: prepared_topics.extend(topics)
+    service._ensure_video_pipeline = lambda robot_type: video_robot_types.append(robot_type)
+    service._recording_status_pub = SimpleNamespace(
+        publish=lambda status: published.append(status)
+    )
+    service._video_recorder = None
+    service._cpu_checker = SimpleNamespace(get_cpu_usage=lambda: 0.0)
+    response = SimpleNamespace(success=False, message='')
+    request = _request(
+        robot_type='ffw_sg2_rev2',
+        topics=['/joint_states'],
+    )
+
+    result = service._do_refresh_topics(request, response)
+    service._publish_recording_status()
+
+    assert result is response
+    assert response.success is True
+    assert service._robot_type == 'ffw_sg2_rev2'
+    assert prepared_topics == ['/joint_states']
+    assert video_robot_types == ['ffw_sg2_rev2']
+    assert published[-1].robot_type == 'ffw_sg2_rev2'
+
+
+def test_recording_status_prefers_current_service_robot_type_over_old_manager():
+    service, _ = _service_with_logger()
+    published = []
+
+    service._session_lock = RLock()
+    service._robot_type = 'ffw_sg2_rev2'
+    service._data_manager = SimpleNamespace(
+        get_current_record_status=lambda: SimpleNamespace(
+            robot_type='ffw_sg2_rev1',
+            record_phase=_RecordingStatus.READY,
+        )
+    )
+    service._video_recorder = None
+    service._recording_status_pub = SimpleNamespace(
+        publish=lambda status: published.append(status)
+    )
+
+    service._publish_recording_status()
+
+    assert published[-1].robot_type == 'ffw_sg2_rev2'
 
 
 def test_cancel_segment_rejects_when_no_active_recording():

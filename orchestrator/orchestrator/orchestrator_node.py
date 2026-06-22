@@ -188,6 +188,9 @@ class OrchestratorNode(Node):
         self.container_service_client: Optional[ContainerServiceClient] = None
         self._loaded_inference_policy_path: str = ''
         self._loaded_inference_publish_to_robot: bool = False
+        self._loaded_inference_acceleration_mode: str = 'pytorch'
+        self._loaded_inference_acceleration_engine_path: str = ''
+        self._loaded_inference_action_request_mode: str = 'async'
 
         # HF endpoint registry — orchestrator-owned because the
         # set/get/list/select_hf_endpoint services also read and mutate
@@ -365,6 +368,49 @@ class OrchestratorNode(Node):
         else:
             self.get_logger().info(
                 f'{source}: cached task_info for existing task={task_name}')
+
+    @staticmethod
+    def _copy_task_info(task_info: TaskInfo) -> TaskInfo:
+        copied = TaskInfo()
+        for field_name in (
+            'task_num',
+            'task_name',
+            'task_type',
+            'task_instruction',
+            'subtask_instruction',
+            'policy_path',
+            'tags',
+            'record_inference_mode',
+            'control_hz',
+            'inference_hz',
+            'chunk_align_window_s',
+            'include_robotis_license',
+            'service_type',
+            'inference_mode',
+            'action_request_mode',
+            'acceleration_mode',
+            'acceleration_engine_path',
+        ):
+            value = getattr(task_info, field_name)
+            if isinstance(value, list):
+                value = list(value)
+            setattr(copied, field_name, value)
+        return copied
+
+    def _get_inference_record_task_info(self) -> Optional[TaskInfo]:
+        task_info = self._prepared_inference_task_info
+        if task_info is None:
+            task_info = self._last_ui_task_info
+        if task_info is None:
+            return None
+        if getattr(task_info, 'task_type', '') != 'inference':
+            task_info = self._copy_task_info(task_info)
+            task_info.task_type = 'inference'
+            task_info.subtask_instruction = []
+        task_info.record_inference_mode = True
+        self._prepared_inference_task_info = task_info
+        self._last_ui_task_info = task_info
+        return task_info
 
     def _data_operation_status_callback(self, msg: DataOperationStatus):
         """Debug-log DataOperationStatus arrivals.
@@ -1202,6 +1248,7 @@ class OrchestratorNode(Node):
 
             elif request.command == SendCommand.Request.START_INFERENCE:
                 task_info = request.task_info
+                self._cache_ui_task_info(task_info, 'START_INFERENCE')
 
                 task_instruction = (
                     task_info.task_instruction[0]
@@ -1210,6 +1257,12 @@ class OrchestratorNode(Node):
                 )
                 publish_to_robot = publish_to_robot_from_task_info(task_info)
                 service_prefix = self._determine_service_prefix(task_info)
+                requested_acceleration_mode, requested_acceleration_engine_path = (
+                    self._acceleration_from_task_info(task_info)
+                )
+                requested_action_request_mode = (
+                    self._action_request_mode_from_task_info(task_info)
+                )
 
                 # If the requested policy is already loaded on this
                 # container, treat START_INFERENCE as RESUME. If the user
@@ -1229,19 +1282,40 @@ class OrchestratorNode(Node):
                 with self._state_lock:
                     existing_client = self.container_service_client
                     loaded_policy_path = self._loaded_inference_policy_path
+                    loaded_acceleration_mode = (
+                        self._loaded_inference_acceleration_mode
+                    )
+                    loaded_acceleration_engine_path = (
+                        self._loaded_inference_acceleration_engine_path
+                    )
+                    loaded_action_request_mode = (
+                        self._loaded_inference_action_request_mode
+                    )
                 start_handled = False
                 if (
                     existing_client is not None
                     and existing_client._service_prefix == service_prefix
                 ):
+                    loaded_signature = (
+                        loaded_policy_path,
+                        loaded_acceleration_mode,
+                        loaded_acceleration_engine_path,
+                        loaded_action_request_mode,
+                    )
+                    requested_signature = (
+                        requested_policy_path,
+                        requested_acceleration_mode,
+                        requested_acceleration_engine_path,
+                        requested_action_request_mode,
+                    )
                     if (
                         requested_policy_path
                         and loaded_policy_path
-                        and requested_policy_path != loaded_policy_path
+                        and requested_signature != loaded_signature
                     ):
                         self.get_logger().info(
-                            'Requested inference policy changed '
-                            f'({loaded_policy_path} -> {requested_policy_path}); '
+                            'Requested inference policy/runtime changed '
+                            f'({loaded_signature} -> {requested_signature}); '
                             'reloading policy'
                         )
                         self._teardown_inference_client()
@@ -1330,6 +1404,11 @@ class OrchestratorNode(Node):
                                 robot_type=robot_type,
                                 task_instruction=task_instruction,
                                 publish_to_robot=publish_to_robot,
+                                acceleration_mode=requested_acceleration_mode,
+                                acceleration_engine_path=(
+                                    requested_acceleration_engine_path
+                                ),
+                                action_request_mode=requested_action_request_mode,
                             )
                             if not load_result.success:
                                 self.get_logger().error(
@@ -1371,6 +1450,15 @@ class OrchestratorNode(Node):
                                     )
                                     self._loaded_inference_publish_to_robot = (
                                         publish_to_robot
+                                    )
+                                    self._loaded_inference_acceleration_mode = (
+                                        requested_acceleration_mode
+                                    )
+                                    self._loaded_inference_acceleration_engine_path = (
+                                        requested_acceleration_engine_path
+                                    )
+                                    self._loaded_inference_action_request_mode = (
+                                        requested_action_request_mode
                                     )
                             self._publish_inference_phase(InferenceStatus.INFERENCING)
                         except Exception as e:
@@ -1630,6 +1718,10 @@ class OrchestratorNode(Node):
                     elif request.command == SendCommand.Request.UPDATE_INSTRUCTION:
                         # Mid-run language re-conditioning. Lifecycle stays
                         # at INFERENCING — no inference_phase publish.
+                        self._cache_ui_task_info(
+                            request.task_info,
+                            'UPDATE_INSTRUCTION',
+                        )
                         with self._state_lock:
                             client = self.container_service_client
                         if client is not None:
@@ -1653,9 +1745,18 @@ class OrchestratorNode(Node):
                     elif request.command == SendCommand.Request.START_INFERENCE_RECORD:
                         self.get_logger().info(
                             'Starting recording during inference (forwarder)')
+                        self._cache_ui_task_info(
+                            request.task_info,
+                            'START_INFERENCE_RECORD',
+                        )
+                        record_task_info = self._get_inference_record_task_info()
+                        if record_task_info is None:
+                            response.success = False
+                            response.message = 'No inference task info available'
+                            return response
                         cd_result = self._forward_recording(
                             RecordingCommand.Request.START,
-                            task_info=request.task_info,
+                            task_info=record_task_info,
                             include_topics=True,
                         )
                         if (cd_result.success
@@ -2191,6 +2292,46 @@ class OrchestratorNode(Node):
             return ''
         return os.path.normpath(value)
 
+    @staticmethod
+    def _normalize_acceleration_mode(value: str) -> str:
+        mode = str(value or '').strip().lower()
+        if mode in {'', 'none', 'off', 'false', 'pytorch', 'eager'}:
+            return 'pytorch'
+        if mode in {'trt', 'tensorrt', 'tensorrt_dit', 'dit', 'dit_only'}:
+            return 'tensorrt_dit'
+        if mode in {
+            'trt_full_pipeline',
+            'tensorrt_full_pipeline',
+            'full_pipeline',
+        }:
+            return 'tensorrt_full_pipeline'
+        return mode
+
+    @classmethod
+    def _acceleration_from_task_info(cls, task_info) -> tuple[str, str]:
+        mode = cls._normalize_acceleration_mode(
+            getattr(task_info, 'acceleration_mode', '')
+        )
+        engine_path = cls._normalize_policy_path(
+            getattr(task_info, 'acceleration_engine_path', '')
+        )
+        if mode == 'pytorch':
+            engine_path = ''
+        return mode, engine_path
+
+    @staticmethod
+    def _normalize_action_request_mode(value: str) -> str:
+        mode = str(value or '').strip().lower()
+        if mode == 'sync':
+            return 'sync'
+        return 'async'
+
+    @classmethod
+    def _action_request_mode_from_task_info(cls, task_info) -> str:
+        return cls._normalize_action_request_mode(
+            getattr(task_info, 'action_request_mode', '')
+        )
+
     def _determine_service_prefix(self, task_info) -> str:
         """Determine inference service prefix from task_info or policy config.
 
@@ -2249,6 +2390,9 @@ class OrchestratorNode(Node):
             self.container_service_client = None
             self._loaded_inference_policy_path = ''
             self._loaded_inference_publish_to_robot = False
+            self._loaded_inference_acceleration_mode = 'pytorch'
+            self._loaded_inference_acceleration_engine_path = ''
+            self._loaded_inference_action_request_mode = 'async'
         if client is None:
             return
 
@@ -2410,10 +2554,10 @@ class OrchestratorNode(Node):
         self.get_logger().error(f'Trigger CANCEL_SEGMENT failed: {message}')
 
     def _toggle_inference_trigger_recording(self, is_recording: bool) -> None:
-        task_info = self._prepared_inference_task_info
+        task_info = self._get_inference_record_task_info()
         if task_info is None:
             self.get_logger().warning(
-                'Inference trigger ignored: prepare the Inference record session first')
+                'Inference trigger ignored: no inference task info available')
             return
         if is_recording:
             self.get_logger().info('Trigger: STOP inference recording')
@@ -2455,10 +2599,10 @@ class OrchestratorNode(Node):
             self.get_logger().error(f'Trigger inference START failed: {message}')
 
     def _cancel_inference_trigger_recording(self) -> None:
-        task_info = self._prepared_inference_task_info
+        task_info = self._get_inference_record_task_info()
         if task_info is None:
             self.get_logger().warning(
-                'Inference trigger cancel ignored: prepare the Inference record session first')
+                'Inference trigger cancel ignored: no inference task info available')
             return
         self.get_logger().info('Trigger: CANCEL inference recording')
         cd_result = self._forward_recording(
@@ -2494,10 +2638,9 @@ class OrchestratorNode(Node):
                 self._snapshot_session_state()
             )
             if snapshot_on_inference:
-                if self._prepared_inference_task_info is None:
+                if self._get_inference_record_task_info() is None:
                     self.get_logger().warning(
-                        'Inference trigger ignored: prepare the Inference '
-                        'record session first')
+                        'Inference trigger ignored: no inference task info available')
                     return
                 if joystick_mode == 'right':
                     self._toggle_inference_trigger_recording(snapshot_on_recording)

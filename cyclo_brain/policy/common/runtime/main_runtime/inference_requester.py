@@ -53,6 +53,10 @@ class InferenceRequester:
             embodiment_tag=str(getattr(request, "embodiment_tag", "") or ""),
             robot_type=str(getattr(request, "robot_type", "") or ""),
             task_instruction=str(getattr(request, "task_instruction", "") or ""),
+            acceleration_mode=str(getattr(request, "acceleration_mode", "") or ""),
+            acceleration_engine_path=str(
+                getattr(request, "acceleration_engine_path", "") or ""
+            ),
         )
         return self._call(
             engine_request,

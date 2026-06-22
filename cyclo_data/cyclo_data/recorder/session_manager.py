@@ -175,13 +175,10 @@ class DataManager:
             robot_type,
             task_info):
         self._robot_type = robot_type
-        # Folder naming: Task_{task_num}_{task_name}_MCAP for recordings,
-        # Task_{task_num}_{task_name}_Inference_MCAP for inference-time
-        # recordings so the two data sources stay visually separated.
-        task_num = getattr(task_info, 'task_num', '') or ''
-        task_type = getattr(task_info, 'task_type', '') or ''
-        suffix = '_Inference_MCAP' if task_type == 'inference' else '_MCAP'
-        self._save_repo_name = f'Task_{task_num}_{task_info.task_name}{suffix}'
+        self._save_repo_name = self._make_save_repo_name(
+            save_root_path,
+            task_info,
+        )
         self._save_path = save_root_path / self._save_repo_name
         self._save_rosbag_path = '/workspace/rosbag2/' + self._save_repo_name
         self._task_info = task_info
@@ -193,6 +190,7 @@ class DataManager:
         self._segmented_storage_mode = True
         self._single_task = not self._subtask_mode
         self._validate_existing_segment_count()
+
         # Per-recording opt-in flag from the UI checkbox; getattr guards
         # against TaskInfo messages built before the field was added.
         self._include_robotis_license = bool(
@@ -227,6 +225,31 @@ class DataManager:
         # can fire concurrently; the lock guarantees the snapshot read
         # in ``get_current_record_status`` is consistent.
         self._state_lock = threading.Lock()
+
+    @classmethod
+    def _make_save_repo_name(cls, save_root_path, task_info) -> str:
+        """Return the task folder name and normalise inference metadata."""
+        task_type = getattr(task_info, 'task_type', '') or ''
+        if task_type == 'inference':
+            record_id = cls._make_unique_inference_record_id(save_root_path)
+            task_info.task_num = record_id
+            task_info.task_name = 'inference'
+            return f'Task_{record_id}_inference_MCAP'
+
+        task_num = getattr(task_info, 'task_num', '') or ''
+        task_name = getattr(task_info, 'task_name', '') or ''
+        return f'Task_{task_num}_{task_name}_MCAP'
+
+    @staticmethod
+    def _make_unique_inference_record_id(save_root_path) -> str:
+        timestamp = time.strftime('%Y%m%d_%H%M%S', time.gmtime())
+        root = Path(save_root_path)
+        record_id = timestamp
+        suffix = 1
+        while (root / f'Task_{record_id}_inference_MCAP').exists():
+            record_id = f'{timestamp}_{suffix:02d}'
+            suffix += 1
+        return record_id
 
     @staticmethod
     def _read_episode_info(episode_dir: Path) -> dict:

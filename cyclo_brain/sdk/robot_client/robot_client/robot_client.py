@@ -613,6 +613,27 @@ class RobotClient:
                     segment,
                 )
 
+    def publish_idle_action(self, action_keys: Optional[list[str]] = None) -> None:
+        """Publish safe idle commands for velocity-like action topics.
+
+        Position trajectory controllers hold their last target when the action
+        buffer is empty. Twist command topics do not have that same semantics,
+        so publish an explicit zero velocity for any commanded Twist modality.
+        """
+        if not self._command_publishers:
+            raise RuntimeError("RobotClient command publishers are not enabled")
+
+        keys = list(action_keys) if action_keys else self._action_keys
+        for action_key in keys:
+            publish_key = self._resolve_action_key(action_key)
+            cfg = self._action_groups.get(publish_key)
+            if cfg is None or cfg["msg_type"] != "geometry_msgs/msg/Twist":
+                continue
+            publisher = self._command_publishers.get(f"leader_{publish_key}")
+            if publisher is None:
+                continue
+            self._publish_twist(publisher, np.zeros(3, dtype=np.float64))
+
     def build_action_preview(
         self,
         action: np.ndarray,

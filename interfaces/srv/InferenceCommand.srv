@@ -33,6 +33,16 @@ string task_instruction
 # Safety gate. false means dry-run / 3D preview only; true permits Main runtime
 # to publish robot command topics. Default false for regenerated clients.
 bool publish_to_robot
+# Action chunk request scheduling at LOAD time. Empty / "async" preserves the
+# current prefetch behavior. "sync" requests only after the active buffer drains.
+string action_request_mode
+# Runtime acceleration selected at LOAD time. Empty / "pytorch" means normal
+# PyTorch inference. "tensorrt_dit" enables GR00T DiT-only TensorRT when
+# supported by the backend.
+string acceleration_mode
+# Optional engine file/directory. Empty lets the backend use its model-local
+# default path.
+string acceleration_engine_path
 ---
 bool success
 string message

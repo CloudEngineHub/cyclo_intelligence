@@ -36,6 +36,8 @@ string model_path
 string embodiment_tag
 string robot_type
 string task_instruction
+string acceleration_mode
+string acceleration_engine_path
 """
 
 ENGINE_COMMAND_RESPONSE_DEF = """\
@@ -57,6 +59,8 @@ class EngineCommandRequest:
     embodiment_tag: str = ""
     robot_type: str = ""
     task_instruction: str = ""
+    acceleration_mode: str = ""
+    acceleration_engine_path: str = ""
 
 
 @dataclass
@@ -79,6 +83,10 @@ def request_from_message(message: Any) -> EngineCommandRequest:
         embodiment_tag=str(getattr(message, "embodiment_tag", "") or ""),
         robot_type=str(getattr(message, "robot_type", "") or ""),
         task_instruction=str(getattr(message, "task_instruction", "") or ""),
+        acceleration_mode=str(getattr(message, "acceleration_mode", "") or ""),
+        acceleration_engine_path=str(
+            getattr(message, "acceleration_engine_path", "") or ""
+        ),
     )
 
 
@@ -119,6 +127,8 @@ def request_to_message_kwargs(request: EngineCommandRequest) -> dict:
         "embodiment_tag": str(request.embodiment_tag),
         "robot_type": str(request.robot_type),
         "task_instruction": str(request.task_instruction),
+        "acceleration_mode": str(request.acceleration_mode),
+        "acceleration_engine_path": str(request.acceleration_engine_path),
     }
 
 

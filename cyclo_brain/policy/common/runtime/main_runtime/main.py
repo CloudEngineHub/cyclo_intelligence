@@ -98,6 +98,7 @@ class MainRuntime:
             max_refill_latency_s=self._optional_float_env(
                 "REFILL_LATENCY_SAMPLE_MAX_S", "2.0"
             ),
+            action_request_mode=os.environ.get("ACTION_REQUEST_MODE", "async"),
         )
         self._engine_client = engine_client
         self._command_srv = None

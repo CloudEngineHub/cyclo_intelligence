@@ -266,6 +266,8 @@ class RecordingService:
         with self._session_lock:
             self._robot_type = robot_type
             existing = self._data_manager
+            if existing is not None and existing.is_recording():
+                return existing
         candidate = DataManager(
             save_root_path=self.DEFAULT_SAVE_ROOT_PATH,
             robot_type=robot_type,
@@ -326,7 +328,7 @@ class RecordingService:
             total_storage, used_storage = StorageChecker.get_storage_gb('/')
             status.used_storage_size = float(used_storage)
             status.total_storage_size = float(total_storage)
-        if robot_type and not status.robot_type:
+        if robot_type:
             status.robot_type = robot_type
         if self._video_recorder is not None and hasattr(status, 'recording_warnings'):
             try:
@@ -452,6 +454,8 @@ class RecordingService:
         # poison the response — rosbag is already prepared, and the
         # next REFRESH_TOPICS will retry.
         if request.robot_type:
+            with self._session_lock:
+                self._robot_type = request.robot_type
             try:
                 self._ensure_video_pipeline(request.robot_type)
             except Exception as exc:  # noqa: BLE001
