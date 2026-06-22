@@ -16,7 +16,7 @@
 
 import React, { useEffect, useRef } from 'react';
 import clsx from 'clsx';
-import { MdHome, MdVideocam, MdMemory, MdWidgets, MdPlayCircle, MdAccountTree } from 'react-icons/md';
+import { MdHome, MdVideocam, MdMemory, MdWidgets, MdPlayCircle, MdAccountTree, MdNavigation } from 'react-icons/md';
 import { GoGraph } from 'react-icons/go';
 import { Toaster } from 'react-hot-toast';
 import toast from 'react-hot-toast';
@@ -34,6 +34,8 @@ import rosConnectionManager from './utils/rosConnectionManager';
 import { useDispatch, useSelector } from 'react-redux';
 import { moveToPage } from './features/ui/uiSlice';
 import PageType from './constants/pageType';
+
+const NavigationPage = React.lazy(() => import('./pages/NavigationPage'));
 
 function App() {
   const dispatch = useDispatch();
@@ -248,6 +250,11 @@ function App() {
     dispatch(moveToPage(PageType.BT_MANAGER));
   };
 
+  const handleNavigationPageNavigation = () => {
+    isFirstLoad.current = false;
+    dispatch(moveToPage(PageType.NAVIGATION));
+  };
+
   const classPageButton = clsx(
     'flex',
     'flex-col',
@@ -418,6 +425,18 @@ function App() {
             <span className="mt-1 text-sm whitespace-nowrap">Replay</span>
           </button>
 
+          {/* Navigation page button - keep this as the last sidebar item. */}
+          <button
+            className={clsx(classPageButton, {
+              'hover:bg-gray-200 active:bg-gray-400 dark:hover:bg-slate-800 dark:active:bg-slate-700': page !== PageType.NAVIGATION,
+              'bg-gray-300 dark:bg-slate-700': page === PageType.NAVIGATION,
+            })}
+            onClick={handleNavigationPageNavigation}
+          >
+            <MdNavigation size={30} className="mb-2" />
+            <span className="mt-1 text-sm whitespace-nowrap">Nav</span>
+          </button>
+
         </div>
       </aside>
       <main className="flex-1 flex flex-col h-screen bg-white dark:bg-slate-950">
@@ -435,6 +454,10 @@ function App() {
           <ReplayPage isActive={page === PageType.REPLAY} />
         ) : page === PageType.BT_MANAGER ? (
           <BTManagerPage isActive={page === PageType.BT_MANAGER} />
+        ) : page === PageType.NAVIGATION ? (
+          <React.Suspense fallback={<div className="flex-1 flex items-center justify-center">Loading Navigation...</div>}>
+            <NavigationPage />
+          </React.Suspense>
         ) : (
           <HomePage />
         )}

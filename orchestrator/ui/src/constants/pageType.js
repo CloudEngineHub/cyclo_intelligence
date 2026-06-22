@@ -25,6 +25,7 @@ const PageType = {
   EDIT_DATASET: 'edit_dataset',
   REPLAY: 'replay',
   BT_MANAGER: 'bt_manager',
+  NAVIGATION: 'navigation',
 };
 
 export default PageType;

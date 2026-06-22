@@ -54,6 +54,43 @@ _host_workspace_dir = app._host_workspace_dir
 _require_known_service = app._require_known_service
 _BACKENDS = app._BACKENDS
 _USER_SERVICES = app._USER_SERVICES
+navigation = sys.modules["supervisor_api.navigation"]
+
+
+def test_navigation_parses_binary_pgm():
+    data = b"P5\n# map\n2 2\n255\n" + bytes([0, 127, 254, 255])
+
+    assert navigation._parse_pgm(data) == (
+        2,
+        2,
+        255,
+        [0, 127, 254, 255],
+    )
+
+
+def test_navigation_rejects_map_path_escape():
+    import pytest
+    from fastapi import HTTPException
+
+    with pytest.raises(HTTPException):
+        navigation._resolve_pgm_path("../../outside.pgm")
+
+
+def test_navigation_validates_map_name():
+    import pytest
+    from fastapi import HTTPException
+
+    assert navigation._validate_map_name("factory-1") == "factory-1"
+    with pytest.raises(HTTPException):
+        navigation._validate_map_name("factory; reboot")
+
+
+def test_navigation_routes_are_registered():
+    paths = {route.path for route in app.app.routes}
+
+    assert "/navigation/status" in paths
+    assert "/navigation/start" in paths
+    assert "/navigation/maps/pgm/save" in paths
 
 
 def _container_with_mounts(*destinations):
