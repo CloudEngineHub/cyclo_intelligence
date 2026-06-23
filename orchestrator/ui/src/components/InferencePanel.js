@@ -441,39 +441,6 @@ const InferencePanel = () => {
         </div>
       </div>
 
-      <div className={clsx('flex', 'items-center', 'mb-2.5')}>
-        <div className={clsx(classLabel, 'flex', 'items-center', 'gap-1')}>
-          <Tooltip content="Choose when the next action chunk is requested." position="bottom">
-            <MdInfoOutline className="text-gray-400 hover:text-gray-600 cursor-help" size={14} />
-          </Tooltip>
-          <span>Action Request</span>
-        </div>
-        <div className="grid grid-cols-2 gap-1 flex-1 min-w-0">
-          <button
-            type="button"
-            onClick={() => handleChange('actionRequestMode', 'async')}
-            disabled={!isEditable}
-            className={actionModeButtonClass(actionRequestMode !== 'sync')}
-            aria-label="Use async action requests"
-            title="Async"
-          >
-            <MdSync size={16} className="shrink-0" />
-            <span className="truncate">Async</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => handleChange('actionRequestMode', 'sync')}
-            disabled={!isEditable}
-            className={actionModeButtonClass(actionRequestMode === 'sync')}
-            aria-label="Use sync action requests"
-            title="Sync"
-          >
-            <MdHourglassEmpty size={16} className="shrink-0" />
-            <span className="truncate">Sync</span>
-          </button>
-        </div>
-      </div>
-
       {/* Edit mode indicator */}
       <div
         className={clsx('mb-3', 'p-2', 'rounded-md', 'text-sm', 'font-medium', {
@@ -591,6 +558,39 @@ const InferencePanel = () => {
       )}
 
       <div className="w-full h-1 my-2 border-t border-gray-300"></div>
+
+      <div className={clsx('flex', 'items-center', 'mb-2.5')}>
+        <div className={clsx(classLabel, 'flex', 'items-center', 'gap-1')}>
+          <Tooltip content="Choose when the next action chunk is requested." position="bottom">
+            <MdInfoOutline className="text-gray-400 hover:text-gray-600 cursor-help" size={14} />
+          </Tooltip>
+          <span>Action Request</span>
+        </div>
+        <div className="grid grid-cols-2 gap-1 flex-1 min-w-0">
+          <button
+            type="button"
+            onClick={() => handleChange('actionRequestMode', 'async')}
+            disabled={!isEditable}
+            className={actionModeButtonClass(actionRequestMode !== 'sync')}
+            aria-label="Use async action requests"
+            title="Async"
+          >
+            <MdSync size={16} className="shrink-0" />
+            <span className="truncate">Async</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => handleChange('actionRequestMode', 'sync')}
+            disabled={!isEditable}
+            className={actionModeButtonClass(actionRequestMode === 'sync')}
+            aria-label="Use sync action requests"
+            title="Sync"
+          >
+            <MdHourglassEmpty size={16} className="shrink-0" />
+            <span className="truncate">Sync</span>
+          </button>
+        </div>
+      </div>
 
       <div className={clsx('flex', 'items-center', 'mb-2.5')}>
         <div className={clsx(classLabel, 'flex', 'items-center', 'gap-1')}>

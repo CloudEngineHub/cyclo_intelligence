@@ -525,8 +525,8 @@ def test_unknown_user_service_is_rejected():
         raise AssertionError("unknown service should be rejected")
 
 
-def test_zenoh_router_is_user_managed_service():
-    assert "zenoh_router" in _USER_SERVICES
+def test_zenoh_router_is_not_user_managed_service():
+    assert "zenoh_router" not in _USER_SERVICES
 
 
 def test_groot_backend_uses_current_release_image():

@@ -2,6 +2,10 @@
 Changelog for package interfaces
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+0.1.16 (2026-06-23)
+-------------------
+* None
+
 0.1.15 (2026-06-22)
 -------------------
 * Added action request scheduling and acceleration metadata to TaskInfo, InferenceCommand, and EngineCommand for policy runtime selection.
