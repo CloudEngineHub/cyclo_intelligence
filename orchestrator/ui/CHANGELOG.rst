@@ -2,6 +2,11 @@
 Changelog for package cyclo-ui
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+0.1.16 (2026-06-23)
+-------------------
+* Moved the inference ``Action Request`` controls into the runtime timing section so request scheduling sits with the related rate controls.
+* Contributors: Taehyeong Kim
+
 0.1.15 (2026-06-22)
 -------------------
 * Added inference action request mode and acceleration controls, including GR00T TensorRT engine build and status UI.
