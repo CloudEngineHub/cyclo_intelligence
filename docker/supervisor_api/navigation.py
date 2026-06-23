@@ -301,6 +301,16 @@ def _ros_shell_prefix() -> str:
     )
 
 
+def _ros_exec_environment() -> dict[str, str]:
+    """Keep one-shot ROS CLI processes on the server's ROS graph."""
+    return {
+        "ROS_DOMAIN_ID": os.environ.get("ROS_DOMAIN_ID", "30"),
+        "RMW_IMPLEMENTATION": os.environ.get(
+            "RMW_IMPLEMENTATION", "rmw_fastrtps_cpp"
+        ),
+    }
+
+
 @router.get("/status", response_model=NavigationStatus)
 def navigation_status():
     return _service_status(NAVIGATION_SERVICE)
@@ -358,7 +368,10 @@ def send_goal(request: NavigateGoalRequest):
         + "/navigate_to_pose nav2_msgs/action/NavigateToPose "
         + shlex.quote(payload)
     )
-    code, output = _exec(["bash", "-lc", command])
+    code, output = _exec(
+        ["bash", "--noprofile", "--norc", "-c", command],
+        environment=_ros_exec_environment(),
+    )
     accepted = code == 0 or (code == 124 and "Goal accepted" in output)
     if not accepted:
         raise HTTPException(503, output or "NavigateToPose goal failed")
@@ -379,7 +392,10 @@ def cancel_goal():
         + "/navigate_to_pose/_action/cancel_goal action_msgs/srv/CancelGoal "
         + shlex.quote(payload)
     )
-    code, output = _exec(["bash", "-lc", command])
+    code, output = _exec(
+        ["bash", "--noprofile", "--norc", "-c", command],
+        environment=_ros_exec_environment(),
+    )
     if code != 0:
         raise HTTPException(503, output or "NavigateToPose cancel failed")
     return ActionResult(ok=True, message=output or "Goals cancelled")

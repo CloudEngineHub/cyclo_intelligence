@@ -93,6 +93,52 @@ def test_navigation_routes_are_registered():
     assert "/navigation/maps/pgm/save" in paths
 
 
+def test_navigation_ros_exec_environment_matches_server(monkeypatch):
+    monkeypatch.setenv("ROS_DOMAIN_ID", "30")
+    monkeypatch.setenv("RMW_IMPLEMENTATION", "rmw_fastrtps_cpp")
+
+    assert navigation._ros_exec_environment() == {
+        "ROS_DOMAIN_ID": "30",
+        "RMW_IMPLEMENTATION": "rmw_fastrtps_cpp",
+    }
+
+
+def test_navigation_goal_passes_ros_environment(monkeypatch):
+    captured = {}
+
+    def fake_exec(command, *, environment=None, timeout=None):
+        captured["command"] = command
+        captured["environment"] = environment
+        return 0, "Goal accepted"
+
+    monkeypatch.setattr(navigation, "_exec", fake_exec)
+    monkeypatch.setenv("ROS_DOMAIN_ID", "30")
+    monkeypatch.setenv("RMW_IMPLEMENTATION", "rmw_fastrtps_cpp")
+
+    result = navigation.send_goal(
+        navigation.NavigateGoalRequest(
+            pose={
+                "header": {"frame_id": "map"},
+                "pose": {
+                    "position": {"x": 1.0, "y": 2.0, "z": 0.0},
+                    "orientation": {
+                        "x": 0.0, "y": 0.0, "z": 0.0, "w": 1.0,
+                    },
+                },
+            }
+        )
+    )
+
+    assert result.ok
+    assert captured["command"][:4] == [
+        "bash", "--noprofile", "--norc", "-c"
+    ]
+    assert captured["environment"] == {
+        "ROS_DOMAIN_ID": "30",
+        "RMW_IMPLEMENTATION": "rmw_fastrtps_cpp",
+    }
+
+
 def _container_with_mounts(*destinations):
     return SimpleNamespace(
         attrs={
