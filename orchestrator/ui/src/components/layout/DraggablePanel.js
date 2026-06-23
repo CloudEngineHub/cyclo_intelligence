@@ -3,14 +3,18 @@ import { useSelector, useDispatch } from 'react-redux';
 import { togglePanelVisibility, togglePanelExpanded } from '../../features/layout/layoutSlice';
 import PanelTitleBar from './PanelTitleBar';
 
-function DraggablePanel({ panelId, children, onDragStart, isDragging }) {
+function DraggablePanel({ panelId, children, onDragStart, isDragging, layoutOverride = null }) {
   const dispatch = useDispatch();
   const panel = useSelector((state) => state.layout.panels[panelId]);
 
   if (!panel || !panel.visible) return null;
 
-  const gridColumn = panel.expanded ? panel.expandedGridColumn : panel.gridColumn;
-  const gridRow = panel.expanded ? panel.expandedGridRow : panel.gridRow;
+  const gridColumn = panel.expanded
+    ? (layoutOverride?.expandedGridColumn || panel.expandedGridColumn)
+    : (layoutOverride?.gridColumn || panel.gridColumn);
+  const gridRow = panel.expanded
+    ? (layoutOverride?.expandedGridRow || panel.expandedGridRow)
+    : (layoutOverride?.gridRow || panel.gridRow);
 
   const handleMouseDown = (e) => {
     if (onDragStart) {
