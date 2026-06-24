@@ -2,6 +2,11 @@
 Changelog for package orchestrator
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+0.1.17 (2026-06-26)
+-------------------
+* Add Nav
+* Contributors: Howon Kim
+
 0.1.16 (2026-06-23)
 -------------------
 * Removed the Cyclo-managed ``zenoh_router`` service from supervisor user controls so Cyclo uses the externally managed router on port 7447.

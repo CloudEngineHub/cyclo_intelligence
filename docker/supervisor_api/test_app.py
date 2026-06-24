@@ -59,7 +59,7 @@ _trt_status = app._trt_status
 _BACKENDS = app._BACKENDS
 _USER_SERVICES = app._USER_SERVICES
 navigation = sys.modules["supervisor_api.navigation"]
-navigation_topic_relay = sys.modules["supervisor_api.navigation_topic_relay"]
+navigation_grid_cache = sys.modules["supervisor_api.navigation_grid_cache"]
 
 
 def test_navigation_parses_binary_pgm():
@@ -104,13 +104,13 @@ def test_navigation_grid_data_crc32_uses_only_map_data():
     same_data = {"info": {"width": 4}, "data": [-1, 0, 100, 0]}
     changed = {"info": {"width": 2}, "data": [-1, 0, 99, 0]}
 
-    marker = navigation_topic_relay.occupancy_grid_data_crc32(first)
-    assert navigation_topic_relay.occupancy_grid_data_crc32(same_data) == marker
-    assert navigation_topic_relay.occupancy_grid_data_crc32(changed) != marker
+    marker = navigation_grid_cache.occupancy_grid_data_crc32(first)
+    assert navigation_grid_cache.occupancy_grid_data_crc32(same_data) == marker
+    assert navigation_grid_cache.occupancy_grid_data_crc32(changed) != marker
 
 
 def test_navigation_grid_cache_serializes_only_changed_data():
-    cache = navigation_topic_relay.OccupancyGridCache("/map")
+    cache = navigation_grid_cache.OccupancyGridCache("/map")
 
     cache.cache_ros_message({"info": {"width": 2}, "data": [0, 1]})
     marker, payload = cache.serialized_if_changed(None)
@@ -132,9 +132,9 @@ def test_navigation_grid_cache_serializes_only_changed_data():
 
 
 def test_navigation_grid_websocket_sends_cached_original_topic(monkeypatch):
-    cache = navigation_topic_relay.OccupancyGridCache("/map")
+    cache = navigation_grid_cache.OccupancyGridCache("/map")
     cache.cache_ros_message({"info": {"width": 2}, "data": [0, 100]})
-    monkeypatch.setitem(navigation_topic_relay.GRID_CACHES, "/map", cache)
+    monkeypatch.setitem(navigation_grid_cache.GRID_CACHES, "/map", cache)
 
     started = []
     monkeypatch.setattr(

@@ -41,7 +41,7 @@ from docker.errors import DockerException, NotFound
 from fastapi import APIRouter, HTTPException, Query, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, Field
 
-from supervisor_api.navigation_topic_relay import (
+from supervisor_api.navigation_grid_cache import (
     GRID_CACHES,
     GRID_TOPICS,
     ensure_ros_grid_subscriber_started,
