@@ -53,7 +53,11 @@ import HFStatus from '../constants/HFStatus';
 import PageType from '../constants/pageType';
 import store from '../store/store';
 import rosConnectionManager from '../utils/rosConnectionManager';
-import { rosTaskInfoToUiTaskInfo } from '../utils/taskInfoSync';
+import {
+  hasRosTaskInfoPayload,
+  rosTaskInfoToUiTaskInfo,
+  shouldApplyServerTaskInfoToPage,
+} from '../utils/taskInfoSync';
 import {
   buildCameraMonitorTopics,
   isMonitorOnlyStatusMessage,
@@ -72,9 +76,8 @@ export function useRosTopicSubscription() {
   const actionEventTopicRef = useRef(null);
   const recordingMonitorTopicRef = useRef(null);
   const joystickModeTopicRef = useRef(null);
-  // One-shot guard so the backend's task_info echo only seeds redux on the
-  // first message; subsequent echoes would clobber whatever the user is
-  // currently typing in InfoPanel.
+  // HOME only seeds task_info once. Record/Inference pages accept later
+  // backend echoes so multiple browser tabs stay in sync.
   const initialTaskInfoSyncRef = useRef(false);
   // Dedup inference-status error toasts so a sticky error field doesn't spam.
   const previousInferenceErrorRef = useRef('');
@@ -275,9 +278,18 @@ export function useRosTopicSubscription() {
           currentPhase === RecordPhase.RECORDING ||
           currentPhase === RecordPhase.SAVING;
         // Adopt robot_type as the global value when present.
-        if (msg.robot_type && msg.robot_type.trim() !== '' &&
-            msg.robot_type !== store.getState().tasks.robotType) {
-          dispatch(selectRobotType(msg.robot_type));
+        if (msg.robot_type && msg.robot_type.trim() !== '') {
+          const tasksState = store.getState().tasks;
+          const shouldUpdateRobotType =
+            msg.robot_type !== tasksState.robotType ||
+            Boolean(tasksState.robotTypeStatusGuardUntilMs);
+          if (shouldUpdateRobotType) {
+            dispatch(selectRobotType({
+              robotType: msg.robot_type,
+              source: 'status',
+              receivedAtMs: Date.now(),
+            }));
+          }
         }
 
         if (!monitorOnlyMessage) {
@@ -313,20 +325,21 @@ export function useRosTopicSubscription() {
 
         // Keep Record-page task information aligned with the server echo,
         // unless this browser is protecting an in-progress local draft.
-        const hasTaskInfo = msg.task_info && (
-          (msg.task_info.task_name && msg.task_info.task_name.length > 0) ||
-          (msg.task_info.policy_path && msg.task_info.policy_path.length > 0)
-        );
-        const uiTaskInfo = hasTaskInfo ? rosTaskInfoToUiTaskInfo(msg.task_info) : null;
+        const uiTaskInfo = hasRosTaskInfoPayload(msg.task_info)
+          ? rosTaskInfoToUiTaskInfo(msg.task_info)
+          : null;
         const currentPage = store.getState().ui.currentPage;
-        if (uiTaskInfo && currentPage === PageType.RECORD) {
-          dispatch(receiveServerRecordTaskInfo(uiTaskInfo));
-        } else if (
-          uiTaskInfo &&
-          currentPage === PageType.HOME &&
-          !initialTaskInfoSyncRef.current
-        ) {
-          initialTaskInfoSyncRef.current = true;
+        const currentInferencePhase = store.getState().tasks.inferenceStatus.inferencePhase;
+        const shouldApplyTaskInfo = shouldApplyServerTaskInfoToPage({
+          taskInfo: uiTaskInfo,
+          currentPage,
+          inferencePhase: currentInferencePhase,
+          initialTaskInfoSynced: initialTaskInfoSyncRef.current,
+        });
+        if (uiTaskInfo && shouldApplyTaskInfo) {
+          if (currentPage === PageType.HOME) {
+            initialTaskInfoSyncRef.current = true;
+          }
           dispatch(receiveServerRecordTaskInfo(uiTaskInfo));
         }
       });
@@ -428,9 +441,18 @@ export function useRosTopicSubscription() {
         }
         previousInferenceErrorRef.current = msg.error || '';
 
-        if (msg.robot_type && msg.robot_type.trim() !== '' &&
-            msg.robot_type !== store.getState().tasks.robotType) {
-          dispatch(selectRobotType(msg.robot_type));
+        if (msg.robot_type && msg.robot_type.trim() !== '') {
+          const tasksState = store.getState().tasks;
+          const shouldUpdateRobotType =
+            msg.robot_type !== tasksState.robotType ||
+            Boolean(tasksState.robotTypeStatusGuardUntilMs);
+          if (shouldUpdateRobotType) {
+            dispatch(selectRobotType({
+              robotType: msg.robot_type,
+              source: 'status',
+              receivedAtMs: Date.now(),
+            }));
+          }
         }
 
         dispatch(

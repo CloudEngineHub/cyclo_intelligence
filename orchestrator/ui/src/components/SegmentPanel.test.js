@@ -35,6 +35,11 @@ const renderPanel = ({ taskOverrides = {}, sendRecordCommand } = {}) => {
   const initialTasks = taskReducer(undefined, { type: '@@INIT' });
   const tasks = {
     ...initialTasks,
+    recordTaskInfo: {
+      ...initialTasks.recordTaskInfo,
+      taskNum: '1',
+      taskName: 'discard-target-test',
+    },
     taskInfo: {
       ...initialTasks.taskInfo,
       taskNum: '1',
@@ -133,6 +138,38 @@ describe('SegmentPanel discard episode target', () => {
         segmentIndex: 0,
       })
     );
+  });
+
+  test('warns about stalled rosbag topics when starting a record segment', async () => {
+    const { sendRecordCommand } = renderPanel({
+      taskOverrides: {
+        recordingMonitor: {
+          topics: [{
+            name: '/leader/joint_trajectory',
+            secondsSinceLast: -1,
+            status: 2,
+          }],
+          cameraTopics: [],
+          totalReceived: 0,
+          totalWritten: 0,
+        },
+      },
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /record start/i }));
+
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith(
+        expect.stringContaining('/leader/joint_trajectory'),
+        expect.objectContaining({ duration: 9000 })
+      );
+      expect(sendRecordCommand).toHaveBeenCalledWith(
+        'start_segment',
+        expect.objectContaining({
+          segmentIndex: 1,
+        })
+      );
+    });
   });
 
   test('does not restore saved checkmarks from stale status after discarding episode', async () => {

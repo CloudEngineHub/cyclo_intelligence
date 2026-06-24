@@ -2,6 +2,18 @@
 Changelog for package cyclo_brain
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+0.1.16 (2026-06-23)
+-------------------
+* Documented the externally managed Zenoh router flow for policy-runtime integration.
+* Contributors: Taehyeong Kim
+
+0.1.15 (2026-06-22)
+-------------------
+* Added async/sync action request modes with updated buffer refill behavior for the shared policy runtime.
+* Added GR00T TensorRT DiT acceleration selection, synthetic observation-based engine preparation, and model-local engine reuse.
+* Updated GR00T policy image support to ``robotis/groot-zenoh:1.3.1``.
+* Contributors: Taehyeong Kim
+
 0.1.14 (2026-06-17)
 -------------------
 * None

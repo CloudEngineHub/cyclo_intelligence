@@ -129,6 +129,13 @@ def _service_type_from_model(model: str) -> str:
     return value
 
 
+def _normalize_action_request_mode(value: str) -> str:
+    mode = str(value or '').strip().lower()
+    if mode == 'sync':
+        return 'sync'
+    return 'async'
+
+
 class SendCommand(BaseAction):
     """Drive the orchestrator inference pipeline through lifecycle commands.
 
@@ -155,6 +162,16 @@ class SendCommand(BaseAction):
             if command_str == 'LOAD'
             else ''
         )
+        acceleration_mode = (
+            params.get('acceleration_mode', 'pytorch')
+            if command_str == 'LOAD'
+            else ''
+        )
+        action_request_mode = (
+            params.get('action_request_mode', 'async')
+            if command_str == 'LOAD'
+            else ''
+        )
         action = cls(
             node=context.node,
             command=command,
@@ -165,6 +182,9 @@ class SendCommand(BaseAction):
             control_hz=params.get('control_hz', 100),
             chunk_align_window_s=params.get('chunk_align_window_s', 0.3),
             inference_mode=inference_mode,
+            action_request_mode=action_request_mode,
+            acceleration_mode=acceleration_mode,
+            acceleration_engine_path=params.get('acceleration_engine_path', ''),
         )
         action.name = name
         return action
@@ -185,6 +205,9 @@ class SendCommand(BaseAction):
         control_hz: int = 100,
         chunk_align_window_s: float = 0.3,
         inference_mode: str = 'simulation',
+        action_request_mode: str = 'async',
+        acceleration_mode: str = 'pytorch',
+        acceleration_engine_path: str = '',
         service_name: str = '/task/command',
     ):
         super().__init__(node, name='SendCommand')
@@ -199,6 +222,21 @@ class SendCommand(BaseAction):
         )
         self.inference_mode = (
             (inference_mode or 'simulation').strip().lower()
+            if self.command_str == 'LOAD'
+            else ''
+        )
+        self.action_request_mode = (
+            _normalize_action_request_mode(action_request_mode)
+            if self.command_str == 'LOAD'
+            else ''
+        )
+        self.acceleration_mode = (
+            self._normalize_acceleration_mode(acceleration_mode)
+            if self.command_str == 'LOAD'
+            else ''
+        )
+        self.acceleration_engine_path = (
+            str(acceleration_engine_path or '').strip()
             if self.command_str == 'LOAD'
             else ''
         )
@@ -252,6 +290,7 @@ class SendCommand(BaseAction):
                     'SendCommand started '
                     f'(command={self.command_str}, model={self.model}, '
                     f'inference_mode={self.inference_mode}, '
+                    f'acceleration_mode={self.acceleration_mode}, '
                     f'publish_to_robot={self.inference_mode == "robot"})'
                 )
                 if self.inference_mode == 'simulation':
@@ -373,6 +412,21 @@ class SendCommand(BaseAction):
         # _STATE_DONE
         return NodeStatus.SUCCESS if self._result else NodeStatus.FAILURE
 
+    @staticmethod
+    def _normalize_acceleration_mode(value: str) -> str:
+        mode = str(value or '').strip().lower()
+        if mode in {'', 'none', 'off', 'false', 'pytorch', 'eager'}:
+            return 'pytorch'
+        if mode in {'trt', 'tensorrt', 'tensorrt_dit', 'dit', 'dit_only'}:
+            return 'tensorrt_dit'
+        if mode in {
+            'trt_full_pipeline',
+            'tensorrt_full_pipeline',
+            'full_pipeline',
+        }:
+            return 'tensorrt_full_pipeline'
+        return mode
+
     def _build_task_info(self) -> TaskInfo:
         ti = TaskInfo()
         ti.task_type = 'inference'
@@ -380,11 +434,17 @@ class SendCommand(BaseAction):
         ti.service_type = _service_type_from_model(self.model)
         if self.command_str == 'LOAD' and hasattr(ti, 'inference_mode'):
             ti.inference_mode = self.inference_mode
+        if self.command_str == 'LOAD' and hasattr(ti, 'action_request_mode'):
+            ti.action_request_mode = self.action_request_mode
         ti.tags = (
             [f'inference_mode:{self.inference_mode}']
             if self.command_str == 'LOAD'
             else []
         )
+        if self.command_str == 'LOAD' and hasattr(ti, 'acceleration_mode'):
+            ti.acceleration_mode = self.acceleration_mode
+        if self.command_str == 'LOAD' and hasattr(ti, 'acceleration_engine_path'):
+            ti.acceleration_engine_path = self.acceleration_engine_path
         if self.control_hz:
             ti.control_hz = self.control_hz
         if self.inference_hz:

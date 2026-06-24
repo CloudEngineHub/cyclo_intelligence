@@ -3,7 +3,7 @@
 // Licensed under the Apache License, Version 2.0 (the "License");
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useSelector, useDispatch } from 'react-redux';
+import { shallowEqual, useSelector, useDispatch } from 'react-redux';
 import clsx from 'clsx';
 import toast from 'react-hot-toast';
 import {
@@ -21,6 +21,7 @@ import {
   markLocalTaskInfoEdited,
   resetSegmentPlan,
   resetSegmentProgress,
+  selectRecordTaskInfo,
   setActiveSlotIndex,
   setPlannedCount,
   setPlannedSubTaskAt,
@@ -28,6 +29,7 @@ import {
   setSlotToServerIdx,
 } from '../features/tasks/taskSlice';
 import { useRosServiceCaller } from '../hooks/useRosServiceCaller';
+import { buildRosbagStartWarningMessage } from '../utils/recordingMonitorWarnings';
 import InfoPanel from './InfoPanel';
 import Tooltip from './Tooltip';
 
@@ -44,12 +46,13 @@ export default function SegmentPanel() {
   const dispatch = useDispatch();
   const { sendRecordCommand } = useRosServiceCaller();
 
-  const taskInfo = useSelector((state) => state.tasks.taskInfo);
+  const taskInfo = useSelector(selectRecordTaskInfo, shallowEqual);
   const recordStatus = useSelector((state) => state.tasks.recordStatus);
   const plannedCount = useSelector((state) => state.tasks.plannedCount);
   const plannedSubTasks = useSelector((state) => state.tasks.plannedSubTasks);
   const slotToServerIdx = useSelector((state) => state.tasks.slotToServerIdx);
   const activeSlotIndex = useSelector((state) => state.tasks.activeSlotIndex);
+  const recordingMonitor = useSelector((state) => state.tasks.recordingMonitor);
 
   const [optimisticRecording, setOptimisticRecording] = useState(false);
   const [episodeAcquisitionStarted, setEpisodeAcquisitionStarted] = useState(false);
@@ -353,11 +356,15 @@ export default function SegmentPanel() {
     if (commandSequenceInProgressRef.current) return;
     commandSequenceInProgressRef.current = true;
     try {
+      const warningMessage = buildRosbagStartWarningMessage(recordingMonitor);
+      if (warningMessage) {
+        toast.error(warningMessage, { duration: 9000 });
+      }
       await startRecordingSlot(activeSlotIndex);
     } finally {
       commandSequenceInProgressRef.current = false;
     }
-  }, [activeSlotIndex, canStartRecord, startRecordingSlot]);
+  }, [activeSlotIndex, canStartRecord, recordingMonitor, startRecordingSlot]);
 
   const handleSlotSave = useCallback(
     async (slotIdx) => {

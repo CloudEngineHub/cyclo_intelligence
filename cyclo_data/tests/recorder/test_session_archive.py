@@ -69,6 +69,35 @@ def _make_manager(root: Path, *, subtask_total: int = 2) -> DataManager:
     return manager
 
 
+def test_inference_save_repo_name_uses_timestamp_metadata(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        "cyclo_data.recorder.session_manager.time.strftime",
+        lambda fmt, tm: "20260622_031455",
+    )
+    task_info = SimpleNamespace(task_num="", task_name="", task_type="inference")
+
+    repo_name = DataManager._make_save_repo_name(tmp_path, task_info)
+
+    assert repo_name == "Task_20260622_031455_inference_MCAP"
+    assert task_info.task_num == "20260622_031455"
+    assert task_info.task_name == "inference"
+
+
+def test_inference_save_repo_name_avoids_existing_timestamp(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        "cyclo_data.recorder.session_manager.time.strftime",
+        lambda fmt, tm: "20260622_031455",
+    )
+    (tmp_path / "Task_20260622_031455_inference_MCAP").mkdir()
+    task_info = SimpleNamespace(task_num="", task_name="", task_type="inference")
+
+    repo_name = DataManager._make_save_repo_name(tmp_path, task_info)
+
+    assert repo_name == "Task_20260622_031455_01_inference_MCAP"
+    assert task_info.task_num == "20260622_031455_01"
+    assert task_info.task_name == "inference"
+
+
 def _write_segment(
     root: Path,
     *,

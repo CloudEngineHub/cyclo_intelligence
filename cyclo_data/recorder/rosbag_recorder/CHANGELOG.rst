@@ -2,6 +2,15 @@
 Changelog for package rosbag_recorder
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+0.1.16 (2026-06-23)
+-------------------
+* None
+
+0.1.15 (2026-06-22)
+-------------------
+* Allowed recording to start with currently available topics while unavailable topics remain visible through monitor warnings.
+* Contributors: Taehyeong Kim
+
 0.1.14 (2026-06-17)
 -------------------
 * None

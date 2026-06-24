@@ -2,6 +2,16 @@
 Changelog for package cyclo_data
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+0.1.16 (2026-06-23)
+-------------------
+* None
+
+0.1.15 (2026-06-22)
+-------------------
+* Normalized inference recording folder metadata with unique timestamp IDs.
+* Preserved active recording sessions across robot type refreshes and kept status robot type synchronized.
+* Contributors: Taehyeong Kim
+
 0.1.14 (2026-06-17)
 -------------------
 * Added saved-subtask tracking and full-episode validation for segmented recording finish/discard flows.

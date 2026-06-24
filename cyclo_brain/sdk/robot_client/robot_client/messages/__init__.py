@@ -62,6 +62,9 @@ string embodiment_tag
 string robot_type
 string task_instruction
 bool publish_to_robot
+string action_request_mode
+string acceleration_mode
+string acceleration_engine_path
 """
 
 INFERENCE_COMMAND_RESPONSE_DEF = """\
@@ -80,6 +83,8 @@ string model_path
 string embodiment_tag
 string robot_type
 string task_instruction
+string acceleration_mode
+string acceleration_engine_path
 """
 
 ENGINE_COMMAND_RESPONSE_DEF = """\

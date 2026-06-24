@@ -54,6 +54,8 @@ _backend_container_stale_reason = app._backend_container_stale_reason
 _compose_env = app._compose_env
 _host_workspace_dir = app._host_workspace_dir
 _require_known_service = app._require_known_service
+_resolve_groot_trt_paths = app._resolve_groot_trt_paths
+_trt_status = app._trt_status
 _BACKENDS = app._BACKENDS
 _USER_SERVICES = app._USER_SERVICES
 navigation = sys.modules["supervisor_api.navigation"]
@@ -240,11 +242,11 @@ def test_missing_required_mounts_accepts_current_groot_container():
 def test_backend_container_image_mismatch_detects_old_container_image():
     class FakeImages:
         def get(self, image):
-            assert image == "robotis/groot-zenoh:1.3.0-arm64"
+            assert image == "robotis/groot-zenoh:1.3.1-arm64"
             return SimpleNamespace(id="sha256:new")
 
     container = SimpleNamespace(attrs={"Image": "sha256:old"})
-    spec = {"image": "robotis/groot-zenoh:1.3.0-arm64"}
+    spec = {"image": "robotis/groot-zenoh:1.3.1-arm64"}
 
     assert _backend_container_image_mismatch(
         SimpleNamespace(images=FakeImages()),
@@ -256,11 +258,11 @@ def test_backend_container_image_mismatch_detects_old_container_image():
 def test_backend_container_image_mismatch_accepts_current_container_image():
     class FakeImages:
         def get(self, image):
-            assert image == "robotis/groot-zenoh:1.3.0-arm64"
+            assert image == "robotis/groot-zenoh:1.3.1-arm64"
             return SimpleNamespace(id="sha256:new")
 
     container = SimpleNamespace(attrs={"Image": "sha256:new"})
-    spec = {"image": "robotis/groot-zenoh:1.3.0-arm64"}
+    spec = {"image": "robotis/groot-zenoh:1.3.1-arm64"}
 
     assert not _backend_container_image_mismatch(
         SimpleNamespace(images=FakeImages()),
@@ -272,7 +274,7 @@ def test_backend_container_image_mismatch_accepts_current_container_image():
 def test_backend_container_stale_reason_detects_workspace_mount_mismatch():
     class FakeImages:
         def get(self, image):
-            assert image == "robotis/groot-zenoh:1.3.0-arm64"
+            assert image == "robotis/groot-zenoh:1.3.1-arm64"
             return SimpleNamespace(id="sha256:new")
 
     container = SimpleNamespace(
@@ -286,7 +288,7 @@ def test_backend_container_stale_reason_detects_workspace_mount_mismatch():
             ],
         }
     )
-    spec = {"image": "robotis/groot-zenoh:1.3.0-arm64"}
+    spec = {"image": "robotis/groot-zenoh:1.3.1-arm64"}
 
     assert _backend_container_stale_reason(
         "groot",
@@ -295,6 +297,48 @@ def test_backend_container_stale_reason_detects_workspace_mount_mismatch():
         spec,
         "/mnt/ssd/cyclo_intelligence/workspace",
     ) == "workspace_mount_mismatch"
+
+
+def test_backend_container_stale_reason_accepts_repo_symlink_workspace_mount(
+    monkeypatch,
+    tmp_path,
+):
+    class FakeImages:
+        def get(self, image):
+            assert image == "robotis/groot-zenoh:1.3.1-arm64"
+            return SimpleNamespace(id="sha256:new")
+
+    host_repo = tmp_path / "host_repo"
+    container_repo = tmp_path / "container_repo"
+    ssd_workspace = tmp_path / "ssd" / "cyclo_intelligence" / "workspace"
+    (host_repo / "docker").mkdir(parents=True)
+    (container_repo / "docker").mkdir(parents=True)
+    ssd_workspace.mkdir(parents=True)
+    (container_repo / "docker" / "workspace").symlink_to(ssd_workspace)
+
+    monkeypatch.setattr(app, "_HOST_PROJECT_DIR_CACHE", str(host_repo / "docker"))
+    monkeypatch.setattr(app, "_CYCLO_REPO_MOUNT", str(container_repo))
+
+    container = SimpleNamespace(
+        attrs={
+            "Image": "sha256:new",
+            "Mounts": [
+                {
+                    "Destination": "/workspace",
+                    "Source": str(host_repo / "docker" / "workspace"),
+                },
+            ],
+        }
+    )
+    spec = {"image": "robotis/groot-zenoh:1.3.1-arm64"}
+
+    assert _backend_container_stale_reason(
+        "groot",
+        SimpleNamespace(images=FakeImages()),
+        container,
+        spec,
+        str(ssd_workspace),
+    ) is None
 
 
 def test_mount_source_for_destination_resolves_workspace_host_path():
@@ -334,6 +378,56 @@ def test_host_workspace_dir_prefers_actual_mount_over_legacy_env(monkeypatch):
         assert _host_workspace_dir() == "/repo/docker/workspace"
     finally:
         app._HOST_WORKSPACE_DIR_CACHE = None
+
+
+def test_resolve_groot_trt_paths_defaults_engine_inside_model():
+    model, engine = _resolve_groot_trt_paths(
+        "/workspace/model/groot/example",
+        "",
+    )
+
+    assert model == "/workspace/model/groot/example"
+    assert engine == "/workspace/model/groot/example/dit_model_bf16.trt"
+
+
+def test_trt_status_reports_ready_engine(tmp_path):
+    model = tmp_path / "workspace" / "model" / "groot" / "example"
+    model.mkdir(parents=True)
+    engine = model / "dit_model_bf16.trt"
+    engine.write_bytes(b"engine")
+
+    status = _trt_status(str(model), str(engine))
+
+    assert status.status == "ready"
+    assert status.engine_size_bytes == len(b"engine")
+
+
+def test_trt_status_reports_missing_engine(tmp_path):
+    model = tmp_path / "workspace" / "model" / "groot" / "example"
+    model.mkdir(parents=True)
+    engine = model / "dit_model_bf16.trt"
+
+    status = _trt_status(str(model), str(engine))
+
+    assert status.status == "missing"
+
+
+def test_trt_status_reports_stale_oom_build_from_log(tmp_path):
+    model = tmp_path / "workspace" / "model" / "groot" / "example"
+    model.mkdir(parents=True)
+    engine = model / "dit_model_bf16.trt"
+    (model / "dit_model_bf16.trt.json").write_text(
+        '{"status": "building", "started_at": 1.0, "updated_at": 2.0}'
+    )
+    (model / "dit_model_bf16.trt.build.log").write_text(
+        "=== TensorRT build exited rc=137 at 2026-06-19 06:29:02 ===\n"
+    )
+
+    status = _trt_status(str(model), str(engine))
+
+    assert status.status == "failed"
+    assert status.returncode == 137
+    assert "out-of-memory" in status.message
 
 
 def test_compose_uses_repo_local_workspace_mounts():
@@ -585,17 +679,21 @@ def test_unknown_user_service_is_rejected():
         raise AssertionError("unknown service should be rejected")
 
 
+def test_zenoh_router_is_not_user_managed_service():
+    assert "zenoh_router" not in _USER_SERVICES
+
+
 def test_groot_backend_uses_current_release_image():
     assert (
         _BACKENDS["groot"]["image"]
-        == f"robotis/groot-zenoh:1.3.0-{app._BACKEND_ARCH}"
+        == f"robotis/groot-zenoh:1.3.1-{app._BACKEND_ARCH}"
     )
 
 
 def test_backend_status_model_exposes_stale_image_status():
     status = app.BackendStatus(
         name="groot",
-        image="robotis/groot-zenoh:1.3.0-arm64",
+        image="robotis/groot-zenoh:1.3.1-arm64",
         image_pulled=True,
         image_status="stale",
         container_state="exited",
