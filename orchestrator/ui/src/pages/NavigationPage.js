@@ -26,7 +26,7 @@ import { mergeTfMessages, orientationFromYaw, poseFromBaseLinkTf, tfMessageFromB
 import FixedLogPanel from "../components/navigation/FixedLogPanel";
 const NAVIGATION_SERVICE = "ai_worker_navigation";
 const SERVICE_MODE_STORAGE_KEY = "cyclo.navigation.serviceMode";
-const STATUS_POLL_MS = 2000;
+const STATUS_POLL_MS = 10000;
 const DEFAULT_MAP_NAME = "map";
 const LOG_PANEL_DEFAULT_WIDTH = 420;
 const LOG_PANEL_MIN_WIDTH = 320;
@@ -129,6 +129,7 @@ export default function NavigationPage() {
     const logResizeRef = useRef(null);
     const mapResizeRef = useRef(null);
     const contentGridRef = useRef(null);
+    const statusLoadingRef = useRef(false);
     const tfBufferRef = useRef(new Map());
     const [status, setStatus] = useState(null);
     const [mapName, setMapName] = useState(DEFAULT_MAP_NAME);
@@ -335,6 +336,9 @@ export default function NavigationPage() {
         };
     }, [getMaxMapPanelWidth]);
     const loadStatus = useCallback(async () => {
+        if (statusLoadingRef.current || document.visibilityState === "hidden")
+            return;
+        statusLoadingRef.current = true;
         try {
             const next = await getServiceStatus();
             setStatus(next);
@@ -342,12 +346,21 @@ export default function NavigationPage() {
         catch (_a) {
             setStatus((current) => current);
         }
+        finally {
+            statusLoadingRef.current = false;
+        }
     }, []);
     useEffect(() => {
         void loadStatus();
         const interval = setInterval(loadStatus, STATUS_POLL_MS);
+        const handleVisibilityChange = () => {
+            if (document.visibilityState === "visible")
+                void loadStatus();
+        };
+        document.addEventListener("visibilitychange", handleVisibilityChange);
         return () => {
             clearInterval(interval);
+            document.removeEventListener("visibilitychange", handleVisibilityChange);
         };
     }, [loadStatus]);
     const runCommand = useCallback(async (label, action) => {

@@ -31,6 +31,7 @@ import ReplayPage from './pages/ReplayPage';
 import BTManagerPage from './pages/BTManagerPage';
 import { useRosTopicSubscription } from './hooks/useRosTopicSubscription';
 import rosConnectionManager from './utils/rosConnectionManager';
+import { stopNavigation } from './utils/navigationApi';
 import { useDispatch, useSelector } from 'react-redux';
 import { moveToPage, persistCurrentPage } from './features/ui/uiSlice';
 import { persistRobotType } from './features/tasks/taskSlice';
@@ -61,6 +62,7 @@ function App() {
   const taskStatusReceived = recordTopicReceived || inferenceTopicReceived;
 
   const isFirstLoad = useRef(true);
+  const previousPageRef = useRef(page);
 
   // Subscribe to task status from ROS topic (always active)
   const rosSubscriptionControls = useRosTopicSubscription();
@@ -103,6 +105,19 @@ function App() {
 
   useEffect(() => {
     persistCurrentPage(page);
+  }, [page]);
+
+  // Navigation belongs to the Nav page. Stop the external stack when the user
+  // leaves it; keeping this transition at App level avoids StrictMode's
+  // development-only effect cleanup from stopping a freshly mounted page.
+  useEffect(() => {
+    const previousPage = previousPageRef.current;
+    previousPageRef.current = page;
+    if (previousPage === PageType.NAVIGATION && page !== PageType.NAVIGATION) {
+      void stopNavigation().catch((error) => {
+        console.error('Failed to stop Navigation after leaving the Nav page:', error);
+      });
+    }
   }, [page]);
 
   useEffect(() => {

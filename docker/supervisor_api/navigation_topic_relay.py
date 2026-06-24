@@ -1,9 +1,20 @@
 #!/usr/bin/env python3
 #
-# Copyright 2026 ROBOTIS CO., LTD.
+# Copyright 2025 ROBOTIS CO., LTD.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+# Author: Howon Kim
 
 """CRC-filtered cache for the large Navigation OccupancyGrid topics."""
 
@@ -99,40 +110,86 @@ def occupancy_grid_to_dict(message: Any) -> dict[str, Any]:
 
 
 class OccupancyGridCache:
-    """Keep the newest changed grid and serialize it once per client update."""
+    """Keep one serialized grid and notify connected WebSocket clients."""
 
     def __init__(self, topic: str) -> None:
         if topic not in GRID_TOPICS:
             raise ValueError(f"Unsupported grid topic: {topic}")
         self.topic = topic
         self._lock = threading.Lock()
-        self._crc32: int | None = None
-        self._message: Any | None = None
+        self._marker: tuple[Any, ...] | None = None
+        self._payload: str | None = None
+        self._listeners: dict[int, tuple[Any, Any]] = {}
+
+    @staticmethod
+    def _metadata_marker(message: Any) -> tuple[Any, ...]:
+        if isinstance(message, dict):
+            header = message.get("header") or {}
+            info = message.get("info") or {}
+            origin = info.get("origin") or {}
+            position = origin.get("position") or {}
+            orientation = origin.get("orientation") or {}
+            return (
+                header.get("frame_id"), info.get("resolution"),
+                info.get("width"), info.get("height"),
+                position.get("x"), position.get("y"), position.get("z"),
+                orientation.get("x"), orientation.get("y"),
+                orientation.get("z"), orientation.get("w"),
+            )
+        info = message.info
+        origin = info.origin
+        return (
+            message.header.frame_id, float(info.resolution),
+            int(info.width), int(info.height),
+            float(origin.position.x), float(origin.position.y),
+            float(origin.position.z), float(origin.orientation.x),
+            float(origin.orientation.y), float(origin.orientation.z),
+            float(origin.orientation.w),
+        )
 
     def cache_ros_message(self, message: Any) -> None:
-        marker = occupancy_grid_data_crc32(message)
-        if marker is None:
+        data_marker = occupancy_grid_data_crc32(message)
+        if data_marker is None:
             return
+        marker = (data_marker, *self._metadata_marker(message))
         with self._lock:
-            if marker == self._crc32:
+            if marker == self._marker:
                 return
-            self._crc32 = marker
-            self._message = message
+            self._marker = marker
+            self._payload = json.dumps({
+                "available": True,
+                "data": occupancy_grid_to_dict(message),
+            }, separators=(",", ":"))
+            listeners = list(self._listeners.items())
+        stale_listeners = []
+        for listener_id, (loop, event) in listeners:
+            try:
+                loop.call_soon_threadsafe(event.set)
+            except RuntimeError:
+                stale_listeners.append(listener_id)
+        if stale_listeners:
+            with self._lock:
+                for listener_id in stale_listeners:
+                    self._listeners.pop(listener_id, None)
 
     def serialized_if_changed(
-        self, last_crc32: int | None
-    ) -> tuple[int | None, str | None]:
+        self, last_marker: tuple[Any, ...] | None
+    ) -> tuple[tuple[Any, ...] | None, str | None]:
         """Return a WebSocket payload only when this client's marker changed."""
         with self._lock:
-            marker = self._crc32
-            message = self._message
-        if marker is None or message is None or marker == last_crc32:
-            return last_crc32, None
-        payload = {
-            "available": True,
-            "data": occupancy_grid_to_dict(message),
-        }
-        return marker, json.dumps(payload, separators=(",", ":"))
+            marker = self._marker
+            payload = self._payload
+        if marker is None or payload is None or marker == last_marker:
+            return last_marker, None
+        return marker, payload
+
+    def add_listener(self, listener_id: int, loop: Any, event: Any) -> None:
+        with self._lock:
+            self._listeners[listener_id] = (loop, event)
+
+    def remove_listener(self, listener_id: int) -> None:
+        with self._lock:
+            self._listeners.pop(listener_id, None)
 
 
 GRID_CACHES = {topic: OccupancyGridCache(topic) for topic in GRID_TOPICS}

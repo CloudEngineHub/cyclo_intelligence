@@ -48,7 +48,6 @@ import asyncio
 import json
 import logging
 import os
-from contextlib import asynccontextmanager
 import subprocess
 import threading
 import time
@@ -62,7 +61,6 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from supervisor_api.navigation import router as navigation_router
-from supervisor_api.navigation_topic_relay import ensure_ros_grid_subscriber_started
 
 
 logger = logging.getLogger("supervisor_api")
@@ -974,17 +972,10 @@ def _parse_svstat(raw: str) -> dict:
 # -- FastAPI app ---------------------------------------------------------------
 
 
-@asynccontextmanager
-async def lifespan(_app: FastAPI):
-    ensure_ros_grid_subscriber_started()
-    yield
-
-
 app = FastAPI(
     title="cyclo_intelligence supervisor_api",
     description=__doc__,
     version="0.2.0",
-    lifespan=lifespan,
 )
 
 app.include_router(navigation_router)

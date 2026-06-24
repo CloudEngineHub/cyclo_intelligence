@@ -18,8 +18,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { clearServiceLogs, getServiceLogs } from '../../utils/navigationApi';
 import LogViewer from './LogViewer';
 
-const POLL_INTERVAL_MS = 1000;
-const MAX_LOG_LINES = 3000;
+const POLL_INTERVAL_MS = 200;
+const MAX_LOG_LINES = 1000;
 
 export default function FixedLogPanel({ service }) {
   const [lines, setLines] = useState([]);

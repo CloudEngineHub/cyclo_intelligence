@@ -42,7 +42,8 @@ export function useNavigationRosTopic(topic, options = {}) {
   const [status, setStatus] = useState('disconnected');
 
   useEffect(() => {
-    if (!topic || !rosbridgeUrl) {
+    const usesServerGridSocket = SERVER_GRID_TOPICS.has(topic);
+    if (!topic || (!usesServerGridSocket && !rosbridgeUrl)) {
       setTopicData(null);
       setStatus('disconnected');
       return undefined;
@@ -51,7 +52,7 @@ export function useNavigationRosTopic(topic, options = {}) {
     let mounted = true;
     let subscription = null;
 
-    if (SERVER_GRID_TOPICS.has(topic)) {
+    if (usesServerGridSocket) {
       setStatus('connecting');
       const socket = new WebSocket(navigationGridWebSocketUrl(topic));
       socket.onopen = () => {

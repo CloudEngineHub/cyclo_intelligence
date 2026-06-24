@@ -99,7 +99,7 @@ def test_navigation_routes_are_registered():
     assert "/navigation/topics/ws" in paths
 
 
-def test_navigation_grid_crc32_uses_only_map_data():
+def test_navigation_grid_data_crc32_uses_only_map_data():
     first = {"info": {"width": 2}, "data": [-1, 0, 100, 0]}
     same_data = {"info": {"width": 4}, "data": [-1, 0, 100, 0]}
     changed = {"info": {"width": 2}, "data": [-1, 0, 99, 0]}
@@ -121,11 +121,13 @@ def test_navigation_grid_cache_serializes_only_changed_data():
     assert cache.serialized_if_changed(marker) == (marker, None)
 
     cache.cache_ros_message({"info": {"width": 99}, "data": [0, 1]})
-    assert cache.serialized_if_changed(marker) == (marker, None)
+    metadata_marker, metadata_payload = cache.serialized_if_changed(marker)
+    assert metadata_marker != marker
+    assert json.loads(metadata_payload)["data"]["info"]["width"] == 99
 
     cache.cache_ros_message({"info": {"width": 2}, "data": [0, 2]})
-    changed_marker, changed_payload = cache.serialized_if_changed(marker)
-    assert changed_marker != marker
+    changed_marker, changed_payload = cache.serialized_if_changed(metadata_marker)
+    assert changed_marker != metadata_marker
     assert json.loads(changed_payload)["data"]["data"] == [0, 2]
 
 
@@ -134,10 +136,12 @@ def test_navigation_grid_websocket_sends_cached_original_topic(monkeypatch):
     cache.cache_ros_message({"info": {"width": 2}, "data": [0, 100]})
     monkeypatch.setitem(navigation_topic_relay.GRID_CACHES, "/map", cache)
 
-    async def run_inline(function, *args):
-        return function(*args)
-
-    monkeypatch.setattr(navigation.asyncio, "to_thread", run_inline)
+    started = []
+    monkeypatch.setattr(
+        navigation,
+        "ensure_ros_grid_subscriber_started",
+        lambda: started.append(True),
+    )
 
     class FakeWebSocket:
         def __init__(self):
@@ -160,6 +164,7 @@ def test_navigation_grid_websocket_sends_cached_original_topic(monkeypatch):
     ))
 
     assert websocket.accepted is True
+    assert started == [True]
     assert websocket.messages == [{
         "available": True,
         "data": {"info": {"width": 2}, "data": [0, 100]},

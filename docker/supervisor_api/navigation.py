@@ -1,9 +1,20 @@
 #!/usr/bin/env python3
 #
-# Copyright 2026 ROBOTIS CO., LTD.
+# Copyright 2025 ROBOTIS CO., LTD.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+# Author: Howon Kim
 
 """Self-contained Navigation control plane for cyclo_intelligence.
 
@@ -30,7 +41,11 @@ from docker.errors import DockerException, NotFound
 from fastapi import APIRouter, HTTPException, Query, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, Field
 
-from supervisor_api.navigation_topic_relay import GRID_CACHES, GRID_TOPICS
+from supervisor_api.navigation_topic_relay import (
+    GRID_CACHES,
+    GRID_TOPICS,
+    ensure_ros_grid_subscriber_started,
+)
 
 
 router = APIRouter(prefix="/navigation", tags=["navigation"])
@@ -44,9 +59,6 @@ MAPS_DIR = PurePosixPath(
     "/root/ros2_ws/src/ai_worker/ffw_navigation/maps"
 )
 _SAFE_MAP_NAME = re.compile(r"^[A-Za-z0-9_.-]+$")
-GRID_SEND_INTERVAL_SECONDS = 1.0
-
-
 @router.websocket("/topics/ws")
 async def navigation_grid_websocket(websocket: WebSocket, topic: str):
     """Send the latest grid initially, then only when its data CRC changes."""
@@ -54,27 +66,37 @@ async def navigation_grid_websocket(websocket: WebSocket, topic: str):
         await websocket.close(code=1008, reason="Unsupported grid topic")
         return
 
+    ensure_ros_grid_subscriber_started()
     await websocket.accept()
     cache = GRID_CACHES[topic]
-    last_crc32 = None
+    listener_id = id(websocket)
+    changed = asyncio.Event()
+    cache.add_listener(listener_id, asyncio.get_running_loop(), changed)
+    last_marker = None
     try:
         while True:
-            last_crc32, payload = await asyncio.to_thread(
-                cache.serialized_if_changed, last_crc32
-            )
+            changed.clear()
+            last_marker, payload = cache.serialized_if_changed(last_marker)
             if payload is not None:
                 await websocket.send_text(payload)
-            try:
-                event = await asyncio.wait_for(
-                    websocket.receive(),
-                    timeout=GRID_SEND_INTERVAL_SECONDS,
-                )
+            change_task = asyncio.create_task(changed.wait())
+            receive_task = asyncio.create_task(websocket.receive())
+            done, pending = await asyncio.wait(
+                {change_task, receive_task},
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            for task in pending:
+                task.cancel()
+            if pending:
+                await asyncio.gather(*pending, return_exceptions=True)
+            if receive_task in done:
+                event = receive_task.result()
                 if event["type"] == "websocket.disconnect":
                     return
-            except asyncio.TimeoutError:
-                pass
     except WebSocketDisconnect:
         return
+    finally:
+        cache.remove_listener(listener_id)
 
 
 class NavigationStatus(BaseModel):
