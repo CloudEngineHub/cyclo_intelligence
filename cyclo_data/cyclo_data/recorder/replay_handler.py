@@ -16,6 +16,7 @@
 
 """Replay data handler for ROSbag visualization."""
 
+import math
 import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -643,19 +644,19 @@ class ReplayDataHandler:
                     result["frame_indices"].append(frame_idx)
                     result["frame_timestamps"].append(timestamp - min_time)
 
-            # Build frame counts per camera
-            for i, video_name in enumerate(result["video_names"]):
-                topic = (
-                    result["video_topics"][i]
-                    if i < len(result["video_topics"])
-                    else None
-                )
-                if topic and topic in image_metadata_by_topic:
-                    result["frame_counts"][video_name] = len(
-                        image_metadata_by_topic[topic]
-                    )
-                else:
-                    result["frame_counts"][video_name] = 0
+            result["frame_counts"] = self._build_frame_counts(
+                result["video_names"],
+                result["video_topics"],
+                image_metadata_by_topic,
+                result["video_segments"],
+            )
+            replay_sample_bucket_s = self._replay_sample_bucket_seconds(
+                result["video_fps"],
+                result["video_segments"],
+            )
+            replay_sample_origin_s = (
+                min_time if math.isfinite(min_time) else 0.0
+            )
 
             # Process joint (state) data — per-topic merge
             # Multiple JointState topics have different joint counts,
@@ -679,11 +680,17 @@ class ReplayDataHandler:
 
                 result["joint_names"] = all_joint_names
 
-                # Group data by approximate timestamp (within 10ms)
+                # Group data at replay display resolution. The bucket is
+                # derived from camera FPS so dense joint streams do not make
+                # replay payloads much heavier than the video they accompany.
                 state_timestamp_data: Dict[float, Dict] = {}
                 for topic in state_topic_order:
                     for ts, names, values in state_data_by_topic[topic]:
-                        ts_key = round(ts * 100) / 100
+                        ts_key = self._timestamp_bucket_key(
+                            ts,
+                            replay_sample_bucket_s,
+                            replay_sample_origin_s,
+                        )
                         if ts_key not in state_timestamp_data:
                             state_timestamp_data[ts_key] = {}
                         state_timestamp_data[ts_key][topic] = (
@@ -739,15 +746,18 @@ class ReplayDataHandler:
 
                 result["action_names"] = all_action_names
 
-                # Merge action data by timestamp
-                # Group data by approximate timestamp (within 10ms)
+                # Merge action data by timestamp using the same replay
+                # display-resolution bucket as state data.
                 timestamp_data = {}
                 for topic in topic_order:
                     if topic not in action_data_by_topic:
                         continue
                     for ts, names, values in action_data_by_topic[topic]:
-                        # Round to 10ms for grouping
-                        ts_key = round(ts * 100) / 100
+                        ts_key = self._timestamp_bucket_key(
+                            ts,
+                            replay_sample_bucket_s,
+                            replay_sample_origin_s,
+                        )
                         if ts_key not in timestamp_data:
                             timestamp_data[ts_key] = {}
                         timestamp_data[ts_key][topic] = (
@@ -908,6 +918,96 @@ class ReplayDataHandler:
 
     def _camera_name_for_video(self, video_file: Path) -> str:
         return self._extract_camera_name_from_topic(video_file.stem)
+
+    def _target_replay_sample_hz(
+        self,
+        video_fps: List[float],
+        video_segments: Optional[List[Dict]] = None,
+    ) -> Optional[int]:
+        fps_values: List[float] = []
+
+        def add_fps(value: Any) -> None:
+            try:
+                fps = float(value)
+            except (TypeError, ValueError):
+                return
+            if math.isfinite(fps) and fps > 0:
+                fps_values.append(fps)
+
+        for fps in video_fps or []:
+            add_fps(fps)
+
+        for segment in video_segments or []:
+            segment_fps = segment.get("video_fps")
+            if not isinstance(segment_fps, list):
+                continue
+            for fps in segment_fps:
+                add_fps(fps)
+
+        if not fps_values:
+            return None
+
+        return int(math.ceil(max(fps_values) / 5.0) * 5)
+
+    def _replay_sample_bucket_seconds(
+        self,
+        video_fps: List[float],
+        video_segments: Optional[List[Dict]] = None,
+    ) -> Optional[float]:
+        target_hz = self._target_replay_sample_hz(video_fps, video_segments)
+        if not target_hz:
+            return None
+        return 1.0 / float(target_hz)
+
+    def _timestamp_bucket_key(
+        self,
+        timestamp_s: float,
+        bucket_s: Optional[float],
+        origin_s: float = 0.0,
+    ) -> float:
+        if not bucket_s or not math.isfinite(bucket_s) or bucket_s <= 0:
+            return round(timestamp_s * 100) / 100
+
+        origin = origin_s if math.isfinite(origin_s) else 0.0
+        bucket_index = math.floor(((timestamp_s - origin) / bucket_s) + 1e-9)
+        return round(origin + bucket_index * bucket_s, 9)
+
+    def _build_frame_counts(
+        self,
+        video_names: List[str],
+        video_topics: List[str],
+        image_metadata_by_topic: Dict[str, List[Tuple[int, float]]],
+        video_segments: Optional[List[Dict]] = None,
+    ) -> Dict[str, int]:
+        frame_counts: Dict[str, int] = {}
+        has_segment_counts = False
+
+        for segment in video_segments or []:
+            segment_counts = segment.get("frame_counts")
+            if not isinstance(segment_counts, dict):
+                continue
+
+            for camera_name, count in segment_counts.items():
+                name = str(camera_name or "")
+                if not name:
+                    continue
+                try:
+                    count_value = max(0, int(count))
+                except (TypeError, ValueError):
+                    count_value = 0
+                frame_counts[name] = frame_counts.get(name, 0) + count_value
+                has_segment_counts = True
+
+        if has_segment_counts:
+            return frame_counts
+
+        for i, video_name in enumerate(video_names):
+            name = str(video_name or f"video_{i}")
+            topic = video_topics[i] if i < len(video_topics) else None
+            count = len(image_metadata_by_topic.get(topic, [])) if topic else 0
+            frame_counts[name] = frame_counts.get(name, 0) + count
+
+        return frame_counts
 
     def _build_video_segments(
         self,

@@ -48,7 +48,9 @@ function ReplayLayoutContainer({
   const visiblePanels = Object.values(panels).filter(
     (p) => p.visible && panelContentMap[p.id]
   );
-  const hasExpandedPanel = visiblePanels.some((panel) => panel.expanded);
+  const hasExpandedPanel = visiblePanels.some(
+    (panel) => panel.expandable !== false && panel.expanded
+  );
 
   const handleSplitterPointerDown = useCallback((event) => {
     if (!drawerSidebar || !containerRef.current) return;

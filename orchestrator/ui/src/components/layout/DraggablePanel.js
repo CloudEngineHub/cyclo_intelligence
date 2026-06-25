@@ -9,10 +9,13 @@ function DraggablePanel({ panelId, children, onDragStart, isDragging, layoutOver
 
   if (!panel || !panel.visible) return null;
 
-  const gridColumn = panel.expanded
+  const canExpand = panel.expandable !== false;
+  const isExpanded = canExpand && panel.expanded;
+
+  const gridColumn = isExpanded
     ? (layoutOverride?.expandedGridColumn || panel.expandedGridColumn)
     : (layoutOverride?.gridColumn || panel.gridColumn);
-  const gridRow = panel.expanded
+  const gridRow = isExpanded
     ? (layoutOverride?.expandedGridRow || panel.expandedGridRow)
     : (layoutOverride?.gridRow || panel.gridRow);
 
@@ -27,7 +30,7 @@ function DraggablePanel({ panelId, children, onDragStart, isDragging, layoutOver
       data-panel-id={panelId}
       className={`bg-white rounded-xl shadow-sm overflow-hidden flex flex-col transition-shadow ${
         isDragging ? 'ring-2 ring-blue-400 shadow-lg z-20 opacity-75' : ''
-      } ${panel.expanded ? 'z-10' : ''}`}
+      } ${isExpanded ? 'z-10' : ''}`}
       style={{
         gridColumn,
         gridRow,
@@ -37,11 +40,12 @@ function DraggablePanel({ panelId, children, onDragStart, isDragging, layoutOver
     >
       <PanelTitleBar
         title={panel.title}
-        expanded={panel.expanded}
+        expanded={isExpanded}
         onToggleExpand={() => dispatch(togglePanelExpanded(panelId))}
         onClose={() => dispatch(togglePanelVisibility(panelId))}
         onMouseDown={handleMouseDown}
         isDragging={isDragging}
+        canExpand={canExpand}
       />
       <div className="flex-1 min-h-0 overflow-hidden">
         {children}

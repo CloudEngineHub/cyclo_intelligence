@@ -80,7 +80,6 @@ function CameraPanel({
       segmentVideoRefs.current.delete(id);
       if (
         existing
-        && existing.segmentKey === activeVideoSegmentKey
         && (!videoRefs || videoRefs.current[index] === existing.element)
       ) {
         setVideoElement(index, null);
@@ -137,20 +136,35 @@ function CameraPanel({
   useLayoutEffect(() => {
     if (!hasSegmentVideoSets) return;
 
+    const activeIndexes = new Set();
     segmentVideoRefs.current.forEach(({ segmentKey, index, element }) => {
       if (!element) return;
       if (segmentKey === activeVideoSegmentKey) {
         setVideoElement(index, element);
+        activeIndexes.add(index);
       } else {
         element.pause();
       }
     });
+
+    if (videoRefs) {
+      videoRefs.current.forEach((element, index) => {
+        if (!element) return;
+        if (
+          !activeIndexes.has(index)
+          || element.dataset?.segmentKey !== activeVideoSegmentKey
+        ) {
+          setVideoElement(index, null);
+        }
+      });
+    }
   }, [
     activeVideoSegmentKey,
     expandedVideoIndex,
     hasSegmentVideoSets,
     segmentVideoSets,
     setVideoElement,
+    videoRefs,
   ]);
 
   if (!isLoaded || (videoFiles.length === 0 && !isDirectMcapMode)) {
@@ -199,11 +213,10 @@ function CameraPanel({
     index,
     src,
     className,
-    preload = 'metadata',
-    registerPlayback = true
+    preload = 'metadata'
   ) => (
     <video
-      ref={registerPlayback ? ((el) => setSegmentVideoElement(segmentKey, index, el)) : undefined}
+      ref={(el) => setSegmentVideoElement(segmentKey, index, el)}
       src={src || ''}
       data-segment-key={segmentKey}
       className={className}

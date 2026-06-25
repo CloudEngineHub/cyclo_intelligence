@@ -16,12 +16,12 @@
 
 import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
-import { MdFolder, MdRefresh, MdDashboard, MdList, MdChevronRight } from 'react-icons/md';
+import { MdFolder, MdRefresh, MdDashboard, MdList } from 'react-icons/md';
 import toast from 'react-hot-toast';
 import clsx from 'clsx';
 import { useRosServiceCaller } from '../hooks/useRosServiceCaller';
 import FileBrowserModal from '../components/FileBrowserModal';
-import { lttbDownsample } from '../utils/chartUtils';
+import { prepareChartData } from '../utils/chartUtils';
 import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts';
 import {
   setSelectedBagPath,
@@ -330,8 +330,18 @@ function ReplayPage({ isActive }) {
   );
 
   const getActiveSegmentLocalEnd = useCallback(
-    (metadataLocalEnd, segmentKey = activeVideoSegmentKey) => {
+    (metadataLocalEnd, segmentKey = activeVideoSegmentKey, preferredIndex = null) => {
       if (!Number.isFinite(metadataLocalEnd)) return metadataLocalEnd;
+
+      if (preferredIndex !== null) {
+        const preferredVideo = videoRefs.current[preferredIndex];
+        if (isVideoElementForSegment(preferredVideo, segmentKey)) {
+          const preferredDuration = Number(preferredVideo?.duration);
+          if (Number.isFinite(preferredDuration) && preferredDuration > 0) {
+            return Math.min(metadataLocalEnd, preferredDuration);
+          }
+        }
+      }
 
       let localEnd = metadataLocalEnd;
       videoRefs.current.forEach((video) => {
@@ -533,56 +543,24 @@ function ReplayPage({ isActive }) {
 
   // Prepare state chart data
   const stateChartData = useMemo(() => {
-    if (!jointTimestamps.length || !jointNames.length || !jointPositions.length) {
-      return [];
-    }
-
-    const numJoints = jointNames.length;
-    const targetPoints = 1000;
-
-    const fullData = jointTimestamps.map((time, i) => {
-      const point = { time };
-      const startIdx = i * numJoints;
-      jointNames.forEach((name, j) => {
-        point[`state_${name}`] = jointPositions[startIdx + j] || 0;
-      });
-      return point;
-    });
-
-    if (fullData.length <= targetPoints) {
-      return fullData;
-    }
-
-    const firstJointKey = `state_${jointNames[0]}`;
-    const sampledData = lttbDownsample(fullData, targetPoints, 'time', firstJointKey);
-    return sampledData;
+    return prepareChartData(
+      jointTimestamps,
+      jointNames,
+      jointPositions,
+      'state_',
+      1000
+    );
   }, [jointTimestamps, jointNames, jointPositions]);
 
   // Prepare action chart data
   const actionChartData = useMemo(() => {
-    if (!actionTimestamps.length || !actionNames.length || !actionValues.length) {
-      return [];
-    }
-
-    const numActions = actionNames.length;
-    const targetPoints = 1000;
-
-    const fullData = actionTimestamps.map((time, i) => {
-      const point = { time };
-      const startIdx = i * numActions;
-      actionNames.forEach((name, j) => {
-        point[`action_${name}`] = actionValues[startIdx + j] || 0;
-      });
-      return point;
-    });
-
-    if (fullData.length <= targetPoints) {
-      return fullData;
-    }
-
-    const firstActionKey = `action_${actionNames[0]}`;
-    const sampledData = lttbDownsample(fullData, targetPoints, 'time', firstActionKey);
-    return sampledData;
+    return prepareChartData(
+      actionTimestamps,
+      actionNames,
+      actionValues,
+      'action_',
+      1000
+    );
   }, [actionTimestamps, actionNames, actionValues]);
 
   // Toggle one joint chart at a time.
@@ -714,11 +692,15 @@ function ReplayPage({ isActive }) {
       return index >= 0 && videoRefs.current[index] === eventTarget;
     };
 
-    const getDriverVideo = () => (
-      expandedVideoIndex !== null
-        ? videoRefs.current[expandedVideoIndex]
-        : videoRefs.current.find((video) => isVideoElementForSegment(video))
-    );
+    const getDriverVideoIndex = () => {
+      if (expandedVideoIndex !== null) return expandedVideoIndex;
+      return videoRefs.current.findIndex((video) => isVideoElementForSegment(video));
+    };
+
+    const getDriverVideo = () => {
+      const driverIndex = getDriverVideoIndex();
+      return driverIndex >= 0 ? videoRefs.current[driverIndex] : null;
+    };
 
     const handleTimeUpdate = (event) => {
       if (!isCurrentActiveVideo(event.currentTarget)) return;
@@ -736,8 +718,19 @@ function ReplayPage({ isActive }) {
       if (segmentVideoMode && activeVideoSegment && currentlyPlaying) {
         const segmentEnd = Number(activeVideoSegment.frame_duration?.[1]);
         const metadataLocalEnd = globalToVideoTime(segmentEnd, activeVideoSegment);
-        const localEnd = getActiveSegmentLocalEnd(metadataLocalEnd);
-        const fps = currentVideoFps[0] || videoFps[0] || 30;
+        const driverIndex = getDriverVideoIndex();
+        const localEnd = getActiveSegmentLocalEnd(
+          metadataLocalEnd,
+          activeVideoSegmentKey,
+          driverIndex >= 0 ? driverIndex : null
+        );
+        const fps = (
+          currentVideoFps[driverIndex]
+          || currentVideoFps[0]
+          || videoFps[driverIndex]
+          || videoFps[0]
+          || 30
+        );
         const transitionEpsilon = Math.max(1 / fps, 1 / 60);
 
         if (
@@ -828,6 +821,7 @@ function ReplayPage({ isActive }) {
     isVideoElementForSegment,
     segmentVideoMode,
     activeVideoSegment,
+    activeVideoSegmentKey,
     currentVideoFps,
     videoTimeToGlobal,
     videoFps,
@@ -988,7 +982,14 @@ function ReplayPage({ isActive }) {
         dispatch(setIsPlaying(false));
       }
 
-      const fps = currentVideoFps[0] || videoFps[0] || 30;
+      const fpsIndex = expandedVideoIndex ?? 0;
+      const fps = (
+        currentVideoFps[fpsIndex]
+        || currentVideoFps[0]
+        || videoFps[fpsIndex]
+        || videoFps[0]
+        || 30
+      );
       const frameTime = 1 / fps;
       const delta = direction === 'forward' ? frameTime : -frameTime;
       const newTime = Math.max(0, Math.min(duration, currentTime + delta));
@@ -996,7 +997,7 @@ function ReplayPage({ isActive }) {
       syncVideosToGlobalTime(newTime);
       dispatch(setCurrentTime(newTime));
     },
-    [isVideoLoaded, isPlaying, isDirectMcapMode, mcapPlayer, currentVideoFps, videoFps, duration, currentTime, syncVideosToGlobalTime, dispatch]
+    [isVideoLoaded, isPlaying, isDirectMcapMode, mcapPlayer, currentVideoFps, videoFps, expandedVideoIndex, duration, currentTime, syncVideosToGlobalTime, dispatch]
   );
 
   // Seek relative
@@ -1115,6 +1116,9 @@ function ReplayPage({ isActive }) {
   // Hidden panels list
   const hiddenPanels = Object.values(layoutPanels).filter(
     (p) => !p.visible && p.id !== PANEL_IDS.SIDEBAR
+  );
+  const hasExpandedReplayPanel = Object.values(layoutPanels).some(
+    (p) => p.visible && p.expandable !== false && p.expanded
   );
 
   return (
@@ -1401,7 +1405,12 @@ function ReplayPage({ isActive }) {
       )}
 
       {episodeDrawerOpen && rosbagList.length > 0 && (
-        <div className="absolute right-4 top-14 bottom-24 z-30 w-[340px] max-w-[calc(100vw-2rem)] rounded-lg border border-gray-200 bg-white shadow-xl overflow-hidden">
+        <div
+          className={clsx(
+            'absolute right-4 top-14 bottom-24 w-[340px] max-w-[calc(100vw-2rem)] rounded-lg border border-gray-200 bg-white shadow-xl overflow-hidden',
+            hasExpandedReplayPanel ? 'z-0' : 'z-30'
+          )}
+        >
           <SidebarPanel
             taskPath={selectedTaskPath}
             recordingDate={recordingDate}
@@ -1424,16 +1433,6 @@ function ReplayPage({ isActive }) {
             onClose={() => setEpisodeDrawerOpen(false)}
           />
         </div>
-      )}
-      {!episodeDrawerOpen && rosbagList.length > 0 && (
-        <button
-          onClick={() => setEpisodeDrawerOpen(true)}
-          className="absolute right-4 top-16 z-30 flex items-center gap-1.5 rounded-l-lg rounded-r-md bg-blue-600 px-2.5 py-2 text-xs font-medium text-white shadow-lg hover:bg-blue-700 transition-colors"
-          title="Show episodes"
-        >
-          <MdChevronRight size={16} className="rotate-180" />
-          Episodes
-        </button>
       )}
 
       {/* Bag info */}
