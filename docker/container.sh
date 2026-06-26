@@ -490,6 +490,14 @@ Flags (any start* command):
 
 Environment:
   GPU_ARCH         default | blackwell   (optional, amd64 only)
+  FLASH_ATTN_BUILD_JOBS
+                   flash-attn source build parallelism for GR00T Blackwell
+                   images (default 1)
+  FLASH_ATTN_NVCC_THREADS
+                   nvcc threads per flash-attn build job (default 1)
+  FLASH_ATTN_CUDA_ARCHS
+                   CUDA archs for GR00T Blackwell flash-attn builds
+                   (default 120)
   VERSION          image tag version (default: 0.2.1 for cyclo)
   ROS_DOMAIN_ID    default 30
   CYCLO_STORAGE_MODE

@@ -5,6 +5,7 @@ Changelog for package cyclo_brain
 0.2.1 (2026-06-26)
 ------------------
 * Updated the Isaac-GR00T submodule to include Cyclo GR00T modality configuration examples.
+* Scoped GR00T Blackwell flash-attn source builds to sm_120 with single-job defaults for safer amd64 image validation.
 * Contributors: Taehyeong Kim
 
 0.2.0 (2026-06-25)
@@ -20,7 +21,7 @@ Changelog for package cyclo_brain
 -------------------
 * Added async/sync action request modes with updated buffer refill behavior for the shared policy runtime.
 * Added GR00T TensorRT DiT acceleration selection, synthetic observation-based engine preparation, and model-local engine reuse.
-* Updated GR00T policy image support to ``robotis/groot-zenoh:1.3.1``.
+* Updated GR00T policy image support to ``robotis/groot-zenoh:1.3.2``.
 * Contributors: Taehyeong Kim
 
 0.1.14 (2026-06-17)
