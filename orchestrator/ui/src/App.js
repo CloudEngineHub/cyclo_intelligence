@@ -16,7 +16,7 @@
 
 import React, { useEffect, useRef } from 'react';
 import clsx from 'clsx';
-import { MdHome, MdVideocam, MdMemory, MdWidgets, MdPlayCircle, MdAccountTree, MdNavigation } from 'react-icons/md';
+import { MdHome, MdVideocam, MdMemory, MdWidgets, MdAccountTree, MdNavigation } from 'react-icons/md';
 import { GoGraph } from 'react-icons/go';
 import { Toaster } from 'react-hot-toast';
 import toast from 'react-hot-toast';
@@ -27,7 +27,6 @@ import RecordPage from './pages/RecordPage';
 import InferencePage from './pages/InferencePage';
 import TrainingPage from './pages/TrainingPage';
 import EditDatasetPage from './pages/EditDatasetPage';
-import ReplayPage from './pages/ReplayPage';
 import BTManagerPage from './pages/BTManagerPage';
 import { useRosTopicSubscription } from './hooks/useRosTopicSubscription';
 import rosConnectionManager from './utils/rosConnectionManager';
@@ -258,40 +257,8 @@ function App() {
   };
 
   const handleEditDatasetPageNavigation = () => {
-    if (process.env.REACT_APP_DEBUG === 'true') {
-      console.log('handleEditDatasetPageNavigation');
-      isFirstLoad.current = false;
-      dispatch(moveToPage(PageType.EDIT_DATASET));
-      return;
-    }
-
-    // Allow navigation if task is in progress
-    if (robotType && robotType !== '') {
-      console.log(
-        'robot type:',
-        robotType,
-        '=> allowing navigation to Edit Dataset page'
-      );
-      isFirstLoad.current = false;
-      dispatch(moveToPage(PageType.EDIT_DATASET));
-      return;
-    }
-
-    // Block navigation if robot type is not set
-    if (!robotType || robotType.trim() === '') {
-      toast.error('Please select a robot type first in the Home page', {
-        duration: 4000,
-      });
-      return;
-    }
-
-    // Allow navigation if conditions are met
-    dispatch(moveToPage(PageType.EDIT_DATASET));
-  };
-
-  const handleReplayPageNavigation = () => {
     isFirstLoad.current = false;
-    dispatch(moveToPage(PageType.REPLAY));
+    dispatch(moveToPage(PageType.EDIT_DATASET));
   };
 
   const handleBTManagerPageNavigation = () => {
@@ -462,6 +429,7 @@ function App() {
             <span className="mt-1 text-sm whitespace-nowrap">Data Tools</span>
           </button>
 
+<<<<<<< HEAD
           {/* Replay page button */}
           <button
             className={clsx(classPageButton, {
@@ -486,6 +454,8 @@ function App() {
             <span className="mt-1 text-sm whitespace-nowrap">Nav</span>
           </button>
 
+=======
+>>>>>>> origin/main
         </div>
       </aside>
       <main className="flex-1 flex flex-col h-screen bg-white dark:bg-slate-950">
@@ -499,8 +469,6 @@ function App() {
           <TrainingPage isActive={page === PageType.TRAINING} />
         ) : page === PageType.EDIT_DATASET ? (
           <EditDatasetPage isActive={page === PageType.EDIT_DATASET} />
-        ) : page === PageType.REPLAY ? (
-          <ReplayPage isActive={page === PageType.REPLAY} />
         ) : page === PageType.BT_MANAGER ? (
           <BTManagerPage isActive={page === PageType.BT_MANAGER} />
         ) : page === PageType.NAVIGATION ? (

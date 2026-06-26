@@ -2,6 +2,10 @@
 Changelog for package cyclo_brain
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+0.2.0 (2026-06-25)
+------------------
+* None
+
 0.1.16 (2026-06-23)
 -------------------
 * Documented the externally managed Zenoh router flow for policy-runtime integration.

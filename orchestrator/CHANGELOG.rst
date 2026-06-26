@@ -2,10 +2,15 @@
 Changelog for package orchestrator
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-0.1.17 (2026-06-26)
+0.2.1 (2026-06-26)
 -------------------
 * Add Nav
 * Contributors: Howon Kim
+
+0.2.0 (2026-06-25)
+------------------
+* Added Replay regression coverage for segmented video metadata and robot-configured joint/action layouts.
+* Contributors: Taehyeong Kim
 
 0.1.16 (2026-06-23)
 -------------------

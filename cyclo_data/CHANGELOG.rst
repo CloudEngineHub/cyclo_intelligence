@@ -2,6 +2,12 @@
 Changelog for package cyclo_data
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+0.2.0 (2026-06-25)
+------------------
+* Added segment-aware Replay data extraction with video segment metadata, configured robot state/action topic layouts, and Twist/Odometry motion values.
+* Normalized replay recording dates to UTC ISO timestamps.
+* Contributors: Taehyeong Kim
+
 0.1.16 (2026-06-23)
 -------------------
 * None

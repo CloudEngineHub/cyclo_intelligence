@@ -490,7 +490,7 @@ Flags (any start* command):
 
 Environment:
   GPU_ARCH         default | blackwell   (optional, amd64 only)
-  VERSION          image tag version (default: 0.1.16 for cyclo)
+  VERSION          image tag version (default: 0.2.0 for cyclo)
   ROS_DOMAIN_ID    default 30
   CYCLO_STORAGE_MODE
                    auto | ssd | local (default auto). Containers always
@@ -615,9 +615,8 @@ test_ui() {
 start_main() {
     setup_storage
     setup_x11
-    echo "[container.sh] Pulling pre-built images (ignoring local-only failures)..."
-    $COMPOSE pull --ignore-pull-failures "$MAIN_SERVICE" "$LEROBOT_SERVICE" "$GROOT_SERVICE" || true
-    remove_stale_policy_containers
+    echo "[container.sh] Pulling pre-built image..."
+    $COMPOSE pull --ignore-pull-failures "$MAIN_SERVICE" || true
     echo "[container.sh] Starting $MAIN_SERVICE (ARCH=$ARCH${BUILD_FLAG:+, rebuild on})..."
     $COMPOSE up -d $BUILD_FLAG "$MAIN_SERVICE"
     echo "[container.sh] Done. 'docker/container.sh status' to check s6 services."

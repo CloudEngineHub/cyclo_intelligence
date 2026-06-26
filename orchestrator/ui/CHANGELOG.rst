@@ -2,6 +2,13 @@
 Changelog for package cyclo-ui
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+0.2.0 (2026-06-25)
+------------------
+* Merged Replay into Data Tools as the Review Episodes workflow.
+* Reworked Replay playback with segment-aware camera panels, timeline controls, joint charts, and 3D viewer layout updates.
+* Added cache-control rules so rebuilt UI assets and SPA entrypoints refresh predictably.
+* Contributors: Taehyeong Kim
+
 0.1.16 (2026-06-23)
 -------------------
 * Moved the inference ``Action Request`` controls into the runtime timing section so request scheduling sits with the related rate controls.
