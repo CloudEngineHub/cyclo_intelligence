@@ -219,7 +219,7 @@ function App() {
 
     // Allow navigation if task is in progress
     if (robotType && robotType !== '') {
-      console.log('robot type:', robotType, '=> allowing navigation to Training page');
+      console.log('robot type:', robotType, '=> allowing navigation to Training Guide page');
       isFirstLoad.current = false;
       dispatch(moveToPage(PageType.TRAINING));
       return;
@@ -230,12 +230,12 @@ function App() {
       toast.error('Please select a robot type first in the Home page', {
         duration: 4000,
       });
-      console.log('Robot type not set, blocking navigation to Training page');
+      console.log('Robot type not set, blocking navigation to Training Guide page');
       return;
     }
 
     // Allow navigation if conditions are met
-    console.log('Robot type set, allowing navigation to Training page');
+    console.log('Robot type set, allowing navigation to Training Guide page');
     dispatch(moveToPage(PageType.TRAINING));
   };
 
@@ -357,7 +357,7 @@ function App() {
             <MdVideocam size={32} className="mb-1.5" />
             <span className="mt-1 text-sm">Record</span>
           </button>
-          {/* Training page button */}
+          {/* Training Guide page button */}
           <button
             className={clsx(classPageButton, {
               'hover:bg-gray-200 active:bg-gray-400 dark:hover:bg-slate-800 dark:active:bg-slate-700': page !== PageType.TRAINING,
@@ -366,7 +366,9 @@ function App() {
             onClick={handleTrainingPageNavigation}
           >
             <GoGraph size={28} className="mb-1.5" />
-            <span className="mt-1 text-sm">Training</span>
+            <span className="mt-1 text-center text-sm leading-tight">
+              Training<br />Guide
+            </span>
           </button>
           {/* Inference page button */}
           <button

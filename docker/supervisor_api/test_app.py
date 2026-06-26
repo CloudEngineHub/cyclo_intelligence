@@ -88,11 +88,11 @@ def test_missing_required_mounts_accepts_current_groot_container():
 def test_backend_container_image_mismatch_detects_old_container_image():
     class FakeImages:
         def get(self, image):
-            assert image == "robotis/groot-zenoh:1.3.1-arm64"
+            assert image == "robotis/groot-zenoh:1.3.2-arm64"
             return SimpleNamespace(id="sha256:new")
 
     container = SimpleNamespace(attrs={"Image": "sha256:old"})
-    spec = {"image": "robotis/groot-zenoh:1.3.1-arm64"}
+    spec = {"image": "robotis/groot-zenoh:1.3.2-arm64"}
 
     assert _backend_container_image_mismatch(
         SimpleNamespace(images=FakeImages()),
@@ -104,11 +104,11 @@ def test_backend_container_image_mismatch_detects_old_container_image():
 def test_backend_container_image_mismatch_accepts_current_container_image():
     class FakeImages:
         def get(self, image):
-            assert image == "robotis/groot-zenoh:1.3.1-arm64"
+            assert image == "robotis/groot-zenoh:1.3.2-arm64"
             return SimpleNamespace(id="sha256:new")
 
     container = SimpleNamespace(attrs={"Image": "sha256:new"})
-    spec = {"image": "robotis/groot-zenoh:1.3.1-arm64"}
+    spec = {"image": "robotis/groot-zenoh:1.3.2-arm64"}
 
     assert not _backend_container_image_mismatch(
         SimpleNamespace(images=FakeImages()),
@@ -120,7 +120,7 @@ def test_backend_container_image_mismatch_accepts_current_container_image():
 def test_backend_container_stale_reason_detects_workspace_mount_mismatch():
     class FakeImages:
         def get(self, image):
-            assert image == "robotis/groot-zenoh:1.3.1-arm64"
+            assert image == "robotis/groot-zenoh:1.3.2-arm64"
             return SimpleNamespace(id="sha256:new")
 
     container = SimpleNamespace(
@@ -134,7 +134,7 @@ def test_backend_container_stale_reason_detects_workspace_mount_mismatch():
             ],
         }
     )
-    spec = {"image": "robotis/groot-zenoh:1.3.1-arm64"}
+    spec = {"image": "robotis/groot-zenoh:1.3.2-arm64"}
 
     assert _backend_container_stale_reason(
         "groot",
@@ -151,7 +151,7 @@ def test_backend_container_stale_reason_accepts_repo_symlink_workspace_mount(
 ):
     class FakeImages:
         def get(self, image):
-            assert image == "robotis/groot-zenoh:1.3.1-arm64"
+            assert image == "robotis/groot-zenoh:1.3.2-arm64"
             return SimpleNamespace(id="sha256:new")
 
     host_repo = tmp_path / "host_repo"
@@ -176,7 +176,7 @@ def test_backend_container_stale_reason_accepts_repo_symlink_workspace_mount(
             ],
         }
     )
-    spec = {"image": "robotis/groot-zenoh:1.3.1-arm64"}
+    spec = {"image": "robotis/groot-zenoh:1.3.2-arm64"}
 
     assert _backend_container_stale_reason(
         "groot",
@@ -532,14 +532,14 @@ def test_zenoh_router_is_not_user_managed_service():
 def test_groot_backend_uses_current_release_image():
     assert (
         _BACKENDS["groot"]["image"]
-        == f"robotis/groot-zenoh:1.3.1-{app._BACKEND_ARCH}"
+        == f"robotis/groot-zenoh:1.3.2-{app._BACKEND_ARCH}"
     )
 
 
 def test_backend_status_model_exposes_stale_image_status():
     status = app.BackendStatus(
         name="groot",
-        image="robotis/groot-zenoh:1.3.1-arm64",
+        image="robotis/groot-zenoh:1.3.2-arm64",
         image_pulled=True,
         image_status="stale",
         container_state="exited",

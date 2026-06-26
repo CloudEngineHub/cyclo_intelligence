@@ -2,6 +2,12 @@
 Changelog for package cyclo-ui
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+0.2.1 (2026-06-26)
+------------------
+* Replaced the Training placeholder with a Training Guide for LeRobot and GR00T CLI training handoff.
+* Documented that training should use the pinned policy submodules that match Cyclo Inference.
+* Contributors: Taehyeong Kim
+
 0.2.0 (2026-06-25)
 ------------------
 * Merged Replay into Data Tools as the Review Episodes workflow.

@@ -2,6 +2,11 @@
 Changelog for package orchestrator
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+0.2.1 (2026-06-26)
+------------------
+* Updated Cyclo release metadata to 0.2.1.
+* Contributors: Taehyeong Kim
+
 0.2.0 (2026-06-25)
 ------------------
 * Added Replay regression coverage for segmented video metadata and robot-configured joint/action layouts.

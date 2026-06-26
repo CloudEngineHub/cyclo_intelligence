@@ -43,7 +43,7 @@ services:
   # ============================================================
   cyclo_intelligence:
     container_name: cyclo_intelligence
-    image: robotis/cyclo-intelligence:${VERSION:-0.2.0}-${ARCH:-arm64}
+    image: robotis/cyclo-intelligence:${VERSION:-0.2.1}-${ARCH:-arm64}
     build:
       context: ..
       dockerfile: docker/Dockerfile.${ARCH:-arm64}
@@ -264,7 +264,7 @@ services:
   # ============================================================
   groot:
     container_name: groot_server
-    image: robotis/groot-zenoh:1.3.1-${ARCH:-arm64}
+    image: robotis/groot-zenoh:1.3.2-${ARCH:-arm64}
     build:
       context: ../cyclo_brain/policy/groot
       dockerfile: Dockerfile.${ARCH:-arm64}
@@ -272,6 +272,9 @@ services:
       network: host
       args:
         GPU_ARCH: ${GPU_ARCH:-default}
+        FLASH_ATTN_BUILD_JOBS: ${FLASH_ATTN_BUILD_JOBS:-1}
+        FLASH_ATTN_NVCC_THREADS: ${FLASH_ATTN_NVCC_THREADS:-1}
+        FLASH_ATTN_CUDA_ARCHS: ${FLASH_ATTN_CUDA_ARCHS:-120}
 
     # Main runtime's control loop tries SCHED_FIFO — let the kernel grant it.
     cap_add:
