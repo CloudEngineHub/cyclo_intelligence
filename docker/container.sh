@@ -615,9 +615,8 @@ test_ui() {
 start_main() {
     setup_storage
     setup_x11
-    echo "[container.sh] Pulling pre-built images (ignoring local-only failures)..."
-    $COMPOSE pull --ignore-pull-failures "$MAIN_SERVICE" "$LEROBOT_SERVICE" "$GROOT_SERVICE" || true
-    remove_stale_policy_containers
+    echo "[container.sh] Pulling pre-built image..."
+    $COMPOSE pull --ignore-pull-failures "$MAIN_SERVICE" || true
     echo "[container.sh] Starting $MAIN_SERVICE (ARCH=$ARCH${BUILD_FLAG:+, rebuild on})..."
     $COMPOSE up -d $BUILD_FLAG "$MAIN_SERVICE"
     echo "[container.sh] Done. 'docker/container.sh status' to check s6 services."

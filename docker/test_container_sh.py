@@ -6,7 +6,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_start_pulls_main_and_policy_images(tmp_path):
+def test_start_pulls_main_image_only(tmp_path):
     log_path = tmp_path / "docker.log"
     docker_stub = tmp_path / "docker"
     docker_stub.write_text(
@@ -45,12 +45,14 @@ def test_start_pulls_main_and_policy_images(tmp_path):
 
     docker_calls = log_path.read_text().splitlines()
     assert any(
-        "pull --ignore-pull-failures cyclo_intelligence lerobot groot" in call
+        "pull --ignore-pull-failures cyclo_intelligence" in call
         for call in docker_calls
     )
+    assert not any("pull --ignore-pull-failures lerobot" in call for call in docker_calls)
+    assert not any("pull --ignore-pull-failures groot" in call for call in docker_calls)
 
 
-def test_start_removes_policy_container_with_stale_workspace_mount(tmp_path):
+def test_start_does_not_remove_policy_container_with_stale_workspace_mount(tmp_path):
     log_path = tmp_path / "docker.log"
     docker_stub = tmp_path / "docker"
     docker_stub.write_text(
@@ -106,10 +108,8 @@ def test_start_removes_policy_container_with_stale_workspace_mount(tmp_path):
     )
 
     docker_calls = log_path.read_text().splitlines()
-    assert any(
-        call == "rm -f lerobot_server"
-        for call in docker_calls
-    )
+    assert "rm -f lerobot_server" not in docker_calls
+    assert "rm -f groot_server" not in docker_calls
 
 
 def test_start_lerobot_removes_stale_workspace_mount(tmp_path):
@@ -164,6 +164,11 @@ def test_start_lerobot_removes_stale_workspace_mount(tmp_path):
     )
 
     docker_calls = log_path.read_text().splitlines()
+    assert any(
+        "pull --ignore-pull-failures lerobot" in call
+        for call in docker_calls
+    )
+    assert not any("pull --ignore-pull-failures groot" in call for call in docker_calls)
     assert any(
         call == "rm -f lerobot_server"
         for call in docker_calls
