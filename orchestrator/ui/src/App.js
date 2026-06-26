@@ -429,7 +429,6 @@ function App() {
             <span className="mt-1 text-sm whitespace-nowrap">Data Tools</span>
           </button>
 
-<<<<<<< HEAD
           {/* Replay page button */}
           <button
             className={clsx(classPageButton, {
@@ -454,8 +453,6 @@ function App() {
             <span className="mt-1 text-sm whitespace-nowrap">Nav</span>
           </button>
 
-=======
->>>>>>> origin/main
         </div>
       </aside>
       <main className="flex-1 flex flex-col h-screen bg-white dark:bg-slate-950">
