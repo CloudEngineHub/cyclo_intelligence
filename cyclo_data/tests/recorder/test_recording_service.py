@@ -91,6 +91,7 @@ _stub_module(
 )
 _stub_module("psutil", cpu_percent=lambda interval=None: 0.0)
 
+import cyclo_data.services.recording_service as recording_service_module  # noqa: E402
 from cyclo_data.services.recording_service import RecordingService  # noqa: E402
 
 for _module_name in (
@@ -156,6 +157,43 @@ def _service_with_logger():
     service = RecordingService.__new__(RecordingService)
     service._node = SimpleNamespace(get_logger=lambda: logger)
     return service, logger
+
+
+def test_ensure_data_manager_reuses_same_task_without_candidate_scan(
+    monkeypatch,
+    tmp_path,
+):
+    service, _ = _service_with_logger()
+    service._session_lock = RLock()
+    service.DEFAULT_SAVE_ROOT_PATH = tmp_path
+    updates = []
+    existing = SimpleNamespace(
+        _save_repo_name="Task_42_pick_MCAP",
+        is_recording=lambda: False,
+        update_task_info=lambda task_info: updates.append(task_info),
+    )
+    service._data_manager = existing
+
+    class ExplodingDataManager:
+        @classmethod
+        def _make_save_repo_name(cls, save_root_path, task_info):
+            assert save_root_path == tmp_path
+            return "Task_42_pick_MCAP"
+
+        def __init__(self, *args, **kwargs):
+            raise AssertionError(
+                "same task must not construct a scan-heavy manager"
+            )
+
+    monkeypatch.setattr(
+        recording_service_module,
+        "DataManager",
+        ExplodingDataManager,
+    )
+    task_info = SimpleNamespace(task_num="42", task_name="pick")
+
+    assert service._ensure_data_manager(task_info, "ffw_sg2_rev1") is existing
+    assert updates == [task_info]
 
 
 def test_validate_active_segment_rejects_stale_segment_request():

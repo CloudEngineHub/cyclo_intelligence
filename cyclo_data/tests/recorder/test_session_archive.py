@@ -63,9 +63,13 @@ def _make_manager(root: Path, *, subtask_total: int = 2) -> DataManager:
     manager._physical_segment_total = subtask_total
     manager._subtask_mode = subtask_total > 1
     manager._main_task_instruction = "main instruction"
+    manager._subtask_instructions = [
+        f"subtask {idx}" for idx in range(subtask_total)
+    ]
     manager._task_info = SimpleNamespace(task_num="1234", task_name="archive test")
     manager._robot_type = "test_robot"
     manager._state_lock = threading.Lock()
+    manager._saved_subtasks_cache = {}
     return manager
 
 
@@ -333,6 +337,81 @@ def test_active_segment_directory_without_episode_info_is_not_saved(tmp_path):
 
     assert manager.saved_subtask_indices_for_full_episode() == {0}
     assert manager.missing_subtasks_for_full_episode() == [1, 2]
+
+
+def test_saved_subtask_indices_uses_cache_when_segments_dir_missing(monkeypatch, tmp_path):
+    root = tmp_path / "Task_1234_archive_MCAP"
+    manager = _make_manager(root, subtask_total=3)
+    manager._current_full_episode_index = 4
+    manager._saved_subtasks_cache = {4: {0, 2}}
+    monkeypatch.setattr(
+        manager,
+        "_episode_dirs_for_full_subtask",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("status lookup must not scan the whole task root")
+        ),
+    )
+
+    assert manager.saved_subtask_indices_for_full_episode() == {0, 2}
+    assert manager.missing_subtasks_for_full_episode() == [1]
+
+
+def test_episode_dirs_for_full_subtask_uses_nested_segments_without_root_scan(
+    monkeypatch,
+    tmp_path,
+):
+    root = tmp_path / "Task_1234_archive_MCAP"
+    manager = _make_manager(root, subtask_total=2)
+    first = _write_segment(root, full_idx=0, subtask_idx=0, subtask_total=2)
+    second = _write_segment(root, full_idx=0, subtask_idx=1, subtask_total=2)
+    monkeypatch.setattr(
+        manager,
+        "_iter_subtask_episode_dirs",
+        lambda: (_ for _ in ()).throw(
+            AssertionError("nested layout should not fall back to root scan")
+        ),
+    )
+
+    assert manager._episode_dirs_for_full_subtask(0) == [first, second]
+    assert manager._episode_dirs_for_full_subtask(0, 1) == [second]
+    assert manager._saved_subtasks_cache[0] == {0, 1}
+
+
+def test_update_task_info_license_toggle_does_not_rescan(monkeypatch, tmp_path):
+    root = tmp_path / "Task_1234_archive_MCAP"
+    manager = _make_manager(root, subtask_total=2)
+    manager._status = "idle"
+    manager._current_full_episode_index = 3
+    manager._current_subtask_index = 1
+    manager._current_scenario_number = 1
+    manager.current_instruction = "old instruction"
+    manager._include_robotis_license = False
+    monkeypatch.setattr(
+        manager,
+        "_validate_existing_segment_count",
+        lambda: (_ for _ in ()).throw(
+            AssertionError("same layout refresh must not rescan validation")
+        ),
+    )
+    monkeypatch.setattr(
+        manager,
+        "_find_next_subtask_position",
+        lambda: (_ for _ in ()).throw(
+            AssertionError("same layout refresh must not recompute cursor")
+        ),
+    )
+    task_info = SimpleNamespace(
+        task_instruction=["updated instruction"],
+        subtask_instruction=["subtask 0", "subtask 1"],
+        include_robotis_license=True,
+    )
+
+    manager.update_task_info(task_info)
+
+    assert manager._include_robotis_license is True
+    assert manager._current_full_episode_index == 3
+    assert manager._current_subtask_index == 1
+    assert manager.current_instruction == "updated instruction"
 
 
 def test_full_episode_archive_errors_report_corrupt_saved_segment(tmp_path):
