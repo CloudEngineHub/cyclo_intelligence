@@ -2,6 +2,12 @@
 Changelog for package cyclo_data
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+0.2.2 (2026-06-26)
+------------------
+* Optimized recording startup by caching existing episode metadata scans while initializing and refreshing recording sessions.
+* Preserved segmented recording subtask cache updates across save, rerecord, and discard flows.
+* Contributors: Taehyeong Kim
+
 0.2.1 (2026-06-26)
 ------------------
 * None

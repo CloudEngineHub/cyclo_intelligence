@@ -268,6 +268,19 @@ class RecordingService:
             existing = self._data_manager
             if existing is not None and existing.is_recording():
                 return existing
+        save_repo_name = DataManager._make_save_repo_name(
+            self.DEFAULT_SAVE_ROOT_PATH,
+            task_info,
+        )
+        if (existing is not None
+                and getattr(existing, '_save_repo_name', None) == save_repo_name):
+            # Same task as before — reuse existing manager but refresh
+            # its task_info so per-session knobs (e.g. UI's
+            # include_robotis_license checkbox) flipped between
+            # episodes are picked up on the next save_robotis_metadata.
+            existing.update_task_info(task_info)
+            return existing
+
         candidate = DataManager(
             save_root_path=self.DEFAULT_SAVE_ROOT_PATH,
             robot_type=robot_type,
@@ -282,10 +295,6 @@ class RecordingService:
                 f'DataManager initialised: repo={candidate._save_repo_name} '
                 f'robot_type={robot_type}')
             return candidate
-        # Same task as before — reuse existing manager but refresh
-        # its task_info so per-session knobs (e.g. UI's
-        # include_robotis_license checkbox) flipped between
-        # episodes are picked up on the next save_robotis_metadata.
         existing.update_task_info(task_info)
         return existing
 
