@@ -182,17 +182,17 @@ function SaveMapDialog({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 px-4"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 px-4"
       role="dialog"
       aria-modal="true"
       aria-labelledby="mission-save-map-title"
     >
       <form
-        className="w-full max-w-sm border p-4 grid gap-3"
+        className="w-full max-w-sm border p-4 grid gap-3 shadow-2xl"
         style={{
-          color: "var(--vscode-foreground)",
-          backgroundColor: "var(--vscode-editor-background)",
-          borderColor: "var(--vscode-panel-border)",
+          color: "#111827",
+          backgroundColor: "#ffffff",
+          borderColor: "#d1d5db",
         }}
         onSubmit={(event) => {
           event.preventDefault();
@@ -203,7 +203,7 @@ function SaveMapDialog({
           Save Map
         </div>
         <label className="grid gap-1 text-xs">
-          <span style={{ color: "var(--vscode-descriptionForeground)" }}>Map name</span>
+          <span style={{ color: "#4b5563" }}>Map name</span>
           <input
             autoFocus
             aria-label="Save map name"
@@ -212,9 +212,9 @@ function SaveMapDialog({
             onChange={(event) => onChange(event.currentTarget.value)}
             className="h-8 px-2 border text-sm"
             style={{
-              color: "var(--vscode-input-foreground)",
-              backgroundColor: "var(--vscode-input-background)",
-              borderColor: "var(--vscode-input-border, var(--vscode-panel-border))",
+              color: "#111827",
+              backgroundColor: "#f9fafb",
+              borderColor: "#9ca3af",
             }}
           />
         </label>
