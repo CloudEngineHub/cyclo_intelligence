@@ -125,6 +125,7 @@ const TOPIC_LABELS = {
 const MISSION_BORDER = "#e5e7eb";
 const MISSION_BORDER_SOFT = "#e5e7eb";
 const MISSION_BUTTON_BORDER = "#cbd5e1";
+const MISSION_PANEL_BORDER = "#cbd5e1";
 const MISSION_ACTIVE_BORDER = "#93c5fd";
 const MISSION_STAGE_FILL = MISSION_BORDER;
 const MISSION_STAGE_EMPTY = "#ffffff";
@@ -169,8 +170,8 @@ function Panel({ title, children, className = "" }) {
       className={`border p-3 ${className}`}
       style={{
         color: "var(--vscode-foreground)",
-        borderColor: MISSION_BORDER,
-        backgroundColor: MISSION_SURFACE,
+        borderColor: MISSION_PANEL_BORDER,
+        backgroundColor: MISSION_STAGE_EMPTY,
       }}
     >
       {title && <div className="text-xs font-semibold mb-2">{title}</div>}
@@ -246,8 +247,8 @@ function LayerToggle({ label, checked, onChange }) {
       className="h-8 px-2 border flex items-center gap-2 text-xs font-medium"
       style={{
         color: "var(--vscode-foreground)",
-        borderColor: MISSION_BORDER_SOFT,
-        backgroundColor: MISSION_SURFACE,
+        borderColor: MISSION_PANEL_BORDER,
+        backgroundColor: MISSION_STAGE_EMPTY,
       }}
     >
       <input
@@ -381,7 +382,7 @@ function BehaviorPalette({ selectedTag = "", onNodeSelect }) {
                       : MISSION_SURFACE,
                     borderColor: selectedTag === node.tag
                       ? MISSION_ACTIVE_BORDER
-                      : MISSION_BORDER_SOFT,
+                      : MISSION_PANEL_BORDER,
                     boxShadow: selectedTag === node.tag
                       ? `inset 0 0 0 1px ${MISSION_ACTIVE_BORDER}`
                       : "none",
@@ -396,8 +397,8 @@ function BehaviorPalette({ selectedTag = "", onNodeSelect }) {
                   className="h-8 px-2 border flex items-center text-xs"
                   style={{
                     color: "var(--vscode-descriptionForeground)",
-                    backgroundColor: MISSION_SURFACE,
-                    borderColor: MISSION_BORDER_SOFT,
+                    backgroundColor: MISSION_STAGE_EMPTY,
+                    borderColor: MISSION_PANEL_BORDER,
                   }}
                 >
                   No nodes
@@ -1236,8 +1237,8 @@ export default function MissionCanvasPage() {
                           : "var(--vscode-foreground)",
                         backgroundColor: node.id === selectedBehaviorNodeId
                           ? "var(--vscode-button-background)"
-                          : MISSION_SURFACE,
-                        borderColor: MISSION_BORDER_SOFT,
+                          : MISSION_STAGE_EMPTY,
+                        borderColor: MISSION_PANEL_BORDER,
                       }}
                     >
                       <span className="block truncate">{node.tag}</span>
@@ -1268,8 +1269,8 @@ export default function MissionCanvasPage() {
                           : "var(--vscode-foreground)",
                         backgroundColor: spot.id === selectedSpotId
                           ? "var(--vscode-button-background)"
-                          : MISSION_SURFACE,
-                        borderColor: MISSION_BORDER_SOFT,
+                          : MISSION_STAGE_EMPTY,
+                        borderColor: MISSION_PANEL_BORDER,
                       }}
                     >
                       <span className="block truncate">{spot.label}</span>
