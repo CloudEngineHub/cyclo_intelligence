@@ -1207,6 +1207,7 @@ export default function MissionCanvasPage() {
                 active={busy === "Run mission" || (running && workspaceStage === STAGE_RUN)}
                 disabled={!!busy || running}
                 onClick={handleRunMission}
+                variant="secondary"
               >
                 Run Mission
               </ActionButton>
