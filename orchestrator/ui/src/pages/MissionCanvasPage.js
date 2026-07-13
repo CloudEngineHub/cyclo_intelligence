@@ -19,7 +19,7 @@ import {
   getNavigationSpots,
   updateNavigationSpot,
 } from "../utils/navigationSpotsApi";
-import { useNavigationRosTopic } from "../hooks/useNavigationRosTopic";
+import { useNavigationRosPublisher, useNavigationRosTopic } from "../hooks/useNavigationRosTopic";
 import { MapEditorControls, useMapEditor } from "../components/navigation/MapEditor";
 import { MapViewer } from "../components/navigation/MapViewer";
 import {
@@ -149,6 +149,12 @@ const MISSION_STAGE_EMPTY = "#ffffff";
 const MISSION_SURFACE = "color-mix(in srgb, var(--vscode-foreground, #ffffff) 5%, transparent)";
 const MISSION_SURFACE_STRONG = "color-mix(in srgb, var(--vscode-foreground, #ffffff) 8%, transparent)";
 const MISSION_DESIGN_STORAGE_KEY = "mission_canvas_designs";
+const TELEOP_TOPIC = "/cmd_vel";
+const TELEOP_MESSAGE_TYPE = "geometry_msgs/msg/Twist";
+const TELEOP_REPEAT_MS = 200;
+const TELEOP_DEFAULT_LINEAR_SPEED = 0.4;
+const TELEOP_DEFAULT_ANGULAR_SPEED = 0.8;
+const TELEOP_STOP = { linearX: 0, angularZ: 0 };
 
 function messageData(value) {
   if (!value || typeof value !== "object") return null;
@@ -457,6 +463,296 @@ function RunSessionPanel({ mapName, running }) {
   );
 }
 
+function clampNumber(value, min, max) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return min;
+  return Math.min(Math.max(number, min), max);
+}
+
+function teleopTwist({ linearX = 0, angularZ = 0 }) {
+  return {
+    linear: { x: linearX, y: 0, z: 0 },
+    angular: { x: 0, y: 0, z: angularZ },
+  };
+}
+
+function isTextInputTarget(target) {
+  if (!target || !(target instanceof Element)) return false;
+  const tagName = target.tagName.toLowerCase();
+  return (
+    tagName === "input" ||
+    tagName === "textarea" ||
+    tagName === "select" ||
+    target.isContentEditable
+  );
+}
+
+function TeleopButton({
+  children,
+  active = false,
+  disabled = false,
+  title,
+  onStart,
+  onStop,
+}) {
+  const handlePointerDown = (event) => {
+    if (disabled) return;
+    event.preventDefault();
+    if (event.currentTarget.setPointerCapture) {
+      event.currentTarget.setPointerCapture(event.pointerId);
+    }
+    onStart();
+  };
+
+  const handlePointerStop = (event) => {
+    if (disabled) return;
+    event.preventDefault();
+    onStop();
+  };
+
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      title={title}
+      aria-pressed={active ? true : undefined}
+      onPointerDown={handlePointerDown}
+      onPointerUp={handlePointerStop}
+      onPointerCancel={handlePointerStop}
+      onPointerLeave={handlePointerStop}
+      className="h-10 w-10 border text-sm font-bold transition-all active:translate-y-px disabled:opacity-45"
+      style={{
+        color: active ? "var(--vscode-button-foreground)" : "var(--vscode-foreground)",
+        backgroundColor: active ? "var(--vscode-button-background)" : MISSION_STAGE_EMPTY,
+        borderColor: MISSION_BUTTON_BORDER,
+        boxShadow: "none",
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
+function MappingTeleopPanel({ disabled, onPublish, onMessage }) {
+  const [linearSpeed, setLinearSpeed] = useState(TELEOP_DEFAULT_LINEAR_SPEED);
+  const [angularSpeed, setAngularSpeed] = useState(TELEOP_DEFAULT_ANGULAR_SPEED);
+  const [activeLabel, setActiveLabel] = useState("");
+  const activeMotionRef = useRef(null);
+
+  const publishMotion = useCallback((motion) => {
+    void onPublish(motion).catch((error) => {
+      setActiveLabel("");
+      activeMotionRef.current = null;
+      onMessage(error instanceof Error ? error.message : "Teleop publish failed");
+    });
+  }, [onMessage, onPublish]);
+
+  const stopTeleop = useCallback(() => {
+    activeMotionRef.current = null;
+    setActiveLabel("");
+    publishMotion(TELEOP_STOP);
+  }, [publishMotion]);
+
+  const startTeleop = useCallback((label, motion) => {
+    if (disabled) return;
+    activeMotionRef.current = motion;
+    setActiveLabel(label);
+    publishMotion(motion);
+  }, [disabled, publishMotion]);
+
+  useEffect(() => {
+    if (disabled) {
+      if (activeMotionRef.current) {
+        publishMotion(TELEOP_STOP);
+      }
+      activeMotionRef.current = null;
+      setActiveLabel("");
+      return undefined;
+    }
+    const interval = window.setInterval(() => {
+      if (activeMotionRef.current) {
+        publishMotion(activeMotionRef.current);
+      }
+    }, TELEOP_REPEAT_MS);
+    return () => window.clearInterval(interval);
+  }, [disabled, publishMotion]);
+
+  useEffect(() => () => {
+    if (activeMotionRef.current) {
+      void onPublish(TELEOP_STOP);
+    }
+  }, [onPublish]);
+
+  const commandByKey = useMemo(() => ({
+    w: {
+      label: "W",
+      motion: { linearX: linearSpeed, angularZ: 0 },
+    },
+    s: {
+      label: "S",
+      motion: { linearX: -linearSpeed, angularZ: 0 },
+    },
+    a: {
+      label: "A",
+      motion: { linearX: 0, angularZ: angularSpeed },
+    },
+    d: {
+      label: "D",
+      motion: { linearX: 0, angularZ: -angularSpeed },
+    },
+  }), [angularSpeed, linearSpeed]);
+
+  const handleKeyDown = (event) => {
+    if (disabled || event.repeat || isTextInputTarget(event.target)) return;
+    const key = event.key === " " ? "space" : event.key.toLowerCase();
+    if (key === "space") {
+      event.preventDefault();
+      stopTeleop();
+      return;
+    }
+    const command = commandByKey[key];
+    if (!command) return;
+    event.preventDefault();
+    startTeleop(command.label, command.motion);
+  };
+
+  const handleKeyUp = (event) => {
+    if (disabled || isTextInputTarget(event.target)) return;
+    const key = event.key.toLowerCase();
+    if (!commandByKey[key]) return;
+    event.preventDefault();
+    stopTeleop();
+  };
+
+  const updateLinearSpeed = (value) => {
+    const nextSpeed = clampNumber(value, 0.05, 1.2);
+    setLinearSpeed(nextSpeed);
+    if (activeMotionRef.current?.linearX) {
+      const direction = Math.sign(activeMotionRef.current.linearX);
+      const nextMotion = { linearX: direction * nextSpeed, angularZ: 0 };
+      activeMotionRef.current = nextMotion;
+      publishMotion(nextMotion);
+    }
+  };
+
+  const updateAngularSpeed = (value) => {
+    const nextSpeed = clampNumber(value, 0.05, 2);
+    setAngularSpeed(nextSpeed);
+    if (activeMotionRef.current?.angularZ) {
+      const direction = Math.sign(activeMotionRef.current.angularZ);
+      const nextMotion = { linearX: 0, angularZ: direction * nextSpeed };
+      activeMotionRef.current = nextMotion;
+      publishMotion(nextMotion);
+    }
+  };
+
+  const speedControlStyle = {
+    accentColor: "var(--vscode-button-background)",
+  };
+
+  return (
+    <Panel title="Mobile Teleop" className="grid gap-3">
+      <div
+        role="group"
+        aria-label="Mobile Teleop"
+        tabIndex={disabled ? -1 : 0}
+        onKeyDown={handleKeyDown}
+        onKeyUp={handleKeyUp}
+        onBlur={(event) => {
+          if (!event.currentTarget.contains(event.relatedTarget)) {
+            stopTeleop();
+          }
+        }}
+        className="grid grid-cols-[auto_1fr] gap-3 items-center outline-none"
+      >
+        <div className="grid grid-cols-3 gap-1 justify-start">
+          <div />
+          <TeleopButton
+            active={activeLabel === "W"}
+            disabled={disabled}
+            title="Forward"
+            onStart={() => startTeleop("W", { linearX: linearSpeed, angularZ: 0 })}
+            onStop={stopTeleop}
+          >
+            W
+          </TeleopButton>
+          <div />
+          <TeleopButton
+            active={activeLabel === "A"}
+            disabled={disabled}
+            title="Left"
+            onStart={() => startTeleop("A", { linearX: 0, angularZ: angularSpeed })}
+            onStop={stopTeleop}
+          >
+            A
+          </TeleopButton>
+          <TeleopButton
+            disabled={disabled}
+            title="Stop"
+            onStart={stopTeleop}
+            onStop={stopTeleop}
+          >
+            0
+          </TeleopButton>
+          <TeleopButton
+            active={activeLabel === "D"}
+            disabled={disabled}
+            title="Right"
+            onStart={() => startTeleop("D", { linearX: 0, angularZ: -angularSpeed })}
+            onStop={stopTeleop}
+          >
+            D
+          </TeleopButton>
+          <div />
+          <TeleopButton
+            active={activeLabel === "S"}
+            disabled={disabled}
+            title="Backward"
+            onStart={() => startTeleop("S", { linearX: -linearSpeed, angularZ: 0 })}
+            onStop={stopTeleop}
+          >
+            S
+          </TeleopButton>
+          <div />
+        </div>
+
+        <div className="grid gap-2 min-w-0">
+          <label className="grid grid-cols-[52px_1fr_44px] items-center gap-2 text-xs">
+            <span style={{ color: "var(--vscode-descriptionForeground)" }}>Linear</span>
+            <input
+              type="range"
+              min="0.05"
+              max="1.2"
+              step="0.05"
+              value={linearSpeed}
+              disabled={disabled}
+              onChange={(event) => updateLinearSpeed(event.currentTarget.value)}
+              style={speedControlStyle}
+            />
+            <span className="font-mono text-right">{linearSpeed.toFixed(2)}</span>
+          </label>
+          <label className="grid grid-cols-[52px_1fr_44px] items-center gap-2 text-xs">
+            <span style={{ color: "var(--vscode-descriptionForeground)" }}>Angular</span>
+            <input
+              type="range"
+              min="0.05"
+              max="2"
+              step="0.05"
+              value={angularSpeed}
+              disabled={disabled}
+              onChange={(event) => updateAngularSpeed(event.currentTarget.value)}
+              style={speedControlStyle}
+            />
+            <span className="font-mono text-right">{angularSpeed.toFixed(2)}</span>
+          </label>
+          <SessionRow label="Topic" value={TELEOP_TOPIC} />
+          <SessionRow label="Command" value={disabled ? "Unavailable" : activeLabel || "Stop"} />
+        </div>
+      </div>
+    </Panel>
+  );
+}
+
 function BehaviorPalette({ selectedTag = "", onNodeSelect }) {
   const groupedNodes = useMemo(() => (
     BEHAVIOR_NODE_GROUPS.map((group) => ({
@@ -617,6 +913,7 @@ export default function MissionCanvasPage() {
     [STAGE_AUTHORING]: { ...LAYER_PRESETS[STAGE_AUTHORING] },
     [STAGE_RUN]: { ...LAYER_PRESETS[STAGE_RUN] },
   }));
+  const publishRosTopic = useNavigationRosPublisher();
 
   const running = status?.is_up ?? false;
   const mappingEditorActive = workspaceStage === STAGE_MAPPING && showPgmFix;
@@ -765,6 +1062,7 @@ export default function MissionCanvasPage() {
     tfStatic,
     workspaceStage,
   ]);
+  const teleopDisabled = !running || !!busy || mappingEditorActive;
 
   const loadStatus = useCallback(async () => {
     if (statusLoadingRef.current || document.visibilityState === "hidden") {
@@ -839,6 +1137,10 @@ export default function MissionCanvasPage() {
       void loadStatus();
     }
   }, [loadStatus]);
+
+  const publishTeleopCommand = useCallback((motion) => (
+    publishRosTopic(TELEOP_TOPIC, TELEOP_MESSAGE_TYPE, teleopTwist(motion))
+  ), [publishRosTopic]);
 
   const loadSavedDesignForMap = useCallback((targetMapName) => {
     const savedNodes = savedBehaviorNodesForMap(targetMapName);
@@ -1554,7 +1856,14 @@ export default function MissionCanvasPage() {
             <TopicStatusPanel topicRows={topicRows} />
           </aside>
         ) : (
-          <aside className="min-h-0 grid grid-rows-[auto_auto_minmax(0,1fr)] gap-4">
+          <aside
+            className={[
+              "min-h-0 grid gap-4",
+              workspaceStage === STAGE_MAPPING
+                ? "grid-rows-[auto_auto_auto_minmax(96px,140px)]"
+                : "grid-rows-[auto_auto_minmax(0,1fr)]",
+            ].join(" ")}
+          >
             {workspaceStage === STAGE_MAPPING ? (
               <MappingSessionPanel
                 mappingEditorActive={mappingEditorActive}
@@ -1563,6 +1872,13 @@ export default function MissionCanvasPage() {
               />
             ) : (
               <RunSessionPanel mapName={currentMapName} running={running} />
+            )}
+            {workspaceStage === STAGE_MAPPING && (
+              <MappingTeleopPanel
+                disabled={teleopDisabled}
+                onPublish={publishTeleopCommand}
+                onMessage={setMessage}
+              />
             )}
             <LayersPanel layerToggles={layerToggles} />
             <TopicStatusPanel topicRows={topicRows} />

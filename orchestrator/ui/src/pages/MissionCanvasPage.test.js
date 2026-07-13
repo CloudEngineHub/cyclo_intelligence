@@ -11,6 +11,7 @@ import {
 import { getNavigationSpots } from '../utils/navigationSpotsApi';
 
 const mockMapViewer = jest.fn(() => <div>Mission Canvas Map</div>);
+const mockPublishRosTopic = jest.fn();
 
 jest.mock('../components/navigation/MapViewer', () => ({
   MapViewer: (props) => mockMapViewer(props),
@@ -55,11 +56,13 @@ jest.mock('../utils/navigationSpotsApi', () => ({
 
 jest.mock('../hooks/useNavigationRosTopic', () => ({
   useNavigationRosTopic: () => ({ status: 'disconnected', topicData: null }),
+  useNavigationRosPublisher: () => mockPublishRosTopic,
 }));
 
 beforeEach(() => {
   jest.clearAllMocks();
   window.localStorage.clear();
+  mockPublishRosTopic.mockResolvedValue(undefined);
   getPgmFiles.mockResolvedValue({ files: [] });
   getPgmImage.mockResolvedValue({
     path: 'map.pgm',
@@ -94,6 +97,10 @@ test('renders Mission Canvas foundation', async () => {
   expect(screen.getByRole('button', { name: 'Save Map' })).toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Start Mapping' })).toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Map Editor' })).toBeInTheDocument();
+  expect(screen.getByText('Mobile Teleop')).toBeInTheDocument();
+  expect(screen.getByRole('group', { name: 'Mobile Teleop' })).toBeInTheDocument();
+  expect(screen.getByText('/cmd_vel')).toBeInTheDocument();
+  expect(screen.getByText('Unavailable')).toBeInTheDocument();
   expect(screen.getByText('Layers')).toBeInTheDocument();
   expect(screen.getByText('Topics')).toBeInTheDocument();
   expect(screen.getByText('/map')).toBeInTheDocument();
@@ -246,6 +253,37 @@ test('starts mapping mode from Mission Canvas', async () => {
   fireEvent.click(screen.getByRole('button', { name: 'Start Mapping' }));
 
   await waitFor(() => expect(startNavigation).toHaveBeenCalledWith('map', 'map'));
+});
+
+test('publishes keyboard teleop commands while mapping is running', async () => {
+  getServiceStatus.mockResolvedValueOnce({ is_up: true });
+
+  render(<MissionCanvasPage />);
+
+  const teleop = screen.getByRole('group', { name: 'Mobile Teleop' });
+  await waitFor(() => expect(teleop).toHaveAttribute('tabindex', '0'));
+
+  fireEvent.keyDown(teleop, { key: 'w' });
+
+  await waitFor(() => expect(mockPublishRosTopic).toHaveBeenCalledWith(
+    '/cmd_vel',
+    'geometry_msgs/msg/Twist',
+    {
+      linear: { x: 0.4, y: 0, z: 0 },
+      angular: { x: 0, y: 0, z: 0 },
+    },
+  ));
+
+  fireEvent.keyUp(teleop, { key: 'w' });
+
+  await waitFor(() => expect(mockPublishRosTopic).toHaveBeenCalledWith(
+    '/cmd_vel',
+    'geometry_msgs/msg/Twist',
+    {
+      linear: { x: 0, y: 0, z: 0 },
+      angular: { x: 0, y: 0, z: 0 },
+    },
+  ));
 });
 
 test('asks for a map name before saving from Mission Canvas', async () => {
