@@ -58,6 +58,7 @@ MAP_SAVE_SERVICE = "ai_worker_map_save"
 MAPS_DIR = PurePosixPath(
     "/root/ros2_ws/src/ai_worker/ffw_navigation/maps"
 )
+SAVE_MAP_WAIT_SECONDS = 12.0
 _SAFE_MAP_NAME = re.compile(r"^[A-Za-z0-9_.-]+$")
 @router.websocket("/topics/ws")
 async def navigation_grid_websocket(websocket: WebSocket, topic: str):
@@ -211,6 +212,58 @@ def _write_runtime_file(path: str, content: str) -> None:
     if code != 0:
         raise HTTPException(503, output or f"Failed to create parent for {path}")
     _write_container_file(PurePosixPath(path), content.encode("utf-8"))
+
+
+def _map_artifact_paths(map_name: str) -> tuple[PurePosixPath, PurePosixPath]:
+    return (
+        MAPS_DIR / f"{map_name}.yaml",
+        MAPS_DIR / f"{map_name}.pgm",
+    )
+
+
+def _container_file_signature(path: PurePosixPath) -> Optional[str]:
+    code, output = _exec(["stat", "-c", "%s:%Y:%y", str(path)])
+    return output if code == 0 else None
+
+
+def _map_artifact_signatures(map_name: str) -> dict[str, Optional[str]]:
+    yaml_path, pgm_path = _map_artifact_paths(map_name)
+    return {
+        "yaml": _container_file_signature(yaml_path),
+        "pgm": _container_file_signature(pgm_path),
+    }
+
+
+def _saved_map_ready(
+    previous: dict[str, Optional[str]],
+    current: dict[str, Optional[str]],
+) -> bool:
+    if not current["yaml"] or not current["pgm"]:
+        return False
+    return (
+        current["yaml"] != previous.get("yaml")
+        or current["pgm"] != previous.get("pgm")
+    )
+
+
+def _wait_for_saved_map(
+    map_name: str,
+    previous: dict[str, Optional[str]],
+) -> dict[str, Optional[str]]:
+    deadline = time.monotonic() + SAVE_MAP_WAIT_SECONDS
+    while time.monotonic() <= deadline:
+        current = _map_artifact_signatures(map_name)
+        if _saved_map_ready(previous, current):
+            return current
+        time.sleep(0.25)
+    yaml_path, pgm_path = _map_artifact_paths(map_name)
+    raise HTTPException(
+        503,
+        (
+            "Map save did not create or update expected files: "
+            f"{yaml_path.name}, {pgm_path.name}"
+        ),
+    )
 
 
 def _s6_command(service: str, action: Literal["up", "down", "restart"]):
@@ -394,13 +447,23 @@ def navigation_stop():
 @router.post("/save-map", response_model=ActionResult)
 def save_map(request: MapSaveRequest):
     map_name = _validate_map_name(request.map_name)
+    previous = _map_artifact_signatures(map_name)
     _write_runtime_file(
         f"/run/launch_args/{MAP_SAVE_SERVICE}",
         f"map_name:={map_name}",
     )
+    message = _s6_command(MAP_SAVE_SERVICE, "restart")
+    _wait_for_saved_map(map_name, previous)
     return ActionResult(
         ok=True,
-        message=_s6_command(MAP_SAVE_SERVICE, "restart"),
+        message=(
+            f"Saved map '{map_name}' as {map_name}.yaml and {map_name}.pgm"
+            if not message
+            else (
+                f"Saved map '{map_name}' as {map_name}.yaml and "
+                f"{map_name}.pgm ({message})"
+            )
+        ),
     )
 
 

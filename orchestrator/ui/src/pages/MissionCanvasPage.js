@@ -19,6 +19,7 @@ import {
   updateNavigationSpot,
 } from "../utils/navigationSpotsApi";
 import { useNavigationRosTopic } from "../hooks/useNavigationRosTopic";
+import { MapEditorControls, useMapEditor } from "../components/navigation/MapEditor";
 import { MapViewer } from "../components/navigation/MapViewer";
 import {
   mergeTfMessages,
@@ -148,6 +149,11 @@ function behaviorNodeId(tag, index) {
   return `behavior_${index}_${tag.toLowerCase().replace(/[^a-z0-9]+/g, "_")}`;
 }
 
+function mapNameFromPgmPath(path) {
+  const fileName = String(path || "").split("/").filter(Boolean).pop() || "";
+  return fileName.replace(/\.pgm$/i, "") || DEFAULT_MAP_NAME;
+}
+
 function Panel({ title, children, className = "" }) {
   return (
     <div
@@ -160,6 +166,67 @@ function Panel({ title, children, className = "" }) {
     >
       {title && <div className="text-xs font-semibold mb-2">{title}</div>}
       {children}
+    </div>
+  );
+}
+
+function SaveMapDialog({
+  open,
+  value,
+  busy,
+  onChange,
+  onCancel,
+  onSubmit,
+}) {
+  if (!open) return null;
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 px-4"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="mission-save-map-title"
+    >
+      <form
+        className="w-full max-w-sm border p-4 grid gap-3"
+        style={{
+          color: "var(--vscode-foreground)",
+          backgroundColor: "var(--vscode-editor-background)",
+          borderColor: "var(--vscode-panel-border)",
+        }}
+        onSubmit={(event) => {
+          event.preventDefault();
+          onSubmit();
+        }}
+      >
+        <div id="mission-save-map-title" className="text-sm font-semibold">
+          Save Map
+        </div>
+        <label className="grid gap-1 text-xs">
+          <span style={{ color: "var(--vscode-descriptionForeground)" }}>Map name</span>
+          <input
+            autoFocus
+            aria-label="Save map name"
+            value={value}
+            disabled={busy}
+            onChange={(event) => onChange(event.currentTarget.value)}
+            className="h-8 px-2 border text-sm"
+            style={{
+              color: "var(--vscode-input-foreground)",
+              backgroundColor: "var(--vscode-input-background)",
+              borderColor: "var(--vscode-input-border, var(--vscode-panel-border))",
+            }}
+          />
+        </label>
+        <div className="flex justify-end gap-2">
+          <ActionButton disabled={busy} onClick={onCancel} variant="secondary">
+            Cancel
+          </ActionButton>
+          <ActionButton disabled={busy || !value.trim()} type="submit">
+            Save
+          </ActionButton>
+        </div>
+      </form>
     </div>
   );
 }
@@ -299,6 +366,7 @@ function ActionButton({
   children,
   disabled = false,
   onClick,
+  type = "button",
   variant = "primary",
 }) {
   const styles = {
@@ -321,7 +389,7 @@ function ActionButton({
 
   return (
     <button
-      type="button"
+      type={type}
       disabled={disabled}
       onClick={onClick}
       className="h-8 px-3 border text-sm font-semibold disabled:opacity-50"
@@ -348,6 +416,9 @@ export default function MissionCanvasPage() {
   const [interactionMode, setInteractionMode] = useState("view");
   const [tfBufferRevision, setTfBufferRevision] = useState(0);
   const [workspaceStage, setWorkspaceStage] = useState(STAGE_MAPPING);
+  const [showPgmFix, setShowPgmFix] = useState(false);
+  const [showSaveMapDialog, setShowSaveMapDialog] = useState(false);
+  const [saveMapName, setSaveMapName] = useState(DEFAULT_MAP_NAME);
   const [layersByStage, setLayersByStage] = useState(() => ({
     [STAGE_MAPPING]: { ...LAYER_PRESETS[STAGE_MAPPING] },
     [STAGE_AUTHORING]: { ...LAYER_PRESETS[STAGE_AUTHORING] },
@@ -355,9 +426,15 @@ export default function MissionCanvasPage() {
   }));
 
   const running = status?.is_up ?? false;
-  const navigationTopicsActive = running && busy !== "Stop";
+  const mappingEditorActive = workspaceStage === STAGE_MAPPING && showPgmFix;
+  const navigationTopicsActive = running && busy !== "Stop" && !mappingEditorActive;
   const activeLayers = layersByStage[workspaceStage] || LAYER_PRESETS[workspaceStage];
   const currentMapName = mapName.trim() || DEFAULT_MAP_NAME;
+  const mapEditor = useMapEditor({
+    open: mappingEditorActive,
+    mapName: currentMapName,
+    onMessage: setMessage,
+  });
   const needsGlobalCostmap = navigationTopicsActive && activeLayers.globalCostmap;
   const needsLocalCostmap = navigationTopicsActive && activeLayers.localCostmap;
   const needsScan = navigationTopicsActive && activeLayers.scan;
@@ -524,11 +601,23 @@ export default function MissionCanvasPage() {
     }
   }, [latestTf]);
 
+  useEffect(() => {
+    if (!mappingEditorActive || !mapEditor.selectedPath) return;
+    const loadedMapName = mapNameFromPgmPath(mapEditor.selectedPath);
+    if (loadedMapName !== currentMapName) {
+      setMapName(loadedMapName);
+    }
+  }, [currentMapName, mapEditor.selectedPath, mappingEditorActive]);
+
   const runCommand = useCallback(async (label, action) => {
     setBusy(label);
     try {
-      await action();
-      setMessage(`${label} complete`);
+      const result = await action();
+      if (typeof result === "string") {
+        setMessage(result);
+      } else {
+        setMessage(result?.message || `${label} complete`);
+      }
     } catch (error) {
       setMessage(error instanceof Error ? error.message : `${label} failed`);
     } finally {
@@ -549,14 +638,45 @@ export default function MissionCanvasPage() {
     "Mapping",
     async () => {
       setWorkspaceStage(STAGE_MAPPING);
+      setShowPgmFix(false);
       await startNavigation("map", mapName.trim() || DEFAULT_MAP_NAME);
     },
   ), [mapName, runCommand]);
 
-  const handleSaveMap = useCallback(() => runCommand(
-    "Save map",
-    () => saveNavigationMap(mapName.trim() || DEFAULT_MAP_NAME),
-  ), [mapName, runCommand]);
+  const handleOpenSaveMapDialog = useCallback(() => {
+    setSaveMapName(currentMapName);
+    setShowSaveMapDialog(true);
+  }, [currentMapName]);
+
+  const handleConfirmSaveMap = useCallback(() => {
+    const targetMapName = saveMapName.trim();
+    if (!targetMapName) {
+      setMessage("Map name required");
+      return;
+    }
+    void runCommand(
+      "Save map",
+      async () => {
+        const result = await saveNavigationMap(targetMapName);
+        setMapName(targetMapName);
+        setShowSaveMapDialog(false);
+        return result;
+      },
+    );
+  }, [runCommand, saveMapName]);
+
+  const handleLoadMap = useCallback(() => {
+    setWorkspaceStage(STAGE_MAPPING);
+    setInteractionMode("view");
+    setShowPgmFix(true);
+    setMessage("Loading saved maps");
+  }, []);
+
+  const handleToggleMapFix = useCallback(() => {
+    setWorkspaceStage(STAGE_MAPPING);
+    setInteractionMode("view");
+    setShowPgmFix((value) => !value);
+  }, []);
 
   const handleStopNavigation = useCallback(() => runCommand(
     "Stop",
@@ -679,6 +799,14 @@ export default function MissionCanvasPage() {
 
   return (
     <div className="mission-canvas-page h-full min-h-[560px] flex flex-col overflow-hidden p-4">
+      <SaveMapDialog
+        open={showSaveMapDialog}
+        value={saveMapName}
+        busy={!!busy}
+        onChange={setSaveMapName}
+        onCancel={() => setShowSaveMapDialog(false)}
+        onSubmit={handleConfirmSaveMap}
+      />
       <header
         className="shrink-0 border-b pb-3 mb-4 flex flex-col xl:flex-row xl:items-center xl:justify-between gap-3"
         style={{ borderColor: "var(--vscode-panel-border)" }}
@@ -737,6 +865,9 @@ export default function MissionCanvasPage() {
               aria-selected={selected}
               onClick={() => {
                 setWorkspaceStage(stage.id);
+                if (stage.id !== STAGE_MAPPING) {
+                  setShowPgmFix(false);
+                }
                 if (stage.id !== STAGE_AUTHORING) {
                   setInteractionMode("view");
                   setPendingBehaviorNodeTag("");
@@ -771,29 +902,29 @@ export default function MissionCanvasPage() {
       >
         {workspaceStage === STAGE_MAPPING && (
           <>
-            <label className="flex items-center gap-2 text-sm">
-              <span style={{ color: "var(--vscode-descriptionForeground)" }}>Map</span>
-              <input
-                aria-label="Map name"
-                value={mapName}
-                onChange={(event) => setMapName(event.currentTarget.value)}
-                className="h-8 w-32 px-2 border text-sm"
-                style={{
-                  color: "var(--vscode-input-foreground)",
-                  backgroundColor: "var(--vscode-input-background)",
-                  borderColor: "var(--vscode-input-border, var(--vscode-panel-border))",
-                }}
-              />
-            </label>
             <ActionButton disabled={!!busy || running} onClick={handleStartMapping}>
               Mapping
             </ActionButton>
             <ActionButton
               disabled={!!busy || !running}
-              onClick={handleSaveMap}
+              onClick={handleOpenSaveMapDialog}
               variant="secondary"
             >
               Save Map
+            </ActionButton>
+            <ActionButton
+              disabled={!!busy}
+              onClick={handleLoadMap}
+              variant="secondary"
+            >
+              Load Map
+            </ActionButton>
+            <ActionButton
+              disabled={!!busy}
+              onClick={handleToggleMapFix}
+              variant={mappingEditorActive ? "primary" : "secondary"}
+            >
+              Fix Map
             </ActionButton>
             <ActionButton
               disabled={!!busy || !running}
@@ -802,6 +933,30 @@ export default function MissionCanvasPage() {
             >
               Stop
             </ActionButton>
+            {mappingEditorActive && (
+              <>
+                <div
+                  className="h-6 w-px"
+                  aria-hidden="true"
+                  style={{ backgroundColor: "var(--vscode-panel-border)" }}
+                />
+                <MapEditorControls
+                  files={mapEditor.files}
+                  selectedPath={mapEditor.selectedPath}
+                  setSelectedPath={mapEditor.setSelectedPath}
+                  tool={mapEditor.tool}
+                  setTool={mapEditor.setTool}
+                  brushSize={mapEditor.brushSize}
+                  setBrushSize={mapEditor.setBrushSize}
+                  busy={mapEditor.busy}
+                  image={mapEditor.image}
+                  dirty={mapEditor.dirty}
+                  canUndo={mapEditor.canUndo}
+                  undo={mapEditor.undo}
+                  save={mapEditor.save}
+                />
+              </>
+            )}
           </>
         )}
 
@@ -877,35 +1032,40 @@ export default function MissionCanvasPage() {
           ].join(" ")}
         >
           <MapViewer
-            map={map}
-            globalCostmap={needsGlobalCostmap ? globalCostmap : null}
-            localCostmap={needsLocalCostmap ? localCostmap : null}
-            scan={needsScan ? scan : null}
-            pose={navigationTopicsActive ? currentPose : null}
-            plan={needsPlan ? plan : null}
-            goalPose={needsGoalPose ? goalPose : null}
-            footprint={needsRobotModel ? footprint : null}
-            tf={needsTf ? bufferedTf : null}
-            spots={spots}
-            selectedSpotId={selectedSpotId}
-            behaviorNodes={activeBehaviorNodes}
-            selectedBehaviorNodeId={selectedBehaviorNodeId}
-            showMap={activeLayers.map}
-            showGlobalCostmap={needsGlobalCostmap}
-            showLocalCostmap={needsLocalCostmap}
-            showScan={needsScan}
-            showGlobalPlan={needsPlan}
-            showGoalPose={needsGoalPose}
-            showTf={navigationTopicsActive && activeLayers.tf}
-            showRobotModel={needsRobotModel}
-            interactionDisabled={!!busy}
-            interactionMode={interactionMode}
-            editorActive={false}
+            map={mappingEditorActive ? mapEditor.map : map}
+            globalCostmap={mappingEditorActive ? null : needsGlobalCostmap ? globalCostmap : null}
+            localCostmap={mappingEditorActive ? null : needsLocalCostmap ? localCostmap : null}
+            scan={mappingEditorActive ? null : needsScan ? scan : null}
+            pose={mappingEditorActive ? null : navigationTopicsActive ? currentPose : null}
+            plan={mappingEditorActive ? null : needsPlan ? plan : null}
+            goalPose={mappingEditorActive ? null : needsGoalPose ? goalPose : null}
+            footprint={mappingEditorActive ? null : needsRobotModel ? footprint : null}
+            tf={mappingEditorActive ? null : needsTf ? bufferedTf : null}
+            spots={mappingEditorActive ? [] : spots}
+            selectedSpotId={mappingEditorActive ? "" : selectedSpotId}
+            behaviorNodes={mappingEditorActive ? [] : activeBehaviorNodes}
+            selectedBehaviorNodeId={mappingEditorActive ? "" : selectedBehaviorNodeId}
+            showMap={mappingEditorActive ? true : activeLayers.map}
+            showGlobalCostmap={mappingEditorActive ? false : needsGlobalCostmap}
+            showLocalCostmap={mappingEditorActive ? false : needsLocalCostmap}
+            showScan={mappingEditorActive ? false : needsScan}
+            showGlobalPlan={mappingEditorActive ? false : needsPlan}
+            showGoalPose={mappingEditorActive ? false : needsGoalPose}
+            showTf={mappingEditorActive ? false : navigationTopicsActive && activeLayers.tf}
+            showRobotModel={mappingEditorActive ? false : needsRobotModel}
+            interactionDisabled={!!busy || (mappingEditorActive && mapEditor.busy)}
+            interactionMode={mappingEditorActive ? "view" : interactionMode}
+            editorActive={mappingEditorActive && !!mapEditor.map && mapEditor.tool !== "view"}
             fitContainer
-            viewKey={`mission:${mapName}`}
-            waitingLabel={running ? "Waiting for /map" : "Start Navigation to view /map"}
+            viewKey={mappingEditorActive
+              ? `mission-editor:${mapEditor.selectedPath || "none"}`
+              : `mission:${mapName}`}
+            waitingLabel={mappingEditorActive
+              ? "Select a PGM"
+              : running ? "Waiting for /map" : "Start Navigation to view /map"}
             onSpotClick={handleSelectSpot}
             onBehaviorNodeClick={handleSelectBehaviorNode}
+            onEditorMapPoint={mapEditor.editAtMapPoint}
             onMapPose={handleCreateSpotAtPose}
           />
           {workspaceStage === STAGE_AUTHORING && (

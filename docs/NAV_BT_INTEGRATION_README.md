@@ -388,6 +388,8 @@ As of the first Mission Canvas implementation slice, the repository contains:
 - MapViewer Spot marker overlay with click selection.
 - MapViewer Behavior node marker overlay with click selection.
 - Mission Canvas Spot creation, selection, rename, and delete UI.
+- Mission Canvas Mapping tab Save Map dialog.
+- Mission Canvas Mapping tab Load Map / Fix Map flow using the shared PGM editor.
 - Mission Canvas stage tabs:
   - Mapping
   - Design
@@ -397,8 +399,11 @@ As of the first Mission Canvas implementation slice, the repository contains:
 - Design Objects list and Inspector support for local Behavior nodes.
 - Stage-specific action bars for mapping, authoring, and runtime controls.
 - Stage-specific layer presets and shared Topics diagnostics.
+- Navigation save-map API now verifies that the expected `.yaml` and `.pgm`
+  artifacts were actually created or updated.
 - Frontend API utilities and focused tests for the new page/API client.
-- Backend unit coverage for Spot CRUD added to docker/supervisor_api/test_app.py.
+- Backend unit coverage for Spot CRUD and save-map validation in
+  docker/supervisor_api/test_app.py.
 ```
 
 This is intentionally a foundation slice:
@@ -409,6 +414,7 @@ Implemented:
   Phase 1 Spot persistence API
   Early Phase 2 Spot overlay and Inspector UI
   Early Phase 3 Behavior Layer overlay prototype
+  Early Mission Canvas Mapping save/load/fix workflow
   Early Mission Canvas stage layout
 
 Deferred:

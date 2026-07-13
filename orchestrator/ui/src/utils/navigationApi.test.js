@@ -2,6 +2,7 @@ import {
   cancelNavigateToPoseGoal,
   getPgmImage,
   getServiceStatus,
+  saveNavigationMap,
   startNavigation,
 } from './navigationApi';
 
@@ -34,6 +35,18 @@ test('maps a mapping restart to the self-hosted start endpoint', async () => {
     expect.objectContaining({
       method: 'POST',
       body: JSON.stringify({ mode: 'map', map_name: 'factory' }),
+    })
+  );
+});
+
+test('saves maps with the requested basename', async () => {
+  await saveNavigationMap('factory');
+
+  expect(global.fetch).toHaveBeenCalledWith(
+    '/api/navigation/save-map',
+    expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({ map_name: 'factory' }),
     })
   );
 });

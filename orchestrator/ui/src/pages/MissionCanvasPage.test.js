@@ -1,6 +1,12 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import MissionCanvasPage from './MissionCanvasPage';
-import { getServiceStatus, startNavigation } from '../utils/navigationApi';
+import {
+  getPgmFiles,
+  getPgmImage,
+  getServiceStatus,
+  saveNavigationMap,
+  startNavigation,
+} from '../utils/navigationApi';
 import { getNavigationSpots } from '../utils/navigationSpotsApi';
 
 const mockMapViewer = jest.fn(() => <div>Mission Canvas Map</div>);
@@ -10,8 +16,17 @@ jest.mock('../components/navigation/MapViewer', () => ({
 }));
 
 jest.mock('../utils/navigationApi', () => ({
+  getPgmFiles: jest.fn().mockResolvedValue({ files: [] }),
+  getPgmImage: jest.fn().mockResolvedValue({
+    path: 'map.pgm',
+    width: 1,
+    height: 1,
+    maxval: 255,
+    pixels_base64: 'AA==',
+  }),
   getServiceStatus: jest.fn().mockResolvedValue({ is_up: false }),
   saveNavigationMap: jest.fn().mockResolvedValue({ ok: true }),
+  savePgmImage: jest.fn().mockResolvedValue({ path: 'map.pgm', saved: true }),
   startNavigation: jest.fn().mockResolvedValue({ ok: true }),
   stopNavigation: jest.fn().mockResolvedValue({ ok: true }),
 }));
@@ -43,8 +58,17 @@ jest.mock('../hooks/useNavigationRosTopic', () => ({
 
 beforeEach(() => {
   jest.clearAllMocks();
+  getPgmFiles.mockResolvedValue({ files: [] });
+  getPgmImage.mockResolvedValue({
+    path: 'map.pgm',
+    width: 1,
+    height: 1,
+    maxval: 255,
+    pixels_base64: 'AA==',
+  });
   getServiceStatus.mockResolvedValue({ is_up: false });
   getNavigationSpots.mockResolvedValue({ map_name: 'map', spots: [] });
+  saveNavigationMap.mockResolvedValue({ ok: true, message: 'Saved map' });
   startNavigation.mockResolvedValue({ ok: true });
   mockMapViewer.mockImplementation(() => <div>Mission Canvas Map</div>);
 });
@@ -57,8 +81,10 @@ test('renders Mission Canvas foundation', async () => {
   expect(screen.getByRole('tab', { name: 'Mapping' })).toHaveAttribute('aria-selected', 'true');
   expect(screen.getByRole('tab', { name: 'Design' })).toBeInTheDocument();
   expect(screen.getByRole('tab', { name: 'Run' })).toBeInTheDocument();
-  expect(screen.getByLabelText('Map name')).toBeInTheDocument();
+  expect(screen.queryByLabelText('Map name')).not.toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Save Map' })).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Load Map' })).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Fix Map' })).toBeInTheDocument();
   expect(screen.getByText('Layers')).toBeInTheDocument();
   expect(screen.getByText('Topics')).toBeInTheDocument();
   await waitFor(() => expect(getServiceStatus).toHaveBeenCalled());
@@ -126,6 +152,49 @@ test('starts mapping mode from Mission Canvas', async () => {
   fireEvent.click(screen.getByRole('button', { name: 'Mapping' }));
 
   await waitFor(() => expect(startNavigation).toHaveBeenCalledWith('map', 'map'));
+});
+
+test('asks for a map name before saving from Mission Canvas', async () => {
+  getServiceStatus.mockResolvedValueOnce({ is_up: true });
+
+  render(<MissionCanvasPage />);
+
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Save Map' })).toBeEnabled());
+
+  fireEvent.click(screen.getByRole('button', { name: 'Save Map' }));
+  fireEvent.change(screen.getByLabelText('Save map name'), {
+    target: { value: 'factory' },
+  });
+  fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+  await waitFor(() => expect(saveNavigationMap).toHaveBeenCalledWith('factory'));
+});
+
+test('loads saved maps into the mapping fix editor', async () => {
+  const latestMapViewerProps = () => (
+    mockMapViewer.mock.calls[mockMapViewer.mock.calls.length - 1][0]
+  );
+  getPgmFiles.mockResolvedValue({
+    files: [{ path: 'factory.pgm', name: 'factory.pgm' }],
+  });
+  getPgmImage.mockResolvedValue({
+    path: 'factory.pgm',
+    width: 1,
+    height: 1,
+    maxval: 255,
+    pixels_base64: 'AA==',
+  });
+
+  render(<MissionCanvasPage />);
+
+  fireEvent.click(screen.getByRole('button', { name: 'Load Map' }));
+
+  await waitFor(() => expect(getPgmFiles).toHaveBeenCalled());
+  await waitFor(() => expect(getPgmImage).toHaveBeenCalledWith('factory.pgm'));
+  expect(screen.getByDisplayValue('factory.pgm')).toBeInTheDocument();
+  expect(latestMapViewerProps().showScan).toBe(false);
+  expect(latestMapViewerProps().showMap).toBe(true);
+  expect(latestMapViewerProps().waitingLabel).toBe('Select a PGM');
 });
 
 test('enables live robot and lidar layers while navigation runtime is active', async () => {

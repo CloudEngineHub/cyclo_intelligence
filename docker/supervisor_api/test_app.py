@@ -94,6 +94,61 @@ def test_navigation_validates_map_name():
         navigation._validate_map_name("factory; reboot")
 
 
+def test_navigation_save_map_waits_for_artifacts(monkeypatch):
+    calls = []
+    signatures = [
+        {"yaml": None, "pgm": None},
+        {"yaml": "yaml:1", "pgm": "pgm:1"},
+    ]
+
+    monkeypatch.setattr(
+        navigation,
+        "_map_artifact_signatures",
+        lambda map_name: signatures.pop(0),
+    )
+    monkeypatch.setattr(
+        navigation,
+        "_write_runtime_file",
+        lambda path, content: calls.append((path, content)),
+    )
+    monkeypatch.setattr(
+        navigation,
+        "_s6_command",
+        lambda service, action: "map saver restarted",
+    )
+
+    result = navigation.save_map(
+        navigation.MapSaveRequest(map_name="factory")
+    )
+
+    assert calls == [
+        ("/run/launch_args/ai_worker_map_save", "map_name:=factory")
+    ]
+    assert result.ok
+    assert "factory.yaml" in result.message
+    assert "factory.pgm" in result.message
+
+
+def test_navigation_save_map_errors_when_artifacts_missing(monkeypatch):
+    import pytest
+    from fastapi import HTTPException
+
+    monkeypatch.setattr(navigation, "SAVE_MAP_WAIT_SECONDS", 0)
+    monkeypatch.setattr(
+        navigation,
+        "_map_artifact_signatures",
+        lambda map_name: {"yaml": None, "pgm": None},
+    )
+    monkeypatch.setattr(navigation, "_write_runtime_file", lambda path, content: None)
+    monkeypatch.setattr(navigation, "_s6_command", lambda service, action: "")
+
+    with pytest.raises(HTTPException) as exc:
+        navigation.save_map(navigation.MapSaveRequest(map_name="factory"))
+
+    assert exc.value.status_code == 503
+    assert "factory.yaml" in exc.value.detail
+
+
 def test_navigation_routes_are_registered():
     paths = {route.path for route in app.app.routes if hasattr(route, "path")}
 
