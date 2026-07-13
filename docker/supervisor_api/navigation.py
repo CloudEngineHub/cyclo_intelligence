@@ -54,10 +54,10 @@ AI_WORKER_CONTAINER = os.environ.get(
     "CYCLO_NAVIGATION_CONTAINER", "ai_worker"
 )
 NAVIGATION_SERVICE = "ai_worker_navigation"
-MAP_SAVE_SERVICE = "ai_worker_map_save"
 MAPS_DIR = PurePosixPath(
     "/root/ros2_ws/src/ai_worker/ffw_navigation/maps"
 )
+MAP_SAVE_CLI_TIMEOUT_SECONDS = 20
 SAVE_MAP_WAIT_SECONDS = 12.0
 _SAFE_MAP_NAME = re.compile(r"^[A-Za-z0-9_.-]+$")
 @router.websocket("/topics/ws")
@@ -419,6 +419,26 @@ def _ros_exec_environment() -> dict[str, str]:
     }
 
 
+def _save_map_with_cli(map_name: str) -> str:
+    output_prefix = MAPS_DIR / map_name
+    command = (
+        _ros_shell_prefix()
+        + f"timeout {MAP_SAVE_CLI_TIMEOUT_SECONDS}s "
+        + "ros2 run nav2_map_server map_saver_cli "
+        + f"-f {shlex.quote(str(output_prefix))} "
+        + "--ros-args "
+        + "-p map_subscribe_transient_local:=true "
+        + "-p save_map_timeout:=10.0"
+    )
+    code, output = _exec(
+        ["bash", "--noprofile", "--norc", "-c", command],
+        environment=_ros_exec_environment(),
+    )
+    if code != 0:
+        raise HTTPException(503, output or "Map saver failed")
+    return output or "map_saver_cli complete"
+
+
 @router.get("/status", response_model=NavigationStatus)
 def navigation_status():
     return _service_status(NAVIGATION_SERVICE)
@@ -448,11 +468,7 @@ def navigation_stop():
 def save_map(request: MapSaveRequest):
     map_name = _validate_map_name(request.map_name)
     previous = _map_artifact_signatures(map_name)
-    _write_runtime_file(
-        f"/run/launch_args/{MAP_SAVE_SERVICE}",
-        f"map_name:={map_name}",
-    )
-    message = _s6_command(MAP_SAVE_SERVICE, "restart")
+    message = _save_map_with_cli(map_name)
     _wait_for_saved_map(map_name, previous)
     return ActionResult(
         ok=True,

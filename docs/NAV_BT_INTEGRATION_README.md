@@ -38,8 +38,8 @@ The current contract with `ai_worker` is:
 ai_worker container
 ├─ service: ai_worker_navigation
 │  └─ owns mapping/navigation Nav2 launch
-├─ service: ai_worker_map_save
-│  └─ saves map files
+├─ ROS CLI tools
+│  └─ nav2_map_server map_saver_cli for one-shot map save
 ├─ maps directory
 │  └─ /root/ros2_ws/src/ai_worker/ffw_navigation/maps
 └─ ROS graph
@@ -191,8 +191,8 @@ ai_worker container
 │     ├─ localization
 │     └─ /navigate_to_pose action server
 │
-└─ ai_worker_map_save
-   └─ map saver
+└─ ROS CLI tools
+   └─ nav2_map_server map_saver_cli
 ```
 
 ## Core Domain Model
@@ -436,9 +436,8 @@ Tasks:
 
 ```text
 - Keep ai_worker container name configurable via CYCLO_NAVIGATION_CONTAINER.
-- Keep service names centralized:
-  - ai_worker_navigation
-  - ai_worker_map_save
+- Keep ai_worker_navigation service name centralized.
+- Run one-shot map saves from supervisor_api with nav2_map_server map_saver_cli.
 - Document expected ROS topics/actions.
 - Add tests around navigation start/stop/goal/map-file behavior.
 - Decide where map-specific metadata lives.

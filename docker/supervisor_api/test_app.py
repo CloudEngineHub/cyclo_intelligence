@@ -108,22 +108,15 @@ def test_navigation_save_map_waits_for_artifacts(monkeypatch):
     )
     monkeypatch.setattr(
         navigation,
-        "_write_runtime_file",
-        lambda path, content: calls.append((path, content)),
-    )
-    monkeypatch.setattr(
-        navigation,
-        "_s6_command",
-        lambda service, action: "map saver restarted",
+        "_save_map_with_cli",
+        lambda map_name: calls.append(map_name) or "map saver complete",
     )
 
     result = navigation.save_map(
         navigation.MapSaveRequest(map_name="factory")
     )
 
-    assert calls == [
-        ("/run/launch_args/ai_worker_map_save", "map_name:=factory")
-    ]
+    assert calls == ["factory"]
     assert result.ok
     assert "factory.yaml" in result.message
     assert "factory.pgm" in result.message
@@ -139,14 +132,41 @@ def test_navigation_save_map_errors_when_artifacts_missing(monkeypatch):
         "_map_artifact_signatures",
         lambda map_name: {"yaml": None, "pgm": None},
     )
-    monkeypatch.setattr(navigation, "_write_runtime_file", lambda path, content: None)
-    monkeypatch.setattr(navigation, "_s6_command", lambda service, action: "")
+    monkeypatch.setattr(navigation, "_save_map_with_cli", lambda map_name: "")
 
     with pytest.raises(HTTPException) as exc:
         navigation.save_map(navigation.MapSaveRequest(map_name="factory"))
 
     assert exc.value.status_code == 503
     assert "factory.yaml" in exc.value.detail
+
+
+def test_navigation_save_map_cli_does_not_forward_launch_args(monkeypatch):
+    captured = {}
+
+    def fake_exec(command, *, environment=None, timeout=None):
+        captured["command"] = command
+        captured["environment"] = environment
+        return 0, "saved"
+
+    monkeypatch.setattr(navigation, "_exec", fake_exec)
+    monkeypatch.setenv("ROS_DOMAIN_ID", "30")
+    monkeypatch.setenv("RMW_IMPLEMENTATION", "rmw_fastrtps_cpp")
+
+    result = navigation._save_map_with_cli("test_2")
+
+    assert result == "saved"
+    assert captured["command"][:4] == [
+        "bash", "--noprofile", "--norc", "-c"
+    ]
+    command_text = captured["command"][-1]
+    assert "map_saver_cli" in command_text
+    assert "/root/ros2_ws/src/ai_worker/ffw_navigation/maps/test_2" in command_text
+    assert "map_name:=" not in command_text
+    assert captured["environment"] == {
+        "ROS_DOMAIN_ID": "30",
+        "RMW_IMPLEMENTATION": "rmw_fastrtps_cpp",
+    }
 
 
 def test_navigation_routes_are_registered():
