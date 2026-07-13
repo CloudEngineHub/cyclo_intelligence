@@ -118,8 +118,8 @@ def test_navigation_save_map_waits_for_artifacts(monkeypatch):
 
     assert calls == ["factory"]
     assert result.ok
-    assert "factory.yaml" in result.message
-    assert "factory.pgm" in result.message
+    assert result.message == "Saved map 'factory' as factory.yaml and factory.pgm"
+    assert "map_saver" not in result.message
 
 
 def test_navigation_save_map_errors_when_artifacts_missing(monkeypatch):

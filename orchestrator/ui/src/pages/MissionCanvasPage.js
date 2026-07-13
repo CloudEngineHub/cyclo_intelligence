@@ -443,6 +443,7 @@ export default function MissionCanvasPage() {
   const [showPgmFix, setShowPgmFix] = useState(false);
   const [showSaveMapDialog, setShowSaveMapDialog] = useState(false);
   const [saveMapName, setSaveMapName] = useState(DEFAULT_MAP_NAME);
+  const [mapEditorReloadToken, setMapEditorReloadToken] = useState(0);
   const [layersByStage, setLayersByStage] = useState(() => ({
     [STAGE_MAPPING]: { ...LAYER_PRESETS[STAGE_MAPPING] },
     [STAGE_AUTHORING]: { ...LAYER_PRESETS[STAGE_AUTHORING] },
@@ -458,6 +459,7 @@ export default function MissionCanvasPage() {
     open: mappingEditorActive,
     mapName: currentMapName,
     onMessage: setMessage,
+    reloadToken: mapEditorReloadToken,
   });
   const needsGlobalCostmap = navigationTopicsActive && activeLayers.globalCostmap;
   const needsLocalCostmap = navigationTopicsActive && activeLayers.localCostmap;
@@ -683,6 +685,10 @@ export default function MissionCanvasPage() {
       async () => {
         const result = await saveNavigationMap(targetMapName);
         setMapName(targetMapName);
+        setWorkspaceStage(STAGE_MAPPING);
+        setInteractionMode("view");
+        setShowPgmFix(true);
+        setMapEditorReloadToken((value) => value + 1);
         setShowSaveMapDialog(false);
         return result;
       },

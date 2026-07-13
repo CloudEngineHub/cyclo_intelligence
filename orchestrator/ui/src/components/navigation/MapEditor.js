@@ -98,7 +98,14 @@ function normalizeBrushSize(value) {
         return DEFAULT_BRUSH_SIZE_CELLS;
     return Math.min(Math.max(Math.floor(value), 1), MAX_BRUSH_SIZE_CELLS);
 }
-export function useMapEditor({ open, mapName, onMessage }) {
+function mapNameFromPgmPath(path) {
+    return path.split("/").pop().replace(/\.pgm$/i, "");
+}
+function preferredPgmFile(files, mapName) {
+    const exact = files.find((file) => mapNameFromPgmPath(file.path) === mapName);
+    return exact || files.find((file) => file.path.includes(mapName));
+}
+export function useMapEditor({ open, mapName, onMessage, reloadToken = 0 }) {
     const pixelsRef = useRef(null);
     const [files, setFiles] = useState([]);
     const [selectedPath, setSelectedPath] = useState("");
@@ -119,8 +126,14 @@ export function useMapEditor({ open, mapName, onMessage }) {
             if (cancelled)
                 return;
             setFiles(response.files);
-            const preferred = response.files.find((file) => file.path.includes(mapName));
-            setSelectedPath((current) => { var _a; return current || (preferred === null || preferred === void 0 ? void 0 : preferred.path) || ((_a = response.files[0]) === null || _a === void 0 ? void 0 : _a.path) || ""; });
+            const preferred = preferredPgmFile(response.files, mapName);
+            setSelectedPath((current) => {
+                var _a;
+                if (preferred && (reloadToken || mapNameFromPgmPath(current) !== mapName)) {
+                    return preferred.path;
+                }
+                return current || (preferred === null || preferred === void 0 ? void 0 : preferred.path) || ((_a = response.files[0]) === null || _a === void 0 ? void 0 : _a.path) || "";
+            });
             if (!response.files.length)
                 onMessage("No PGM files found");
         })
@@ -135,7 +148,7 @@ export function useMapEditor({ open, mapName, onMessage }) {
         return () => {
             cancelled = true;
         };
-    }, [mapName, onMessage, open]);
+    }, [mapName, onMessage, open, reloadToken]);
     useEffect(() => {
         if (!open || !selectedPath) {
             setImage(null);

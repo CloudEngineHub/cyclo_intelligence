@@ -468,18 +468,11 @@ def navigation_stop():
 def save_map(request: MapSaveRequest):
     map_name = _validate_map_name(request.map_name)
     previous = _map_artifact_signatures(map_name)
-    message = _save_map_with_cli(map_name)
+    _save_map_with_cli(map_name)
     _wait_for_saved_map(map_name, previous)
     return ActionResult(
         ok=True,
-        message=(
-            f"Saved map '{map_name}' as {map_name}.yaml and {map_name}.pgm"
-            if not message
-            else (
-                f"Saved map '{map_name}' as {map_name}.yaml and "
-                f"{map_name}.pgm ({message})"
-            )
-        ),
+        message=f"Saved map '{map_name}' as {map_name}.yaml and {map_name}.pgm",
     )
 
 
