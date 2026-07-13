@@ -297,6 +297,43 @@ function TopicStatusPanel({ topicRows }) {
   );
 }
 
+function SessionRow({ label, value }) {
+  return (
+    <div className="flex items-center justify-between gap-3 text-xs">
+      <span style={{ color: "var(--vscode-descriptionForeground)" }}>{label}</span>
+      <span className="font-mono truncate text-right">{value}</span>
+    </div>
+  );
+}
+
+function MappingSessionPanel({ mappingEditorActive, selectedPath, dirty }) {
+  return (
+    <Panel title="Mapping Session" className="grid gap-2">
+      <SessionRow
+        label="Source"
+        value={mappingEditorActive ? "Saved map" : "Live mapping"}
+      />
+      <SessionRow
+        label="Map file"
+        value={mappingEditorActive && selectedPath ? selectedPath : "Not saved"}
+      />
+      <SessionRow
+        label="Edits"
+        value={mappingEditorActive && dirty ? "Unsaved changes" : "Clean"}
+      />
+    </Panel>
+  );
+}
+
+function RunSessionPanel({ mapName, running }) {
+  return (
+    <Panel title="Run Session" className="grid gap-2">
+      <SessionRow label="Runtime" value={running ? "Running" : "Idle"} />
+      <SessionRow label="Selected map" value={mapName || "Not selected"} />
+    </Panel>
+  );
+}
+
 function BehaviorPalette({ selectedTag = "", onNodeSelect }) {
   const groupedNodes = useMemo(() => (
     BEHAVIOR_NODE_GROUPS.map((group) => ({
@@ -1248,14 +1285,15 @@ export default function MissionCanvasPage() {
           </aside>
         ) : (
           <aside className="min-h-0 grid grid-rows-[auto_auto_minmax(0,1fr)] gap-4">
-            <Panel title={workspaceStage === STAGE_MAPPING ? "Mapping" : "Run"}>
-              <div className="text-xs">
-                Map name: <span className="font-mono">{mapName || "-"}</span>
-              </div>
-              <div className="mt-1 text-xs">
-                PID: <span className="font-mono">{status?.pid ?? "-"}</span>
-              </div>
-            </Panel>
+            {workspaceStage === STAGE_MAPPING ? (
+              <MappingSessionPanel
+                mappingEditorActive={mappingEditorActive}
+                selectedPath={mapEditor.selectedPath}
+                dirty={mapEditor.dirty}
+              />
+            ) : (
+              <RunSessionPanel mapName={currentMapName} running={running} />
+            )}
             <LayersPanel layerToggles={layerToggles} />
             <TopicStatusPanel topicRows={topicRows} />
           </aside>

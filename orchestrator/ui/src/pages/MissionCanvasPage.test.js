@@ -85,6 +85,11 @@ test('renders Mission Canvas foundation', async () => {
   expect(screen.getByRole('tab', { name: 'Run' })).toBeInTheDocument();
   expect(screen.getByText('Status: idle')).toBeInTheDocument();
   expect(screen.queryByLabelText('Map name')).not.toBeInTheDocument();
+  expect(screen.getByText('Mapping Session')).toBeInTheDocument();
+  expect(screen.getByText('Live mapping')).toBeInTheDocument();
+  expect(screen.getByText('Not saved')).toBeInTheDocument();
+  expect(screen.getByText('Clean')).toBeInTheDocument();
+  expect(screen.queryByText('PID:')).not.toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Save Map' })).toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Load Map' })).toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Fix Map' })).toBeInTheDocument();
@@ -208,6 +213,8 @@ test('loads saved maps into the mapping fix editor', async () => {
   await waitFor(() => expect(getPgmFiles).toHaveBeenCalled());
   await waitFor(() => expect(getPgmImage).toHaveBeenCalledWith('factory.pgm'));
   expect(screen.getByDisplayValue('factory.pgm')).toBeInTheDocument();
+  expect(screen.getByText('Saved map')).toBeInTheDocument();
+  expect(screen.getAllByText('factory.pgm').length).toBeGreaterThan(0);
   expect(latestMapViewerProps().showScan).toBe(false);
   expect(latestMapViewerProps().showMap).toBe(true);
   expect(latestMapViewerProps().waitingLabel).toBe('Select a PGM');
@@ -245,6 +252,7 @@ test('edits and saves loaded map pixels from the fix editor', async () => {
     latestMapViewerProps().onEditorMapPoint(0, 0);
   });
 
+  expect(screen.getByText('Unsaved changes')).toBeInTheDocument();
   await waitFor(() => expect(screen.getByRole('button', { name: 'Save' })).toBeEnabled());
   fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
@@ -277,6 +285,10 @@ test('enables navigation runtime layers in the run stage', async () => {
 
   fireEvent.click(screen.getByRole('tab', { name: 'Run' }));
 
+  expect(screen.getByText('Run Session')).toBeInTheDocument();
+  expect(screen.getByText('Runtime')).toBeInTheDocument();
+  await waitFor(() => expect(screen.getByText('Running')).toBeInTheDocument());
+  expect(screen.queryByText('PID:')).not.toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Navigation' })).toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Run BT' })).toBeDisabled();
   expect(screen.queryByRole('button', { name: 'Save Map' })).not.toBeInTheDocument();
