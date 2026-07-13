@@ -3,8 +3,10 @@ import MissionCanvasPage from './MissionCanvasPage';
 import { getServiceStatus, startNavigation } from '../utils/navigationApi';
 import { getNavigationSpots } from '../utils/navigationSpotsApi';
 
+const mockMapViewer = jest.fn(() => <div>Mission Canvas Map</div>);
+
 jest.mock('../components/navigation/MapViewer', () => ({
-  MapViewer: () => <div>Mission Canvas Map</div>,
+  MapViewer: (props) => mockMapViewer(props),
 }));
 
 jest.mock('../utils/navigationApi', () => ({
@@ -39,6 +41,11 @@ jest.mock('../hooks/useNavigationRosTopic', () => ({
   useNavigationRosTopic: () => ({ status: 'disconnected', topicData: null }),
 }));
 
+beforeEach(() => {
+  jest.clearAllMocks();
+  mockMapViewer.mockImplementation(() => <div>Mission Canvas Map</div>);
+});
+
 test('renders Mission Canvas foundation', async () => {
   render(<MissionCanvasPage />);
 
@@ -56,4 +63,17 @@ test('starts mapping mode from Mission Canvas', async () => {
   fireEvent.click(screen.getByRole('button', { name: 'Mapping' }));
 
   await waitFor(() => expect(startNavigation).toHaveBeenCalledWith('map', 'map'));
+});
+
+test('enables live robot and lidar layers while navigation runtime is active', async () => {
+  getServiceStatus.mockResolvedValueOnce({ is_up: true });
+
+  render(<MissionCanvasPage />);
+
+  await waitFor(() => {
+    expect(mockMapViewer.mock.calls.some(([props]) => (
+      props.showScan === true &&
+      props.showRobotModel === true
+    ))).toBe(true);
+  });
 });

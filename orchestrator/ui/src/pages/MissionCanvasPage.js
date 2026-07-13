@@ -20,9 +20,16 @@ import {
 } from "../utils/navigationSpotsApi";
 import { useNavigationRosTopic } from "../hooks/useNavigationRosTopic";
 import { MapViewer } from "../components/navigation/MapViewer";
+import {
+  mergeTfMessages,
+  poseFromBaseLinkTf,
+  tfMessageFromBuffer,
+  updateTfBuffer,
+} from "../utils/navigationTf";
 
 const DEFAULT_MAP_NAME = "map";
 const STATUS_POLL_MS = 10000;
+const ROS2_WS_FAST_TOPIC_OPTIONS = { throttleMs: 100 };
 
 function messageData(value) {
   if (!value || typeof value !== "object") return null;
@@ -42,6 +49,7 @@ function spotPoseFromMapPose(x, y, yaw) {
 
 export default function MissionCanvasPage() {
   const statusLoadingRef = useRef(false);
+  const tfBufferRef = useRef(new Map());
   const [mapName, setMapName] = useState(DEFAULT_MAP_NAME);
   const [status, setStatus] = useState(null);
   const [spots, setSpots] = useState([]);
@@ -49,16 +57,47 @@ export default function MissionCanvasPage() {
   const [busy, setBusy] = useState("");
   const [message, setMessage] = useState("Ready");
   const [interactionMode, setInteractionMode] = useState("view");
+  const [tfBufferRevision, setTfBufferRevision] = useState(0);
 
   const running = status?.is_up ?? false;
+  const navigationTopicsActive = running && busy !== "Stop";
   const selectedSpot = useMemo(
     () => spots.find((spot) => spot.id === selectedSpotId) || null,
     [selectedSpotId, spots],
   );
   const { topicData: mapData } = useNavigationRosTopic(
-    running ? "/map" : null,
+    navigationTopicsActive ? "/map" : null,
+  );
+  const { topicData: footprintData } = useNavigationRosTopic(
+    navigationTopicsActive ? "/local_costmap/published_footprint" : null,
+    ROS2_WS_FAST_TOPIC_OPTIONS,
+  );
+  const { topicData: scanData } = useNavigationRosTopic(
+    navigationTopicsActive ? "/scan" : null,
+    ROS2_WS_FAST_TOPIC_OPTIONS,
+  );
+  const { topicData: amclData } = useNavigationRosTopic(
+    navigationTopicsActive ? "/amcl_pose" : null,
+    ROS2_WS_FAST_TOPIC_OPTIONS,
+  );
+  const { topicData: tfData } = useNavigationRosTopic(
+    navigationTopicsActive ? "/tf" : null,
+    ROS2_WS_FAST_TOPIC_OPTIONS,
+  );
+  const { topicData: tfStaticData } = useNavigationRosTopic(
+    navigationTopicsActive ? "/tf_static" : null,
   );
   const map = useMemo(() => messageData(mapData), [mapData]);
+  const footprint = useMemo(() => messageData(footprintData), [footprintData]);
+  const scan = useMemo(() => messageData(scanData), [scanData]);
+  const amclPose = useMemo(() => messageData(amclData), [amclData]);
+  const tf = useMemo(() => messageData(tfData), [tfData]);
+  const tfStatic = useMemo(() => messageData(tfStaticData), [tfStaticData]);
+  const latestTf = useMemo(() => mergeTfMessages(tfStatic, tf), [tf, tfStatic]);
+  void tfBufferRevision;
+  const bufferedTf = tfMessageFromBuffer(tfBufferRef.current) ?? latestTf;
+  const fallbackPose = amclPose?.pose?.pose ?? null;
+  const currentPose = poseFromBaseLinkTf(bufferedTf) ?? fallbackPose;
 
   const loadStatus = useCallback(async () => {
     if (statusLoadingRef.current || document.visibilityState === "hidden") {
@@ -102,6 +141,12 @@ export default function MissionCanvasPage() {
   useEffect(() => {
     void loadSpots();
   }, [loadSpots]);
+
+  useEffect(() => {
+    if (updateTfBuffer(tfBufferRef.current, latestTf)) {
+      setTfBufferRevision((value) => value + 1);
+    }
+  }, [latestTf]);
 
   const runCommand = useCallback(async (label, action) => {
     setBusy(label);
@@ -307,22 +352,22 @@ export default function MissionCanvasPage() {
             map={map}
             globalCostmap={null}
             localCostmap={null}
-            scan={null}
-            pose={null}
+            scan={navigationTopicsActive ? scan : null}
+            pose={navigationTopicsActive ? currentPose : null}
             plan={null}
             goalPose={null}
-            footprint={null}
-            tf={null}
+            footprint={navigationTopicsActive ? footprint : null}
+            tf={navigationTopicsActive ? bufferedTf : null}
             spots={spots}
             selectedSpotId={selectedSpotId}
             showMap
             showGlobalCostmap={false}
             showLocalCostmap={false}
-            showScan={false}
+            showScan={navigationTopicsActive}
             showGlobalPlan={false}
             showGoalPose={false}
             showTf={false}
-            showRobotModel={false}
+            showRobotModel={navigationTopicsActive}
             interactionDisabled={!!busy}
             interactionMode={interactionMode}
             editorActive={false}
