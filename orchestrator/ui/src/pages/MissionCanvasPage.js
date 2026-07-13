@@ -107,21 +107,6 @@ const LAYER_PRESETS = {
   },
 };
 
-const TOPIC_LABELS = {
-  "/map": "Map",
-  "/scan": "Lidar",
-  "/amcl_pose": "AMCL pose",
-  "/tf": "TF",
-  "/tf_static": "TF static",
-  "/local_costmap/published_footprint": "Footprint",
-  "/global_costmap/costmap": "Global costmap",
-  "/local_costmap/costmap": "Local costmap",
-  "/plan": "Global plan",
-  "/goal_pose": "Goal pose",
-  "/bt/status": "BT status",
-  "/bt/active_nodes": "BT active nodes",
-};
-
 const STAGE_TOPIC_IDS = {
   [STAGE_MAPPING]: [
     "/map",
@@ -307,14 +292,11 @@ function LayersPanel({ layerToggles }) {
 
 function TopicStatusPanel({ topicRows }) {
   return (
-    <Panel title="Topics" className="grid gap-2 text-xs min-h-0 overflow-auto">
+    <Panel title="Topics" className="grid gap-1 text-xs min-h-0 overflow-auto content-start">
       {topicRows.map(({ topic, isLive }) => (
-        <div key={topic} className="flex items-center justify-between gap-3 min-w-0">
-          <div className="min-w-0">
-            <div className="font-mono truncate">{topic}</div>
-            <div style={{ color: "var(--vscode-descriptionForeground)" }}>
-              {TOPIC_LABELS[topic] || topic}
-            </div>
+        <div key={topic} className="min-h-5 flex items-center justify-between gap-2 min-w-0">
+          <div className="font-mono truncate min-w-0">
+            {topic}
           </div>
           <span
             className="shrink-0"
