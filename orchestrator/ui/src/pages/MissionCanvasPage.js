@@ -851,11 +851,9 @@ export default function MissionCanvasPage() {
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <div
-            className="h-8 px-2.5 border flex items-center gap-2 text-sm"
+            className="h-8 flex items-center gap-2 text-sm"
             style={{
               color: "var(--vscode-foreground)",
-              backgroundColor: "var(--vscode-sidebar-background)",
-              borderColor: "var(--vscode-panel-border)",
             }}
           >
             <span
@@ -865,17 +863,6 @@ export default function MissionCanvasPage() {
               aria-label={running ? "Navigation running" : "Navigation idle"}
             />
             <span className="font-medium">{running ? "running" : "idle"}</span>
-          </div>
-          <div
-            className="h-8 px-2.5 border flex items-center gap-2 text-sm"
-            style={{
-              color: "var(--vscode-foreground)",
-              backgroundColor: "var(--vscode-sidebar-background)",
-              borderColor: "var(--vscode-panel-border)",
-            }}
-          >
-            <span style={{ color: "var(--vscode-descriptionForeground)" }}>map</span>
-            <span className="font-mono">{mapName.trim() || DEFAULT_MAP_NAME}</span>
           </div>
         </div>
       </header>
