@@ -329,8 +329,9 @@ test('enables navigation runtime layers in the run stage', async () => {
   await waitFor(() => expect(screen.getByText('Running')).toBeInTheDocument());
   expect(screen.queryByText('PID:')).not.toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Load Map' })).toBeInTheDocument();
-  expect(screen.getByRole('button', { name: 'Navigation' })).toBeInTheDocument();
-  expect(screen.getByRole('button', { name: 'Run BT' })).toBeDisabled();
+  expect(screen.getByRole('button', { name: 'Run Mission' })).toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Navigation' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Run BT' })).not.toBeInTheDocument();
   expect(screen.queryByRole('button', { name: 'Save Map' })).not.toBeInTheDocument();
   expect(screen.getByText('/global_costmap/costmap')).toBeInTheDocument();
   expect(screen.getByText('/local_costmap/costmap')).toBeInTheDocument();
@@ -373,7 +374,7 @@ test('loads a saved map for the run stage', async () => {
 
   expect(screen.getByText('factory')).toBeInTheDocument();
 
-  fireEvent.click(screen.getByRole('button', { name: 'Navigation' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Run Mission' }));
 
   await waitFor(() => expect(startNavigation).toHaveBeenCalledWith('nav', 'factory'));
 });

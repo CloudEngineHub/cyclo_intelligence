@@ -789,8 +789,8 @@ export default function MissionCanvasPage() {
     }
   }, [loadStatus]);
 
-  const handleStartNavigation = useCallback(() => runCommand(
-    "Navigation",
+  const handleRunMission = useCallback(() => runCommand(
+    "Run mission",
     async () => {
       setWorkspaceStage(STAGE_RUN);
       await startNavigation("nav", mapName.trim() || DEFAULT_MAP_NAME);
@@ -1204,14 +1204,11 @@ export default function MissionCanvasPage() {
                 Load Map
               </ActionButton>
               <ActionButton
-                active={busy === "Navigation" || (running && workspaceStage === STAGE_RUN)}
+                active={busy === "Run mission" || (running && workspaceStage === STAGE_RUN)}
                 disabled={!!busy || running}
-                onClick={handleStartNavigation}
+                onClick={handleRunMission}
               >
-                Navigation
-              </ActionButton>
-              <ActionButton disabled variant="secondary">
-                Run BT
+                Run Mission
               </ActionButton>
               <ActionButton
                 active={busy === "Stop"}
@@ -1265,7 +1262,7 @@ export default function MissionCanvasPage() {
               : `mission:${mapName}`}
             waitingLabel={mappingEditorActive
               ? "Select a PGM"
-              : running ? "Waiting for /map" : "Start Navigation to view /map"}
+              : running ? "Waiting for /map" : "Run Mission to view /map"}
             onSpotClick={handleSelectSpot}
             onBehaviorNodeClick={handleSelectBehaviorNode}
             onEditorMapPoint={mapEditor.editAtMapPoint}
