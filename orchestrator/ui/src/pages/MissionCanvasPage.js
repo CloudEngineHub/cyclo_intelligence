@@ -124,7 +124,10 @@ const TOPIC_LABELS = {
 
 const MISSION_BORDER = "#e5e7eb";
 const MISSION_BORDER_SOFT = "#e5e7eb";
+const MISSION_BUTTON_BORDER = "#cbd5e1";
 const MISSION_ACTIVE_BORDER = "#93c5fd";
+const MISSION_STAGE_FILL = MISSION_BORDER;
+const MISSION_STAGE_EMPTY = "#ffffff";
 const MISSION_SURFACE = "color-mix(in srgb, var(--vscode-foreground, #ffffff) 5%, transparent)";
 const MISSION_SURFACE_STRONG = "color-mix(in srgb, var(--vscode-foreground, #ffffff) 8%, transparent)";
 
@@ -420,12 +423,12 @@ function ActionButton({
     primary: {
       color: "var(--vscode-button-foreground)",
       backgroundColor: "var(--vscode-button-background)",
-      borderColor: MISSION_BORDER,
+      borderColor: MISSION_BUTTON_BORDER,
     },
     secondary: {
       color: "var(--vscode-foreground)",
-      backgroundColor: MISSION_SURFACE_STRONG,
-      borderColor: MISSION_BORDER,
+      backgroundColor: MISSION_STAGE_EMPTY,
+      borderColor: MISSION_BUTTON_BORDER,
     },
     danger: {
       color: "#000000",
@@ -911,7 +914,7 @@ export default function MissionCanvasPage() {
       </header>
 
       <div
-        className="shrink-0 mb-4 flex flex-wrap items-end gap-1 border-b"
+        className="shrink-0 flex flex-wrap items-end gap-1 border-b"
         role="tablist"
         aria-label="Mission Canvas stages"
         style={{ borderColor: MISSION_BORDER }}
@@ -937,17 +940,15 @@ export default function MissionCanvasPage() {
               className="relative h-10 px-5 border border-b-0 rounded-t-md text-sm font-semibold transition-colors"
               style={{
                 color: selected
-                  ? "var(--vscode-list-activeSelectionForeground, var(--vscode-button-foreground))"
+                  ? "var(--vscode-foreground)"
                   : "var(--vscode-foreground)",
                 backgroundColor: selected
-                  ? "var(--vscode-list-activeSelectionBackground, var(--vscode-button-background))"
-                  : "transparent",
+                  ? MISSION_STAGE_FILL
+                  : MISSION_STAGE_EMPTY,
                 borderColor: selected
                   ? MISSION_BORDER
-                  : "transparent",
-                boxShadow: selected
-                  ? `inset 0 3px 0 ${MISSION_ACTIVE_BORDER}`
-                  : "none",
+                  : MISSION_BORDER,
+                boxShadow: "none",
                 transform: selected ? "translateY(1px)" : "none",
               }}
             >
@@ -958,11 +959,11 @@ export default function MissionCanvasPage() {
       </div>
 
       <div
-        className="shrink-0 mb-4 border px-3 py-2 flex flex-wrap items-center gap-2"
+        className="shrink-0 mb-4 border border-t-0 px-3 py-2 flex flex-wrap items-center gap-2"
         style={{
           color: "var(--vscode-foreground)",
           borderColor: MISSION_BORDER,
-          backgroundColor: MISSION_SURFACE_STRONG,
+          backgroundColor: MISSION_STAGE_FILL,
         }}
       >
         {workspaceStage === STAGE_MAPPING && (
