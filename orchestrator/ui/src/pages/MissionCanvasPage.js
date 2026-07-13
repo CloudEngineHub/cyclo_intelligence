@@ -1297,7 +1297,7 @@ export default function MissionCanvasPage() {
                 onClick={handleSaveDesign}
                 variant="secondary"
               >
-                Save Design
+                Save Map
               </ActionButton>
               <ActionButton
                 active={interactionMode === "spot"}

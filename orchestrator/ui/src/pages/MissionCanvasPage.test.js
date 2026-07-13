@@ -150,7 +150,7 @@ test('shows Spot and BT authoring panels in the authoring stage', async () => {
   expect(screen.getByText('Behavior Nodes')).toBeInTheDocument();
   expect(screen.getByText('Spots')).toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Load Map' })).toBeInTheDocument();
-  expect(screen.getByRole('button', { name: 'Save Design' })).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Save Map' })).toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Spot' })).toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Delete Spot' })).toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Delete Node' })).toBeDisabled();
@@ -228,7 +228,7 @@ test('places behavior palette nodes on the map overlay', async () => {
   expect(screen.getByText('behavior_1_wait')).toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Delete Node' })).toBeEnabled();
 
-  fireEvent.click(screen.getByRole('button', { name: 'Save Design' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Save Map' }));
 
   const savedDesigns = JSON.parse(window.localStorage.getItem('mission_canvas_designs'));
   expect(savedDesigns.map.behaviorNodes[0]).toMatchObject({
