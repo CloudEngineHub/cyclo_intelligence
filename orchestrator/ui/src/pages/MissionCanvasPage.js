@@ -1194,7 +1194,7 @@ export default function MissionCanvasPage() {
                   setPendingBehaviorNodeTag("");
                 }
               }}
-              className="relative h-10 px-5 border border-b-0 rounded-t-md text-sm font-semibold transition-colors"
+              className="relative h-10 w-24 px-3 border border-b-0 rounded-t-md text-sm font-semibold transition-colors"
               style={{
                 color: selected
                   ? "var(--vscode-foreground)"
