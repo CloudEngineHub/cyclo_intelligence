@@ -122,8 +122,8 @@ const TOPIC_LABELS = {
   "/bt/active_nodes": "BT active nodes",
 };
 
-const MISSION_BORDER = "color-mix(in srgb, var(--vscode-foreground, #ffffff) 16%, transparent)";
-const MISSION_BORDER_SOFT = "color-mix(in srgb, var(--vscode-foreground, #ffffff) 10%, transparent)";
+const MISSION_BORDER = "#e5e7eb";
+const MISSION_BORDER_SOFT = "#e5e7eb";
 const MISSION_SURFACE = "color-mix(in srgb, var(--vscode-foreground, #ffffff) 5%, transparent)";
 const MISSION_SURFACE_STRONG = "color-mix(in srgb, var(--vscode-foreground, #ffffff) 8%, transparent)";
 
