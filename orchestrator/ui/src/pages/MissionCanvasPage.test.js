@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import MissionCanvasPage from './MissionCanvasPage';
 import { getServiceStatus, startNavigation } from '../utils/navigationApi';
 import { getNavigationSpots } from '../utils/navigationSpotsApi';
@@ -77,14 +77,47 @@ test('shows Spot and BT authoring panels in the authoring stage', async () => {
   expect(screen.getByRole('button', { name: 'SendCommand' })).toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Sequence' })).toBeInTheDocument();
   expect(screen.getByText('Inspector')).toBeInTheDocument();
+  expect(screen.getByText('Design Objects')).toBeInTheDocument();
+  expect(screen.getByText('Behavior Nodes')).toBeInTheDocument();
   expect(screen.getByText('Spots')).toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Spot' })).toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Delete Spot' })).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Delete Node' })).toBeDisabled();
   expect(screen.getByRole('button', { name: 'Create BT' })).toBeDisabled();
   expect(screen.getByRole('button', { name: 'Edit BT' })).toBeDisabled();
   expect(screen.queryByRole('button', { name: 'Mapping' })).not.toBeInTheDocument();
   await waitFor(() => expect(getServiceStatus).toHaveBeenCalled());
   await waitFor(() => expect(getNavigationSpots).toHaveBeenCalledWith('map'));
+});
+
+test('places behavior palette nodes on the map overlay', async () => {
+  const latestMapViewerProps = () => (
+    mockMapViewer.mock.calls[mockMapViewer.mock.calls.length - 1][0]
+  );
+
+  render(<MissionCanvasPage />);
+
+  fireEvent.click(screen.getByRole('tab', { name: 'Design' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Wait' }));
+
+  await waitFor(() => expect(latestMapViewerProps().interactionMode).toBe('behavior'));
+  expect(screen.getByRole('button', { name: 'Wait' })).toHaveAttribute('aria-pressed', 'true');
+
+  await act(async () => {
+    await latestMapViewerProps().onMapPose(1.25, -0.5, 0.75);
+  });
+
+  await waitFor(() => expect(latestMapViewerProps().behaviorNodes).toHaveLength(1));
+  expect(latestMapViewerProps().behaviorNodes[0]).toMatchObject({
+    id: 'behavior_1_wait',
+    map_name: 'map',
+    tag: 'Wait',
+    category: 'action',
+    pose: { frame_id: 'map', x: 1.25, y: -0.5, yaw: 0.75 },
+  });
+  expect(latestMapViewerProps().selectedBehaviorNodeId).toBe('behavior_1_wait');
+  expect(screen.getByText('behavior_1_wait')).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Delete Node' })).toBeEnabled();
 });
 
 test('starts mapping mode from Mission Canvas', async () => {

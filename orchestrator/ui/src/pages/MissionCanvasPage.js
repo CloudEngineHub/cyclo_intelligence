@@ -137,6 +137,17 @@ function spotPoseFromMapPose(x, y, yaw) {
   };
 }
 
+function behaviorNodeDefinition(tag) {
+  return FALLBACK_CATALOG.find((node) => node.tag === tag) || {
+    tag,
+    category: "action",
+  };
+}
+
+function behaviorNodeId(tag, index) {
+  return `behavior_${index}_${tag.toLowerCase().replace(/[^a-z0-9]+/g, "_")}`;
+}
+
 function Panel({ title, children, className = "" }) {
   return (
     <div
@@ -213,7 +224,7 @@ function TopicStatusPanel({ topicRows }) {
   );
 }
 
-function BehaviorPalette() {
+function BehaviorPalette({ selectedTag = "", onNodeSelect }) {
   const groupedNodes = useMemo(() => (
     BEHAVIOR_NODE_GROUPS.map((group) => ({
       ...group,
@@ -244,12 +255,20 @@ function BehaviorPalette() {
                   key={node.tag}
                   type="button"
                   draggable
+                  aria-pressed={selectedTag === node.tag}
+                  onClick={() => onNodeSelect(node.tag)}
                   onDragStart={(event) => handleDragStart(event, node.tag)}
                   className="h-8 px-2 border text-xs font-medium"
                   style={{
-                    color: "var(--vscode-foreground)",
-                    backgroundColor: "var(--vscode-editor-background)",
-                    borderColor: "var(--vscode-panel-border)",
+                    color: selectedTag === node.tag
+                      ? "var(--vscode-button-foreground)"
+                      : "var(--vscode-foreground)",
+                    backgroundColor: selectedTag === node.tag
+                      ? "var(--vscode-button-background)"
+                      : "var(--vscode-editor-background)",
+                    borderColor: selectedTag === node.tag
+                      ? "var(--vscode-focusBorder)"
+                      : "var(--vscode-panel-border)",
                   }}
                   title={node.tag}
                 >
@@ -316,10 +335,14 @@ function ActionButton({
 export default function MissionCanvasPage() {
   const statusLoadingRef = useRef(false);
   const tfBufferRef = useRef(new Map());
+  const behaviorNodeSerialRef = useRef(0);
   const [mapName, setMapName] = useState(DEFAULT_MAP_NAME);
   const [status, setStatus] = useState(null);
   const [spots, setSpots] = useState([]);
   const [selectedSpotId, setSelectedSpotId] = useState("");
+  const [behaviorNodes, setBehaviorNodes] = useState([]);
+  const [selectedBehaviorNodeId, setSelectedBehaviorNodeId] = useState("");
+  const [pendingBehaviorNodeTag, setPendingBehaviorNodeTag] = useState("");
   const [busy, setBusy] = useState("");
   const [message, setMessage] = useState("Ready");
   const [interactionMode, setInteractionMode] = useState("view");
@@ -334,6 +357,7 @@ export default function MissionCanvasPage() {
   const running = status?.is_up ?? false;
   const navigationTopicsActive = running && busy !== "Stop";
   const activeLayers = layersByStage[workspaceStage] || LAYER_PRESETS[workspaceStage];
+  const currentMapName = mapName.trim() || DEFAULT_MAP_NAME;
   const needsGlobalCostmap = navigationTopicsActive && activeLayers.globalCostmap;
   const needsLocalCostmap = navigationTopicsActive && activeLayers.localCostmap;
   const needsScan = navigationTopicsActive && activeLayers.scan;
@@ -348,6 +372,14 @@ export default function MissionCanvasPage() {
   const selectedSpot = useMemo(
     () => spots.find((spot) => spot.id === selectedSpotId) || null,
     [selectedSpotId, spots],
+  );
+  const activeBehaviorNodes = useMemo(
+    () => behaviorNodes.filter((node) => node.map_name === currentMapName),
+    [behaviorNodes, currentMapName],
+  );
+  const selectedBehaviorNode = useMemo(
+    () => activeBehaviorNodes.find((node) => node.id === selectedBehaviorNodeId) || null,
+    [activeBehaviorNodes, selectedBehaviorNodeId],
   );
   const { topicData: mapData } = useNavigationRosTopic(
     navigationTopicsActive && activeLayers.map ? "/map" : null,
@@ -531,29 +563,79 @@ export default function MissionCanvasPage() {
     () => stopNavigation(),
   ), [runCommand]);
 
+  const handleSelectSpot = useCallback((spotId) => {
+    setSelectedSpotId(spotId);
+    setSelectedBehaviorNodeId("");
+    setPendingBehaviorNodeTag("");
+    setInteractionMode("view");
+  }, []);
+
+  const handleSelectBehaviorNode = useCallback((nodeId) => {
+    setSelectedBehaviorNodeId(nodeId);
+    setSelectedSpotId("");
+    setPendingBehaviorNodeTag("");
+    setInteractionMode("view");
+  }, []);
+
+  const handleSelectBehaviorPaletteNode = useCallback((tag) => {
+    setWorkspaceStage(STAGE_AUTHORING);
+    setPendingBehaviorNodeTag(tag);
+    setSelectedSpotId("");
+    setInteractionMode("behavior");
+    setMessage(`${tag} selected`);
+  }, []);
+
   const handleToggleSpotMode = useCallback(() => {
     setWorkspaceStage(STAGE_AUTHORING);
+    setPendingBehaviorNodeTag("");
+    setSelectedBehaviorNodeId("");
     setInteractionMode((value) => (value === "spot" ? "view" : "spot"));
   }, []);
 
   const handleCreateSpotAtPose = useCallback(async (x, y, yaw) => {
+    if (interactionMode === "behavior" && pendingBehaviorNodeTag) {
+      const definition = behaviorNodeDefinition(pendingBehaviorNodeTag);
+      behaviorNodeSerialRef.current += 1;
+      const index = behaviorNodeSerialRef.current;
+      const node = {
+        id: behaviorNodeId(pendingBehaviorNodeTag, index),
+        map_name: currentMapName,
+        tag: pendingBehaviorNodeTag,
+        label: pendingBehaviorNodeTag,
+        category: definition.category || "action",
+        pose: spotPoseFromMapPose(x, y, yaw),
+        metadata: { source: "mission_canvas" },
+      };
+      setBehaviorNodes((current) => [...current, node]);
+      setSelectedBehaviorNodeId(node.id);
+      setSelectedSpotId("");
+      setPendingBehaviorNodeTag("");
+      setInteractionMode("view");
+      setMessage(`Placed ${node.tag}`);
+      return;
+    }
     if (interactionMode !== "spot") return;
-    const normalizedMapName = mapName.trim() || DEFAULT_MAP_NAME;
     const label = `Spot ${spots.length + 1}`;
     try {
       const created = await createNavigationSpot({
-        map_name: normalizedMapName,
+        map_name: currentMapName,
         label,
         pose: spotPoseFromMapPose(x, y, yaw),
       });
       setSpots((current) => [...current, created]);
       setSelectedSpotId(created.id);
+      setSelectedBehaviorNodeId("");
       setInteractionMode("view");
       setMessage(`Created ${created.label}`);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Failed to create spot");
     }
-  }, [interactionMode, mapName, spots.length]);
+  }, [
+    currentMapName,
+    interactionMode,
+    pendingBehaviorNodeTag,
+    spots.length,
+  ]);
 
   const handleRenameSpot = useCallback(async (event) => {
     if (!selectedSpot) return;
@@ -585,6 +667,15 @@ export default function MissionCanvasPage() {
       setMessage(error instanceof Error ? error.message : "Failed to delete spot");
     }
   }, [selectedSpot]);
+
+  const handleDeleteSelectedBehaviorNode = useCallback(() => {
+    if (!selectedBehaviorNode) return;
+    setBehaviorNodes((current) => current.filter((node) => (
+      node.id !== selectedBehaviorNode.id
+    )));
+    setSelectedBehaviorNodeId("");
+    setMessage(`Deleted ${selectedBehaviorNode.tag}`);
+  }, [selectedBehaviorNode]);
 
   return (
     <div className="mission-canvas-page h-full min-h-[560px] flex flex-col overflow-hidden p-4">
@@ -646,7 +737,10 @@ export default function MissionCanvasPage() {
               aria-selected={selected}
               onClick={() => {
                 setWorkspaceStage(stage.id);
-                if (stage.id !== STAGE_AUTHORING) setInteractionMode("view");
+                if (stage.id !== STAGE_AUTHORING) {
+                  setInteractionMode("view");
+                  setPendingBehaviorNodeTag("");
+                }
               }}
               className="h-8 px-3 border text-sm font-semibold"
               style={{
@@ -727,6 +821,13 @@ export default function MissionCanvasPage() {
             >
               Delete Spot
             </ActionButton>
+            <ActionButton
+              disabled={!selectedBehaviorNode}
+              onClick={handleDeleteSelectedBehaviorNode}
+              variant="secondary"
+            >
+              Delete Node
+            </ActionButton>
             <ActionButton disabled variant="secondary">
               Create BT
             </ActionButton>
@@ -787,6 +888,8 @@ export default function MissionCanvasPage() {
             tf={needsTf ? bufferedTf : null}
             spots={spots}
             selectedSpotId={selectedSpotId}
+            behaviorNodes={activeBehaviorNodes}
+            selectedBehaviorNodeId={selectedBehaviorNodeId}
             showMap={activeLayers.map}
             showGlobalCostmap={needsGlobalCostmap}
             showLocalCostmap={needsLocalCostmap}
@@ -801,78 +904,142 @@ export default function MissionCanvasPage() {
             fitContainer
             viewKey={`mission:${mapName}`}
             waitingLabel={running ? "Waiting for /map" : "Start Navigation to view /map"}
-            onSpotClick={setSelectedSpotId}
+            onSpotClick={handleSelectSpot}
+            onBehaviorNodeClick={handleSelectBehaviorNode}
             onMapPose={handleCreateSpotAtPose}
           />
           {workspaceStage === STAGE_AUTHORING && (
-            <BehaviorPalette />
+            <BehaviorPalette
+              selectedTag={pendingBehaviorNodeTag}
+              onNodeSelect={handleSelectBehaviorPaletteNode}
+            />
           )}
         </section>
 
         {workspaceStage === STAGE_AUTHORING ? (
           <aside className="min-h-0 grid grid-rows-[auto_1fr_minmax(160px,220px)] gap-4">
             <Panel title="Inspector" className="grid gap-3">
-            {selectedSpot ? (
-              <div className="grid gap-2 text-xs">
-                <label className="grid gap-1">
-                  <span style={{ color: "var(--vscode-descriptionForeground)" }}>Label</span>
-                  <input
-                    value={selectedSpot.label}
-                    onChange={handleRenameSpot}
-                    className="h-8 px-2 border text-sm"
-                    style={{
-                      color: "var(--vscode-input-foreground)",
-                      backgroundColor: "var(--vscode-input-background)",
-                      borderColor: "var(--vscode-input-border, var(--vscode-panel-border))",
-                    }}
-                  />
-                </label>
-                <div>
-                  ID: <span className="font-mono">{selectedSpot.id}</span>
+              {selectedBehaviorNode ? (
+                <div className="grid gap-2 text-xs">
+                  <div>
+                    Node: <span className="font-mono">{selectedBehaviorNode.tag}</span>
+                  </div>
+                  <div>
+                    Type: <span className="font-mono">{selectedBehaviorNode.category}</span>
+                  </div>
+                  <div>
+                    ID: <span className="font-mono">{selectedBehaviorNode.id}</span>
+                  </div>
+                  <div>
+                    Pose:{" "}
+                    <span className="font-mono">
+                      {selectedBehaviorNode.pose.x.toFixed(2)},{" "}
+                      {selectedBehaviorNode.pose.y.toFixed(2)}, yaw{" "}
+                      {selectedBehaviorNode.pose.yaw.toFixed(2)}
+                    </span>
+                  </div>
                 </div>
-                <div>
-                  Pose:{" "}
-                  <span className="font-mono">
-                    {selectedSpot.pose.x.toFixed(2)}, {selectedSpot.pose.y.toFixed(2)}, yaw {selectedSpot.pose.yaw.toFixed(2)}
-                  </span>
+              ) : selectedSpot ? (
+                <div className="grid gap-2 text-xs">
+                  <label className="grid gap-1">
+                    <span style={{ color: "var(--vscode-descriptionForeground)" }}>Label</span>
+                    <input
+                      value={selectedSpot.label}
+                      onChange={handleRenameSpot}
+                      className="h-8 px-2 border text-sm"
+                      style={{
+                        color: "var(--vscode-input-foreground)",
+                        backgroundColor: "var(--vscode-input-background)",
+                        borderColor: "var(--vscode-input-border, var(--vscode-panel-border))",
+                      }}
+                    />
+                  </label>
+                  <div>
+                    ID: <span className="font-mono">{selectedSpot.id}</span>
+                  </div>
+                  <div>
+                    Pose:{" "}
+                    <span className="font-mono">
+                      {selectedSpot.pose.x.toFixed(2)}, {selectedSpot.pose.y.toFixed(2)}, yaw {selectedSpot.pose.yaw.toFixed(2)}
+                    </span>
+                  </div>
+                  <div>
+                    BT: <span className="font-mono">{selectedSpot.linked_bt_tree || "-"}</span>
+                  </div>
                 </div>
-                <div>
-                  BT: <span className="font-mono">{selectedSpot.linked_bt_tree || "-"}</span>
+              ) : (
+                <div className="text-xs leading-5" style={{ color: "var(--vscode-descriptionForeground)" }}>
+                  No selection.
                 </div>
-              </div>
-            ) : (
-              <div className="text-xs leading-5" style={{ color: "var(--vscode-descriptionForeground)" }}>
-                Select a Spot, or press Spot and click the map to create one.
-              </div>
-            )}
+              )}
             </Panel>
 
-            <Panel title="Spots" className="min-h-0 overflow-auto">
-              <div className="grid gap-2">
-                {spots.map((spot) => (
-                  <button
-                    key={spot.id}
-                    type="button"
-                    onClick={() => setSelectedSpotId(spot.id)}
-                    className="h-8 px-2 border text-left text-xs min-w-0"
-                    style={{
-                      color: spot.id === selectedSpotId
-                        ? "var(--vscode-button-foreground)"
-                        : "var(--vscode-foreground)",
-                      backgroundColor: spot.id === selectedSpotId
-                        ? "var(--vscode-button-background)"
-                        : "var(--vscode-editor-background)",
-                      borderColor: "var(--vscode-panel-border)",
-                    }}
+            <Panel title="Design Objects" className="min-h-0 overflow-auto">
+              <div className="grid gap-3">
+                <div className="grid gap-2">
+                  <div
+                    className="text-[10px] uppercase font-semibold"
+                    style={{ color: "var(--vscode-descriptionForeground)" }}
                   >
-                    <span className="block truncate">{spot.label}</span>
-                  </button>
-                ))}
-                {spots.length === 0 && (
-                  <div className="text-xs" style={{ color: "var(--vscode-descriptionForeground)" }}>
-                    No spots for this map yet.
+                    Behavior Nodes
                   </div>
-                )}
+                  {activeBehaviorNodes.map((node) => (
+                    <button
+                      key={node.id}
+                      type="button"
+                      onClick={() => handleSelectBehaviorNode(node.id)}
+                      className="h-8 px-2 border text-left text-xs min-w-0"
+                      style={{
+                        color: node.id === selectedBehaviorNodeId
+                          ? "var(--vscode-button-foreground)"
+                          : "var(--vscode-foreground)",
+                        backgroundColor: node.id === selectedBehaviorNodeId
+                          ? "var(--vscode-button-background)"
+                          : "var(--vscode-editor-background)",
+                        borderColor: "var(--vscode-panel-border)",
+                      }}
+                    >
+                      <span className="block truncate">{node.tag}</span>
+                    </button>
+                  ))}
+                  {activeBehaviorNodes.length === 0 && (
+                    <div className="text-xs" style={{ color: "var(--vscode-descriptionForeground)" }}>
+                      No behavior nodes placed yet.
+                    </div>
+                  )}
+                </div>
+                <div className="grid gap-2">
+                  <div
+                    className="text-[10px] uppercase font-semibold"
+                    style={{ color: "var(--vscode-descriptionForeground)" }}
+                  >
+                    Spots
+                  </div>
+                  {spots.map((spot) => (
+                    <button
+                      key={spot.id}
+                      type="button"
+                      onClick={() => handleSelectSpot(spot.id)}
+                      className="h-8 px-2 border text-left text-xs min-w-0"
+                      style={{
+                        color: spot.id === selectedSpotId
+                          ? "var(--vscode-button-foreground)"
+                          : "var(--vscode-foreground)",
+                        backgroundColor: spot.id === selectedSpotId
+                          ? "var(--vscode-button-background)"
+                          : "var(--vscode-editor-background)",
+                        borderColor: "var(--vscode-panel-border)",
+                      }}
+                    >
+                      <span className="block truncate">{spot.label}</span>
+                    </button>
+                  ))}
+                  {spots.length === 0 && (
+                    <div className="text-xs" style={{ color: "var(--vscode-descriptionForeground)" }}>
+                      No spots for this map yet.
+                    </div>
+                  )}
+                </div>
               </div>
             </Panel>
             <TopicStatusPanel topicRows={topicRows} />

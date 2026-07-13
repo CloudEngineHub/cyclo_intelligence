@@ -386,12 +386,15 @@ As of the first Mission Canvas implementation slice, the repository contains:
 - JSON Spot persistence at /workspace/navigation/maps/<map_name>/spots.json
   by default, overrideable with CYCLO_NAVIGATION_DATA_DIR.
 - MapViewer Spot marker overlay with click selection.
+- MapViewer Behavior node marker overlay with click selection.
 - Mission Canvas Spot creation, selection, rename, and delete UI.
 - Mission Canvas stage tabs:
   - Mapping
   - Design
   - Run
 - Design tab Behavior Palette with Action / Control / Decorator groups.
+- Design tab palette placement mode for local Behavior nodes on the map.
+- Design Objects list and Inspector support for local Behavior nodes.
 - Stage-specific action bars for mapping, authoring, and runtime controls.
 - Stage-specific layer presets and shared Topics diagnostics.
 - Frontend API utilities and focused tests for the new page/API client.
@@ -405,10 +408,14 @@ Implemented:
   Phase 0 contract documentation and route registration hardening
   Phase 1 Spot persistence API
   Early Phase 2 Spot overlay and Inspector UI
+  Early Phase 3 Behavior Layer overlay prototype
   Early Mission Canvas stage layout
 
 Deferred:
   BT graph embedding
+  Behavior node persistence
+  Behavior edge editing
+  Behavior node parameter editing on the map
   NavigateToSpot runtime action node
   active BT node overlay
   runtime ownership/session policy
@@ -508,6 +515,8 @@ Tasks:
 - Add spot selector UI for NavigateToSpot nodes.
 - Preserve normal BT XML save/load flow.
 - Add optional mini map preview in BT node parameter panel.
+- Represent BT nodes with explicit map poses as a Behavior Layer over MapViewer.
+- Allow palette-selected BT nodes to be placed on the map as local overlay nodes.
 - Start extracting reusable BT editor components from BTManagerPage:
   - graph canvas
   - node palette

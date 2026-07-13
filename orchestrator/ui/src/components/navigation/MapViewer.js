@@ -322,6 +322,69 @@ function makeSpotMarker(spot, selected = false) {
     }
     return group;
 }
+function behaviorNodeColor(category, selected = false) {
+    if (selected)
+        return 0xf59e0b;
+    switch (category) {
+        case "control":
+            return 0x38bdf8;
+        case "decorator":
+            return 0xa78bfa;
+        case "action":
+        default:
+            return 0x22c55e;
+    }
+}
+function makeBehaviorNodeMarker(node, selected = false) {
+    var _a, _b, _c, _d, _e;
+    const pose = node === null || node === void 0 ? void 0 : node.pose;
+    if (!pose)
+        return null;
+    const x = Number((_a = pose.x) !== null && _a !== void 0 ? _a : 0);
+    const y = Number((_b = pose.y) !== null && _b !== void 0 ? _b : 0);
+    const yaw = Number((_c = pose.yaw) !== null && _c !== void 0 ? _c : 0);
+    const color = behaviorNodeColor(node.category, selected);
+    const group = new THREE.Group();
+    group.position.set(x, y, 0.28);
+    group.rotation.z = yaw;
+    group.userData.behaviorNodeId = node.id;
+    const body = new THREE.Mesh(new THREE.PlaneGeometry(0.46, 0.28), new THREE.MeshBasicMaterial({
+        color,
+        transparent: true,
+        opacity: selected ? 0.95 : 0.82,
+        side: THREE.DoubleSide,
+    }));
+    body.userData.behaviorNodeId = node.id;
+    group.add(body);
+    const outline = makeLine([
+        new THREE.Vector3(-0.26, -0.16, 0.02),
+        new THREE.Vector3(0.26, -0.16, 0.02),
+        new THREE.Vector3(0.26, 0.16, 0.02),
+        new THREE.Vector3(-0.26, 0.16, 0.02),
+        new THREE.Vector3(-0.26, -0.16, 0.02),
+    ], selected ? 0xffffff : 0xe5e7eb, 2);
+    if (outline) {
+        outline.userData.behaviorNodeId = node.id;
+        group.add(outline);
+    }
+    const port = new THREE.Mesh(new THREE.CircleGeometry(0.045, 16), new THREE.MeshBasicMaterial({
+        color: 0xffffff,
+        transparent: true,
+        opacity: 0.92,
+    }));
+    port.position.set(-0.16, 0, 0.03);
+    port.userData.behaviorNodeId = node.id;
+    group.add(port);
+    const label = String((_e = (_d = node.label) !== null && _d !== void 0 ? _d : node.tag) !== null && _e !== void 0 ? _e : node.id);
+    if (label) {
+        const sprite = makeTfLabelSprite(label);
+        sprite.position.set(0, 0.38, 0.06);
+        sprite.scale.set(0.56, 0.14, 1);
+        sprite.userData.behaviorNodeId = node.id;
+        group.add(sprite);
+    }
+    return group;
+}
 function makeTfAxes(pose, label) {
     var _a, _b, _c, _d, _e, _f;
     const group = new THREE.Group();
@@ -439,7 +502,7 @@ function applyTopViewRoll(camera, controls, roll) {
     camera.lookAt(controls.target);
     controls.update();
 }
-export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, goalPose, footprint, tf, showMap, showGlobalCostmap, showLocalCostmap, showScan, showGlobalPlan, showGoalPose, showTf, showRobotModel, interactionDisabled, interactionMode, editorActive, viewKey, waitingLabel = "Waiting for /map", fitContainer = false, spots = [], selectedSpotId = "", onSpotClick, onEditorMapPoint, onMapPose, }) {
+export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, goalPose, footprint, tf, showMap, showGlobalCostmap, showLocalCostmap, showScan, showGlobalPlan, showGoalPose, showTf, showRobotModel, interactionDisabled, interactionMode, editorActive, viewKey, waitingLabel = "Waiting for /map", fitContainer = false, spots = [], selectedSpotId = "", behaviorNodes = [], selectedBehaviorNodeId = "", onSpotClick, onBehaviorNodeClick, onEditorMapPoint, onMapPose, }) {
     const containerRef = useRef(null);
     const sceneRef = useRef(null);
     const rendererRef = useRef(null);
@@ -662,6 +725,11 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, 
             if (marker)
                 layers.add(marker);
         });
+        behaviorNodes.forEach((node) => {
+            const marker = makeBehaviorNodeMarker(node, node.id === selectedBehaviorNodeId);
+            if (marker)
+                layers.add(marker);
+        });
         const robotX = Number((_h = (_g = pose === null || pose === void 0 ? void 0 : pose.position) === null || _g === void 0 ? void 0 : _g.x) !== null && _h !== void 0 ? _h : 0);
         const robotY = Number((_k = (_j = pose === null || pose === void 0 ? void 0 : pose.position) === null || _j === void 0 ? void 0 : _j.y) !== null && _k !== void 0 ? _k : 0);
         if (showScan && ((_l = scan === null || scan === void 0 ? void 0 : scan.ranges) === null || _l === void 0 ? void 0 : _l.length)) {
@@ -734,6 +802,8 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, 
         plan,
         pose,
         scan,
+        behaviorNodes,
+        selectedBehaviorNodeId,
         selectedSpotId,
         showGlobalCostmap,
         showLocalCostmap,
@@ -779,13 +849,13 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, 
                 return null;
             return point;
         };
-        const spotIdFromEvent = (event) => {
+        const targetFromEvent = (event) => {
             const layers = layersRef.current;
-            if (!layers || typeof onSpotClick !== "function")
-                return "";
+            if (!layers || (typeof onSpotClick !== "function" && typeof onBehaviorNodeClick !== "function"))
+                return null;
             const rect = renderer.domElement.getBoundingClientRect();
             if (rect.width <= 0 || rect.height <= 0)
-                return "";
+                return null;
             pointerRef.current.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
             pointerRef.current.y = -(((event.clientY - rect.top) / rect.height) * 2 - 1);
             raycasterRef.current.setFromCamera(pointerRef.current, camera);
@@ -793,12 +863,14 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, 
             for (const hit of hits) {
                 let object = hit.object;
                 while (object) {
-                    if (object.userData && object.userData.spotId)
-                        return object.userData.spotId;
+                    if (object.userData && object.userData.behaviorNodeId && typeof onBehaviorNodeClick === "function")
+                        return { type: "behaviorNode", id: object.userData.behaviorNodeId };
+                    if (object.userData && object.userData.spotId && typeof onSpotClick === "function")
+                        return { type: "spot", id: object.userData.spotId };
                     object = object.parent;
                 }
             }
-            return "";
+            return null;
         };
         const previewPoseFromDrag = (start, point, clientX, clientY) => {
             const moved = Math.hypot(clientX - start.clientX, clientY - start.clientY);
@@ -830,11 +902,16 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, 
                 return;
             }
             if (!interactionDisabled && interactionMode === "view") {
-                const spotId = spotIdFromEvent(event);
-                if (spotId) {
+                const target = targetFromEvent(event);
+                if (target) {
                     event.preventDefault();
                     event.stopImmediatePropagation();
-                    onSpotClick(spotId);
+                    if (target.type === "behaviorNode") {
+                        onBehaviorNodeClick(target.id);
+                    }
+                    else {
+                        onSpotClick(target.id);
+                    }
                     pointerDownRef.current = null;
                     setDragPreviewPose(null);
                     return;
@@ -928,7 +1005,7 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, 
             renderer.domElement.removeEventListener("pointerup", handlePointerUp);
             renderer.domElement.removeEventListener("pointercancel", handlePointerCancel);
         };
-    }, [editorActive, interactionDisabled, interactionMode, map, onEditorMapPoint, onMapPose, onSpotClick, pose]);
+    }, [editorActive, interactionDisabled, interactionMode, map, onBehaviorNodeClick, onEditorMapPoint, onMapPose, onSpotClick, pose]);
     return (<div className={`relative border min-h-0 overflow-hidden ${fitContainer ? "h-full w-full" : ""}`} style={{
             ...(fitContainer
                 ? { height: "100%", width: "100%" }
