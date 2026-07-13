@@ -8,6 +8,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   getServiceStatus,
+  getPgmFiles,
   saveNavigationMap,
   startNavigation,
   stopNavigation,
@@ -257,6 +258,75 @@ function SaveMapDialog({
   );
 }
 
+function LoadRunMapDialog({
+  open,
+  files,
+  selectedPath,
+  busy,
+  onChange,
+  onCancel,
+  onSubmit,
+}) {
+  if (!open) return null;
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 px-4"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="mission-load-map-title"
+    >
+      <form
+        className="w-full max-w-sm border p-4 grid gap-3 shadow-2xl"
+        style={{
+          color: "#111827",
+          backgroundColor: "#ffffff",
+          borderColor: "#d1d5db",
+        }}
+        onSubmit={(event) => {
+          event.preventDefault();
+          onSubmit();
+        }}
+      >
+        <div id="mission-load-map-title" className="text-sm font-semibold">
+          Load Map
+        </div>
+        <label className="grid gap-1 text-xs">
+          <span style={{ color: "#4b5563" }}>Map file</span>
+          <select
+            aria-label="Run map file"
+            value={selectedPath}
+            disabled={busy || files.length === 0}
+            onChange={(event) => onChange(event.currentTarget.value)}
+            className="h-8 px-2 border text-sm"
+            style={{
+              color: "#111827",
+              backgroundColor: "#f9fafb",
+              borderColor: "#9ca3af",
+            }}
+          >
+            {files.length === 0 ? (
+              <option value="">No maps found</option>
+            ) : files.map((file) => (
+              <option key={file.path} value={file.path}>
+                {file.name || file.path}
+              </option>
+            ))}
+          </select>
+        </label>
+        <div className="flex justify-end gap-2">
+          <ActionButton disabled={busy} onClick={onCancel} variant="secondary">
+            Cancel
+          </ActionButton>
+          <ActionButton disabled={busy || !selectedPath} type="submit" variant="secondary">
+            Load
+          </ActionButton>
+        </div>
+      </form>
+    </div>
+  );
+}
+
 function LayerToggle({ label, checked, onChange }) {
   return (
     <label
@@ -496,6 +566,10 @@ export default function MissionCanvasPage() {
   const [showPgmFix, setShowPgmFix] = useState(false);
   const [showSaveMapDialog, setShowSaveMapDialog] = useState(false);
   const [saveMapName, setSaveMapName] = useState(DEFAULT_MAP_NAME);
+  const [showRunMapDialog, setShowRunMapDialog] = useState(false);
+  const [runMapFiles, setRunMapFiles] = useState([]);
+  const [runMapPath, setRunMapPath] = useState("");
+  const [runMapBusy, setRunMapBusy] = useState(false);
   const [mapEditorReloadToken, setMapEditorReloadToken] = useState(0);
   const [layersByStage, setLayersByStage] = useState(() => ({
     [STAGE_MAPPING]: { ...LAYER_PRESETS[STAGE_MAPPING] },
@@ -723,6 +797,42 @@ export default function MissionCanvasPage() {
     },
   ), [mapName, runCommand]);
 
+  const handleOpenRunMapDialog = useCallback(() => {
+    setWorkspaceStage(STAGE_RUN);
+    setShowPgmFix(false);
+    setShowRunMapDialog(true);
+    setRunMapBusy(true);
+    setMessage("Loading saved maps");
+    getPgmFiles()
+      .then((response) => {
+        const files = response.files || [];
+        const preferred = files.find((file) => mapNameFromPgmPath(file.path) === currentMapName)
+          || files[0];
+        setRunMapFiles(files);
+        setRunMapPath(preferred?.path || "");
+        if (!files.length) {
+          setMessage("No PGM files found");
+        }
+      })
+      .catch((error) => {
+        setMessage(error instanceof Error ? error.message : "Failed to list PGM files");
+      })
+      .finally(() => setRunMapBusy(false));
+  }, [currentMapName]);
+
+  const handleConfirmRunMap = useCallback(() => {
+    const selectedMapName = mapNameFromPgmPath(runMapPath);
+    if (!selectedMapName) {
+      setMessage("Map file required");
+      return;
+    }
+    setMapName(selectedMapName);
+    setShowRunMapDialog(false);
+    setWorkspaceStage(STAGE_RUN);
+    setInteractionMode("view");
+    setMessage(`Loaded map ${selectedMapName}`);
+  }, [runMapPath]);
+
   const handleStartMapping = useCallback(() => runCommand(
     "Mapping",
     async () => {
@@ -895,6 +1005,15 @@ export default function MissionCanvasPage() {
         onChange={setSaveMapName}
         onCancel={() => setShowSaveMapDialog(false)}
         onSubmit={handleConfirmSaveMap}
+      />
+      <LoadRunMapDialog
+        open={showRunMapDialog}
+        files={runMapFiles}
+        selectedPath={runMapPath}
+        busy={runMapBusy}
+        onChange={setRunMapPath}
+        onCancel={() => setShowRunMapDialog(false)}
+        onSubmit={handleConfirmRunMap}
       />
       <header
         className="shrink-0 border-b pb-3 mb-4 flex flex-col xl:flex-row xl:items-center xl:justify-between gap-3"
@@ -1076,17 +1195,14 @@ export default function MissionCanvasPage() {
 
           {workspaceStage === STAGE_RUN && (
             <>
-              <div
-                className="h-8 px-2.5 border flex items-center gap-2 text-sm"
-                style={{
-                  color: "var(--vscode-foreground)",
-                  backgroundColor: MISSION_STAGE_EMPTY,
-                  borderColor: MISSION_BUTTON_BORDER,
-                }}
+              <ActionButton
+                active={showRunMapDialog || runMapBusy}
+                disabled={!!busy || running || runMapBusy}
+                onClick={handleOpenRunMapDialog}
+                variant="secondary"
               >
-                <span style={{ color: "var(--vscode-descriptionForeground)" }}>Map</span>
-                <span className="font-mono">{mapName.trim() || DEFAULT_MAP_NAME}</span>
-              </div>
+                Load Map
+              </ActionButton>
               <ActionButton
                 active={busy === "Navigation" || (running && workspaceStage === STAGE_RUN)}
                 disabled={!!busy || running}

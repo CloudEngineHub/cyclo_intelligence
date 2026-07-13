@@ -328,6 +328,7 @@ test('enables navigation runtime layers in the run stage', async () => {
   expect(screen.getByText('Runtime')).toBeInTheDocument();
   await waitFor(() => expect(screen.getByText('Running')).toBeInTheDocument());
   expect(screen.queryByText('PID:')).not.toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Load Map' })).toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Navigation' })).toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Run BT' })).toBeDisabled();
   expect(screen.queryByRole('button', { name: 'Save Map' })).not.toBeInTheDocument();
@@ -353,4 +354,26 @@ test('enables navigation runtime layers in the run stage', async () => {
       props.showGoalPose === true
     ))).toBe(true);
   });
+});
+
+test('loads a saved map for the run stage', async () => {
+  getPgmFiles.mockResolvedValue({
+    files: [{ path: 'factory.pgm', name: 'factory.pgm' }],
+  });
+
+  render(<MissionCanvasPage />);
+
+  fireEvent.click(screen.getByRole('tab', { name: 'Run' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Load Map' }));
+
+  const mapSelect = await screen.findByRole('combobox', { name: 'Run map file' });
+  await waitFor(() => expect(mapSelect).toHaveValue('factory.pgm'));
+
+  fireEvent.click(screen.getByRole('button', { name: 'Load' }));
+
+  expect(screen.getByText('factory')).toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole('button', { name: 'Navigation' }));
+
+  await waitFor(() => expect(startNavigation).toHaveBeenCalledWith('nav', 'factory'));
 });
