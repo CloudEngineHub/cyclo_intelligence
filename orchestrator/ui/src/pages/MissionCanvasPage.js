@@ -124,6 +124,7 @@ const TOPIC_LABELS = {
 
 const MISSION_BORDER = "#e5e7eb";
 const MISSION_BORDER_SOFT = "#e5e7eb";
+const MISSION_ACTIVE_BORDER = "#93c5fd";
 const MISSION_SURFACE = "color-mix(in srgb, var(--vscode-foreground, #ffffff) 5%, transparent)";
 const MISSION_SURFACE_STRONG = "color-mix(in srgb, var(--vscode-foreground, #ffffff) 8%, transparent)";
 
@@ -339,10 +340,10 @@ function BehaviorPalette({ selectedTag = "", onNodeSelect }) {
                       ? "var(--vscode-button-background)"
                       : MISSION_SURFACE,
                     borderColor: selectedTag === node.tag
-                      ? "var(--vscode-focusBorder)"
+                      ? MISSION_ACTIVE_BORDER
                       : MISSION_BORDER_SOFT,
                     boxShadow: selectedTag === node.tag
-                      ? "inset 0 0 0 1px var(--vscode-focusBorder)"
+                      ? `inset 0 0 0 1px ${MISSION_ACTIVE_BORDER}`
                       : "none",
                   }}
                   title={node.tag}
@@ -382,7 +383,7 @@ function ActionButton({
     primary: {
       color: "var(--vscode-button-foreground)",
       backgroundColor: "var(--vscode-button-background)",
-      borderColor: "var(--vscode-focusBorder)",
+      borderColor: MISSION_BORDER,
     },
     secondary: {
       color: "var(--vscode-foreground)",
@@ -403,10 +404,10 @@ function ActionButton({
       backgroundColor: variant === "danger"
         ? styles.danger.backgroundColor
         : "var(--vscode-list-activeSelectionBackground, var(--vscode-button-background))",
-      borderColor: "var(--vscode-focusBorder)",
+      borderColor: MISSION_ACTIVE_BORDER,
       boxShadow: [
-        "inset 0 0 0 1px var(--vscode-focusBorder)",
-        "inset 3px 0 0 var(--vscode-focusBorder)",
+        `inset 0 0 0 1px ${MISSION_ACTIVE_BORDER}`,
+        `inset 3px 0 0 ${MISSION_ACTIVE_BORDER}`,
       ].join(", "),
     }
     : {};
@@ -905,10 +906,10 @@ export default function MissionCanvasPage() {
                   ? "var(--vscode-list-activeSelectionBackground, var(--vscode-button-background))"
                   : "transparent",
                 borderColor: selected
-                  ? "var(--vscode-focusBorder)"
+                  ? MISSION_BORDER
                   : "transparent",
                 boxShadow: selected
-                  ? "inset 0 3px 0 var(--vscode-focusBorder)"
+                  ? `inset 0 3px 0 ${MISSION_ACTIVE_BORDER}`
                   : "none",
                 transform: selected ? "translateY(1px)" : "none",
               }}
