@@ -439,7 +439,7 @@ function applyTopViewRoll(camera, controls, roll) {
     camera.lookAt(controls.target);
     controls.update();
 }
-export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, goalPose, footprint, tf, showMap, showGlobalCostmap, showLocalCostmap, showScan, showGlobalPlan, showGoalPose, showTf, showRobotModel, interactionDisabled, interactionMode, editorActive, viewKey, waitingLabel = "Waiting for /map", spots = [], selectedSpotId = "", onSpotClick, onEditorMapPoint, onMapPose, }) {
+export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, goalPose, footprint, tf, showMap, showGlobalCostmap, showLocalCostmap, showScan, showGlobalPlan, showGoalPose, showTf, showRobotModel, interactionDisabled, interactionMode, editorActive, viewKey, waitingLabel = "Waiting for /map", fitContainer = false, spots = [], selectedSpotId = "", onSpotClick, onEditorMapPoint, onMapPose, }) {
     const containerRef = useRef(null);
     const sceneRef = useRef(null);
     const rendererRef = useRef(null);
@@ -929,8 +929,10 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, 
             renderer.domElement.removeEventListener("pointercancel", handlePointerCancel);
         };
     }, [editorActive, interactionDisabled, interactionMode, map, onEditorMapPoint, onMapPose, onSpotClick, pose]);
-    return (<div className="relative border min-h-0 overflow-hidden" style={{
-            aspectRatio: "1 / 1",
+    return (<div className={`relative border min-h-0 overflow-hidden ${fitContainer ? "h-full w-full" : ""}`} style={{
+            ...(fitContainer
+                ? { height: "100%", width: "100%" }
+                : { aspectRatio: "1 / 1" }),
             backgroundColor: "var(--vscode-editor-background)",
             borderColor: "var(--vscode-panel-border)",
         }}>
@@ -938,7 +940,7 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, 
       {viewerError && (<div className="absolute inset-0 flex items-center justify-center p-4 text-center text-sm pointer-events-none" style={{ color: "var(--vscode-descriptionForeground)" }}>
           Map viewer unavailable: {viewerError}
         </div>)}
-      {showMap && !map && (<div className="absolute inset-0 flex items-center justify-center text-sm pointer-events-none" style={{ color: "var(--vscode-descriptionForeground)" }}>
+      {!viewerError && showMap && !map && (<div className="absolute inset-0 flex items-center justify-center text-sm pointer-events-none" style={{ color: "var(--vscode-descriptionForeground)" }}>
           {waitingLabel}
         </div>)}
     </div>);

@@ -265,7 +265,7 @@ export default function MissionCanvasPage() {
       </header>
 
       <div className="flex-1 min-h-0 grid grid-cols-1 xl:grid-cols-[minmax(520px,1fr)_360px] gap-4">
-        <section className="min-h-0 grid grid-rows-[1fr_180px] gap-4">
+        <section className="min-h-0 overflow-hidden grid grid-rows-[minmax(0,1fr)_180px] gap-4">
           <MapViewer
             map={map}
             globalCostmap={null}
@@ -289,6 +289,7 @@ export default function MissionCanvasPage() {
             interactionDisabled={!!busy}
             interactionMode={interactionMode}
             editorActive={false}
+            fitContainer
             viewKey={`mission:${mapName}`}
             waitingLabel={running ? "Waiting for /map" : "Start Navigation to view /map"}
             onSpotClick={setSelectedSpotId}
