@@ -1,6 +1,6 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import MissionCanvasPage from './MissionCanvasPage';
-import { getServiceStatus } from '../utils/navigationApi';
+import { getServiceStatus, startNavigation } from '../utils/navigationApi';
 import { getNavigationSpots } from '../utils/navigationSpotsApi';
 
 jest.mock('../components/navigation/MapViewer', () => ({
@@ -9,6 +9,7 @@ jest.mock('../components/navigation/MapViewer', () => ({
 
 jest.mock('../utils/navigationApi', () => ({
   getServiceStatus: jest.fn().mockResolvedValue({ is_up: false }),
+  saveNavigationMap: jest.fn().mockResolvedValue({ ok: true }),
   startNavigation: jest.fn().mockResolvedValue({ ok: true }),
   stopNavigation: jest.fn().mockResolvedValue({ ok: true }),
 }));
@@ -47,4 +48,12 @@ test('renders Mission Canvas foundation', async () => {
   expect(screen.getByText('Inspector')).toBeInTheDocument();
   await waitFor(() => expect(getServiceStatus).toHaveBeenCalled());
   await waitFor(() => expect(getNavigationSpots).toHaveBeenCalledWith('map'));
+});
+
+test('starts mapping mode from Mission Canvas', async () => {
+  render(<MissionCanvasPage />);
+
+  fireEvent.click(screen.getByRole('button', { name: 'Mapping' }));
+
+  await waitFor(() => expect(startNavigation).toHaveBeenCalledWith('map', 'map'));
 });

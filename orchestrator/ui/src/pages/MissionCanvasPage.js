@@ -8,6 +8,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   getServiceStatus,
+  saveNavigationMap,
   startNavigation,
   stopNavigation,
 } from "../utils/navigationApi";
@@ -120,6 +121,16 @@ export default function MissionCanvasPage() {
     () => startNavigation("nav", mapName.trim() || DEFAULT_MAP_NAME),
   ), [mapName, runCommand]);
 
+  const handleStartMapping = useCallback(() => runCommand(
+    "Mapping",
+    () => startNavigation("map", mapName.trim() || DEFAULT_MAP_NAME),
+  ), [mapName, runCommand]);
+
+  const handleSaveMap = useCallback(() => runCommand(
+    "Save map",
+    () => saveNavigationMap(mapName.trim() || DEFAULT_MAP_NAME),
+  ), [mapName, runCommand]);
+
   const handleStopNavigation = useCallback(() => runCommand(
     "Stop",
     () => stopNavigation(),
@@ -219,6 +230,19 @@ export default function MissionCanvasPage() {
           <button
             type="button"
             disabled={!!busy || running}
+            onClick={handleStartMapping}
+            className="h-8 px-3 border text-sm font-semibold disabled:opacity-50"
+            style={{
+              color: "var(--vscode-button-foreground)",
+              backgroundColor: "var(--vscode-button-background)",
+              borderColor: "var(--vscode-focusBorder)",
+            }}
+          >
+            Mapping
+          </button>
+          <button
+            type="button"
+            disabled={!!busy || running}
             onClick={handleStartNavigation}
             className="h-8 px-3 border text-sm font-semibold disabled:opacity-50"
             style={{
@@ -228,6 +252,19 @@ export default function MissionCanvasPage() {
             }}
           >
             Navigation
+          </button>
+          <button
+            type="button"
+            disabled={!!busy || !running}
+            onClick={handleSaveMap}
+            className="h-8 px-3 border text-sm font-semibold disabled:opacity-50"
+            style={{
+              color: "var(--vscode-button-secondaryForeground)",
+              backgroundColor: "var(--vscode-button-secondaryBackground)",
+              borderColor: "var(--vscode-panel-border)",
+            }}
+          >
+            Save Map
           </button>
           <button
             type="button"
