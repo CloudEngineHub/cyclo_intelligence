@@ -959,150 +959,151 @@ export default function MissionCanvasPage() {
       </div>
 
       <div
-        className="shrink-0 mb-4 border border-t-0 px-3 py-2 flex flex-wrap items-center gap-2"
+        className="flex-1 min-h-0 border border-t-0 p-3 flex flex-col gap-4"
         style={{
           color: "var(--vscode-foreground)",
           borderColor: MISSION_BORDER,
           backgroundColor: MISSION_STAGE_FILL,
         }}
       >
-        {workspaceStage === STAGE_MAPPING && (
-          <>
-            <ActionButton
-              active={busy === "Mapping" || (running && !mappingEditorActive)}
-              disabled={!!busy || running}
-              onClick={handleStartMapping}
-            >
-              Mapping
-            </ActionButton>
-            <ActionButton
-              active={showSaveMapDialog || busy === "Save map"}
-              disabled={!!busy || !running}
-              onClick={handleOpenSaveMapDialog}
-              variant="secondary"
-            >
-              Save Map
-            </ActionButton>
-            <ActionButton
-              active={mappingEditorActive}
-              disabled={!!busy}
-              onClick={handleLoadMap}
-              variant="secondary"
-            >
-              Load Map
-            </ActionButton>
-            <ActionButton
-              active={mappingEditorActive}
-              disabled={!!busy}
-              onClick={handleToggleMapFix}
-              variant="secondary"
-            >
-              Fix Map
-            </ActionButton>
-            <ActionButton
-              active={busy === "Stop"}
-              disabled={!!busy || !running}
-              onClick={handleStopNavigation}
-              variant="danger"
-            >
-              Stop
-            </ActionButton>
-            {mappingEditorActive && (
-              <>
-                <div
-                  className="h-6 w-px"
-                  aria-hidden="true"
-                  style={{ backgroundColor: MISSION_BORDER }}
-                />
-                <MapEditorControls
-                  files={mapEditor.files}
-                  selectedPath={mapEditor.selectedPath}
-                  setSelectedPath={mapEditor.setSelectedPath}
-                  tool={mapEditor.tool}
-                  setTool={mapEditor.setTool}
-                  brushSize={mapEditor.brushSize}
-                  setBrushSize={mapEditor.setBrushSize}
-                  busy={mapEditor.busy}
-                  image={mapEditor.image}
-                  dirty={mapEditor.dirty}
-                  canUndo={mapEditor.canUndo}
-                  undo={mapEditor.undo}
-                  save={mapEditor.save}
-                />
-              </>
-            )}
-          </>
-        )}
+        <div className="shrink-0 flex flex-wrap items-center gap-2">
+          {workspaceStage === STAGE_MAPPING && (
+            <>
+              <ActionButton
+                active={busy === "Mapping" || (running && !mappingEditorActive)}
+                disabled={!!busy || running}
+                onClick={handleStartMapping}
+              >
+                Mapping
+              </ActionButton>
+              <ActionButton
+                active={showSaveMapDialog || busy === "Save map"}
+                disabled={!!busy || !running}
+                onClick={handleOpenSaveMapDialog}
+                variant="secondary"
+              >
+                Save Map
+              </ActionButton>
+              <ActionButton
+                active={mappingEditorActive}
+                disabled={!!busy}
+                onClick={handleLoadMap}
+                variant="secondary"
+              >
+                Load Map
+              </ActionButton>
+              <ActionButton
+                active={mappingEditorActive}
+                disabled={!!busy}
+                onClick={handleToggleMapFix}
+                variant="secondary"
+              >
+                Fix Map
+              </ActionButton>
+              <ActionButton
+                active={busy === "Stop"}
+                disabled={!!busy || !running}
+                onClick={handleStopNavigation}
+                variant="danger"
+              >
+                Stop
+              </ActionButton>
+              {mappingEditorActive && (
+                <>
+                  <div
+                    className="h-6 w-px"
+                    aria-hidden="true"
+                    style={{ backgroundColor: MISSION_BUTTON_BORDER }}
+                  />
+                  <MapEditorControls
+                    files={mapEditor.files}
+                    selectedPath={mapEditor.selectedPath}
+                    setSelectedPath={mapEditor.setSelectedPath}
+                    tool={mapEditor.tool}
+                    setTool={mapEditor.setTool}
+                    brushSize={mapEditor.brushSize}
+                    setBrushSize={mapEditor.setBrushSize}
+                    busy={mapEditor.busy}
+                    image={mapEditor.image}
+                    dirty={mapEditor.dirty}
+                    canUndo={mapEditor.canUndo}
+                    undo={mapEditor.undo}
+                    save={mapEditor.save}
+                  />
+                </>
+              )}
+            </>
+          )}
 
-        {workspaceStage === STAGE_AUTHORING && (
-          <>
-            <ActionButton
-              active={interactionMode === "spot"}
-              disabled={!running || !map}
-              onClick={handleToggleSpotMode}
-              variant="secondary"
-            >
-              Spot
-            </ActionButton>
-            <ActionButton
-              disabled={!selectedSpot}
-              onClick={handleDeleteSelectedSpot}
-              variant="secondary"
-            >
-              Delete Spot
-            </ActionButton>
-            <ActionButton
-              disabled={!selectedBehaviorNode}
-              onClick={handleDeleteSelectedBehaviorNode}
-              variant="secondary"
-            >
-              Delete Node
-            </ActionButton>
-            <ActionButton disabled variant="secondary">
-              Create BT
-            </ActionButton>
-            <ActionButton disabled variant="secondary">
-              Edit BT
-            </ActionButton>
-          </>
-        )}
+          {workspaceStage === STAGE_AUTHORING && (
+            <>
+              <ActionButton
+                active={interactionMode === "spot"}
+                disabled={!running || !map}
+                onClick={handleToggleSpotMode}
+                variant="secondary"
+              >
+                Spot
+              </ActionButton>
+              <ActionButton
+                disabled={!selectedSpot}
+                onClick={handleDeleteSelectedSpot}
+                variant="secondary"
+              >
+                Delete Spot
+              </ActionButton>
+              <ActionButton
+                disabled={!selectedBehaviorNode}
+                onClick={handleDeleteSelectedBehaviorNode}
+                variant="secondary"
+              >
+                Delete Node
+              </ActionButton>
+              <ActionButton disabled variant="secondary">
+                Create BT
+              </ActionButton>
+              <ActionButton disabled variant="secondary">
+                Edit BT
+              </ActionButton>
+            </>
+          )}
 
-        {workspaceStage === STAGE_RUN && (
-          <>
-            <div
-              className="h-8 px-2.5 border flex items-center gap-2 text-sm"
-              style={{
-                color: "var(--vscode-foreground)",
-                backgroundColor: MISSION_SURFACE,
-                borderColor: MISSION_BORDER,
-              }}
-            >
-              <span style={{ color: "var(--vscode-descriptionForeground)" }}>Map</span>
-              <span className="font-mono">{mapName.trim() || DEFAULT_MAP_NAME}</span>
-            </div>
-            <ActionButton
-              active={busy === "Navigation" || (running && workspaceStage === STAGE_RUN)}
-              disabled={!!busy || running}
-              onClick={handleStartNavigation}
-            >
-              Navigation
-            </ActionButton>
-            <ActionButton disabled variant="secondary">
-              Run BT
-            </ActionButton>
-            <ActionButton
-              active={busy === "Stop"}
-              disabled={!!busy || !running}
-              onClick={handleStopNavigation}
-              variant="danger"
-            >
-              Stop
-            </ActionButton>
-          </>
-        )}
-      </div>
+          {workspaceStage === STAGE_RUN && (
+            <>
+              <div
+                className="h-8 px-2.5 border flex items-center gap-2 text-sm"
+                style={{
+                  color: "var(--vscode-foreground)",
+                  backgroundColor: MISSION_STAGE_EMPTY,
+                  borderColor: MISSION_BUTTON_BORDER,
+                }}
+              >
+                <span style={{ color: "var(--vscode-descriptionForeground)" }}>Map</span>
+                <span className="font-mono">{mapName.trim() || DEFAULT_MAP_NAME}</span>
+              </div>
+              <ActionButton
+                active={busy === "Navigation" || (running && workspaceStage === STAGE_RUN)}
+                disabled={!!busy || running}
+                onClick={handleStartNavigation}
+              >
+                Navigation
+              </ActionButton>
+              <ActionButton disabled variant="secondary">
+                Run BT
+              </ActionButton>
+              <ActionButton
+                active={busy === "Stop"}
+                disabled={!!busy || !running}
+                onClick={handleStopNavigation}
+                variant="danger"
+              >
+                Stop
+              </ActionButton>
+            </>
+          )}
+        </div>
 
-      <div className="flex-1 min-h-0 grid grid-cols-1 xl:grid-cols-[minmax(520px,1fr)_360px] gap-4">
+        <div className="flex-1 min-h-0 grid grid-cols-1 xl:grid-cols-[minmax(520px,1fr)_360px] gap-4">
         <section
           className={[
             "min-h-0 overflow-hidden grid gap-4",
@@ -1299,6 +1300,7 @@ export default function MissionCanvasPage() {
             <TopicStatusPanel topicRows={topicRows} />
           </aside>
         )}
+      </div>
       </div>
     </div>
   );
