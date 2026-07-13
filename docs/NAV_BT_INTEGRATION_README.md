@@ -101,11 +101,15 @@ Browser UI
 │  │  ├─ active BT node highlight
 │  │  └─ robot / plan / costmap / scan layers
 │  │
-│  ├─ Behavior Surface
-│  │  ├─ embedded BT graph editor
-│  │  ├─ node palette
-│  │  ├─ graph layout controls
+│  ├─ Behavior Layer
+│  │  ├─ BT nodes placed on the map surface
+│  │  ├─ BT edges / spatial relationships
 │  │  └─ active BT node highlight
+│  │
+│  ├─ Behavior Palette
+│  │  ├─ Action node list
+│  │  ├─ Control node list
+│  │  └─ Decorator node list
 │  │
 │  ├─ Inspector
 │  │  ├─ selected Spot editor
@@ -385,8 +389,9 @@ As of the first Mission Canvas implementation slice, the repository contains:
 - Mission Canvas Spot creation, selection, rename, and delete UI.
 - Mission Canvas stage tabs:
   - Mapping
-  - Spot / BT
+  - Design
   - Run
+- Design tab Behavior Palette with Action / Control / Decorator groups.
 - Stage-specific action bars for mapping, authoring, and runtime controls.
 - Stage-specific layer presets and shared Topics diagnostics.
 - Frontend API utilities and focused tests for the new page/API client.

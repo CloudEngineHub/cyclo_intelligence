@@ -55,7 +55,7 @@ test('renders Mission Canvas foundation', async () => {
   expect(screen.getByRole('heading', { name: 'Mission Canvas' })).toBeInTheDocument();
   expect(screen.getByText('Mission Canvas Map')).toBeInTheDocument();
   expect(screen.getByRole('tab', { name: 'Mapping' })).toHaveAttribute('aria-selected', 'true');
-  expect(screen.getByRole('tab', { name: 'Spot / BT' })).toBeInTheDocument();
+  expect(screen.getByRole('tab', { name: 'Design' })).toBeInTheDocument();
   expect(screen.getByRole('tab', { name: 'Run' })).toBeInTheDocument();
   expect(screen.getByLabelText('Map name')).toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Save Map' })).toBeInTheDocument();
@@ -68,9 +68,14 @@ test('renders Mission Canvas foundation', async () => {
 test('shows Spot and BT authoring panels in the authoring stage', async () => {
   render(<MissionCanvasPage />);
 
-  fireEvent.click(screen.getByRole('tab', { name: 'Spot / BT' }));
+  fireEvent.click(screen.getByRole('tab', { name: 'Design' }));
 
-  expect(screen.getByText('Behavior Surface')).toBeInTheDocument();
+  expect(screen.getByText('Behavior Palette')).toBeInTheDocument();
+  expect(screen.getByText('Actions')).toBeInTheDocument();
+  expect(screen.getByText('Controls')).toBeInTheDocument();
+  expect(screen.getByText('Decorators')).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'SendCommand' })).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Sequence' })).toBeInTheDocument();
   expect(screen.getByText('Inspector')).toBeInTheDocument();
   expect(screen.getByText('Spots')).toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Spot' })).toBeInTheDocument();

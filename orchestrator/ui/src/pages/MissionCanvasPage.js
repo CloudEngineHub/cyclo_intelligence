@@ -26,6 +26,7 @@ import {
   tfMessageFromBuffer,
   updateTfBuffer,
 } from "../utils/navigationTf";
+import { FALLBACK_CATALOG } from "../constants/btNodeCatalogFallback";
 
 const DEFAULT_MAP_NAME = "map";
 const STATUS_POLL_MS = 10000;
@@ -36,8 +37,14 @@ const STAGE_RUN = "run";
 
 const WORKSPACE_STAGES = [
   { id: STAGE_MAPPING, label: "Mapping" },
-  { id: STAGE_AUTHORING, label: "Spot / BT" },
+  { id: STAGE_AUTHORING, label: "Design" },
   { id: STAGE_RUN, label: "Run" },
+];
+
+const BEHAVIOR_NODE_GROUPS = [
+  { id: "action", label: "Actions" },
+  { id: "control", label: "Controls" },
+  { id: "decorator", label: "Decorators" },
 ];
 
 const LAYER_DEFINITIONS = {
@@ -202,6 +209,69 @@ function TopicStatusPanel({ topicRows }) {
           </span>
         </div>
       ))}
+    </Panel>
+  );
+}
+
+function BehaviorPalette() {
+  const groupedNodes = useMemo(() => (
+    BEHAVIOR_NODE_GROUPS.map((group) => ({
+      ...group,
+      nodes: FALLBACK_CATALOG.filter((node) => node.category === group.id),
+    }))
+  ), []);
+
+  const handleDragStart = (event, tag) => {
+    event.dataTransfer.setData("application/bt-node-tag", tag);
+    event.dataTransfer.setData("text/plain", tag);
+    event.dataTransfer.effectAllowed = "copy";
+  };
+
+  return (
+    <Panel title="Behavior Palette" className="min-h-0 overflow-hidden">
+      <div className="h-full min-h-0 grid grid-cols-1 md:grid-cols-3 gap-3 overflow-auto">
+        {groupedNodes.map((group) => (
+          <div key={group.id} className="min-w-0">
+            <div
+              className="text-[10px] uppercase font-semibold mb-2"
+              style={{ color: "var(--vscode-descriptionForeground)" }}
+            >
+              {group.label}
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {group.nodes.map((node) => (
+                <button
+                  key={node.tag}
+                  type="button"
+                  draggable
+                  onDragStart={(event) => handleDragStart(event, node.tag)}
+                  className="h-8 px-2 border text-xs font-medium"
+                  style={{
+                    color: "var(--vscode-foreground)",
+                    backgroundColor: "var(--vscode-editor-background)",
+                    borderColor: "var(--vscode-panel-border)",
+                  }}
+                  title={node.tag}
+                >
+                  {node.tag}
+                </button>
+              ))}
+              {group.nodes.length === 0 && (
+                <div
+                  className="h-8 px-2 border flex items-center text-xs"
+                  style={{
+                    color: "var(--vscode-descriptionForeground)",
+                    backgroundColor: "var(--vscode-editor-background)",
+                    borderColor: "var(--vscode-panel-border)",
+                  }}
+                >
+                  No nodes
+                </div>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
     </Panel>
   );
 }
@@ -735,11 +805,7 @@ export default function MissionCanvasPage() {
             onMapPose={handleCreateSpotAtPose}
           />
           {workspaceStage === STAGE_AUTHORING && (
-            <Panel title="Behavior Surface" className="min-h-0 overflow-hidden">
-              <div className="text-xs leading-5" style={{ color: "var(--vscode-descriptionForeground)" }}>
-                BT graph embedding starts after Spot persistence and NavigateToSpot are stable.
-              </div>
-            </Panel>
+            <BehaviorPalette />
           )}
         </section>
 
