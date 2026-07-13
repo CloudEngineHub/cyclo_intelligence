@@ -222,17 +222,21 @@ function behaviorNodeSerialFromNodes(nodes) {
   }, 0);
 }
 
-function Panel({ title, children, className = "" }) {
+function Panel({ title, children, className = "", compact = false }) {
   return (
     <div
-      className={`border p-3 ${className}`}
+      className={`border ${compact ? "p-2" : "p-3"} ${className}`}
       style={{
         color: "var(--vscode-foreground)",
         borderColor: MISSION_PANEL_BORDER,
         backgroundColor: MISSION_STAGE_EMPTY,
       }}
     >
-      {title && <div className="text-xs font-semibold mb-2">{title}</div>}
+      {title && (
+        <div className={`text-xs font-semibold ${compact ? "mb-1" : "mb-2"}`}>
+          {title}
+        </div>
+      )}
       {children}
     </div>
   );
@@ -369,10 +373,10 @@ function LoadMapDialog({
   );
 }
 
-function LayerToggle({ label, checked, onChange }) {
+function LayerToggle({ label, checked, compact = false, onChange }) {
   return (
     <label
-      className="h-8 px-2 border flex items-center gap-2 text-xs font-medium"
+      className={`${compact ? "h-6 px-1.5 gap-1.5" : "h-8 px-2 gap-2"} border flex items-center text-xs font-medium`}
       style={{
         color: "var(--vscode-foreground)",
         borderColor: MISSION_PANEL_BORDER,
@@ -389,15 +393,16 @@ function LayerToggle({ label, checked, onChange }) {
   );
 }
 
-function LayersPanel({ layerToggles }) {
+function LayersPanel({ layerToggles, compact = false }) {
   return (
-    <Panel title="Layers" className="grid gap-2 shrink-0">
-      <div className="flex flex-wrap gap-2">
+    <Panel title="Layers" compact={compact} className={`grid shrink-0 ${compact ? "gap-1" : "gap-2"}`}>
+      <div className={`flex flex-wrap ${compact ? "gap-1" : "gap-2"}`}>
         {layerToggles.map((layer) => (
           <LayerToggle
             key={layer.id}
             label={layer.label}
             checked={layer.checked}
+            compact={compact}
             onChange={layer.onChange}
           />
         ))}
@@ -428,7 +433,7 @@ function TopicStatusPanel({ topicRows }) {
 
 function SessionRow({ label, value }) {
   return (
-    <div className="flex items-center justify-between gap-3 text-xs">
+    <div className="flex items-center justify-between gap-2 text-xs min-w-0">
       <span style={{ color: "var(--vscode-descriptionForeground)" }}>{label}</span>
       <span className="font-mono truncate text-right">{value}</span>
     </div>
@@ -437,19 +442,21 @@ function SessionRow({ label, value }) {
 
 function MappingSessionPanel({ mappingEditorActive, selectedPath, dirty }) {
   return (
-    <Panel title="Mapping Session" className="grid gap-2">
-      <SessionRow
-        label="Source"
-        value={mappingEditorActive ? "Saved map" : "Live mapping"}
-      />
-      <SessionRow
-        label="Map file"
-        value={mappingEditorActive && selectedPath ? selectedPath : "Not saved"}
-      />
-      <SessionRow
-        label="Edits"
-        value={mappingEditorActive && dirty ? "Unsaved changes" : "Clean"}
-      />
+    <Panel title="Mapping Session" compact className="grid gap-1">
+      <div className="grid grid-cols-2 gap-x-3 gap-y-1">
+        <SessionRow
+          label="Source"
+          value={mappingEditorActive ? "Saved map" : "Live mapping"}
+        />
+        <SessionRow
+          label="Map"
+          value={mappingEditorActive && selectedPath ? selectedPath : "Not saved"}
+        />
+        <SessionRow
+          label="Edits"
+          value={mappingEditorActive && dirty ? "Unsaved changes" : "Clean"}
+        />
+      </div>
     </Panel>
   );
 }
@@ -520,7 +527,7 @@ function TeleopButton({
       onPointerUp={handlePointerStop}
       onPointerCancel={handlePointerStop}
       onPointerLeave={handlePointerStop}
-      className="h-10 w-10 border text-sm font-bold transition-all active:translate-y-px disabled:opacity-45"
+      className="h-12 w-14 border text-base font-bold transition-all active:translate-y-px disabled:opacity-45"
       style={{
         color: active ? "var(--vscode-button-foreground)" : "var(--vscode-foreground)",
         backgroundColor: active ? "var(--vscode-button-background)" : MISSION_STAGE_EMPTY,
@@ -651,7 +658,7 @@ function MappingTeleopPanel({ disabled, onPublish, onMessage }) {
   };
 
   return (
-    <Panel title="Mobile Teleop" className="grid gap-3">
+    <Panel title="Mobile Teleop" className="grid gap-3 min-h-0">
       <div
         role="group"
         aria-label="Mobile Teleop"
@@ -663,9 +670,9 @@ function MappingTeleopPanel({ disabled, onPublish, onMessage }) {
             stopTeleop();
           }
         }}
-        className="grid grid-cols-[auto_1fr] gap-3 items-center outline-none"
+        className="grid gap-4 outline-none"
       >
-        <div className="grid grid-cols-3 gap-1 justify-start">
+        <div className="grid grid-cols-3 gap-2 justify-self-center">
           <div />
           <TeleopButton
             active={activeLabel === "W"}
@@ -745,8 +752,10 @@ function MappingTeleopPanel({ disabled, onPublish, onMessage }) {
             />
             <span className="font-mono text-right">{angularSpeed.toFixed(2)}</span>
           </label>
-          <SessionRow label="Topic" value={TELEOP_TOPIC} />
-          <SessionRow label="Command" value={disabled ? "Unavailable" : activeLabel || "Stop"} />
+          <div className="grid grid-cols-2 gap-2">
+            <SessionRow label="Topic" value={TELEOP_TOPIC} />
+            <SessionRow label="Command" value={disabled ? "Unavailable" : activeLabel || "Stop"} />
+          </div>
         </div>
       </div>
     </Panel>
@@ -1860,10 +1869,17 @@ export default function MissionCanvasPage() {
             className={[
               "min-h-0 grid gap-4",
               workspaceStage === STAGE_MAPPING
-                ? "grid-rows-[auto_auto_auto_minmax(96px,140px)]"
+                ? "grid-rows-[minmax(255px,auto)_auto_auto_minmax(150px,1fr)]"
                 : "grid-rows-[auto_auto_minmax(0,1fr)]",
             ].join(" ")}
           >
+            {workspaceStage === STAGE_MAPPING && (
+              <MappingTeleopPanel
+                disabled={teleopDisabled}
+                onPublish={publishTeleopCommand}
+                onMessage={setMessage}
+              />
+            )}
             {workspaceStage === STAGE_MAPPING ? (
               <MappingSessionPanel
                 mappingEditorActive={mappingEditorActive}
@@ -1873,14 +1889,10 @@ export default function MissionCanvasPage() {
             ) : (
               <RunSessionPanel mapName={currentMapName} running={running} />
             )}
-            {workspaceStage === STAGE_MAPPING && (
-              <MappingTeleopPanel
-                disabled={teleopDisabled}
-                onPublish={publishTeleopCommand}
-                onMessage={setMessage}
-              />
-            )}
-            <LayersPanel layerToggles={layerToggles} />
+            <LayersPanel
+              layerToggles={layerToggles}
+              compact={workspaceStage === STAGE_MAPPING}
+            />
             <TopicStatusPanel topicRows={topicRows} />
           </aside>
         )}
