@@ -383,6 +383,11 @@ As of the first Mission Canvas implementation slice, the repository contains:
   by default, overrideable with CYCLO_NAVIGATION_DATA_DIR.
 - MapViewer Spot marker overlay with click selection.
 - Mission Canvas Spot creation, selection, rename, and delete UI.
+- Mission Canvas stage tabs:
+  - Mapping
+  - Spot / BT
+  - Run
+- Stage-specific layer presets and shared Topics diagnostics.
 - Frontend API utilities and focused tests for the new page/API client.
 - Backend unit coverage for Spot CRUD added to docker/supervisor_api/test_app.py.
 ```
@@ -394,6 +399,7 @@ Implemented:
   Phase 0 contract documentation and route registration hardening
   Phase 1 Spot persistence API
   Early Phase 2 Spot overlay and Inspector UI
+  Early Mission Canvas stage layout
 
 Deferred:
   BT graph embedding

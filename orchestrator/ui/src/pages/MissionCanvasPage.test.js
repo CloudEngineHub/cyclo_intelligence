@@ -43,6 +43,9 @@ jest.mock('../hooks/useNavigationRosTopic', () => ({
 
 beforeEach(() => {
   jest.clearAllMocks();
+  getServiceStatus.mockResolvedValue({ is_up: false });
+  getNavigationSpots.mockResolvedValue({ map_name: 'map', spots: [] });
+  startNavigation.mockResolvedValue({ ok: true });
   mockMapViewer.mockImplementation(() => <div>Mission Canvas Map</div>);
 });
 
@@ -51,8 +54,23 @@ test('renders Mission Canvas foundation', async () => {
 
   expect(screen.getByRole('heading', { name: 'Mission Canvas' })).toBeInTheDocument();
   expect(screen.getByText('Mission Canvas Map')).toBeInTheDocument();
+  expect(screen.getByRole('tab', { name: 'Mapping' })).toHaveAttribute('aria-selected', 'true');
+  expect(screen.getByRole('tab', { name: 'Spot / BT' })).toBeInTheDocument();
+  expect(screen.getByRole('tab', { name: 'Run' })).toBeInTheDocument();
+  expect(screen.getByText('Layers')).toBeInTheDocument();
+  expect(screen.getByText('Topics')).toBeInTheDocument();
+  await waitFor(() => expect(getServiceStatus).toHaveBeenCalled());
+  await waitFor(() => expect(getNavigationSpots).toHaveBeenCalledWith('map'));
+});
+
+test('shows Spot and BT authoring panels in the authoring stage', async () => {
+  render(<MissionCanvasPage />);
+
+  fireEvent.click(screen.getByRole('tab', { name: 'Spot / BT' }));
+
   expect(screen.getByText('Behavior Surface')).toBeInTheDocument();
   expect(screen.getByText('Inspector')).toBeInTheDocument();
+  expect(screen.getByText('Spots')).toBeInTheDocument();
   await waitFor(() => expect(getServiceStatus).toHaveBeenCalled());
   await waitFor(() => expect(getNavigationSpots).toHaveBeenCalledWith('map'));
 });
@@ -74,6 +92,23 @@ test('enables live robot and lidar layers while navigation runtime is active', a
     expect(mockMapViewer.mock.calls.some(([props]) => (
       props.showScan === true &&
       props.showRobotModel === true
+    ))).toBe(true);
+  });
+});
+
+test('enables navigation runtime layers in the run stage', async () => {
+  getServiceStatus.mockResolvedValueOnce({ is_up: true });
+
+  render(<MissionCanvasPage />);
+
+  fireEvent.click(screen.getByRole('tab', { name: 'Run' }));
+
+  await waitFor(() => {
+    expect(mockMapViewer.mock.calls.some(([props]) => (
+      props.showGlobalCostmap === true &&
+      props.showLocalCostmap === true &&
+      props.showGlobalPlan === true &&
+      props.showGoalPose === true
     ))).toBe(true);
   });
 });

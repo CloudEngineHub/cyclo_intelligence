@@ -30,6 +30,89 @@ import {
 const DEFAULT_MAP_NAME = "map";
 const STATUS_POLL_MS = 10000;
 const ROS2_WS_FAST_TOPIC_OPTIONS = { throttleMs: 100 };
+const STAGE_MAPPING = "mapping";
+const STAGE_AUTHORING = "authoring";
+const STAGE_RUN = "run";
+
+const WORKSPACE_STAGES = [
+  { id: STAGE_MAPPING, label: "Mapping" },
+  { id: STAGE_AUTHORING, label: "Spot / BT" },
+  { id: STAGE_RUN, label: "Run" },
+];
+
+const LAYER_DEFINITIONS = {
+  map: "Map",
+  scan: "Lidar",
+  robotModel: "Robot Model",
+  tf: "TF",
+  globalCostmap: "Global costmap",
+  localCostmap: "Local costmap",
+  globalPlan: "Global plan",
+  goalPose: "Goal pose",
+};
+
+const STAGE_LAYER_IDS = {
+  [STAGE_MAPPING]: ["map", "scan", "robotModel", "tf"],
+  [STAGE_AUTHORING]: ["map", "scan", "robotModel", "tf"],
+  [STAGE_RUN]: [
+    "map",
+    "scan",
+    "robotModel",
+    "globalCostmap",
+    "localCostmap",
+    "globalPlan",
+    "goalPose",
+    "tf",
+  ],
+};
+
+const LAYER_PRESETS = {
+  [STAGE_MAPPING]: {
+    map: true,
+    scan: true,
+    robotModel: true,
+    tf: true,
+    globalCostmap: false,
+    localCostmap: false,
+    globalPlan: false,
+    goalPose: false,
+  },
+  [STAGE_AUTHORING]: {
+    map: true,
+    scan: false,
+    robotModel: false,
+    tf: false,
+    globalCostmap: false,
+    localCostmap: false,
+    globalPlan: false,
+    goalPose: false,
+  },
+  [STAGE_RUN]: {
+    map: true,
+    scan: true,
+    robotModel: true,
+    tf: false,
+    globalCostmap: true,
+    localCostmap: true,
+    globalPlan: true,
+    goalPose: true,
+  },
+};
+
+const TOPIC_LABELS = {
+  "/map": "Map",
+  "/scan": "Lidar",
+  "/amcl_pose": "AMCL pose",
+  "/tf": "TF",
+  "/tf_static": "TF static",
+  "/local_costmap/published_footprint": "Footprint",
+  "/global_costmap/costmap": "Global costmap",
+  "/local_costmap/costmap": "Local costmap",
+  "/plan": "Global plan",
+  "/goal_pose": "Goal pose",
+  "/bt/status": "BT status",
+  "/bt/active_nodes": "BT active nodes",
+};
 
 function messageData(value) {
   if (!value || typeof value !== "object") return null;
@@ -47,6 +130,82 @@ function spotPoseFromMapPose(x, y, yaw) {
   };
 }
 
+function Panel({ title, children, className = "" }) {
+  return (
+    <div
+      className={`border p-3 ${className}`}
+      style={{
+        color: "var(--vscode-foreground)",
+        borderColor: "var(--vscode-panel-border)",
+        backgroundColor: "var(--vscode-sidebar-background)",
+      }}
+    >
+      {title && <div className="text-xs font-semibold mb-2">{title}</div>}
+      {children}
+    </div>
+  );
+}
+
+function LayerToggle({ label, checked, onChange }) {
+  return (
+    <label
+      className="h-8 px-2 border flex items-center gap-2 text-xs font-medium"
+      style={{
+        color: "var(--vscode-foreground)",
+        borderColor: "var(--vscode-panel-border)",
+        backgroundColor: "var(--vscode-editor-background)",
+      }}
+    >
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={(event) => onChange(event.currentTarget.checked)}
+      />
+      {label}
+    </label>
+  );
+}
+
+function LayersPanel({ layerToggles }) {
+  return (
+    <Panel title="Layers" className="grid gap-2 shrink-0">
+      <div className="flex flex-wrap gap-2">
+        {layerToggles.map((layer) => (
+          <LayerToggle
+            key={layer.id}
+            label={layer.label}
+            checked={layer.checked}
+            onChange={layer.onChange}
+          />
+        ))}
+      </div>
+    </Panel>
+  );
+}
+
+function TopicStatusPanel({ topicRows }) {
+  return (
+    <Panel title="Topics" className="grid gap-2 text-xs min-h-0 overflow-auto">
+      {topicRows.map(({ topic, isLive }) => (
+        <div key={topic} className="flex items-center justify-between gap-3 min-w-0">
+          <div className="min-w-0">
+            <div className="font-mono truncate">{topic}</div>
+            <div style={{ color: "var(--vscode-descriptionForeground)" }}>
+              {TOPIC_LABELS[topic] || topic}
+            </div>
+          </div>
+          <span
+            className="shrink-0"
+            style={{ color: isLive ? "#22c55e" : "var(--vscode-descriptionForeground)" }}
+          >
+            {isLive ? "live" : "wait"}
+          </span>
+        </div>
+      ))}
+    </Panel>
+  );
+}
+
 export default function MissionCanvasPage() {
   const statusLoadingRef = useRef(false);
   const tfBufferRef = useRef(new Map());
@@ -58,39 +217,73 @@ export default function MissionCanvasPage() {
   const [message, setMessage] = useState("Ready");
   const [interactionMode, setInteractionMode] = useState("view");
   const [tfBufferRevision, setTfBufferRevision] = useState(0);
+  const [workspaceStage, setWorkspaceStage] = useState(STAGE_MAPPING);
+  const [layersByStage, setLayersByStage] = useState(() => ({
+    [STAGE_MAPPING]: { ...LAYER_PRESETS[STAGE_MAPPING] },
+    [STAGE_AUTHORING]: { ...LAYER_PRESETS[STAGE_AUTHORING] },
+    [STAGE_RUN]: { ...LAYER_PRESETS[STAGE_RUN] },
+  }));
 
   const running = status?.is_up ?? false;
   const navigationTopicsActive = running && busy !== "Stop";
+  const activeLayers = layersByStage[workspaceStage] || LAYER_PRESETS[workspaceStage];
+  const needsGlobalCostmap = navigationTopicsActive && activeLayers.globalCostmap;
+  const needsLocalCostmap = navigationTopicsActive && activeLayers.localCostmap;
+  const needsScan = navigationTopicsActive && activeLayers.scan;
+  const needsGoalPose = navigationTopicsActive && activeLayers.goalPose;
+  const needsPlan = navigationTopicsActive && activeLayers.globalPlan;
+  const needsRobotModel = navigationTopicsActive && activeLayers.robotModel;
+  const needsTf = navigationTopicsActive && (
+    activeLayers.tf ||
+    activeLayers.scan ||
+    activeLayers.robotModel
+  );
   const selectedSpot = useMemo(
     () => spots.find((spot) => spot.id === selectedSpotId) || null,
     [selectedSpotId, spots],
   );
   const { topicData: mapData } = useNavigationRosTopic(
-    navigationTopicsActive ? "/map" : null,
+    navigationTopicsActive && activeLayers.map ? "/map" : null,
+  );
+  const { topicData: globalCostmapData } = useNavigationRosTopic(
+    needsGlobalCostmap ? "/global_costmap/costmap" : null,
+  );
+  const { topicData: localCostmapData } = useNavigationRosTopic(
+    needsLocalCostmap ? "/local_costmap/costmap" : null,
   );
   const { topicData: footprintData } = useNavigationRosTopic(
-    navigationTopicsActive ? "/local_costmap/published_footprint" : null,
+    needsRobotModel ? "/local_costmap/published_footprint" : null,
     ROS2_WS_FAST_TOPIC_OPTIONS,
   );
   const { topicData: scanData } = useNavigationRosTopic(
-    navigationTopicsActive ? "/scan" : null,
+    needsScan ? "/scan" : null,
     ROS2_WS_FAST_TOPIC_OPTIONS,
   );
   const { topicData: amclData } = useNavigationRosTopic(
-    navigationTopicsActive ? "/amcl_pose" : null,
+    navigationTopicsActive && (needsRobotModel || needsScan) ? "/amcl_pose" : null,
     ROS2_WS_FAST_TOPIC_OPTIONS,
   );
+  const { topicData: planData } = useNavigationRosTopic(
+    needsPlan ? "/plan" : null,
+  );
+  const { topicData: goalPoseData } = useNavigationRosTopic(
+    needsGoalPose ? "/goal_pose" : null,
+  );
   const { topicData: tfData } = useNavigationRosTopic(
-    navigationTopicsActive ? "/tf" : null,
+    needsTf ? "/tf" : null,
     ROS2_WS_FAST_TOPIC_OPTIONS,
   );
   const { topicData: tfStaticData } = useNavigationRosTopic(
-    navigationTopicsActive ? "/tf_static" : null,
+    needsTf ? "/tf_static" : null,
   );
   const map = useMemo(() => messageData(mapData), [mapData]);
+  const globalCostmap = useMemo(() => messageData(globalCostmapData), [globalCostmapData]);
+  const localCostmap = useMemo(() => messageData(localCostmapData), [localCostmapData]);
   const footprint = useMemo(() => messageData(footprintData), [footprintData]);
   const scan = useMemo(() => messageData(scanData), [scanData]);
   const amclPose = useMemo(() => messageData(amclData), [amclData]);
+  const plan = useMemo(() => messageData(planData), [planData]);
+  const goalPose = useMemo(() => messageData(goalPoseData), [goalPoseData]);
   const tf = useMemo(() => messageData(tfData), [tfData]);
   const tfStatic = useMemo(() => messageData(tfStaticData), [tfStaticData]);
   const latestTf = useMemo(() => mergeTfMessages(tfStatic, tf), [tf, tfStatic]);
@@ -98,6 +291,50 @@ export default function MissionCanvasPage() {
   const bufferedTf = tfMessageFromBuffer(tfBufferRef.current) ?? latestTf;
   const fallbackPose = amclPose?.pose?.pose ?? null;
   const currentPose = poseFromBaseLinkTf(bufferedTf) ?? fallbackPose;
+  const layerToggles = useMemo(() => (
+    STAGE_LAYER_IDS[workspaceStage].map((id) => ({
+      id,
+      label: LAYER_DEFINITIONS[id],
+      checked: !!activeLayers[id],
+      onChange: (checked) => {
+        setLayersByStage((current) => ({
+          ...current,
+          [workspaceStage]: {
+            ...current[workspaceStage],
+            [id]: checked,
+          },
+        }));
+      },
+    }))
+  ), [activeLayers, workspaceStage]);
+  const topicRows = useMemo(() => ([
+    { topic: "/map", isLive: !!map },
+    { topic: "/scan", isLive: !!scan },
+    { topic: "/amcl_pose", isLive: !!amclPose },
+    { topic: "/tf", isLive: !!(tf?.transforms?.length) },
+    { topic: "/tf_static", isLive: !!(tfStatic?.transforms?.length) },
+    {
+      topic: "/local_costmap/published_footprint",
+      isLive: !!(footprint?.polygon?.points?.length),
+    },
+    { topic: "/global_costmap/costmap", isLive: !!globalCostmap },
+    { topic: "/local_costmap/costmap", isLive: !!localCostmap },
+    { topic: "/plan", isLive: !!plan },
+    { topic: "/goal_pose", isLive: !!goalPose },
+    { topic: "/bt/status", isLive: false },
+    { topic: "/bt/active_nodes", isLive: false },
+  ]), [
+    amclPose,
+    footprint,
+    globalCostmap,
+    goalPose,
+    localCostmap,
+    map,
+    plan,
+    scan,
+    tf,
+    tfStatic,
+  ]);
 
   const loadStatus = useCallback(async () => {
     if (statusLoadingRef.current || document.visibilityState === "hidden") {
@@ -163,12 +400,18 @@ export default function MissionCanvasPage() {
 
   const handleStartNavigation = useCallback(() => runCommand(
     "Navigation",
-    () => startNavigation("nav", mapName.trim() || DEFAULT_MAP_NAME),
+    async () => {
+      setWorkspaceStage(STAGE_RUN);
+      await startNavigation("nav", mapName.trim() || DEFAULT_MAP_NAME);
+    },
   ), [mapName, runCommand]);
 
   const handleStartMapping = useCallback(() => runCommand(
     "Mapping",
-    () => startNavigation("map", mapName.trim() || DEFAULT_MAP_NAME),
+    async () => {
+      setWorkspaceStage(STAGE_MAPPING);
+      await startNavigation("map", mapName.trim() || DEFAULT_MAP_NAME);
+    },
   ), [mapName, runCommand]);
 
   const handleSaveMap = useCallback(() => runCommand(
@@ -180,6 +423,11 @@ export default function MissionCanvasPage() {
     "Stop",
     () => stopNavigation(),
   ), [runCommand]);
+
+  const handleToggleSpotMode = useCallback(() => {
+    setWorkspaceStage(STAGE_AUTHORING);
+    setInteractionMode((value) => (value === "spot" ? "view" : "spot"));
+  }, []);
 
   const handleCreateSpotAtPose = useCallback(async (x, y, yaw) => {
     if (interactionMode !== "spot") return;
@@ -327,7 +575,7 @@ export default function MissionCanvasPage() {
           <button
             type="button"
             disabled={!running || !map}
-            onClick={() => setInteractionMode((value) => (value === "spot" ? "view" : "spot"))}
+            onClick={handleToggleSpotMode}
             className="h-8 px-3 border text-sm font-semibold disabled:opacity-50"
             style={{
               color: interactionMode === "spot"
@@ -346,28 +594,71 @@ export default function MissionCanvasPage() {
         </div>
       </header>
 
+      <div
+        className="shrink-0 mb-4 flex flex-wrap gap-2"
+        role="tablist"
+        aria-label="Mission Canvas stages"
+      >
+        {WORKSPACE_STAGES.map((stage) => {
+          const selected = workspaceStage === stage.id;
+          return (
+            <button
+              key={stage.id}
+              type="button"
+              role="tab"
+              aria-selected={selected}
+              onClick={() => {
+                setWorkspaceStage(stage.id);
+                if (stage.id !== STAGE_AUTHORING) setInteractionMode("view");
+              }}
+              className="h-8 px-3 border text-sm font-semibold"
+              style={{
+                color: selected
+                  ? "var(--vscode-button-foreground)"
+                  : "var(--vscode-foreground)",
+                backgroundColor: selected
+                  ? "var(--vscode-button-background)"
+                  : "var(--vscode-editor-background)",
+                borderColor: selected
+                  ? "var(--vscode-focusBorder)"
+                  : "var(--vscode-panel-border)",
+              }}
+            >
+              {stage.label}
+            </button>
+          );
+        })}
+      </div>
+
       <div className="flex-1 min-h-0 grid grid-cols-1 xl:grid-cols-[minmax(520px,1fr)_360px] gap-4">
-        <section className="min-h-0 overflow-hidden grid grid-rows-[minmax(0,1fr)_180px] gap-4">
+        <section
+          className={[
+            "min-h-0 overflow-hidden grid gap-4",
+            workspaceStage === STAGE_AUTHORING
+              ? "grid-rows-[minmax(0,1fr)_180px]"
+              : "grid-rows-[minmax(0,1fr)]",
+          ].join(" ")}
+        >
           <MapViewer
             map={map}
-            globalCostmap={null}
-            localCostmap={null}
-            scan={navigationTopicsActive ? scan : null}
+            globalCostmap={needsGlobalCostmap ? globalCostmap : null}
+            localCostmap={needsLocalCostmap ? localCostmap : null}
+            scan={needsScan ? scan : null}
             pose={navigationTopicsActive ? currentPose : null}
-            plan={null}
-            goalPose={null}
-            footprint={navigationTopicsActive ? footprint : null}
-            tf={navigationTopicsActive ? bufferedTf : null}
+            plan={needsPlan ? plan : null}
+            goalPose={needsGoalPose ? goalPose : null}
+            footprint={needsRobotModel ? footprint : null}
+            tf={needsTf ? bufferedTf : null}
             spots={spots}
             selectedSpotId={selectedSpotId}
-            showMap
-            showGlobalCostmap={false}
-            showLocalCostmap={false}
-            showScan={navigationTopicsActive}
-            showGlobalPlan={false}
-            showGoalPose={false}
-            showTf={false}
-            showRobotModel={navigationTopicsActive}
+            showMap={activeLayers.map}
+            showGlobalCostmap={needsGlobalCostmap}
+            showLocalCostmap={needsLocalCostmap}
+            showScan={needsScan}
+            showGlobalPlan={needsPlan}
+            showGoalPose={needsGoalPose}
+            showTf={navigationTopicsActive && activeLayers.tf}
+            showRobotModel={needsRobotModel}
             interactionDisabled={!!busy}
             interactionMode={interactionMode}
             editorActive={false}
@@ -377,30 +668,18 @@ export default function MissionCanvasPage() {
             onSpotClick={setSelectedSpotId}
             onMapPose={handleCreateSpotAtPose}
           />
-          <div
-            className="border p-3 min-h-0 overflow-hidden"
-            style={{
-              color: "var(--vscode-foreground)",
-              borderColor: "var(--vscode-panel-border)",
-              backgroundColor: "var(--vscode-sidebar-background)",
-            }}
-          >
-            <div className="text-xs font-semibold mb-2">Behavior Surface</div>
-            <div className="text-xs leading-5" style={{ color: "var(--vscode-descriptionForeground)" }}>
-              BT graph embedding starts after Spot persistence and NavigateToSpot are stable.
-            </div>
-          </div>
+          {workspaceStage === STAGE_AUTHORING && (
+            <Panel title="Behavior Surface" className="min-h-0 overflow-hidden">
+              <div className="text-xs leading-5" style={{ color: "var(--vscode-descriptionForeground)" }}>
+                BT graph embedding starts after Spot persistence and NavigateToSpot are stable.
+              </div>
+            </Panel>
+          )}
         </section>
 
-        <aside className="min-h-0 grid grid-rows-[auto_1fr] gap-4">
-          <div
-            className="border p-3 grid gap-3"
-            style={{
-              color: "var(--vscode-foreground)",
-              borderColor: "var(--vscode-panel-border)",
-              backgroundColor: "var(--vscode-sidebar-background)",
-            }}
-          >
+        {workspaceStage === STAGE_AUTHORING ? (
+          <aside className="min-h-0 grid grid-rows-[auto_1fr_minmax(160px,220px)] gap-4">
+            <Panel className="grid gap-3">
             <div className="flex items-center justify-between gap-3">
               <div className="text-xs font-semibold">Inspector</div>
               <button
@@ -450,45 +729,57 @@ export default function MissionCanvasPage() {
                 Select a Spot, or press Spot and click the map to create one.
               </div>
             )}
-          </div>
+            </Panel>
 
-          <div
-            className="border p-3 min-h-0 overflow-auto"
-            style={{
-              color: "var(--vscode-foreground)",
-              borderColor: "var(--vscode-panel-border)",
-              backgroundColor: "var(--vscode-sidebar-background)",
-            }}
-          >
-            <div className="text-xs font-semibold mb-2">Spots</div>
-            <div className="grid gap-2">
-              {spots.map((spot) => (
-                <button
-                  key={spot.id}
-                  type="button"
-                  onClick={() => setSelectedSpotId(spot.id)}
-                  className="h-8 px-2 border text-left text-xs min-w-0"
-                  style={{
-                    color: spot.id === selectedSpotId
-                      ? "var(--vscode-button-foreground)"
-                      : "var(--vscode-foreground)",
-                    backgroundColor: spot.id === selectedSpotId
-                      ? "var(--vscode-button-background)"
-                      : "var(--vscode-editor-background)",
-                    borderColor: "var(--vscode-panel-border)",
-                  }}
-                >
-                  <span className="block truncate">{spot.label}</span>
-                </button>
-              ))}
-              {spots.length === 0 && (
-                <div className="text-xs" style={{ color: "var(--vscode-descriptionForeground)" }}>
-                  No spots for this map yet.
-                </div>
-              )}
-            </div>
-          </div>
-        </aside>
+            <Panel title="Spots" className="min-h-0 overflow-auto">
+              <div className="grid gap-2">
+                {spots.map((spot) => (
+                  <button
+                    key={spot.id}
+                    type="button"
+                    onClick={() => setSelectedSpotId(spot.id)}
+                    className="h-8 px-2 border text-left text-xs min-w-0"
+                    style={{
+                      color: spot.id === selectedSpotId
+                        ? "var(--vscode-button-foreground)"
+                        : "var(--vscode-foreground)",
+                      backgroundColor: spot.id === selectedSpotId
+                        ? "var(--vscode-button-background)"
+                        : "var(--vscode-editor-background)",
+                      borderColor: "var(--vscode-panel-border)",
+                    }}
+                  >
+                    <span className="block truncate">{spot.label}</span>
+                  </button>
+                ))}
+                {spots.length === 0 && (
+                  <div className="text-xs" style={{ color: "var(--vscode-descriptionForeground)" }}>
+                    No spots for this map yet.
+                  </div>
+                )}
+              </div>
+            </Panel>
+            <TopicStatusPanel topicRows={topicRows} />
+          </aside>
+        ) : (
+          <aside className="min-h-0 grid grid-rows-[auto_auto_minmax(0,1fr)] gap-4">
+            <Panel title={workspaceStage === STAGE_MAPPING ? "Mapping" : "Run"}>
+              <div className="text-xs leading-5" style={{ color: "var(--vscode-descriptionForeground)" }}>
+                {workspaceStage === STAGE_MAPPING
+                  ? "Focused map building view with map, lidar, robot model, and TF layers."
+                  : "Runtime view for navigation, costmaps, global plan, goal pose, and future BT/VLA state."}
+              </div>
+              <div className="mt-3 text-xs">
+                Map name: <span className="font-mono">{mapName || "-"}</span>
+              </div>
+              <div className="mt-1 text-xs">
+                PID: <span className="font-mono">{status?.pid ?? "-"}</span>
+              </div>
+            </Panel>
+            <LayersPanel layerToggles={layerToggles} />
+            <TopicStatusPanel topicRows={topicRows} />
+          </aside>
+        )}
       </div>
     </div>
   );
