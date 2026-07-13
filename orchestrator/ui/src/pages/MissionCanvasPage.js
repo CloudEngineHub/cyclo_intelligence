@@ -742,18 +742,14 @@ export default function MissionCanvasPage() {
     );
   }, [runCommand, saveMapName]);
 
-  const handleLoadMap = useCallback(() => {
+  const handleToggleMapEditor = useCallback(() => {
     setWorkspaceStage(STAGE_MAPPING);
     setInteractionMode("view");
-    setShowPgmFix(true);
-    setMessage("Loading saved maps");
-  }, []);
-
-  const handleToggleMapFix = useCallback(() => {
-    setWorkspaceStage(STAGE_MAPPING);
-    setInteractionMode("view");
+    if (!showPgmFix) {
+      setMessage("Loading saved maps");
+    }
     setShowPgmFix((value) => !value);
-  }, []);
+  }, [showPgmFix]);
 
   const handleStopNavigation = useCallback(() => runCommand(
     "Stop",
@@ -974,8 +970,9 @@ export default function MissionCanvasPage() {
                 active={busy === "Mapping" || (running && !mappingEditorActive)}
                 disabled={!!busy || running}
                 onClick={handleStartMapping}
+                variant="secondary"
               >
-                Mapping
+                Start Mapping
               </ActionButton>
               <ActionButton
                 active={showSaveMapDialog || busy === "Save map"}
@@ -988,18 +985,10 @@ export default function MissionCanvasPage() {
               <ActionButton
                 active={mappingEditorActive}
                 disabled={!!busy}
-                onClick={handleLoadMap}
+                onClick={handleToggleMapEditor}
                 variant="secondary"
               >
-                Load Map
-              </ActionButton>
-              <ActionButton
-                active={mappingEditorActive}
-                disabled={!!busy}
-                onClick={handleToggleMapFix}
-                variant="secondary"
-              >
-                Fix Map
+                Map Editor
               </ActionButton>
               <ActionButton
                 active={busy === "Stop"}

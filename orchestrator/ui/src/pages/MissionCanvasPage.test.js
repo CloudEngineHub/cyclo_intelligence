@@ -91,8 +91,8 @@ test('renders Mission Canvas foundation', async () => {
   expect(screen.getByText('Clean')).toBeInTheDocument();
   expect(screen.queryByText('PID:')).not.toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Save Map' })).toBeInTheDocument();
-  expect(screen.getByRole('button', { name: 'Load Map' })).toBeInTheDocument();
-  expect(screen.getByRole('button', { name: 'Fix Map' })).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Start Mapping' })).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Map Editor' })).toBeInTheDocument();
   expect(screen.getByText('Layers')).toBeInTheDocument();
   expect(screen.getByText('Topics')).toBeInTheDocument();
   await waitFor(() => expect(getServiceStatus).toHaveBeenCalled());
@@ -119,7 +119,7 @@ test('shows Spot and BT authoring panels in the authoring stage', async () => {
   expect(screen.getByRole('button', { name: 'Delete Node' })).toBeDisabled();
   expect(screen.getByRole('button', { name: 'Create BT' })).toBeDisabled();
   expect(screen.getByRole('button', { name: 'Edit BT' })).toBeDisabled();
-  expect(screen.queryByRole('button', { name: 'Mapping' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Start Mapping' })).not.toBeInTheDocument();
   await waitFor(() => expect(getServiceStatus).toHaveBeenCalled());
   await waitFor(() => expect(getNavigationSpots).toHaveBeenCalledWith('map'));
 });
@@ -157,7 +157,7 @@ test('places behavior palette nodes on the map overlay', async () => {
 test('starts mapping mode from Mission Canvas', async () => {
   render(<MissionCanvasPage />);
 
-  fireEvent.click(screen.getByRole('button', { name: 'Mapping' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Start Mapping' }));
 
   await waitFor(() => expect(startNavigation).toHaveBeenCalledWith('map', 'map'));
 });
@@ -208,7 +208,7 @@ test('loads saved maps into the mapping fix editor', async () => {
 
   render(<MissionCanvasPage />);
 
-  fireEvent.click(screen.getByRole('button', { name: 'Load Map' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Map Editor' }));
 
   await waitFor(() => expect(getPgmFiles).toHaveBeenCalled());
   await waitFor(() => expect(getPgmImage).toHaveBeenCalledWith('factory.pgm'));
@@ -237,7 +237,7 @@ test('edits and saves loaded map pixels from the fix editor', async () => {
 
   render(<MissionCanvasPage />);
 
-  fireEvent.click(screen.getByRole('button', { name: 'Load Map' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Map Editor' }));
 
   await waitFor(() => expect(getPgmImage).toHaveBeenCalledWith('factory.pgm'));
   fireEvent.change(screen.getByLabelText('Brush size'), {
