@@ -5,6 +5,7 @@ import {
   getPgmImage,
   getServiceStatus,
   saveNavigationMap,
+  savePgmImage,
   startNavigation,
 } from '../utils/navigationApi';
 import { getNavigationSpots } from '../utils/navigationSpotsApi';
@@ -69,6 +70,7 @@ beforeEach(() => {
   getServiceStatus.mockResolvedValue({ is_up: false });
   getNavigationSpots.mockResolvedValue({ map_name: 'map', spots: [] });
   saveNavigationMap.mockResolvedValue({ ok: true, message: 'Saved map' });
+  savePgmImage.mockResolvedValue({ path: 'map.pgm', saved: true });
   startNavigation.mockResolvedValue({ ok: true });
   mockMapViewer.mockImplementation(() => <div>Mission Canvas Map</div>);
 });
@@ -195,6 +197,50 @@ test('loads saved maps into the mapping fix editor', async () => {
   expect(latestMapViewerProps().showScan).toBe(false);
   expect(latestMapViewerProps().showMap).toBe(true);
   expect(latestMapViewerProps().waitingLabel).toBe('Select a PGM');
+});
+
+test('edits and saves loaded map pixels from the fix editor', async () => {
+  const latestMapViewerProps = () => (
+    mockMapViewer.mock.calls[mockMapViewer.mock.calls.length - 1][0]
+  );
+  getPgmFiles.mockResolvedValue({
+    files: [{ path: 'factory.pgm', name: 'factory.pgm' }],
+  });
+  getPgmImage.mockResolvedValue({
+    path: 'factory.pgm',
+    width: 1,
+    height: 1,
+    maxval: 255,
+    pixels_base64: '/g==',
+  });
+
+  render(<MissionCanvasPage />);
+
+  fireEvent.click(screen.getByRole('button', { name: 'Load Map' }));
+
+  await waitFor(() => expect(getPgmImage).toHaveBeenCalledWith('factory.pgm'));
+  fireEvent.change(screen.getByLabelText('Brush size'), {
+    target: { value: '8' },
+  });
+  expect(screen.getByLabelText('Brush size')).toHaveValue('8');
+
+  fireEvent.click(screen.getByRole('button', { name: '+' }));
+  await waitFor(() => expect(latestMapViewerProps().editorActive).toBe(true));
+
+  await act(async () => {
+    latestMapViewerProps().onEditorMapPoint(0, 0);
+  });
+
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Save' })).toBeEnabled());
+  fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+  await waitFor(() => expect(savePgmImage).toHaveBeenCalledWith(
+    'factory.pgm',
+    1,
+    1,
+    255,
+    'AA==',
+  ));
 });
 
 test('enables live robot and lidar layers while navigation runtime is active', async () => {

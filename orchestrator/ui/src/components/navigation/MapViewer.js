@@ -523,6 +523,7 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, 
     const raycasterRef = useRef(new THREE.Raycaster());
     const pointerRef = useRef(new THREE.Vector2());
     const pointerDownRef = useRef(null);
+    const editorPaintPointerRef = useRef(null);
     useEffect(() => {
         const containerEl = containerRef.current;
         if (!containerEl || rendererRef.current)
@@ -882,13 +883,30 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, 
                 orientation: orientationFromYaw(yaw),
             };
         };
+        const paintEditorPoint = (event) => {
+            if (typeof onEditorMapPoint !== "function")
+                return false;
+            const point = mapPointFromEvent(event);
+            if (!point)
+                return false;
+            event.preventDefault();
+            event.stopImmediatePropagation();
+            onEditorMapPoint(point.x, point.y);
+            return true;
+        };
         const handlePointerDown = (event) => {
             if (event.button !== 0)
                 return;
             if (editorActive) {
-                const point = mapPointFromEvent(event);
-                if (point)
-                    onEditorMapPoint(point.x, point.y);
+                if (interactionDisabled) {
+                    pointerDownRef.current = null;
+                    setDragPreviewPose(null);
+                    return;
+                }
+                if (paintEditorPoint(event)) {
+                    editorPaintPointerRef.current = event.pointerId;
+                    renderer.domElement.setPointerCapture(event.pointerId);
+                }
                 return;
             }
             if (!interactionDisabled && interactionMode === "view" && event.shiftKey) {
@@ -939,6 +957,10 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, 
             renderer.domElement.setPointerCapture(event.pointerId);
         };
         const handlePointerMove = (event) => {
+            if (editorPaintPointerRef.current === event.pointerId) {
+                paintEditorPoint(event);
+                return;
+            }
             const viewRotateDrag = viewRotateDragRef.current;
             if (viewRotateDrag) {
                 event.preventDefault();
@@ -959,6 +981,15 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, 
             setDragPreviewPose(previewPoseFromDrag(pointerDown, point, event.clientX, event.clientY));
         };
         const handlePointerUp = (event) => {
+            if (editorPaintPointerRef.current === event.pointerId) {
+                event.preventDefault();
+                event.stopImmediatePropagation();
+                editorPaintPointerRef.current = null;
+                if (renderer.domElement.hasPointerCapture(event.pointerId)) {
+                    renderer.domElement.releasePointerCapture(event.pointerId);
+                }
+                return;
+            }
             if (viewRotateDragRef.current) {
                 event.preventDefault();
                 event.stopImmediatePropagation();
@@ -988,6 +1019,7 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, 
             onMapPose(pointerDown.mapX, pointerDown.mapY, yaw);
         };
         const handlePointerCancel = (event) => {
+            editorPaintPointerRef.current = null;
             viewRotateDragRef.current = null;
             pointerDownRef.current = null;
             setDragPreviewPose(null);

@@ -15,7 +15,7 @@
 // Author: Howon Kim
 
 "use client";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getPgmFiles, getPgmImage, savePgmImage } from "../../utils/navigationApi";
 const FREE_VALUE = 254;
 const OCCUPIED_VALUE = 0;
@@ -99,6 +99,7 @@ function normalizeBrushSize(value) {
     return Math.min(Math.max(Math.floor(value), 1), MAX_BRUSH_SIZE_CELLS);
 }
 export function useMapEditor({ open, mapName, onMessage }) {
+    const pixelsRef = useRef(null);
     const [files, setFiles] = useState([]);
     const [selectedPath, setSelectedPath] = useState("");
     const [image, setImage] = useState(null);
@@ -139,6 +140,7 @@ export function useMapEditor({ open, mapName, onMessage }) {
         if (!open || !selectedPath) {
             setImage(null);
             setPixels(null);
+            pixelsRef.current = null;
             return;
         }
         let cancelled = false;
@@ -148,7 +150,9 @@ export function useMapEditor({ open, mapName, onMessage }) {
             if (cancelled)
                 return;
             setImage(response);
-            setPixels(decodePgmPixels(response));
+            const decodedPixels = decodePgmPixels(response);
+            pixelsRef.current = decodedPixels;
+            setPixels(decodedPixels);
             setUndoStack([]);
             setDirty(false);
             onMessage(`Loaded ${response.path}`);
@@ -171,33 +175,38 @@ export function useMapEditor({ open, mapName, onMessage }) {
         return pgmPixelsToGrid(image, pixels);
     }, [image, pixels]);
     const editAtMapPoint = useCallback((x, y) => {
-        if (!open || !image || !pixels || busy || tool === "view")
+        if (!open || !image || busy || tool === "view")
             return;
         const pixel = mapPointToPgmPixel(image, x, y);
         if (!pixel)
             return;
         const { pixelX, pixelY } = pixel;
-        const nextPixels = paintPgmPixels(pixels, image.width, image.height, pixelX, pixelY, tool, brushSize);
+        const currentPixels = pixelsRef.current;
+        if (!currentPixels)
+            return;
+        const nextPixels = paintPgmPixels(currentPixels, image.width, image.height, pixelX, pixelY, tool, brushSize);
         let editedPixels = 0;
-        for (let index = 0; index < pixels.length; index += 1) {
-            if (pixels[index] !== nextPixels[index])
+        for (let index = 0; index < currentPixels.length; index += 1) {
+            if (currentPixels[index] !== nextPixels[index])
                 editedPixels += 1;
         }
         if (editedPixels === 0) {
             onMessage("No pixels changed");
             return;
         }
-        setUndoStack((stack) => [...stack, pixels]);
+        pixelsRef.current = nextPixels;
+        setUndoStack((stack) => [...stack, currentPixels]);
         setPixels(nextPixels);
         setDirty(true);
         const action = tool === "erase_black" ? "Removed" : "Added";
         onMessage(`${action} ${editedPixels} pixels locally`);
-    }, [brushSize, busy, image, onMessage, open, pixels, tool]);
+    }, [brushSize, busy, image, onMessage, open, tool]);
     const undo = useCallback(() => {
         setUndoStack((stack) => {
             const previous = stack[stack.length - 1];
             if (!previous)
                 return stack;
+            pixelsRef.current = previous;
             setPixels(previous);
             setDirty(stack.length > 1);
             onMessage("Undid last edit");
@@ -248,6 +257,7 @@ function ViewToolIcon() {
     </svg>);
 }
 export function MapEditorControls({ files, selectedPath, setSelectedPath, tool, setTool, brushSize, setBrushSize, busy, image, dirty, canUndo, undo, save, }) {
+    const brushSizeOptions = Array.from({ length: MAX_BRUSH_SIZE_CELLS }, (_, index) => index + 1);
     return (<div className="flex flex-wrap items-center gap-2">
       <select value={selectedPath} disabled={busy || files.length === 0} onChange={(event) => setSelectedPath(event.currentTarget.value)} className="h-8 min-w-64 px-2 border text-sm" style={{
             color: "var(--vscode-input-foreground)",
@@ -281,11 +291,15 @@ export function MapEditorControls({ files, selectedPath, setSelectedPath, tool, 
             }}>
           {value === "erase_black" ? "-" : "+"}
         </button>))}
-      <input type="number" min={1} max={MAX_BRUSH_SIZE_CELLS} step={1} value={brushSize} disabled={busy} onChange={(event) => setBrushSize(event.currentTarget.valueAsNumber)} className="h-8 w-8 border text-center text-sm font-semibold disabled:opacity-50" title="Brush size" aria-label="Brush size" style={{
+      <select value={brushSize} disabled={busy} onChange={(event) => setBrushSize(Number(event.currentTarget.value))} className="h-8 w-12 border text-center text-sm font-semibold disabled:opacity-50" title="Brush size" aria-label="Brush size" style={{
             color: "var(--vscode-input-foreground)",
             backgroundColor: "var(--vscode-input-background)",
             borderColor: "var(--vscode-input-border, var(--vscode-panel-border))",
-        }}/>
+        }}>
+        {brushSizeOptions.map((value) => (<option key={value} value={value}>
+            {value}
+          </option>))}
+      </select>
       <div className="h-6 w-px" aria-hidden="true" style={{ backgroundColor: "var(--vscode-panel-border)" }}/>
       <button type="button" disabled={busy || !canUndo} onClick={undo} className="h-8 px-3 border text-sm font-semibold disabled:opacity-50" style={{
             color: "var(--vscode-foreground)",
