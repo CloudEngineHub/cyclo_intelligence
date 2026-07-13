@@ -59,6 +59,7 @@ jest.mock('../hooks/useNavigationRosTopic', () => ({
 
 beforeEach(() => {
   jest.clearAllMocks();
+  window.localStorage.clear();
   getPgmFiles.mockResolvedValue({ files: [] });
   getPgmImage.mockResolvedValue({
     path: 'map.pgm',
@@ -148,6 +149,8 @@ test('shows Spot and BT authoring panels in the authoring stage', async () => {
   expect(screen.getByText('Design Objects')).toBeInTheDocument();
   expect(screen.getByText('Behavior Nodes')).toBeInTheDocument();
   expect(screen.getByText('Spots')).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Load Map' })).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Save Design' })).toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Spot' })).toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Delete Spot' })).toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Delete Node' })).toBeDisabled();
@@ -161,6 +164,39 @@ test('shows Spot and BT authoring panels in the authoring stage', async () => {
   expect(screen.queryByText('/global_costmap/costmap')).not.toBeInTheDocument();
   await waitFor(() => expect(getServiceStatus).toHaveBeenCalled());
   await waitFor(() => expect(getNavigationSpots).toHaveBeenCalledWith('map'));
+});
+
+test('loads a saved map into the design stage', async () => {
+  const latestMapViewerProps = () => (
+    mockMapViewer.mock.calls[mockMapViewer.mock.calls.length - 1][0]
+  );
+  getPgmFiles.mockResolvedValue({
+    files: [{ path: 'factory.pgm', name: 'factory.pgm' }],
+  });
+  getPgmImage.mockResolvedValue({
+    path: 'factory.pgm',
+    width: 1,
+    height: 1,
+    maxval: 255,
+    pixels_base64: 'AA==',
+  });
+
+  render(<MissionCanvasPage />);
+
+  fireEvent.click(screen.getByRole('tab', { name: 'Design' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Load Map' }));
+
+  const mapSelect = await screen.findByRole('combobox', { name: 'Design map file' });
+  await waitFor(() => expect(mapSelect).toHaveValue('factory.pgm'));
+
+  fireEvent.click(screen.getByRole('button', { name: 'Load' }));
+
+  await waitFor(() => expect(getPgmImage).toHaveBeenCalledWith('factory.pgm'));
+  await waitFor(() => expect(latestMapViewerProps().map).toMatchObject({
+    info: { width: 1, height: 1 },
+  }));
+  expect(screen.getByRole('button', { name: 'Spot' })).toBeEnabled();
+  await waitFor(() => expect(getNavigationSpots).toHaveBeenCalledWith('factory'));
 });
 
 test('places behavior palette nodes on the map overlay', async () => {
@@ -191,6 +227,16 @@ test('places behavior palette nodes on the map overlay', async () => {
   expect(latestMapViewerProps().selectedBehaviorNodeId).toBe('behavior_1_wait');
   expect(screen.getByText('behavior_1_wait')).toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Delete Node' })).toBeEnabled();
+
+  fireEvent.click(screen.getByRole('button', { name: 'Save Design' }));
+
+  const savedDesigns = JSON.parse(window.localStorage.getItem('mission_canvas_designs'));
+  expect(savedDesigns.map.behaviorNodes[0]).toMatchObject({
+    id: 'behavior_1_wait',
+    map_name: 'map',
+    tag: 'Wait',
+  });
+  expect(screen.getByText('Saved design for map')).toBeInTheDocument();
 });
 
 test('starts mapping mode from Mission Canvas', async () => {

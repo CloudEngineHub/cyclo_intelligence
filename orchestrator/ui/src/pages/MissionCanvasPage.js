@@ -148,6 +148,7 @@ const MISSION_STAGE_FILL = MISSION_BORDER;
 const MISSION_STAGE_EMPTY = "#ffffff";
 const MISSION_SURFACE = "color-mix(in srgb, var(--vscode-foreground, #ffffff) 5%, transparent)";
 const MISSION_SURFACE_STRONG = "color-mix(in srgb, var(--vscode-foreground, #ffffff) 8%, transparent)";
+const MISSION_DESIGN_STORAGE_KEY = "mission_canvas_designs";
 
 function messageData(value) {
   if (!value || typeof value !== "object") return null;
@@ -179,6 +180,40 @@ function behaviorNodeId(tag, index) {
 function mapNameFromPgmPath(path) {
   const fileName = String(path || "").split("/").filter(Boolean).pop() || "";
   return fileName.replace(/\.pgm$/i, "") || DEFAULT_MAP_NAME;
+}
+
+function readDesignStore() {
+  if (typeof window === "undefined" || !window.localStorage) return {};
+  try {
+    const raw = window.localStorage.getItem(MISSION_DESIGN_STORAGE_KEY);
+    const parsed = raw ? JSON.parse(raw) : {};
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function savedBehaviorNodesForMap(mapName) {
+  const saved = readDesignStore()[mapName]?.behaviorNodes;
+  return Array.isArray(saved) ? saved : null;
+}
+
+function saveBehaviorNodesForMap(mapName, nodes) {
+  if (typeof window === "undefined" || !window.localStorage) return;
+  const store = readDesignStore();
+  store[mapName] = {
+    ...store[mapName],
+    behaviorNodes: nodes,
+    savedAt: new Date().toISOString(),
+  };
+  window.localStorage.setItem(MISSION_DESIGN_STORAGE_KEY, JSON.stringify(store));
+}
+
+function behaviorNodeSerialFromNodes(nodes) {
+  return nodes.reduce((max, node) => {
+    const match = String(node.id || "").match(/^behavior_(\d+)_/);
+    return match ? Math.max(max, Number(match[1])) : max;
+  }, 0);
 }
 
 function Panel({ title, children, className = "" }) {
@@ -258,11 +293,12 @@ function SaveMapDialog({
   );
 }
 
-function LoadRunMapDialog({
+function LoadMapDialog({
   open,
   files,
   selectedPath,
   busy,
+  selectAriaLabel = "Map file",
   onChange,
   onCancel,
   onSubmit,
@@ -294,7 +330,7 @@ function LoadRunMapDialog({
         <label className="grid gap-1 text-xs">
           <span style={{ color: "#4b5563" }}>Map file</span>
           <select
-            aria-label="Run map file"
+            aria-label={selectAriaLabel}
             value={selectedPath}
             disabled={busy || files.length === 0}
             onChange={(event) => onChange(event.currentTarget.value)}
@@ -566,6 +602,11 @@ export default function MissionCanvasPage() {
   const [showPgmFix, setShowPgmFix] = useState(false);
   const [showSaveMapDialog, setShowSaveMapDialog] = useState(false);
   const [saveMapName, setSaveMapName] = useState(DEFAULT_MAP_NAME);
+  const [showDesignMapDialog, setShowDesignMapDialog] = useState(false);
+  const [designMapFiles, setDesignMapFiles] = useState([]);
+  const [designMapPath, setDesignMapPath] = useState("");
+  const [designMapBusy, setDesignMapBusy] = useState(false);
+  const [designMapReloadToken, setDesignMapReloadToken] = useState(0);
   const [showRunMapDialog, setShowRunMapDialog] = useState(false);
   const [runMapFiles, setRunMapFiles] = useState([]);
   const [runMapPath, setRunMapPath] = useState("");
@@ -579,6 +620,7 @@ export default function MissionCanvasPage() {
 
   const running = status?.is_up ?? false;
   const mappingEditorActive = workspaceStage === STAGE_MAPPING && showPgmFix;
+  const designMapActive = workspaceStage === STAGE_AUTHORING && !!designMapPath;
   const navigationTopicsActive = running && busy !== "Stop" && !mappingEditorActive;
   const activeLayers = layersByStage[workspaceStage] || LAYER_PRESETS[workspaceStage];
   const currentMapName = mapName.trim() || DEFAULT_MAP_NAME;
@@ -587,6 +629,12 @@ export default function MissionCanvasPage() {
     mapName: currentMapName,
     onMessage: setMessage,
     reloadToken: mapEditorReloadToken,
+  });
+  const designMapEditor = useMapEditor({
+    open: designMapActive,
+    mapName: currentMapName,
+    onMessage: setMessage,
+    reloadToken: designMapReloadToken,
   });
   const needsGlobalCostmap = navigationTopicsActive && activeLayers.globalCostmap;
   const needsLocalCostmap = navigationTopicsActive && activeLayers.localCostmap;
@@ -788,6 +836,69 @@ export default function MissionCanvasPage() {
       void loadStatus();
     }
   }, [loadStatus]);
+
+  const loadSavedDesignForMap = useCallback((targetMapName) => {
+    const savedNodes = savedBehaviorNodesForMap(targetMapName);
+    if (!savedNodes) return false;
+    setBehaviorNodes((current) => [
+      ...current.filter((node) => node.map_name !== targetMapName),
+      ...savedNodes,
+    ]);
+    behaviorNodeSerialRef.current = Math.max(
+      behaviorNodeSerialRef.current,
+      behaviorNodeSerialFromNodes(savedNodes),
+    );
+    return true;
+  }, []);
+
+  const handleOpenDesignMapDialog = useCallback(() => {
+    setWorkspaceStage(STAGE_AUTHORING);
+    setShowPgmFix(false);
+    setShowDesignMapDialog(true);
+    setDesignMapBusy(true);
+    setMessage("Loading saved maps");
+    getPgmFiles()
+      .then((response) => {
+        const files = response.files || [];
+        const preferred = files.find((file) => mapNameFromPgmPath(file.path) === currentMapName)
+          || files[0];
+        setDesignMapFiles(files);
+        setDesignMapPath(preferred?.path || "");
+        if (!files.length) {
+          setMessage("No PGM files found");
+        }
+      })
+      .catch((error) => {
+        setMessage(error instanceof Error ? error.message : "Failed to list PGM files");
+      })
+      .finally(() => setDesignMapBusy(false));
+  }, [currentMapName]);
+
+  const handleConfirmDesignMap = useCallback(() => {
+    const selectedMapName = mapNameFromPgmPath(designMapPath);
+    if (!selectedMapName) {
+      setMessage("Map file required");
+      return;
+    }
+    setMapName(selectedMapName);
+    setShowDesignMapDialog(false);
+    setWorkspaceStage(STAGE_AUTHORING);
+    setInteractionMode("view");
+    setDesignMapReloadToken((value) => value + 1);
+    const loadedDesign = loadSavedDesignForMap(selectedMapName);
+    setMessage(loadedDesign
+      ? `Loaded design for ${selectedMapName}`
+      : `Loaded map ${selectedMapName}`);
+  }, [designMapPath, loadSavedDesignForMap]);
+
+  const handleSaveDesign = useCallback(() => {
+    try {
+      saveBehaviorNodesForMap(currentMapName, activeBehaviorNodes);
+      setMessage(`Saved design for ${currentMapName}`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Failed to save design");
+    }
+  }, [activeBehaviorNodes, currentMapName]);
 
   const handleRunMission = useCallback(() => runCommand(
     "Run mission",
@@ -1006,11 +1117,22 @@ export default function MissionCanvasPage() {
         onCancel={() => setShowSaveMapDialog(false)}
         onSubmit={handleConfirmSaveMap}
       />
-      <LoadRunMapDialog
+      <LoadMapDialog
+        open={showDesignMapDialog}
+        files={designMapFiles}
+        selectedPath={designMapPath}
+        busy={designMapBusy}
+        selectAriaLabel="Design map file"
+        onChange={setDesignMapPath}
+        onCancel={() => setShowDesignMapDialog(false)}
+        onSubmit={handleConfirmDesignMap}
+      />
+      <LoadMapDialog
         open={showRunMapDialog}
         files={runMapFiles}
         selectedPath={runMapPath}
         busy={runMapBusy}
+        selectAriaLabel="Run map file"
         onChange={setRunMapPath}
         onCancel={() => setShowRunMapDialog(false)}
         onSubmit={handleConfirmRunMap}
@@ -1163,8 +1285,23 @@ export default function MissionCanvasPage() {
           {workspaceStage === STAGE_AUTHORING && (
             <>
               <ActionButton
+                active={showDesignMapDialog || designMapBusy}
+                disabled={!!busy || designMapBusy}
+                onClick={handleOpenDesignMapDialog}
+                variant="secondary"
+              >
+                Load Map
+              </ActionButton>
+              <ActionButton
+                disabled={!!busy}
+                onClick={handleSaveDesign}
+                variant="secondary"
+              >
+                Save Design
+              </ActionButton>
+              <ActionButton
                 active={interactionMode === "spot"}
-                disabled={!running || !map}
+                disabled={!map && !designMapEditor.map}
                 onClick={handleToggleSpotMode}
                 variant="secondary"
               >
@@ -1233,7 +1370,7 @@ export default function MissionCanvasPage() {
           ].join(" ")}
         >
           <MapViewer
-            map={mappingEditorActive ? mapEditor.map : map}
+            map={mappingEditorActive ? mapEditor.map : designMapActive ? designMapEditor.map : map}
             globalCostmap={mappingEditorActive ? null : needsGlobalCostmap ? globalCostmap : null}
             localCostmap={mappingEditorActive ? null : needsLocalCostmap ? localCostmap : null}
             scan={mappingEditorActive ? null : needsScan ? scan : null}
@@ -1254,16 +1391,24 @@ export default function MissionCanvasPage() {
             showGoalPose={mappingEditorActive ? false : needsGoalPose}
             showTf={mappingEditorActive ? false : navigationTopicsActive && activeLayers.tf}
             showRobotModel={mappingEditorActive ? false : needsRobotModel}
-            interactionDisabled={!!busy || (mappingEditorActive && mapEditor.busy)}
+            interactionDisabled={
+              !!busy ||
+              (mappingEditorActive && mapEditor.busy) ||
+              (designMapActive && designMapEditor.busy)
+            }
             interactionMode={mappingEditorActive ? "view" : interactionMode}
             editorActive={mappingEditorActive && !!mapEditor.map && mapEditor.tool !== "view"}
             fitContainer
             viewKey={mappingEditorActive
               ? `mission-editor:${mapEditor.selectedPath || "none"}`
-              : `mission:${mapName}`}
+              : designMapActive
+                ? `mission-design:${designMapEditor.selectedPath || designMapPath || "none"}`
+                : `mission:${mapName}`}
             waitingLabel={mappingEditorActive
               ? "Select a PGM"
-              : running ? "Waiting for /map" : "Run Mission to view /map"}
+              : designMapActive
+                ? "Loading selected map"
+                : running ? "Waiting for /map" : "Run Mission to view /map"}
             onSpotClick={handleSelectSpot}
             onBehaviorNodeClick={handleSelectBehaviorNode}
             onEditorMapPoint={mapEditor.editAtMapPoint}
