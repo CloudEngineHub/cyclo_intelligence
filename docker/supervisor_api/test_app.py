@@ -174,6 +174,12 @@ def test_navigation_start_clears_stale_runtime_before_up(monkeypatch):
 
     monkeypatch.setattr(
         navigation,
+        "_request_s6_service_down",
+        lambda service: events.append(("request_down", service))
+        or f"{service} down requested",
+    )
+    monkeypatch.setattr(
+        navigation,
         "_clear_navigation_runtime_files",
         lambda: events.append("clear"),
     )
@@ -190,7 +196,7 @@ def test_navigation_start_clears_stale_runtime_before_up(monkeypatch):
     monkeypatch.setattr(
         navigation,
         "_s6_command",
-        lambda service, action: events.append(("s6", service, action))
+        lambda service, action, **kwargs: events.append(("s6", service, action))
         or f"{service} {action}",
     )
 
@@ -201,9 +207,10 @@ def test_navigation_start_clears_stale_runtime_before_up(monkeypatch):
     assert result.ok
     assert result.message == "ai_worker_navigation up"
     assert events == [
-        "clear",
-        ("s6", "ai_worker_navigation", "down"),
+        ("request_down", "ai_worker_navigation"),
         "force",
+        ("s6", "ai_worker_navigation", "down"),
+        "clear",
         ("write", "/run/navigation_type", "map"),
         ("write", "/run/launch_args/ai_worker_navigation", "map_name:=factory"),
         ("s6", "ai_worker_navigation", "up"),
@@ -215,13 +222,19 @@ def test_navigation_stop_clears_runtime_and_forces_process_group(monkeypatch):
 
     monkeypatch.setattr(
         navigation,
+        "_request_s6_service_down",
+        lambda service: events.append(("request_down", service))
+        or "down requested",
+    )
+    monkeypatch.setattr(
+        navigation,
         "_clear_navigation_runtime_files",
         lambda: events.append("clear"),
     )
     monkeypatch.setattr(
         navigation,
         "_s6_command",
-        lambda service, action: events.append(("s6", service, action))
+        lambda service, action, **kwargs: events.append(("s6", service, action))
         or "s6 down",
     )
     monkeypatch.setattr(
@@ -233,11 +246,72 @@ def test_navigation_stop_clears_runtime_and_forces_process_group(monkeypatch):
     result = navigation.navigation_stop()
 
     assert result.ok
-    assert result.message == "s6 down\nforced"
+    assert result.message == "down requested\nforced\ns6 down"
     assert events == [
-        "clear",
-        ("s6", "ai_worker_navigation", "down"),
+        ("request_down", "ai_worker_navigation"),
         "force",
+        ("s6", "ai_worker_navigation", "down"),
+        "clear",
+    ]
+
+
+def test_navigation_force_stop_kills_process_group_with_separator(monkeypatch):
+    captured = {}
+
+    def fake_exec(command, *, environment=None, timeout=None):
+        captured["command"] = command
+        return 0, "forced"
+
+    monkeypatch.setattr(navigation, "_exec", fake_exec)
+
+    assert navigation._force_stop_navigation_processes() == "forced"
+    script = captured["command"][-1]
+    assert 'kill -TERM -- -"${PGID}"' in script
+    assert 'kill -KILL -- -"${PGID}"' in script
+    assert "pkill" not in script
+
+
+def test_navigation_stop_defers_busy_s6_lock(monkeypatch):
+    from fastapi import HTTPException
+
+    events = []
+
+    monkeypatch.setattr(
+        navigation,
+        "_request_s6_service_down",
+        lambda service: events.append(("request_down", service))
+        or "down requested",
+    )
+    monkeypatch.setattr(
+        navigation,
+        "_force_stop_navigation_processes",
+        lambda: events.append("force") or "forced",
+    )
+    monkeypatch.setattr(
+        navigation,
+        "_clear_navigation_runtime_files",
+        lambda: events.append("clear"),
+    )
+    monkeypatch.setattr(
+        navigation,
+        "_s6_command",
+        lambda service, action, **kwargs: events.append(("s6", service, action))
+        or (_ for _ in ()).throw(
+            HTTPException(503, "s6-rc: fatal: unable to take locks: Resource busy")
+        ),
+    )
+
+    result = navigation.navigation_stop()
+
+    assert result.ok
+    assert "down requested" in result.message
+    assert "forced" in result.message
+    assert "down sync deferred" in result.message
+    assert events == [
+        ("request_down", "ai_worker_navigation"),
+        "force",
+        ("s6", "ai_worker_navigation", "down"),
+        "clear",
     ]
 
 

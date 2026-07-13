@@ -266,7 +266,13 @@ def _wait_for_saved_map(
     )
 
 
-def _s6_command(service: str, action: Literal["up", "down", "restart"]):
+def _s6_command(
+    service: str,
+    action: Literal["up", "down", "restart"],
+    *,
+    retries: int = 0,
+    retry_delay: float = 0.2,
+):
     control = (
         'S6_RC=$(ls /package/admin/s6-*/command/s6-rc 2>/dev/null | head -1); '
         '[ -z "$S6_RC" ] && S6_RC=$(command -v s6-rc 2>/dev/null); '
@@ -281,12 +287,44 @@ def _s6_command(service: str, action: Literal["up", "down", "restart"]):
             f'"$S6_RC" -d change {service}; '
             f'sleep 1; "$S6_RC" -u change {service}'
         )
-    code, output = _exec(["sh", "-lc", control + body])
-    if code != 0:
+    for attempt in range(retries + 1):
+        code, output = _exec(["sh", "-lc", control + body])
+        if code == 0:
+            return output or f"{service} {action} complete"
+        if "unable to take locks" in output and attempt < retries:
+            time.sleep(retry_delay)
+            continue
         raise HTTPException(
             503, output or f"Failed to {action} {service}"
         )
-    return output or f"{service} {action} complete"
+    return f"{service} {action} complete"
+
+
+def _sync_s6_service_down_best_effort(service: str) -> str:
+    try:
+        return _s6_command(service, "down", retries=15, retry_delay=0.2)
+    except HTTPException as exc:
+        detail = str(exc.detail)
+        if "unable to take locks" not in detail:
+            raise
+        return f"{service} down sync deferred: {detail}"
+
+
+def _request_s6_service_down(service: str) -> str:
+    """Ask s6-supervise to stop a service without waiting for full teardown."""
+    script = (
+        'S6_SVC=$(ls /package/admin/s6-*/command/s6-svc 2>/dev/null | head -1); '
+        '[ -z "$S6_SVC" ] && S6_SVC=$(command -v s6-svc 2>/dev/null); '
+        '[ -n "$S6_SVC" ] || { echo "s6-svc not found"; exit 127; }; '
+        f'"$S6_SVC" -d /run/service/{service}'
+    )
+    code, output = _exec(["sh", "-lc", script])
+    if code != 0:
+        raise HTTPException(
+            503,
+            output or f"Failed to request {service} down",
+        )
+    return output or f"{service} down requested"
 
 
 def _clear_navigation_runtime_files() -> None:
@@ -318,17 +356,35 @@ if [ -f "${{PGID_FILE}}" ]; then
       ;;
     *)
       echo "[navigation stop] Terminating process group ${{PGID}}"
-      kill -TERM -"${{PGID}}" 2>/dev/null || true
+      kill -TERM -- -"${{PGID}}" 2>/dev/null || true
       sleep 1
-      kill -KILL -"${{PGID}}" 2>/dev/null || true
+      kill -KILL -- -"${{PGID}}" 2>/dev/null || true
       ;;
   esac
   rm -f "${{PGID_FILE}}"
 fi
-PATTERN='(ros2 launch .*ffw_navigation|slam_toolbox|cartographer|nav2_|async_slam_toolbox_node|sync_slam_toolbox_node)'
-pkill -TERM -f "${{PATTERN}}" 2>/dev/null || true
+PIDS=$(ps -eo pid=,comm=,args= | awk -v self="$$" '
+  $1 == self {{ next }}
+  $2 ~ /^(awk|sh|bash|ps)$/ {{ next }}
+  /ros2 launch ffw_navigation/ ||
+  /\\/slam_toolbox\\// ||
+  /\\/nav2_/ ||
+  /\\/opennav_docking/ {{
+    print $1
+  }}
+')
+if [ -n "${{PIDS}}" ]; then
+  echo "[navigation stop] Terminating leftover navigation PIDs: ${{PIDS}}"
+  for PID in ${{PIDS}}; do
+    kill -TERM "${{PID}}" 2>/dev/null || true
+  done
+fi
 sleep 1
-pkill -KILL -f "${{PATTERN}}" 2>/dev/null || true
+if [ -n "${{PIDS}}" ]; then
+  for PID in ${{PIDS}}; do
+    kill -KILL "${{PID}}" 2>/dev/null || true
+  done
+fi
 exit 0
 """
     code, output = _exec(["sh", "-lc", script])
@@ -498,9 +554,10 @@ def navigation_status():
 @router.post("/start", response_model=ActionResult)
 def navigation_start(request: NavigationStartRequest):
     map_name = _validate_map_name(request.map_name)
-    _clear_navigation_runtime_files()
-    _s6_command(NAVIGATION_SERVICE, "down")
+    _request_s6_service_down(NAVIGATION_SERVICE)
     _force_stop_navigation_processes()
+    _s6_command(NAVIGATION_SERVICE, "down", retries=15, retry_delay=0.2)
+    _clear_navigation_runtime_files()
     _write_runtime_file("/run/navigation_type", request.mode)
     _write_runtime_file(
         f"/run/launch_args/{NAVIGATION_SERVICE}",
@@ -512,11 +569,14 @@ def navigation_start(request: NavigationStartRequest):
 
 @router.post("/stop", response_model=ActionResult)
 def navigation_stop():
-    _clear_navigation_runtime_files()
-    message = _s6_command(NAVIGATION_SERVICE, "down")
+    message = _request_s6_service_down(NAVIGATION_SERVICE)
     force_message = _force_stop_navigation_processes()
+    sync_message = _sync_s6_service_down_best_effort(NAVIGATION_SERVICE)
+    _clear_navigation_runtime_files()
     if force_message:
         message = f"{message}\n{force_message}"
+    if sync_message:
+        message = f"{message}\n{sync_message}"
     return ActionResult(
         ok=True,
         message=message,
