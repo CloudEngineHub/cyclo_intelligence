@@ -325,7 +325,7 @@ function BehaviorPalette({ selectedTag = "", onNodeSelect }) {
                   aria-pressed={selectedTag === node.tag}
                   onClick={() => onNodeSelect(node.tag)}
                   onDragStart={(event) => handleDragStart(event, node.tag)}
-                  className="h-8 px-2 border text-xs font-medium"
+                  className="h-8 px-2 border text-xs font-medium transition-all active:translate-y-px"
                   style={{
                     color: selectedTag === node.tag
                       ? "var(--vscode-button-foreground)"
@@ -336,6 +336,9 @@ function BehaviorPalette({ selectedTag = "", onNodeSelect }) {
                     borderColor: selectedTag === node.tag
                       ? "var(--vscode-focusBorder)"
                       : "var(--vscode-panel-border)",
+                    boxShadow: selectedTag === node.tag
+                      ? "inset 0 0 0 1px var(--vscode-focusBorder)"
+                      : "none",
                   }}
                   title={node.tag}
                 >
@@ -364,6 +367,7 @@ function BehaviorPalette({ selectedTag = "", onNodeSelect }) {
 
 function ActionButton({
   children,
+  active = false,
   disabled = false,
   onClick,
   type = "button",
@@ -386,14 +390,34 @@ function ActionButton({
       borderColor: "var(--vscode-inputValidation-errorBorder, #ef4444)",
     },
   };
+  const activeStyles = active
+    ? {
+      color: variant === "danger"
+        ? styles.danger.color
+        : "var(--vscode-list-activeSelectionForeground, var(--vscode-button-foreground))",
+      backgroundColor: variant === "danger"
+        ? styles.danger.backgroundColor
+        : "var(--vscode-list-activeSelectionBackground, var(--vscode-button-background))",
+      borderColor: "var(--vscode-focusBorder)",
+      boxShadow: [
+        "inset 0 0 0 1px var(--vscode-focusBorder)",
+        "inset 3px 0 0 var(--vscode-focusBorder)",
+      ].join(", "),
+    }
+    : {};
 
   return (
     <button
       type={type}
       disabled={disabled}
       onClick={onClick}
-      className="h-8 px-3 border text-sm font-semibold disabled:opacity-50"
-      style={styles[variant]}
+      aria-pressed={active ? true : undefined}
+      className={[
+        "h-8 px-3 border text-sm font-semibold transition-all active:translate-y-px",
+        active ? "disabled:opacity-90" : "disabled:opacity-50",
+        "disabled:active:translate-y-0",
+      ].join(" ")}
+      style={{ ...styles[variant], ...activeStyles }}
     >
       {children}
     </button>
@@ -907,10 +931,15 @@ export default function MissionCanvasPage() {
       >
         {workspaceStage === STAGE_MAPPING && (
           <>
-            <ActionButton disabled={!!busy || running} onClick={handleStartMapping}>
+            <ActionButton
+              active={busy === "Mapping" || (running && !mappingEditorActive)}
+              disabled={!!busy || running}
+              onClick={handleStartMapping}
+            >
               Mapping
             </ActionButton>
             <ActionButton
+              active={showSaveMapDialog || busy === "Save map"}
               disabled={!!busy || !running}
               onClick={handleOpenSaveMapDialog}
               variant="secondary"
@@ -918,6 +947,7 @@ export default function MissionCanvasPage() {
               Save Map
             </ActionButton>
             <ActionButton
+              active={mappingEditorActive}
               disabled={!!busy}
               onClick={handleLoadMap}
               variant="secondary"
@@ -925,13 +955,15 @@ export default function MissionCanvasPage() {
               Load Map
             </ActionButton>
             <ActionButton
+              active={mappingEditorActive}
               disabled={!!busy}
               onClick={handleToggleMapFix}
-              variant={mappingEditorActive ? "primary" : "secondary"}
+              variant="secondary"
             >
               Fix Map
             </ActionButton>
             <ActionButton
+              active={busy === "Stop"}
               disabled={!!busy || !running}
               onClick={handleStopNavigation}
               variant="danger"
@@ -968,9 +1000,10 @@ export default function MissionCanvasPage() {
         {workspaceStage === STAGE_AUTHORING && (
           <>
             <ActionButton
+              active={interactionMode === "spot"}
               disabled={!running || !map}
               onClick={handleToggleSpotMode}
-              variant={interactionMode === "spot" ? "secondary" : "primary"}
+              variant="secondary"
             >
               Spot
             </ActionButton>
@@ -1010,13 +1043,18 @@ export default function MissionCanvasPage() {
               <span style={{ color: "var(--vscode-descriptionForeground)" }}>Map</span>
               <span className="font-mono">{mapName.trim() || DEFAULT_MAP_NAME}</span>
             </div>
-            <ActionButton disabled={!!busy || running} onClick={handleStartNavigation}>
+            <ActionButton
+              active={busy === "Navigation" || (running && workspaceStage === STAGE_RUN)}
+              disabled={!!busy || running}
+              onClick={handleStartNavigation}
+            >
               Navigation
             </ActionButton>
             <ActionButton disabled variant="secondary">
               Run BT
             </ActionButton>
             <ActionButton
+              active={busy === "Stop"}
               disabled={!!busy || !running}
               onClick={handleStopNavigation}
               variant="danger"
