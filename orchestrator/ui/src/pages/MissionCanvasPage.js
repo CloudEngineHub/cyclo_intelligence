@@ -915,7 +915,7 @@ export default function MissionCanvasPage() {
       </header>
 
       <div
-        className="shrink-0 flex flex-wrap items-end gap-1 border-b"
+        className="shrink-0 flex flex-wrap items-end border-b"
         role="tablist"
         aria-label="Mission Canvas stages"
         style={{ borderColor: MISSION_BORDER }}
