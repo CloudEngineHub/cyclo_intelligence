@@ -851,9 +851,10 @@ export default function MissionCanvasPage() {
       </header>
 
       <div
-        className="shrink-0 mb-4 flex flex-wrap gap-2"
+        className="shrink-0 mb-4 flex flex-wrap items-end gap-1 border-b"
         role="tablist"
         aria-label="Mission Canvas stages"
+        style={{ borderColor: "var(--vscode-panel-border)" }}
       >
         {WORKSPACE_STAGES.map((stage) => {
           const selected = workspaceStage === stage.id;
@@ -873,17 +874,21 @@ export default function MissionCanvasPage() {
                   setPendingBehaviorNodeTag("");
                 }
               }}
-              className="h-8 px-3 border text-sm font-semibold"
+              className="relative h-10 px-5 border border-b-0 rounded-t-md text-sm font-semibold transition-colors"
               style={{
                 color: selected
-                  ? "var(--vscode-button-foreground)"
+                  ? "var(--vscode-list-activeSelectionForeground, var(--vscode-button-foreground))"
                   : "var(--vscode-foreground)",
                 backgroundColor: selected
-                  ? "var(--vscode-button-background)"
-                  : "var(--vscode-editor-background)",
+                  ? "var(--vscode-list-activeSelectionBackground, var(--vscode-button-background))"
+                  : "transparent",
                 borderColor: selected
                   ? "var(--vscode-focusBorder)"
-                  : "var(--vscode-panel-border)",
+                  : "transparent",
+                boxShadow: selected
+                  ? "inset 0 3px 0 var(--vscode-focusBorder)"
+                  : "none",
+                transform: selected ? "translateY(1px)" : "none",
               }}
             >
               {stage.label}
