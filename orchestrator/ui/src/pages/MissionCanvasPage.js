@@ -154,7 +154,6 @@ const MISSION_BORDER = "#e5e7eb";
 const MISSION_BORDER_SOFT = "#e5e7eb";
 const MISSION_BUTTON_BORDER = "#cbd5e1";
 const MISSION_PANEL_BORDER = "#cbd5e1";
-const MISSION_ACTIVE_BORDER = "#93c5fd";
 const MISSION_STAGE_FILL = MISSION_BORDER;
 const MISSION_STAGE_EMPTY = "#ffffff";
 const MISSION_SURFACE = "color-mix(in srgb, var(--vscode-foreground, #ffffff) 5%, transparent)";
@@ -403,17 +402,13 @@ function BehaviorPalette({ selectedTag = "", onNodeSelect }) {
                   className="h-8 px-2 border text-xs font-medium transition-all active:translate-y-px"
                   style={{
                     color: selectedTag === node.tag
-                      ? "var(--vscode-button-foreground)"
+                      ? "var(--vscode-foreground)"
                       : "var(--vscode-foreground)",
                     backgroundColor: selectedTag === node.tag
-                      ? "var(--vscode-button-background)"
+                      ? MISSION_SURFACE_STRONG
                       : MISSION_SURFACE,
-                    borderColor: selectedTag === node.tag
-                      ? MISSION_ACTIVE_BORDER
-                      : MISSION_PANEL_BORDER,
-                    boxShadow: selectedTag === node.tag
-                      ? `inset 0 0 0 1px ${MISSION_ACTIVE_BORDER}`
-                      : "none",
+                    borderColor: MISSION_PANEL_BORDER,
+                    boxShadow: "none",
                   }}
                   title={node.tag}
                 >
@@ -469,15 +464,12 @@ function ActionButton({
     ? {
       color: variant === "danger"
         ? styles.danger.color
-        : "var(--vscode-list-activeSelectionForeground, var(--vscode-button-foreground))",
+        : "var(--vscode-foreground)",
       backgroundColor: variant === "danger"
         ? styles.danger.backgroundColor
-        : "var(--vscode-list-activeSelectionBackground, var(--vscode-button-background))",
-      borderColor: MISSION_ACTIVE_BORDER,
-      boxShadow: [
-        `inset 0 0 0 1px ${MISSION_ACTIVE_BORDER}`,
-        `inset 3px 0 0 ${MISSION_ACTIVE_BORDER}`,
-      ].join(", "),
+        : MISSION_SURFACE_STRONG,
+      borderColor: variant === "danger" ? styles.danger.borderColor : MISSION_BUTTON_BORDER,
+      boxShadow: "none",
     }
     : {};
 
