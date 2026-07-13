@@ -122,6 +122,34 @@ const TOPIC_LABELS = {
   "/bt/active_nodes": "BT active nodes",
 };
 
+const STAGE_TOPIC_IDS = {
+  [STAGE_MAPPING]: [
+    "/map",
+    "/scan",
+    "/amcl_pose",
+    "/tf",
+    "/tf_static",
+    "/local_costmap/published_footprint",
+  ],
+  [STAGE_AUTHORING]: [
+    "/map",
+    "/bt/status",
+    "/bt/active_nodes",
+  ],
+  [STAGE_RUN]: [
+    "/map",
+    "/scan",
+    "/amcl_pose",
+    "/local_costmap/published_footprint",
+    "/global_costmap/costmap",
+    "/local_costmap/costmap",
+    "/plan",
+    "/goal_pose",
+    "/bt/status",
+    "/bt/active_nodes",
+  ],
+};
+
 const MISSION_BORDER = "#e5e7eb";
 const MISSION_BORDER_SOFT = "#e5e7eb";
 const MISSION_BUTTON_BORDER = "#cbd5e1";
@@ -596,23 +624,26 @@ export default function MissionCanvasPage() {
       },
     }))
   ), [activeLayers, workspaceStage]);
-  const topicRows = useMemo(() => ([
-    { topic: "/map", isLive: !!map },
-    { topic: "/scan", isLive: !!scan },
-    { topic: "/amcl_pose", isLive: !!amclPose },
-    { topic: "/tf", isLive: !!(tf?.transforms?.length) },
-    { topic: "/tf_static", isLive: !!(tfStatic?.transforms?.length) },
-    {
-      topic: "/local_costmap/published_footprint",
-      isLive: !!(footprint?.polygon?.points?.length),
-    },
-    { topic: "/global_costmap/costmap", isLive: !!globalCostmap },
-    { topic: "/local_costmap/costmap", isLive: !!localCostmap },
-    { topic: "/plan", isLive: !!plan },
-    { topic: "/goal_pose", isLive: !!goalPose },
-    { topic: "/bt/status", isLive: false },
-    { topic: "/bt/active_nodes", isLive: false },
-  ]), [
+  const topicRows = useMemo(() => {
+    const liveByTopic = {
+      "/map": !!map,
+      "/scan": !!scan,
+      "/amcl_pose": !!amclPose,
+      "/tf": !!(tf?.transforms?.length),
+      "/tf_static": !!(tfStatic?.transforms?.length),
+      "/local_costmap/published_footprint": !!(footprint?.polygon?.points?.length),
+      "/global_costmap/costmap": !!globalCostmap,
+      "/local_costmap/costmap": !!localCostmap,
+      "/plan": !!plan,
+      "/goal_pose": !!goalPose,
+      "/bt/status": false,
+      "/bt/active_nodes": false,
+    };
+    return (STAGE_TOPIC_IDS[workspaceStage] || []).map((topic) => ({
+      topic,
+      isLive: !!liveByTopic[topic],
+    }));
+  }, [
     amclPose,
     footprint,
     globalCostmap,
@@ -623,6 +654,7 @@ export default function MissionCanvasPage() {
     scan,
     tf,
     tfStatic,
+    workspaceStage,
   ]);
 
   const loadStatus = useCallback(async () => {

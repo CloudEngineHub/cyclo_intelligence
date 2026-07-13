@@ -95,6 +95,11 @@ test('renders Mission Canvas foundation', async () => {
   expect(screen.getByRole('button', { name: 'Map Editor' })).toBeInTheDocument();
   expect(screen.getByText('Layers')).toBeInTheDocument();
   expect(screen.getByText('Topics')).toBeInTheDocument();
+  expect(screen.getByText('/map')).toBeInTheDocument();
+  expect(screen.getByText('/scan')).toBeInTheDocument();
+  expect(screen.getByText('/tf')).toBeInTheDocument();
+  expect(screen.queryByText('/global_costmap/costmap')).not.toBeInTheDocument();
+  expect(screen.queryByText('/bt/status')).not.toBeInTheDocument();
   await waitFor(() => expect(getServiceStatus).toHaveBeenCalled());
   await waitFor(() => expect(getNavigationSpots).toHaveBeenCalledWith('map'));
 });
@@ -120,6 +125,11 @@ test('shows Spot and BT authoring panels in the authoring stage', async () => {
   expect(screen.getByRole('button', { name: 'Create BT' })).toBeDisabled();
   expect(screen.getByRole('button', { name: 'Edit BT' })).toBeDisabled();
   expect(screen.queryByRole('button', { name: 'Start Mapping' })).not.toBeInTheDocument();
+  expect(screen.getByText('/map')).toBeInTheDocument();
+  expect(screen.getByText('/bt/status')).toBeInTheDocument();
+  expect(screen.getByText('/bt/active_nodes')).toBeInTheDocument();
+  expect(screen.queryByText('/scan')).not.toBeInTheDocument();
+  expect(screen.queryByText('/global_costmap/costmap')).not.toBeInTheDocument();
   await waitFor(() => expect(getServiceStatus).toHaveBeenCalled());
   await waitFor(() => expect(getNavigationSpots).toHaveBeenCalledWith('map'));
 });
@@ -292,6 +302,12 @@ test('enables navigation runtime layers in the run stage', async () => {
   expect(screen.getByRole('button', { name: 'Navigation' })).toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Run BT' })).toBeDisabled();
   expect(screen.queryByRole('button', { name: 'Save Map' })).not.toBeInTheDocument();
+  expect(screen.getByText('/global_costmap/costmap')).toBeInTheDocument();
+  expect(screen.getByText('/local_costmap/costmap')).toBeInTheDocument();
+  expect(screen.getByText('/plan')).toBeInTheDocument();
+  expect(screen.getByText('/goal_pose')).toBeInTheDocument();
+  expect(screen.getByText('/bt/status')).toBeInTheDocument();
+  expect(screen.queryByText('/tf')).not.toBeInTheDocument();
 
   await waitFor(() => {
     expect(mockMapViewer.mock.calls.some(([props]) => (
