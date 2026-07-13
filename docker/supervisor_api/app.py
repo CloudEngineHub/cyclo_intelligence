@@ -72,17 +72,26 @@ _PACKAGE_PARENT = str(Path(__file__).resolve().parent.parent)
 if _PACKAGE_PARENT not in sys.path:
     sys.path.insert(0, _PACKAGE_PARENT)
 
-_NAVIGATION_PATH = Path(__file__).resolve().with_name("navigation.py")
-_NAVIGATION_SPEC = importlib.util.spec_from_file_location(
-    "supervisor_api.navigation",
-    _NAVIGATION_PATH,
-)
-if _NAVIGATION_SPEC is None or _NAVIGATION_SPEC.loader is None:
-    raise ImportError(f"Cannot load navigation router from {_NAVIGATION_PATH}")
-_navigation_module = importlib.util.module_from_spec(_NAVIGATION_SPEC)
-sys.modules[_NAVIGATION_SPEC.name] = _navigation_module
-_NAVIGATION_SPEC.loader.exec_module(_navigation_module)
+def _load_sibling_module(module_name: str, filename: str):
+    path = Path(__file__).resolve().with_name(filename)
+    spec = importlib.util.spec_from_file_location(
+        f"supervisor_api.{module_name}",
+        path,
+    )
+    if spec is None or spec.loader is None:
+        raise ImportError(f"Cannot load {module_name} router from {path}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+_navigation_module = _load_sibling_module("navigation", "navigation.py")
 navigation_router = _navigation_module.router
+_navigation_spots_module = _load_sibling_module(
+    "navigation_spots", "navigation_spots.py"
+)
+navigation_spots_router = _navigation_spots_module.router
 
 
 logger = logging.getLogger("supervisor_api")
@@ -1077,6 +1086,7 @@ app = FastAPI(
 )
 
 _include_router_with_eager_routes(app, navigation_router)
+_include_router_with_eager_routes(app, navigation_spots_router)
 
 
 @app.get("/health", response_model=HealthResponse)

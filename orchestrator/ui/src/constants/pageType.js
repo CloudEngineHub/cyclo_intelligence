@@ -25,6 +25,7 @@ const PageType = {
   EDIT_DATASET: 'edit_dataset',
   BT_MANAGER: 'bt_manager',
   NAVIGATION: 'navigation',
+  MISSION_CANVAS: 'mission_canvas',
 };
 
 export default PageType;

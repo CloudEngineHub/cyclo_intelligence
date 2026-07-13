@@ -275,6 +275,53 @@ function makePoseMarker(pose, color, z) {
     group.add(arrow);
     return group;
 }
+function makeSpotMarker(spot, selected = false) {
+    var _a, _b, _c, _d;
+    const pose = spot === null || spot === void 0 ? void 0 : spot.pose;
+    if (!pose)
+        return null;
+    const x = Number((_a = pose.x) !== null && _a !== void 0 ? _a : 0);
+    const y = Number((_b = pose.y) !== null && _b !== void 0 ? _b : 0);
+    const yaw = Number((_c = pose.yaw) !== null && _c !== void 0 ? _c : 0);
+    const color = selected ? 0xf59e0b : 0x22c55e;
+    const group = new THREE.Group();
+    group.position.set(x, y, 0.24);
+    group.rotation.z = yaw;
+    group.userData.spotId = spot.id;
+    const ring = new THREE.Mesh(new THREE.RingGeometry(0.16, 0.22, 32), new THREE.MeshBasicMaterial({
+        color,
+        transparent: true,
+        opacity: 0.95,
+        side: THREE.DoubleSide,
+    }));
+    ring.userData.spotId = spot.id;
+    group.add(ring);
+    const center = new THREE.Mesh(new THREE.CircleGeometry(0.09, 24), new THREE.MeshBasicMaterial({
+        color,
+        transparent: true,
+        opacity: selected ? 0.95 : 0.78,
+    }));
+    center.position.z = 0.01;
+    center.userData.spotId = spot.id;
+    group.add(center);
+    const heading = makeLine([
+        new THREE.Vector3(0, 0, 0.025),
+        new THREE.Vector3(0.34, 0, 0.025),
+    ], selected ? 0xffffff : 0xdcfce7, 2);
+    if (heading) {
+        heading.userData.spotId = spot.id;
+        group.add(heading);
+    }
+    const label = String((_d = spot.label) !== null && _d !== void 0 ? _d : spot.id);
+    if (label) {
+        const sprite = makeTfLabelSprite(label);
+        sprite.position.set(0, -0.34, 0.04);
+        sprite.scale.set(0.48, 0.12, 1);
+        sprite.userData.spotId = spot.id;
+        group.add(sprite);
+    }
+    return group;
+}
 function makeTfAxes(pose, label) {
     var _a, _b, _c, _d, _e, _f;
     const group = new THREE.Group();
@@ -392,7 +439,7 @@ function applyTopViewRoll(camera, controls, roll) {
     camera.lookAt(controls.target);
     controls.update();
 }
-export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, goalPose, footprint, tf, showMap, showGlobalCostmap, showLocalCostmap, showScan, showGlobalPlan, showGoalPose, showTf, showRobotModel, interactionDisabled, interactionMode, editorActive, viewKey, waitingLabel = "Waiting for /map", onEditorMapPoint, onMapPose, }) {
+export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, goalPose, footprint, tf, showMap, showGlobalCostmap, showLocalCostmap, showScan, showGlobalPlan, showGoalPose, showTf, showRobotModel, interactionDisabled, interactionMode, editorActive, viewKey, waitingLabel = "Waiting for /map", spots = [], selectedSpotId = "", onSpotClick, onEditorMapPoint, onMapPose, }) {
     const containerRef = useRef(null);
     const sceneRef = useRef(null);
     const rendererRef = useRef(null);
@@ -610,6 +657,11 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, 
         if (dragPreviewPose === null || dragPreviewPose === void 0 ? void 0 : dragPreviewPose.position) {
             layers.add(makePoseMarker(dragPreviewPose, interactionMode === "initial" ? 0x22c55e : 0xf59e0b, 0.2));
         }
+        spots.forEach((spot) => {
+            const marker = makeSpotMarker(spot, spot.id === selectedSpotId);
+            if (marker)
+                layers.add(marker);
+        });
         const robotX = Number((_h = (_g = pose === null || pose === void 0 ? void 0 : pose.position) === null || _g === void 0 ? void 0 : _g.x) !== null && _h !== void 0 ? _h : 0);
         const robotY = Number((_k = (_j = pose === null || pose === void 0 ? void 0 : pose.position) === null || _j === void 0 ? void 0 : _j.y) !== null && _k !== void 0 ? _k : 0);
         if (showScan && ((_l = scan === null || scan === void 0 ? void 0 : scan.ranges) === null || _l === void 0 ? void 0 : _l.length)) {
@@ -682,6 +734,7 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, 
         plan,
         pose,
         scan,
+        selectedSpotId,
         showGlobalCostmap,
         showLocalCostmap,
         showGlobalPlan,
@@ -690,6 +743,7 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, 
         showRobotModel,
         showScan,
         showTf,
+        spots,
         tf,
         viewKey,
     ]);
@@ -725,6 +779,27 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, 
                 return null;
             return point;
         };
+        const spotIdFromEvent = (event) => {
+            const layers = layersRef.current;
+            if (!layers || typeof onSpotClick !== "function")
+                return "";
+            const rect = renderer.domElement.getBoundingClientRect();
+            if (rect.width <= 0 || rect.height <= 0)
+                return "";
+            pointerRef.current.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+            pointerRef.current.y = -(((event.clientY - rect.top) / rect.height) * 2 - 1);
+            raycasterRef.current.setFromCamera(pointerRef.current, camera);
+            const hits = raycasterRef.current.intersectObjects(layers.children, true);
+            for (const hit of hits) {
+                let object = hit.object;
+                while (object) {
+                    if (object.userData && object.userData.spotId)
+                        return object.userData.spotId;
+                    object = object.parent;
+                }
+            }
+            return "";
+        };
         const previewPoseFromDrag = (start, point, clientX, clientY) => {
             const moved = Math.hypot(clientX - start.clientX, clientY - start.clientY);
             const yaw = moved > CLICK_DRAG_THRESHOLD_PX
@@ -753,6 +828,17 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, 
                 };
                 renderer.domElement.setPointerCapture(event.pointerId);
                 return;
+            }
+            if (!interactionDisabled && interactionMode === "view") {
+                const spotId = spotIdFromEvent(event);
+                if (spotId) {
+                    event.preventDefault();
+                    event.stopImmediatePropagation();
+                    onSpotClick(spotId);
+                    pointerDownRef.current = null;
+                    setDragPreviewPose(null);
+                    return;
+                }
             }
             if (interactionDisabled || interactionMode === "view") {
                 pointerDownRef.current = null;
@@ -842,7 +928,7 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, 
             renderer.domElement.removeEventListener("pointerup", handlePointerUp);
             renderer.domElement.removeEventListener("pointercancel", handlePointerCancel);
         };
-    }, [editorActive, interactionDisabled, interactionMode, map, onEditorMapPoint, onMapPose, pose]);
+    }, [editorActive, interactionDisabled, interactionMode, map, onEditorMapPoint, onMapPose, onSpotClick, pose]);
     return (<div className="relative border min-h-0 overflow-hidden" style={{
             aspectRatio: "1 / 1",
             backgroundColor: "var(--vscode-editor-background)",

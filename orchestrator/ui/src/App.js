@@ -17,6 +17,7 @@
 import React, { useEffect, useRef } from 'react';
 import clsx from 'clsx';
 import { MdHome, MdVideocam, MdMemory, MdWidgets, MdAccountTree, MdNavigation } from 'react-icons/md';
+import { TbMapRoute } from 'react-icons/tb';
 import { GoGraph } from 'react-icons/go';
 import { Toaster } from 'react-hot-toast';
 import toast from 'react-hot-toast';
@@ -38,6 +39,34 @@ import PageType from './constants/pageType';
 import { BT_UNSUPPORTED_ROBOT_MESSAGE, isBtRobotSupported } from './constants/btSupport';
 
 const NavigationPage = React.lazy(() => import('./pages/NavigationPage'));
+const MissionCanvasPage = React.lazy(() => import('./pages/MissionCanvasPage'));
+
+function MissionCanvasIcon({ size = 36 }) {
+  const treeSize = Math.round(size * 0.48);
+  return (
+    <span
+      className="relative inline-flex items-center justify-center mb-1"
+      style={{ width: size, height: size }}
+      aria-hidden="true"
+    >
+      <TbMapRoute size={size} />
+      <span
+        className="absolute inline-flex items-center justify-center rounded-full"
+        style={{
+          width: treeSize + 6,
+          height: treeSize + 6,
+          right: -5,
+          bottom: -10,
+          color: 'var(--vscode-button-foreground, #ffffff)',
+          backgroundColor: 'var(--vscode-button-background, #0e639c)',
+          border: '1px solid var(--vscode-sideBar-background, #111827)',
+        }}
+      >
+        <MdAccountTree size={treeSize} />
+      </span>
+    </span>
+  );
+}
 
 function App() {
   const dispatch = useDispatch();
@@ -279,6 +308,11 @@ function App() {
     dispatch(moveToPage(PageType.NAVIGATION));
   };
 
+  const handleMissionCanvasPageNavigation = () => {
+    isFirstLoad.current = false;
+    dispatch(moveToPage(PageType.MISSION_CANVAS));
+  };
+
   const classPageButton = clsx(
     'flex',
     'flex-col',
@@ -424,6 +458,20 @@ function App() {
             <span className="mt-1 text-sm whitespace-nowrap">BT Manager</span>
           </button>
 
+          {/* Mission Canvas page button */}
+          <button
+            className={clsx(classPageButton, {
+              'hover:bg-gray-200 active:bg-gray-400 dark:hover:bg-slate-800 dark:active:bg-slate-700': page !== PageType.MISSION_CANVAS,
+              'bg-gray-300 dark:bg-slate-700': page === PageType.MISSION_CANVAS,
+            })}
+            onClick={handleMissionCanvasPageNavigation}
+          >
+            <MissionCanvasIcon />
+            <span className="mt-1 text-center text-sm leading-tight">
+              Mission<br />Canvas
+            </span>
+          </button>
+
           {/* Divider line */}
           <div className="w-24 h-1 border-t-2 rounded-full border-gray-200 dark:border-slate-800 mt-3"></div>
 
@@ -466,6 +514,10 @@ function App() {
           <EditDatasetPage isActive={page === PageType.EDIT_DATASET} />
         ) : page === PageType.BT_MANAGER ? (
           <BTManagerPage isActive={page === PageType.BT_MANAGER} />
+        ) : page === PageType.MISSION_CANVAS ? (
+          <React.Suspense fallback={<div className="flex-1 flex items-center justify-center">Loading Mission Canvas...</div>}>
+            <MissionCanvasPage />
+          </React.Suspense>
         ) : page === PageType.NAVIGATION ? (
           <React.Suspense fallback={<div className="flex-1 flex items-center justify-center">Loading Navigation...</div>}>
             <NavigationPage />

@@ -61,6 +61,7 @@ _BACKENDS = app._BACKENDS
 _USER_SERVICES = app._USER_SERVICES
 navigation = sys.modules["supervisor_api.navigation"]
 navigation_grid_cache = sys.modules["supervisor_api.navigation_grid_cache"]
+navigation_spots = sys.modules["supervisor_api.navigation_spots"]
 _GROOT_REQUIRED_MOUNTS = app._REQUIRED_BACKEND_MOUNTS["groot"]
 _LEROBOT_REQUIRED_MOUNTS = app._REQUIRED_BACKEND_MOUNTS["lerobot"]
 
@@ -100,6 +101,50 @@ def test_navigation_routes_are_registered():
     assert "/navigation/start" in paths
     assert "/navigation/maps/pgm/save" in paths
     assert "/navigation/topics/ws" in paths
+    assert "/navigation/spots" in paths
+
+
+def test_navigation_spots_crud(monkeypatch, tmp_path):
+    monkeypatch.setattr(navigation_spots, "SPOTS_ROOT", tmp_path)
+
+    created = navigation_spots.create_spot(
+        navigation_spots.SpotCreateRequest(
+            id="table_a",
+            map_name="factory",
+            label="Table A",
+            pose=navigation_spots.SpotPose(x=1.0, y=2.0, yaw=0.5),
+        )
+    )
+    assert created.id == "table_a"
+
+    listed = navigation_spots.list_spots("factory")
+    assert listed.map_name == "factory"
+    assert [spot.id for spot in listed.spots] == ["table_a"]
+
+    updated = navigation_spots.update_spot(
+        "table_a",
+        navigation_spots.SpotUpdateRequest(
+            map_name="factory",
+            label="Prep Table",
+            linked_bt_tree="prep_table.xml",
+        )
+    )
+    assert updated.label == "Prep Table"
+    assert updated.linked_bt_tree == "prep_table.xml"
+
+    deleted = navigation_spots.delete_spot("table_a", map_name="factory")
+    assert deleted.ok
+    assert navigation_spots.list_spots("factory").spots == []
+
+
+def test_navigation_spots_rejects_path_like_names(monkeypatch, tmp_path):
+    import pytest
+    from fastapi import HTTPException
+
+    monkeypatch.setattr(navigation_spots, "SPOTS_ROOT", tmp_path)
+
+    with pytest.raises(HTTPException):
+        navigation_spots.list_spots("../factory")
 
 
 def test_navigation_grid_data_crc32_uses_only_map_data():
