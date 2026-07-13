@@ -744,6 +744,9 @@ export default function MissionCanvasPage() {
       if (!activeLayers[layerId]) return;
       (LAYER_TOPIC_IDS[layerId] || []).forEach((topic) => selectedTopics.add(topic));
     });
+    if (workspaceStage === STAGE_MAPPING) {
+      selectedTopics.delete("/amcl_pose");
+    }
     return TOPIC_ORDER.filter((topic) => selectedTopics.has(topic)).map((topic) => ({
       topic,
       isLive: !!liveByTopic[topic],

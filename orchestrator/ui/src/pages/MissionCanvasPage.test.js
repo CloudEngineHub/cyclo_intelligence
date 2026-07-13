@@ -99,6 +99,7 @@ test('renders Mission Canvas foundation', async () => {
   expect(screen.getByText('/map')).toBeInTheDocument();
   expect(screen.getByText('/scan')).toBeInTheDocument();
   expect(screen.getByText('/tf')).toBeInTheDocument();
+  expect(screen.queryByText('/amcl_pose')).not.toBeInTheDocument();
   expect(screen.queryByText('/global_costmap/costmap')).not.toBeInTheDocument();
   expect(screen.queryByText('/bt/status')).not.toBeInTheDocument();
   await waitFor(() => expect(getServiceStatus).toHaveBeenCalled());
@@ -109,14 +110,14 @@ test('updates mapping topics when layer toggles change', async () => {
   render(<MissionCanvasPage />);
 
   expect(screen.getByText('/scan')).toBeInTheDocument();
-  expect(screen.getByText('/amcl_pose')).toBeInTheDocument();
+  expect(screen.queryByText('/amcl_pose')).not.toBeInTheDocument();
   expect(screen.getByText('/tf')).toBeInTheDocument();
   expect(screen.getByText('/tf_static')).toBeInTheDocument();
   expect(screen.getByText('/local_costmap/published_footprint')).toBeInTheDocument();
 
   fireEvent.click(screen.getByLabelText('Lidar'));
   expect(screen.queryByText('/scan')).not.toBeInTheDocument();
-  expect(screen.getByText('/amcl_pose')).toBeInTheDocument();
+  expect(screen.queryByText('/amcl_pose')).not.toBeInTheDocument();
 
   fireEvent.click(screen.getByLabelText('Robot Model'));
   expect(screen.queryByText('/amcl_pose')).not.toBeInTheDocument();
@@ -128,7 +129,7 @@ test('updates mapping topics when layer toggles change', async () => {
 
   fireEvent.click(screen.getByLabelText('Lidar'));
   expect(screen.getByText('/scan')).toBeInTheDocument();
-  expect(screen.getByText('/amcl_pose')).toBeInTheDocument();
+  expect(screen.queryByText('/amcl_pose')).not.toBeInTheDocument();
 
   await waitFor(() => expect(getServiceStatus).toHaveBeenCalled());
   await waitFor(() => expect(getNavigationSpots).toHaveBeenCalledWith('map'));
