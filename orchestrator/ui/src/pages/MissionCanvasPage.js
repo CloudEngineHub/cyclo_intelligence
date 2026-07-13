@@ -842,7 +842,7 @@ export default function MissionCanvasPage() {
         style={{ borderColor: "var(--vscode-panel-border)" }}
       >
         <div className="min-w-0">
-          <h1 className="text-base font-semibold" style={{ color: "var(--vscode-foreground)" }}>
+          <h1 className="text-xl font-bold" style={{ color: "var(--vscode-foreground)" }}>
             Mission Canvas
           </h1>
           <div className="mt-1 text-xs" style={{ color: "var(--vscode-descriptionForeground)" }}>
