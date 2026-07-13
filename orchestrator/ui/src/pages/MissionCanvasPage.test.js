@@ -57,6 +57,8 @@ test('renders Mission Canvas foundation', async () => {
   expect(screen.getByRole('tab', { name: 'Mapping' })).toHaveAttribute('aria-selected', 'true');
   expect(screen.getByRole('tab', { name: 'Spot / BT' })).toBeInTheDocument();
   expect(screen.getByRole('tab', { name: 'Run' })).toBeInTheDocument();
+  expect(screen.getByLabelText('Map name')).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Save Map' })).toBeInTheDocument();
   expect(screen.getByText('Layers')).toBeInTheDocument();
   expect(screen.getByText('Topics')).toBeInTheDocument();
   await waitFor(() => expect(getServiceStatus).toHaveBeenCalled());
@@ -71,6 +73,11 @@ test('shows Spot and BT authoring panels in the authoring stage', async () => {
   expect(screen.getByText('Behavior Surface')).toBeInTheDocument();
   expect(screen.getByText('Inspector')).toBeInTheDocument();
   expect(screen.getByText('Spots')).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Spot' })).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Delete Spot' })).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Create BT' })).toBeDisabled();
+  expect(screen.getByRole('button', { name: 'Edit BT' })).toBeDisabled();
+  expect(screen.queryByRole('button', { name: 'Mapping' })).not.toBeInTheDocument();
   await waitFor(() => expect(getServiceStatus).toHaveBeenCalled());
   await waitFor(() => expect(getNavigationSpots).toHaveBeenCalledWith('map'));
 });
@@ -102,6 +109,10 @@ test('enables navigation runtime layers in the run stage', async () => {
   render(<MissionCanvasPage />);
 
   fireEvent.click(screen.getByRole('tab', { name: 'Run' }));
+
+  expect(screen.getByRole('button', { name: 'Navigation' })).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Run BT' })).toBeDisabled();
+  expect(screen.queryByRole('button', { name: 'Save Map' })).not.toBeInTheDocument();
 
   await waitFor(() => {
     expect(mockMapViewer.mock.calls.some(([props]) => (

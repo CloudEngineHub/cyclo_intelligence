@@ -206,6 +206,43 @@ function TopicStatusPanel({ topicRows }) {
   );
 }
 
+function ActionButton({
+  children,
+  disabled = false,
+  onClick,
+  variant = "primary",
+}) {
+  const styles = {
+    primary: {
+      color: "var(--vscode-button-foreground)",
+      backgroundColor: "var(--vscode-button-background)",
+      borderColor: "var(--vscode-focusBorder)",
+    },
+    secondary: {
+      color: "var(--vscode-button-secondaryForeground)",
+      backgroundColor: "var(--vscode-button-secondaryBackground)",
+      borderColor: "var(--vscode-panel-border)",
+    },
+    danger: {
+      color: "#000000",
+      backgroundColor: "var(--vscode-inputValidation-errorBackground, #b91c1c)",
+      borderColor: "var(--vscode-inputValidation-errorBorder, #ef4444)",
+    },
+  };
+
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={onClick}
+      className="h-8 px-3 border text-sm font-semibold disabled:opacity-50"
+      style={styles[variant]}
+    >
+      {children}
+    </button>
+  );
+}
+
 export default function MissionCanvasPage() {
   const statusLoadingRef = useRef(false);
   const tfBufferRef = useRef(new Map());
@@ -510,87 +547,17 @@ export default function MissionCanvasPage() {
             />
             <span className="font-medium">{running ? "running" : "idle"}</span>
           </div>
-          <input
-            value={mapName}
-            onChange={(event) => setMapName(event.currentTarget.value)}
-            className="h-8 w-28 px-2 border text-sm"
+          <div
+            className="h-8 px-2.5 border flex items-center gap-2 text-sm"
             style={{
-              color: "var(--vscode-input-foreground)",
-              backgroundColor: "var(--vscode-input-background)",
-              borderColor: "var(--vscode-input-border, var(--vscode-panel-border))",
-            }}
-          />
-          <button
-            type="button"
-            disabled={!!busy || running}
-            onClick={handleStartMapping}
-            className="h-8 px-3 border text-sm font-semibold disabled:opacity-50"
-            style={{
-              color: "var(--vscode-button-foreground)",
-              backgroundColor: "var(--vscode-button-background)",
-              borderColor: "var(--vscode-focusBorder)",
-            }}
-          >
-            Mapping
-          </button>
-          <button
-            type="button"
-            disabled={!!busy || running}
-            onClick={handleStartNavigation}
-            className="h-8 px-3 border text-sm font-semibold disabled:opacity-50"
-            style={{
-              color: "var(--vscode-button-foreground)",
-              backgroundColor: "var(--vscode-button-background)",
-              borderColor: "var(--vscode-focusBorder)",
-            }}
-          >
-            Navigation
-          </button>
-          <button
-            type="button"
-            disabled={!!busy || !running}
-            onClick={handleSaveMap}
-            className="h-8 px-3 border text-sm font-semibold disabled:opacity-50"
-            style={{
-              color: "var(--vscode-button-secondaryForeground)",
-              backgroundColor: "var(--vscode-button-secondaryBackground)",
+              color: "var(--vscode-foreground)",
+              backgroundColor: "var(--vscode-sidebar-background)",
               borderColor: "var(--vscode-panel-border)",
             }}
           >
-            Save Map
-          </button>
-          <button
-            type="button"
-            disabled={!!busy || !running}
-            onClick={handleStopNavigation}
-            className="h-8 px-3 border text-sm font-semibold disabled:opacity-50"
-            style={{
-              color: "#000000",
-              backgroundColor: "var(--vscode-inputValidation-errorBackground, #b91c1c)",
-              borderColor: "var(--vscode-inputValidation-errorBorder, #ef4444)",
-            }}
-          >
-            Stop
-          </button>
-          <button
-            type="button"
-            disabled={!running || !map}
-            onClick={handleToggleSpotMode}
-            className="h-8 px-3 border text-sm font-semibold disabled:opacity-50"
-            style={{
-              color: interactionMode === "spot"
-                ? "var(--vscode-button-secondaryForeground)"
-                : "var(--vscode-button-foreground)",
-              backgroundColor: interactionMode === "spot"
-                ? "var(--vscode-button-secondaryBackground)"
-                : "var(--vscode-button-background)",
-              borderColor: interactionMode === "spot"
-                ? "var(--vscode-panel-border)"
-                : "var(--vscode-focusBorder)",
-            }}
-          >
-            Spot
-          </button>
+            <span style={{ color: "var(--vscode-descriptionForeground)" }}>map</span>
+            <span className="font-mono">{mapName.trim() || DEFAULT_MAP_NAME}</span>
+          </div>
         </div>
       </header>
 
@@ -628,6 +595,105 @@ export default function MissionCanvasPage() {
             </button>
           );
         })}
+      </div>
+
+      <div
+        className="shrink-0 mb-4 border px-3 py-2 flex flex-wrap items-center gap-2"
+        style={{
+          color: "var(--vscode-foreground)",
+          borderColor: "var(--vscode-panel-border)",
+          backgroundColor: "var(--vscode-sidebar-background)",
+        }}
+      >
+        {workspaceStage === STAGE_MAPPING && (
+          <>
+            <label className="flex items-center gap-2 text-sm">
+              <span style={{ color: "var(--vscode-descriptionForeground)" }}>Map</span>
+              <input
+                aria-label="Map name"
+                value={mapName}
+                onChange={(event) => setMapName(event.currentTarget.value)}
+                className="h-8 w-32 px-2 border text-sm"
+                style={{
+                  color: "var(--vscode-input-foreground)",
+                  backgroundColor: "var(--vscode-input-background)",
+                  borderColor: "var(--vscode-input-border, var(--vscode-panel-border))",
+                }}
+              />
+            </label>
+            <ActionButton disabled={!!busy || running} onClick={handleStartMapping}>
+              Mapping
+            </ActionButton>
+            <ActionButton
+              disabled={!!busy || !running}
+              onClick={handleSaveMap}
+              variant="secondary"
+            >
+              Save Map
+            </ActionButton>
+            <ActionButton
+              disabled={!!busy || !running}
+              onClick={handleStopNavigation}
+              variant="danger"
+            >
+              Stop
+            </ActionButton>
+          </>
+        )}
+
+        {workspaceStage === STAGE_AUTHORING && (
+          <>
+            <ActionButton
+              disabled={!running || !map}
+              onClick={handleToggleSpotMode}
+              variant={interactionMode === "spot" ? "secondary" : "primary"}
+            >
+              Spot
+            </ActionButton>
+            <ActionButton
+              disabled={!selectedSpot}
+              onClick={handleDeleteSelectedSpot}
+              variant="secondary"
+            >
+              Delete Spot
+            </ActionButton>
+            <ActionButton disabled variant="secondary">
+              Create BT
+            </ActionButton>
+            <ActionButton disabled variant="secondary">
+              Edit BT
+            </ActionButton>
+          </>
+        )}
+
+        {workspaceStage === STAGE_RUN && (
+          <>
+            <div
+              className="h-8 px-2.5 border flex items-center gap-2 text-sm"
+              style={{
+                color: "var(--vscode-foreground)",
+                backgroundColor: "var(--vscode-editor-background)",
+                borderColor: "var(--vscode-panel-border)",
+              }}
+            >
+              <span style={{ color: "var(--vscode-descriptionForeground)" }}>Map</span>
+              <span className="font-mono">{mapName.trim() || DEFAULT_MAP_NAME}</span>
+            </div>
+            <ActionButton disabled={!!busy || running} onClick={handleStartNavigation}>
+              Navigation
+            </ActionButton>
+            <ActionButton disabled variant="secondary">
+              Run BT
+            </ActionButton>
+            <ActionButton
+              disabled={!!busy || !running}
+              onClick={handleStopNavigation}
+              variant="danger"
+            >
+              Stop
+            </ActionButton>
+          </>
+        )}
       </div>
 
       <div className="flex-1 min-h-0 grid grid-cols-1 xl:grid-cols-[minmax(520px,1fr)_360px] gap-4">
@@ -679,23 +745,7 @@ export default function MissionCanvasPage() {
 
         {workspaceStage === STAGE_AUTHORING ? (
           <aside className="min-h-0 grid grid-rows-[auto_1fr_minmax(160px,220px)] gap-4">
-            <Panel className="grid gap-3">
-            <div className="flex items-center justify-between gap-3">
-              <div className="text-xs font-semibold">Inspector</div>
-              <button
-                type="button"
-                disabled={!selectedSpot}
-                onClick={handleDeleteSelectedSpot}
-                className="h-7 px-2 border text-xs font-semibold disabled:opacity-50"
-                style={{
-                  color: "var(--vscode-button-secondaryForeground)",
-                  backgroundColor: "var(--vscode-button-secondaryBackground)",
-                  borderColor: "var(--vscode-panel-border)",
-                }}
-              >
-                Delete
-              </button>
-            </div>
+            <Panel title="Inspector" className="grid gap-3">
             {selectedSpot ? (
               <div className="grid gap-2 text-xs">
                 <label className="grid gap-1">
@@ -764,12 +814,7 @@ export default function MissionCanvasPage() {
         ) : (
           <aside className="min-h-0 grid grid-rows-[auto_auto_minmax(0,1fr)] gap-4">
             <Panel title={workspaceStage === STAGE_MAPPING ? "Mapping" : "Run"}>
-              <div className="text-xs leading-5" style={{ color: "var(--vscode-descriptionForeground)" }}>
-                {workspaceStage === STAGE_MAPPING
-                  ? "Focused map building view with map, lidar, robot model, and TF layers."
-                  : "Runtime view for navigation, costmaps, global plan, goal pose, and future BT/VLA state."}
-              </div>
-              <div className="mt-3 text-xs">
+              <div className="text-xs">
                 Map name: <span className="font-mono">{mapName || "-"}</span>
               </div>
               <div className="mt-1 text-xs">

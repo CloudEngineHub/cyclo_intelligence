@@ -387,6 +387,7 @@ As of the first Mission Canvas implementation slice, the repository contains:
   - Mapping
   - Spot / BT
   - Run
+- Stage-specific action bars for mapping, authoring, and runtime controls.
 - Stage-specific layer presets and shared Topics diagnostics.
 - Frontend API utilities and focused tests for the new page/API client.
 - Backend unit coverage for Spot CRUD added to docker/supervisor_api/test_app.py.
