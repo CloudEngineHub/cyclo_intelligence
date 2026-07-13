@@ -104,6 +104,35 @@ test('renders Mission Canvas foundation', async () => {
   await waitFor(() => expect(getNavigationSpots).toHaveBeenCalledWith('map'));
 });
 
+test('updates mapping topics when layer toggles change', async () => {
+  render(<MissionCanvasPage />);
+
+  expect(screen.getByText('/scan')).toBeInTheDocument();
+  expect(screen.getByText('/amcl_pose')).toBeInTheDocument();
+  expect(screen.getByText('/tf')).toBeInTheDocument();
+  expect(screen.getByText('/tf_static')).toBeInTheDocument();
+  expect(screen.getByText('/local_costmap/published_footprint')).toBeInTheDocument();
+
+  fireEvent.click(screen.getByLabelText('Lidar'));
+  expect(screen.queryByText('/scan')).not.toBeInTheDocument();
+  expect(screen.getByText('/amcl_pose')).toBeInTheDocument();
+
+  fireEvent.click(screen.getByLabelText('Robot Model'));
+  expect(screen.queryByText('/amcl_pose')).not.toBeInTheDocument();
+  expect(screen.queryByText('/local_costmap/published_footprint')).not.toBeInTheDocument();
+
+  fireEvent.click(screen.getByLabelText('TF'));
+  expect(screen.queryByText('/tf')).not.toBeInTheDocument();
+  expect(screen.queryByText('/tf_static')).not.toBeInTheDocument();
+
+  fireEvent.click(screen.getByLabelText('Lidar'));
+  expect(screen.getByText('/scan')).toBeInTheDocument();
+  expect(screen.getByText('/amcl_pose')).toBeInTheDocument();
+
+  await waitFor(() => expect(getServiceStatus).toHaveBeenCalled());
+  await waitFor(() => expect(getNavigationSpots).toHaveBeenCalledWith('map'));
+});
+
 test('shows Spot and BT authoring panels in the authoring stage', async () => {
   render(<MissionCanvasPage />);
 
@@ -308,6 +337,13 @@ test('enables navigation runtime layers in the run stage', async () => {
   expect(screen.getByText('/goal_pose')).toBeInTheDocument();
   expect(screen.getByText('/bt/status')).toBeInTheDocument();
   expect(screen.queryByText('/tf')).not.toBeInTheDocument();
+
+  fireEvent.click(screen.getByLabelText('Global costmap'));
+  expect(screen.queryByText('/global_costmap/costmap')).not.toBeInTheDocument();
+
+  fireEvent.click(screen.getByLabelText('TF'));
+  expect(screen.getByText('/tf')).toBeInTheDocument();
+  expect(screen.getByText('/tf_static')).toBeInTheDocument();
 
   await waitFor(() => {
     expect(mockMapViewer.mock.calls.some(([props]) => (

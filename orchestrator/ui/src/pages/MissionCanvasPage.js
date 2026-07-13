@@ -107,33 +107,37 @@ const LAYER_PRESETS = {
   },
 };
 
-const STAGE_TOPIC_IDS = {
-  [STAGE_MAPPING]: [
-    "/map",
-    "/scan",
-    "/amcl_pose",
-    "/tf",
-    "/tf_static",
-    "/local_costmap/published_footprint",
-  ],
-  [STAGE_AUTHORING]: [
-    "/map",
-    "/bt/status",
-    "/bt/active_nodes",
-  ],
-  [STAGE_RUN]: [
-    "/map",
-    "/scan",
-    "/amcl_pose",
-    "/local_costmap/published_footprint",
-    "/global_costmap/costmap",
-    "/local_costmap/costmap",
-    "/plan",
-    "/goal_pose",
-    "/bt/status",
-    "/bt/active_nodes",
-  ],
+const LAYER_TOPIC_IDS = {
+  map: ["/map"],
+  scan: ["/scan", "/amcl_pose"],
+  robotModel: ["/amcl_pose", "/local_costmap/published_footprint"],
+  tf: ["/tf", "/tf_static"],
+  globalCostmap: ["/global_costmap/costmap"],
+  localCostmap: ["/local_costmap/costmap"],
+  globalPlan: ["/plan"],
+  goalPose: ["/goal_pose"],
 };
+
+const STAGE_EXTRA_TOPIC_IDS = {
+  [STAGE_MAPPING]: [],
+  [STAGE_AUTHORING]: ["/bt/status", "/bt/active_nodes"],
+  [STAGE_RUN]: ["/bt/status", "/bt/active_nodes"],
+};
+
+const TOPIC_ORDER = [
+  "/map",
+  "/scan",
+  "/amcl_pose",
+  "/tf",
+  "/tf_static",
+  "/local_costmap/published_footprint",
+  "/global_costmap/costmap",
+  "/local_costmap/costmap",
+  "/plan",
+  "/goal_pose",
+  "/bt/status",
+  "/bt/active_nodes",
+];
 
 const MISSION_BORDER = "#e5e7eb";
 const MISSION_BORDER_SOFT = "#e5e7eb";
@@ -613,11 +617,17 @@ export default function MissionCanvasPage() {
       "/bt/status": false,
       "/bt/active_nodes": false,
     };
-    return (STAGE_TOPIC_IDS[workspaceStage] || []).map((topic) => ({
+    const selectedTopics = new Set(STAGE_EXTRA_TOPIC_IDS[workspaceStage] || []);
+    (STAGE_LAYER_IDS[workspaceStage] || []).forEach((layerId) => {
+      if (!activeLayers[layerId]) return;
+      (LAYER_TOPIC_IDS[layerId] || []).forEach((topic) => selectedTopics.add(topic));
+    });
+    return TOPIC_ORDER.filter((topic) => selectedTopics.has(topic)).map((topic) => ({
       topic,
       isLive: !!liveByTopic[topic],
     }));
   }, [
+    activeLayers,
     amclPose,
     footprint,
     globalCostmap,
