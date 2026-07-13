@@ -289,6 +289,57 @@ def _s6_command(service: str, action: Literal["up", "down", "restart"]):
     return output or f"{service} {action} complete"
 
 
+def _clear_navigation_runtime_files() -> None:
+    code, output = _exec(
+        [
+            "rm",
+            "-f",
+            "/run/navigation_type",
+            f"/run/launch_args/{NAVIGATION_SERVICE}",
+        ]
+    )
+    if code != 0:
+        raise HTTPException(
+            503,
+            output or "Failed to clear navigation runtime files",
+        )
+
+
+def _force_stop_navigation_processes() -> str:
+    script = f"""
+set +e
+SERVICE={shlex.quote(NAVIGATION_SERVICE)}
+PGID_FILE=/run/${{SERVICE}}.pgid
+if [ -f "${{PGID_FILE}}" ]; then
+  PGID=$(cat "${{PGID_FILE}}" 2>/dev/null | tr -d " " || true)
+  case "${{PGID}}" in
+    ""|*[!0-9]*|1)
+      echo "[navigation stop] Ignoring invalid process group '${{PGID}}'"
+      ;;
+    *)
+      echo "[navigation stop] Terminating process group ${{PGID}}"
+      kill -TERM -"${{PGID}}" 2>/dev/null || true
+      sleep 1
+      kill -KILL -"${{PGID}}" 2>/dev/null || true
+      ;;
+  esac
+  rm -f "${{PGID_FILE}}"
+fi
+PATTERN='(ros2 launch .*ffw_navigation|slam_toolbox|cartographer|nav2_|async_slam_toolbox_node|sync_slam_toolbox_node)'
+pkill -TERM -f "${{PATTERN}}" 2>/dev/null || true
+sleep 1
+pkill -KILL -f "${{PATTERN}}" 2>/dev/null || true
+exit 0
+"""
+    code, output = _exec(["sh", "-lc", script])
+    if code != 0:
+        raise HTTPException(
+            503,
+            output or "Failed to force stop navigation processes",
+        )
+    return output
+
+
 def _service_status(service: str) -> NavigationStatus:
     script = (
         'S6_SVSTAT=$(ls /package/admin/s6-*/command/s6-svstat '
@@ -447,20 +498,28 @@ def navigation_status():
 @router.post("/start", response_model=ActionResult)
 def navigation_start(request: NavigationStartRequest):
     map_name = _validate_map_name(request.map_name)
+    _clear_navigation_runtime_files()
+    _s6_command(NAVIGATION_SERVICE, "down")
+    _force_stop_navigation_processes()
     _write_runtime_file("/run/navigation_type", request.mode)
     _write_runtime_file(
         f"/run/launch_args/{NAVIGATION_SERVICE}",
         f"map_name:={map_name}",
     )
-    message = _s6_command(NAVIGATION_SERVICE, "restart")
+    message = _s6_command(NAVIGATION_SERVICE, "up")
     return ActionResult(ok=True, message=message)
 
 
 @router.post("/stop", response_model=ActionResult)
 def navigation_stop():
+    _clear_navigation_runtime_files()
+    message = _s6_command(NAVIGATION_SERVICE, "down")
+    force_message = _force_stop_navigation_processes()
+    if force_message:
+        message = f"{message}\n{force_message}"
     return ActionResult(
         ok=True,
-        message=_s6_command(NAVIGATION_SERVICE, "down"),
+        message=message,
     )
 
 

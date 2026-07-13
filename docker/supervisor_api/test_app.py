@@ -169,6 +169,78 @@ def test_navigation_save_map_cli_does_not_forward_launch_args(monkeypatch):
     }
 
 
+def test_navigation_start_clears_stale_runtime_before_up(monkeypatch):
+    events = []
+
+    monkeypatch.setattr(
+        navigation,
+        "_clear_navigation_runtime_files",
+        lambda: events.append("clear"),
+    )
+    monkeypatch.setattr(
+        navigation,
+        "_force_stop_navigation_processes",
+        lambda: events.append("force") or "",
+    )
+    monkeypatch.setattr(
+        navigation,
+        "_write_runtime_file",
+        lambda path, content: events.append(("write", path, content)),
+    )
+    monkeypatch.setattr(
+        navigation,
+        "_s6_command",
+        lambda service, action: events.append(("s6", service, action))
+        or f"{service} {action}",
+    )
+
+    result = navigation.navigation_start(
+        navigation.NavigationStartRequest(mode="map", map_name="factory")
+    )
+
+    assert result.ok
+    assert result.message == "ai_worker_navigation up"
+    assert events == [
+        "clear",
+        ("s6", "ai_worker_navigation", "down"),
+        "force",
+        ("write", "/run/navigation_type", "map"),
+        ("write", "/run/launch_args/ai_worker_navigation", "map_name:=factory"),
+        ("s6", "ai_worker_navigation", "up"),
+    ]
+
+
+def test_navigation_stop_clears_runtime_and_forces_process_group(monkeypatch):
+    events = []
+
+    monkeypatch.setattr(
+        navigation,
+        "_clear_navigation_runtime_files",
+        lambda: events.append("clear"),
+    )
+    monkeypatch.setattr(
+        navigation,
+        "_s6_command",
+        lambda service, action: events.append(("s6", service, action))
+        or "s6 down",
+    )
+    monkeypatch.setattr(
+        navigation,
+        "_force_stop_navigation_processes",
+        lambda: events.append("force") or "forced",
+    )
+
+    result = navigation.navigation_stop()
+
+    assert result.ok
+    assert result.message == "s6 down\nforced"
+    assert events == [
+        "clear",
+        ("s6", "ai_worker_navigation", "down"),
+        "force",
+    ]
+
+
 def test_navigation_routes_are_registered():
     paths = {route.path for route in app.app.routes if hasattr(route, "path")}
 
