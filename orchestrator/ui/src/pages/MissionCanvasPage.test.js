@@ -83,6 +83,7 @@ test('renders Mission Canvas foundation', async () => {
   expect(screen.getByRole('tab', { name: 'Mapping' })).toHaveAttribute('aria-selected', 'true');
   expect(screen.getByRole('tab', { name: 'Design' })).toBeInTheDocument();
   expect(screen.getByRole('tab', { name: 'Run' })).toBeInTheDocument();
+  expect(screen.getByText('Status: idle')).toBeInTheDocument();
   expect(screen.queryByLabelText('Map name')).not.toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Save Map' })).toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Load Map' })).toBeInTheDocument();

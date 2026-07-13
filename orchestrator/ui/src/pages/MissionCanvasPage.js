@@ -851,18 +851,18 @@ export default function MissionCanvasPage() {
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <div
-            className="h-8 flex items-center gap-2 text-sm"
+            className="h-8 flex items-center gap-2 text-base"
             style={{
               color: "var(--vscode-foreground)",
             }}
           >
             <span
-              className="w-2 h-2 rounded-full shrink-0"
+              className="w-2.5 h-2.5 rounded-full shrink-0"
               style={{ backgroundColor: running ? "#22c55e" : "#ef4444" }}
               title={running ? "Navigation running" : "Navigation idle"}
               aria-label={running ? "Navigation running" : "Navigation idle"}
             />
-            <span className="font-medium">{running ? "running" : "idle"}</span>
+            <span className="font-semibold">Status: {running ? "running" : "idle"}</span>
           </div>
         </div>
       </header>
