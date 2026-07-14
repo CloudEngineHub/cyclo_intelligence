@@ -395,7 +395,7 @@ function LayerToggle({ label, checked, compact = false, onChange }) {
       />
       <span
         aria-hidden="true"
-        className={`${compact ? "h-4 w-8" : "h-5 w-9"} rounded-full relative shrink-0 transition-colors`}
+        className={`${compact ? "h-4 w-8" : "h-5 w-9"} inline-flex rounded-full relative shrink-0 transition-colors`}
         style={{
           backgroundColor: checked
             ? "var(--vscode-button-background)"
@@ -403,7 +403,7 @@ function LayerToggle({ label, checked, compact = false, onChange }) {
         }}
       >
         <span
-          className={`${compact ? "h-3 w-3 top-0.5" : "h-4 w-4 top-0.5"} absolute left-0.5 rounded-full bg-white shadow-sm transition-transform`}
+          className={`${compact ? "h-3 w-3 top-0.5" : "h-4 w-4 top-0.5"} block absolute left-0.5 rounded-full bg-white shadow-sm transition-transform`}
           style={{
             transform: checked
               ? `translateX(${compact ? "16px" : "16px"})`
