@@ -559,7 +559,12 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, 
             controls = new OrbitControls(camera, renderer.domElement);
             controls.enableDamping = true;
             controls.dampingFactor = 0.08;
-            controls.enableRotate = true;
+            controls.enableRotate = false;
+            controls.mouseButtons = {
+                LEFT: THREE.MOUSE.PAN,
+                MIDDLE: THREE.MOUSE.DOLLY,
+                RIGHT: THREE.MOUSE.PAN,
+            };
             controls.screenSpacePanning = true;
             controlsRef.current = controls;
             resize = () => {
@@ -895,6 +900,18 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, 
             return true;
         };
         const handlePointerDown = (event) => {
+            if (event.button === 2) {
+                if (interactionDisabled || editorActive || interactionMode !== "view")
+                    return;
+                event.preventDefault();
+                event.stopImmediatePropagation();
+                viewRotateDragRef.current = {
+                    clientX: event.clientX,
+                    roll: viewRollRef.current,
+                };
+                renderer.domElement.setPointerCapture(event.pointerId);
+                return;
+            }
             if (event.button !== 0)
                 return;
             if (editorActive) {
@@ -907,16 +924,6 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, 
                     editorPaintPointerRef.current = event.pointerId;
                     renderer.domElement.setPointerCapture(event.pointerId);
                 }
-                return;
-            }
-            if (!interactionDisabled && interactionMode === "view" && event.shiftKey) {
-                event.preventDefault();
-                event.stopImmediatePropagation();
-                viewRotateDragRef.current = {
-                    clientX: event.clientX,
-                    roll: viewRollRef.current,
-                };
-                renderer.domElement.setPointerCapture(event.pointerId);
                 return;
             }
             if (!interactionDisabled && interactionMode === "view") {
@@ -1027,15 +1034,20 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, 
                 renderer.domElement.releasePointerCapture(event.pointerId);
             }
         };
+        const handleContextMenu = (event) => {
+            event.preventDefault();
+        };
         renderer.domElement.addEventListener("pointerdown", handlePointerDown, { capture: true });
         renderer.domElement.addEventListener("pointermove", handlePointerMove);
         renderer.domElement.addEventListener("pointerup", handlePointerUp);
         renderer.domElement.addEventListener("pointercancel", handlePointerCancel);
+        renderer.domElement.addEventListener("contextmenu", handleContextMenu);
         return () => {
             renderer.domElement.removeEventListener("pointerdown", handlePointerDown, { capture: true });
             renderer.domElement.removeEventListener("pointermove", handlePointerMove);
             renderer.domElement.removeEventListener("pointerup", handlePointerUp);
             renderer.domElement.removeEventListener("pointercancel", handlePointerCancel);
+            renderer.domElement.removeEventListener("contextmenu", handleContextMenu);
         };
     }, [editorActive, interactionDisabled, interactionMode, map, onBehaviorNodeClick, onEditorMapPoint, onMapPose, onSpotClick, pose]);
     return (<div className={`relative border min-h-0 overflow-hidden ${fitContainer ? "h-full w-full" : ""}`} style={{
