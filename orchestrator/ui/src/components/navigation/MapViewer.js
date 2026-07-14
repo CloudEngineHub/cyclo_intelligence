@@ -764,7 +764,7 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, 
             }
             const geometry = new THREE.BufferGeometry();
             geometry.setAttribute("position", new THREE.Float32BufferAttribute(points, 3));
-            const material = new THREE.PointsMaterial({ color: 0x22c55e, size: 0.045, sizeAttenuation: true });
+            const material = new THREE.PointsMaterial({ color: 0x22c55e, size: 0.1, sizeAttenuation: true });
             layers.add(new THREE.Points(geometry, material));
         }
         if (showTf && ((_y = tf === null || tf === void 0 ? void 0 : tf.transforms) === null || _y === void 0 ? void 0 : _y.length)) {
