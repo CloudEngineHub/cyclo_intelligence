@@ -1041,6 +1041,9 @@ export default function MissionCanvasPage() {
     () => activeBehaviorNodes.find((node) => node.id === selectedBehaviorNodeId) || null,
     [activeBehaviorNodes, selectedBehaviorNodeId],
   );
+  const behaviorPreviewNode = useMemo(() => (
+    pendingBehaviorNodeTag ? behaviorNodeDefinition(pendingBehaviorNodeTag) : null
+  ), [pendingBehaviorNodeTag]);
   const { topicData: mapData } = useNavigationRosTopic(
     navigationTopicsActive && activeLayers.map ? "/map" : null,
   );
@@ -1444,7 +1447,6 @@ export default function MissionCanvasPage() {
       setSpots((current) => [...current, created]);
       setSelectedSpotId(created.id);
       setSelectedBehaviorNodeId("");
-      setInteractionMode("view");
       setMessage(`Created ${created.label}`);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Failed to create waypoint");
@@ -1455,6 +1457,43 @@ export default function MissionCanvasPage() {
     pendingBehaviorNodeTag,
     spots.length,
   ]);
+
+  const handleMoveSpot = useCallback(async (spotId, x, y, yaw) => {
+    const spot = spots.find((item) => item.id === spotId);
+    if (!spot) return;
+    const nextPose = spotPoseFromMapPose(x, y, yaw ?? spot.pose?.yaw ?? 0);
+    setSpots((current) => current.map((item) => (
+      item.id === spotId ? { ...item, pose: nextPose } : item
+    )));
+    try {
+      const updated = await updateNavigationSpot(spotId, {
+        map_name: spot.map_name,
+        pose: nextPose,
+      });
+      setSpots((current) => current.map((item) => (
+        item.id === updated.id ? updated : item
+      )));
+      setMessage(`Moved ${updated.label || spot.label}`);
+    } catch (error) {
+      setSpots((current) => current.map((item) => (
+        item.id === spotId ? spot : item
+      )));
+      setMessage(error instanceof Error ? error.message : "Failed to move waypoint");
+    }
+  }, [spots]);
+
+  const handleMoveBehaviorNode = useCallback((nodeId, x, y, yaw) => {
+    setBehaviorNodes((current) => current.map((node) => (
+      node.id === nodeId
+        ? {
+          ...node,
+          pose: spotPoseFromMapPose(x, y, yaw ?? node.pose?.yaw ?? 0),
+        }
+        : node
+    )));
+    const node = behaviorNodes.find((item) => item.id === nodeId);
+    setMessage(`Moved ${node?.tag || "node"}`);
+  }, [behaviorNodes]);
 
   const handleRenameSpot = useCallback(async (event) => {
     if (!selectedSpot) return;
@@ -1752,6 +1791,7 @@ export default function MissionCanvasPage() {
             selectedSpotId={mappingEditorActive ? "" : selectedSpotId}
             behaviorNodes={mappingEditorActive ? [] : activeBehaviorNodes}
             selectedBehaviorNodeId={mappingEditorActive ? "" : selectedBehaviorNodeId}
+            behaviorPreviewNode={behaviorPreviewNode}
             showMap={mappingEditorActive ? true : activeLayers.map}
             showGlobalCostmap={mappingEditorActive ? false : needsGlobalCostmap}
             showLocalCostmap={mappingEditorActive ? false : needsLocalCostmap}
@@ -1780,6 +1820,8 @@ export default function MissionCanvasPage() {
                 : running ? "Waiting for /map" : "Run Mission to view /map"}
             onSpotClick={handleSelectSpot}
             onBehaviorNodeClick={handleSelectBehaviorNode}
+            onSpotPoseChange={handleMoveSpot}
+            onBehaviorNodePoseChange={handleMoveBehaviorNode}
             onEditorMapPoint={mapEditor.editAtMapPoint}
             onMapPose={handleCreateSpotAtPose}
           />

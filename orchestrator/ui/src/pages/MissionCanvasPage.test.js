@@ -9,7 +9,11 @@ import {
   startNavigation,
   stopNavigation,
 } from '../utils/navigationApi';
-import { createNavigationSpot, getNavigationSpots } from '../utils/navigationSpotsApi';
+import {
+  createNavigationSpot,
+  getNavigationSpots,
+  updateNavigationSpot,
+} from '../utils/navigationSpotsApi';
 
 const mockMapViewer = jest.fn(() => <div>Mission Canvas Map</div>);
 const mockPublishRosTopic = jest.fn();
@@ -72,6 +76,14 @@ beforeEach(() => {
     linked_bt_tree: '',
     metadata: {},
   });
+  updateNavigationSpot.mockImplementation((spotId, patch) => Promise.resolve({
+    id: spotId,
+    map_name: patch.map_name || 'factory',
+    label: 'Waypoint A',
+    pose: patch.pose || { frame_id: 'map', x: 1, y: 2, yaw: 0 },
+    linked_bt_tree: '',
+    metadata: {},
+  }));
   getPgmFiles.mockResolvedValue({ files: [] });
   getPgmImage.mockResolvedValue({
     path: 'map.pgm',
@@ -277,9 +289,28 @@ test('shows waypoint actions in Properties after placing a waypoint', async () =
     pose: { frame_id: 'map', x: 1, y: 2, yaw: 0.25 },
   }));
   expect(screen.getByDisplayValue('Waypoint A')).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Waypoint' })).toHaveAttribute('aria-pressed', 'true');
+  expect(latestMapViewerProps().interactionMode).toBe('spot');
   expect(screen.getByRole('button', { name: 'Create BT' })).toBeDisabled();
   expect(screen.getByRole('button', { name: 'Edit BT' })).toBeDisabled();
   expect(screen.getByRole('button', { name: 'Delete Waypoint' })).toBeEnabled();
+
+  await act(async () => {
+    await latestMapViewerProps().onSpotPoseChange('spot_a', 4, 5, 0.25);
+  });
+
+  await waitFor(() => expect(updateNavigationSpot).toHaveBeenCalledWith('spot_a', {
+    map_name: 'factory',
+    pose: { frame_id: 'map', x: 4, y: 5, yaw: 0.25 },
+  }));
+  await waitFor(() => expect(latestMapViewerProps().spots[0].pose).toMatchObject({
+    x: 4,
+    y: 5,
+    yaw: 0.25,
+  }));
+
+  fireEvent.click(screen.getByRole('button', { name: 'Waypoint' }));
+  expect(screen.getByRole('button', { name: 'Waypoint' })).not.toHaveAttribute('aria-pressed');
 });
 
 test('places behavior palette nodes on the map overlay', async () => {
@@ -310,6 +341,16 @@ test('places behavior palette nodes on the map overlay', async () => {
   expect(latestMapViewerProps().selectedBehaviorNodeId).toBe('behavior_1_wait');
   expect(screen.getByText('behavior_1_wait')).toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Delete Node' })).toBeEnabled();
+
+  act(() => {
+    latestMapViewerProps().onBehaviorNodePoseChange('behavior_1_wait', 3, 4, 0.75);
+  });
+
+  await waitFor(() => expect(latestMapViewerProps().behaviorNodes[0].pose).toMatchObject({
+    x: 3,
+    y: 4,
+    yaw: 0.75,
+  }));
 
   fireEvent.click(screen.getByRole('button', { name: 'Save Map' }));
 

@@ -521,7 +521,7 @@ function applyTopViewRoll(camera, controls, roll) {
     camera.lookAt(controls.target);
     controls.update();
 }
-export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, goalPose, footprint, tf, showMap, showGlobalCostmap, showLocalCostmap, showScan, showGlobalPlan, showGoalPose, showTf, showRobotModel, interactionDisabled, interactionMode, editorActive, viewKey, waitingLabel = "Waiting for /map", fitContainer = false, spots = [], selectedSpotId = "", behaviorNodes = [], selectedBehaviorNodeId = "", onSpotClick, onBehaviorNodeClick, onEditorMapPoint, onMapPose, }) {
+export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, goalPose, footprint, tf, showMap, showGlobalCostmap, showLocalCostmap, showScan, showGlobalPlan, showGoalPose, showTf, showRobotModel, interactionDisabled, interactionMode, editorActive, viewKey, waitingLabel = "Waiting for /map", fitContainer = false, spots = [], selectedSpotId = "", behaviorNodes = [], selectedBehaviorNodeId = "", behaviorPreviewNode = null, onSpotClick, onBehaviorNodeClick, onSpotPoseChange, onBehaviorNodePoseChange, onEditorMapPoint, onMapPose, }) {
     const containerRef = useRef(null);
     const sceneRef = useRef(null);
     const rendererRef = useRef(null);
@@ -536,6 +536,7 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, 
     const latestFootprintRef = useRef(null);
     const tfSyncedFootprintRef = useRef(null);
     const [dragPreviewPose, setDragPreviewPose] = useState(null);
+    const [nodeDragPreview, setNodeDragPreview] = useState(null);
     const [viewerError, setViewerError] = useState(null);
     // Freeze each LaserScan in display coordinates until the next scan or map geometry change.
     const scanProjectionRef = useRef(null);
@@ -543,6 +544,7 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, 
     const pointerRef = useRef(new THREE.Vector2());
     const pointerDownRef = useRef(null);
     const editorPaintPointerRef = useRef(null);
+    const nodeDragRef = useRef(null);
     useEffect(() => {
         const containerEl = containerRef.current;
         if (!containerEl || rendererRef.current)
@@ -743,20 +745,67 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, 
             layers.add(makePoseMarker(goalPose.pose, 0xf59e0b, 0.14));
         }
         if (dragPreviewPose === null || dragPreviewPose === void 0 ? void 0 : dragPreviewPose.position) {
-            layers.add(makePoseMarker(dragPreviewPose, interactionMode === "initial" ? 0x22c55e : 0xf59e0b, 0.2));
+            const previewX = Number((_g = dragPreviewPose.position.x) !== null && _g !== void 0 ? _g : 0);
+            const previewY = Number((_h = dragPreviewPose.position.y) !== null && _h !== void 0 ? _h : 0);
+            const previewYaw = yawFromPose(dragPreviewPose);
+            if (interactionMode === "spot") {
+                layers.add(makeSpotMarker({
+                    id: "__waypoint_preview__",
+                    label: "Waypoint",
+                    pose: { x: previewX, y: previewY, yaw: previewYaw },
+                }, true));
+            }
+            else if (interactionMode === "behavior" && behaviorPreviewNode) {
+                layers.add(makeBehaviorNodeMarker({
+                    id: "__behavior_preview__",
+                    tag: behaviorPreviewNode.tag,
+                    label: behaviorPreviewNode.label || behaviorPreviewNode.tag,
+                    category: behaviorPreviewNode.category || "action",
+                    pose: { x: previewX, y: previewY, yaw: previewYaw },
+                }, true));
+            }
+            else {
+                layers.add(makePoseMarker(dragPreviewPose, interactionMode === "initial" ? 0x22c55e : 0xf59e0b, 0.2));
+            }
         }
         spots.forEach((spot) => {
-            const marker = makeSpotMarker(spot, spot.id === selectedSpotId);
+            const preview = (nodeDragPreview === null || nodeDragPreview === void 0 ? void 0 : nodeDragPreview.type) === "spot" && nodeDragPreview.id === spot.id
+                ? nodeDragPreview
+                : null;
+            const marker = makeSpotMarker(preview
+                ? {
+                    ...spot,
+                    pose: {
+                        ...spot.pose,
+                        x: preview.x,
+                        y: preview.y,
+                        yaw: preview.yaw,
+                    },
+                }
+                : spot, spot.id === selectedSpotId);
             if (marker)
                 layers.add(marker);
         });
         behaviorNodes.forEach((node) => {
-            const marker = makeBehaviorNodeMarker(node, node.id === selectedBehaviorNodeId);
+            const preview = (nodeDragPreview === null || nodeDragPreview === void 0 ? void 0 : nodeDragPreview.type) === "behaviorNode" && nodeDragPreview.id === node.id
+                ? nodeDragPreview
+                : null;
+            const marker = makeBehaviorNodeMarker(preview
+                ? {
+                    ...node,
+                    pose: {
+                        ...node.pose,
+                        x: preview.x,
+                        y: preview.y,
+                        yaw: preview.yaw,
+                    },
+                }
+                : node, node.id === selectedBehaviorNodeId);
             if (marker)
                 layers.add(marker);
         });
-        const robotX = Number((_h = (_g = pose === null || pose === void 0 ? void 0 : pose.position) === null || _g === void 0 ? void 0 : _g.x) !== null && _h !== void 0 ? _h : 0);
-        const robotY = Number((_k = (_j = pose === null || pose === void 0 ? void 0 : pose.position) === null || _j === void 0 ? void 0 : _j.y) !== null && _k !== void 0 ? _k : 0);
+        const robotX = Number((_k = (_j = pose === null || pose === void 0 ? void 0 : pose.position) === null || _j === void 0 ? void 0 : _j.x) !== null && _k !== void 0 ? _k : 0);
+        const robotY = Number((_m = (_l = pose === null || pose === void 0 ? void 0 : pose.position) === null || _l === void 0 ? void 0 : _l.y) !== null && _m !== void 0 ? _m : 0);
         if (showScan && ((_l = scan === null || scan === void 0 ? void 0 : scan.ranges) === null || _l === void 0 ? void 0 : _l.length)) {
             let points = ((_m = scanProjectionRef.current) === null || _m === void 0 ? void 0 : _m.scan) === scan && scanProjectionRef.current.mapKey === mapKey
                 ? scanProjectionRef.current.points
@@ -820,8 +869,10 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, 
     }, [
         globalCostmap,
         dragPreviewPose,
+        nodeDragPreview,
         goalPose,
         interactionMode,
+        behaviorPreviewNode,
         localCostmap,
         map,
         plan,
@@ -897,6 +948,36 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, 
             }
             return null;
         };
+        const draggableTargetPose = (target) => {
+            var _a;
+            if ((target === null || target === void 0 ? void 0 : target.type) === "spot") {
+                const spot = spots.find((item) => item.id === target.id);
+                if (!spot || spot.id !== selectedSpotId || typeof onSpotPoseChange !== "function")
+                    return null;
+                const spotPose = spot.pose;
+                if (!spotPose)
+                    return null;
+                return {
+                    x: Number((_a = spotPose.x) !== null && _a !== void 0 ? _a : 0),
+                    y: Number(spotPose.y !== null && spotPose.y !== void 0 ? spotPose.y : 0),
+                    yaw: Number(spotPose.yaw !== null && spotPose.yaw !== void 0 ? spotPose.yaw : 0),
+                };
+            }
+            if ((target === null || target === void 0 ? void 0 : target.type) === "behaviorNode") {
+                const node = behaviorNodes.find((item) => item.id === target.id);
+                if (!node || node.id !== selectedBehaviorNodeId || typeof onBehaviorNodePoseChange !== "function")
+                    return null;
+                const nodePose = node.pose;
+                if (!nodePose)
+                    return null;
+                return {
+                    x: Number(nodePose.x !== null && nodePose.x !== void 0 ? nodePose.x : 0),
+                    y: Number(nodePose.y !== null && nodePose.y !== void 0 ? nodePose.y : 0),
+                    yaw: Number(nodePose.yaw !== null && nodePose.yaw !== void 0 ? nodePose.yaw : 0),
+                };
+            }
+            return null;
+        };
         const previewPoseFromDrag = (start, point, clientX, clientY) => {
             const moved = Math.hypot(clientX - start.clientX, clientY - start.clientY);
             const yaw = moved > CLICK_DRAG_THRESHOLD_PX
@@ -956,6 +1037,26 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, 
                     else {
                         onSpotClick(target.id);
                     }
+                    const point = mapPointFromEvent(event);
+                    const targetPose = point ? draggableTargetPose(target) : null;
+                    if (point && targetPose) {
+                        nodeDragRef.current = {
+                            type: target.type,
+                            id: target.id,
+                            clientX: event.clientX,
+                            clientY: event.clientY,
+                            offsetX: point.x - targetPose.x,
+                            offsetY: point.y - targetPose.y,
+                            x: targetPose.x,
+                            y: targetPose.y,
+                            yaw: targetPose.yaw,
+                            dragging: false,
+                        };
+                        renderer.domElement.setPointerCapture(event.pointerId);
+                    }
+                    else {
+                        nodeDragRef.current = null;
+                    }
                     pointerDownRef.current = null;
                     setDragPreviewPose(null);
                     return;
@@ -987,6 +1088,30 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, 
                 paintEditorPoint(event);
                 return;
             }
+            const nodeDrag = nodeDragRef.current;
+            if (nodeDrag) {
+                const point = mapPointFromEvent(event);
+                if (!point)
+                    return;
+                event.preventDefault();
+                event.stopImmediatePropagation();
+                const moved = Math.hypot(event.clientX - nodeDrag.clientX, event.clientY - nodeDrag.clientY);
+                const nextX = point.x - nodeDrag.offsetX;
+                const nextY = point.y - nodeDrag.offsetY;
+                nodeDrag.x = nextX;
+                nodeDrag.y = nextY;
+                nodeDrag.dragging = nodeDrag.dragging || moved > CLICK_DRAG_THRESHOLD_PX;
+                if (nodeDrag.dragging) {
+                    setNodeDragPreview({
+                        type: nodeDrag.type,
+                        id: nodeDrag.id,
+                        x: nextX,
+                        y: nextY,
+                        yaw: nodeDrag.yaw,
+                    });
+                }
+                return;
+            }
             const viewRotateDrag = viewRotateDragRef.current;
             if (viewRotateDrag) {
                 event.preventDefault();
@@ -1013,6 +1138,25 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, 
                 editorPaintPointerRef.current = null;
                 if (renderer.domElement.hasPointerCapture(event.pointerId)) {
                     renderer.domElement.releasePointerCapture(event.pointerId);
+                }
+                return;
+            }
+            if (nodeDragRef.current) {
+                event.preventDefault();
+                event.stopImmediatePropagation();
+                const nodeDrag = nodeDragRef.current;
+                nodeDragRef.current = null;
+                setNodeDragPreview(null);
+                if (renderer.domElement.hasPointerCapture(event.pointerId)) {
+                    renderer.domElement.releasePointerCapture(event.pointerId);
+                }
+                if (nodeDrag.dragging) {
+                    if (nodeDrag.type === "spot" && typeof onSpotPoseChange === "function") {
+                        onSpotPoseChange(nodeDrag.id, nodeDrag.x, nodeDrag.y, nodeDrag.yaw);
+                    }
+                    else if (nodeDrag.type === "behaviorNode" && typeof onBehaviorNodePoseChange === "function") {
+                        onBehaviorNodePoseChange(nodeDrag.id, nodeDrag.x, nodeDrag.y, nodeDrag.yaw);
+                    }
                 }
                 return;
             }
@@ -1047,7 +1191,9 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, 
         const handlePointerCancel = (event) => {
             editorPaintPointerRef.current = null;
             viewRotateDragRef.current = null;
+            nodeDragRef.current = null;
             pointerDownRef.current = null;
+            setNodeDragPreview(null);
             setDragPreviewPose(null);
             if (renderer.domElement.hasPointerCapture(event.pointerId)) {
                 renderer.domElement.releasePointerCapture(event.pointerId);
@@ -1068,7 +1214,23 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, 
             renderer.domElement.removeEventListener("pointercancel", handlePointerCancel);
             renderer.domElement.removeEventListener("contextmenu", handleContextMenu);
         };
-    }, [editorActive, interactionDisabled, interactionMode, map, onBehaviorNodeClick, onEditorMapPoint, onMapPose, onSpotClick, pose]);
+    }, [
+        behaviorNodes,
+        editorActive,
+        interactionDisabled,
+        interactionMode,
+        map,
+        onBehaviorNodeClick,
+        onBehaviorNodePoseChange,
+        onEditorMapPoint,
+        onMapPose,
+        onSpotClick,
+        onSpotPoseChange,
+        pose,
+        selectedBehaviorNodeId,
+        selectedSpotId,
+        spots,
+    ]);
     return (<div className={`relative border rounded-md min-h-0 overflow-hidden ${fitContainer ? "h-full w-full" : ""}`} style={{
             ...(fitContainer
                 ? { height: "100%", width: "100%" }
