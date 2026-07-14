@@ -228,7 +228,7 @@ function behaviorNodeSerialFromNodes(nodes) {
 function Panel({ title, children, className = "", compact = false }) {
   return (
     <div
-      className={`border ${compact ? "p-2" : "p-3"} ${className}`}
+      className={`border min-h-0 min-w-0 ${compact ? "p-2" : "p-3"} ${className}`}
       style={{
         color: MISSION_TEXT,
         borderColor: MISSION_PANEL_BORDER,
@@ -398,8 +398,8 @@ function LayerToggle({ label, checked, compact = false, onChange }) {
 
 function LayersPanel({ layerToggles, compact = false }) {
   return (
-    <Panel title="Layers" compact={compact} className={`grid shrink-0 ${compact ? "gap-1" : "gap-2"}`}>
-      <div className={`flex flex-wrap ${compact ? "gap-1" : "gap-2"}`}>
+    <Panel title="Layers" compact={compact} className={`grid content-start overflow-auto ${compact ? "gap-1" : "gap-2"}`}>
+      <div className={`flex flex-wrap min-w-0 ${compact ? "gap-1" : "gap-2"}`}>
         {layerToggles.map((layer) => (
           <LayerToggle
             key={layer.id}
@@ -454,7 +454,7 @@ function SessionRow({ label, value, stacked = false }) {
 
 function MappingSessionPanel({ mappingEditorActive, selectedPath, dirty }) {
   return (
-    <Panel title="Mapping Session" compact className="grid gap-1">
+    <Panel title="Mapping Session" compact className="grid gap-1 content-start overflow-auto">
       <div className="grid gap-1">
         <SessionRow
           label="Source"
@@ -699,7 +699,7 @@ function MappingTeleopPanel({ disabled, onPublish, onMessage }) {
   };
 
   return (
-    <Panel title="Mobile Teleop" className="grid gap-3 min-h-0">
+    <Panel title="Mobile Teleop" className="grid gap-3 min-h-0 content-start overflow-auto">
       <div className="flex items-center justify-between gap-2">
         <div className="text-xs" style={{ color: MISSION_TEXT_MUTED }}>
           {disabled ? "Unavailable" : activated ? "Active" : "Inactive"}
@@ -717,7 +717,7 @@ function MappingTeleopPanel({ disabled, onPublish, onMessage }) {
         role="group"
         aria-label="Mobile Teleop"
         tabIndex={controlsDisabled ? -1 : 0}
-        className="grid gap-4 outline-none"
+        className="grid gap-4 min-h-0 outline-none"
       >
         <div className="grid grid-cols-3 gap-2 justify-self-center">
           <div />
@@ -1915,9 +1915,9 @@ export default function MissionCanvasPage() {
         ) : (
           <aside
             className={[
-              "min-h-0 grid gap-4",
+              "min-h-0 grid gap-4 overflow-hidden",
               workspaceStage === STAGE_MAPPING
-                ? "grid-rows-[minmax(255px,auto)_auto_auto_minmax(150px,1fr)]"
+                ? "grid-rows-[minmax(0,1.35fr)_minmax(0,0.42fr)_minmax(0,0.34fr)_minmax(0,1fr)]"
                 : "grid-rows-[auto_auto_minmax(0,1fr)]",
             ].join(" ")}
           >

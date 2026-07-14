@@ -95,6 +95,7 @@ test('renders Mission Canvas foundation', async () => {
   expect(screen.getByText('Not saved')).toBeInTheDocument();
   expect(screen.getByText('Clean')).toBeInTheDocument();
   expect(screen.queryByText('PID:')).not.toBeInTheDocument();
+  expect(screen.getByText('Mapping Session').parentElement).toHaveClass('overflow-auto');
   const startMappingButton = screen.getByRole('button', { name: 'Start Mapping' });
   const stopButton = screen.getByRole('button', { name: 'Stop' });
   const saveMapButton = screen.getByRole('button', { name: 'Save Map' });
@@ -103,11 +104,13 @@ test('renders Mission Canvas foundation', async () => {
   expect(Boolean(stopButton.compareDocumentPosition(saveMapButton) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
   expect(Boolean(saveMapButton.compareDocumentPosition(mapEditorButton) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
   expect(screen.getByText('Mobile Teleop')).toBeInTheDocument();
+  expect(screen.getByText('Mobile Teleop').parentElement).toHaveClass('overflow-auto');
   expect(screen.getByRole('group', { name: 'Mobile Teleop' })).toBeInTheDocument();
   expect(screen.getByText('/cmd_vel')).toBeInTheDocument();
   expect(screen.getAllByText('Inactive').length).toBeGreaterThan(0);
   expect(screen.getByRole('button', { name: 'Activate' })).toBeEnabled();
   expect(screen.getByText('Layers')).toBeInTheDocument();
+  expect(screen.getByText('Layers').parentElement).toHaveClass('overflow-auto');
   expect(screen.getByText('Topics')).toBeInTheDocument();
   expect(screen.getByText('/map')).toBeInTheDocument();
   expect(screen.getByText('/scan')).toBeInTheDocument();
