@@ -1593,6 +1593,14 @@ export default function MissionCanvasPage() {
                 Start Mapping
               </ActionButton>
               <ActionButton
+                active={busy === "Stop"}
+                disabled={!!busy || !running}
+                onClick={handleStopNavigation}
+                variant="danger"
+              >
+                Stop
+              </ActionButton>
+              <ActionButton
                 active={showSaveMapDialog || busy === "Save map"}
                 disabled={!!busy || !running}
                 onClick={handleOpenSaveMapDialog}
@@ -1602,19 +1610,11 @@ export default function MissionCanvasPage() {
               </ActionButton>
               <ActionButton
                 active={mappingEditorActive}
-                disabled={!!busy}
+                disabled={!!busy || running}
                 onClick={handleToggleMapEditor}
                 variant="secondary"
               >
                 Map Editor
-              </ActionButton>
-              <ActionButton
-                active={busy === "Stop"}
-                disabled={!!busy || !running}
-                onClick={handleStopNavigation}
-                variant="danger"
-              >
-                Stop
               </ActionButton>
               {mappingEditorActive && (
                 <>

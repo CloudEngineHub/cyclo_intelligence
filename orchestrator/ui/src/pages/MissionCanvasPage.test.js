@@ -7,6 +7,7 @@ import {
   saveNavigationMap,
   savePgmImage,
   startNavigation,
+  stopNavigation,
 } from '../utils/navigationApi';
 import { getNavigationSpots } from '../utils/navigationSpotsApi';
 
@@ -94,9 +95,13 @@ test('renders Mission Canvas foundation', async () => {
   expect(screen.getByText('Not saved')).toBeInTheDocument();
   expect(screen.getByText('Clean')).toBeInTheDocument();
   expect(screen.queryByText('PID:')).not.toBeInTheDocument();
-  expect(screen.getByRole('button', { name: 'Save Map' })).toBeInTheDocument();
-  expect(screen.getByRole('button', { name: 'Start Mapping' })).toBeInTheDocument();
-  expect(screen.getByRole('button', { name: 'Map Editor' })).toBeInTheDocument();
+  const startMappingButton = screen.getByRole('button', { name: 'Start Mapping' });
+  const stopButton = screen.getByRole('button', { name: 'Stop' });
+  const saveMapButton = screen.getByRole('button', { name: 'Save Map' });
+  const mapEditorButton = screen.getByRole('button', { name: 'Map Editor' });
+  expect(Boolean(startMappingButton.compareDocumentPosition(stopButton) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
+  expect(Boolean(stopButton.compareDocumentPosition(saveMapButton) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
+  expect(Boolean(saveMapButton.compareDocumentPosition(mapEditorButton) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
   expect(screen.getByText('Mobile Teleop')).toBeInTheDocument();
   expect(screen.getByRole('group', { name: 'Mobile Teleop' })).toBeInTheDocument();
   expect(screen.getByText('/cmd_vel')).toBeInTheDocument();
@@ -254,6 +259,27 @@ test('starts mapping mode from Mission Canvas', async () => {
   fireEvent.click(screen.getByRole('button', { name: 'Start Mapping' }));
 
   await waitFor(() => expect(startNavigation).toHaveBeenCalledWith('map', 'map'));
+});
+
+test('locks mapping controls while mapping is running', async () => {
+  getServiceStatus
+    .mockResolvedValueOnce({ is_up: true })
+    .mockResolvedValueOnce({ is_up: false });
+
+  render(<MissionCanvasPage />);
+
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Stop' })).toBeEnabled());
+  expect(screen.getByRole('button', { name: 'Save Map' })).toBeEnabled();
+  expect(screen.getByRole('button', { name: 'Start Mapping' })).toBeDisabled();
+  expect(screen.getByRole('button', { name: 'Map Editor' })).toBeDisabled();
+
+  fireEvent.click(screen.getByRole('button', { name: 'Stop' }));
+
+  await waitFor(() => expect(stopNavigation).toHaveBeenCalled());
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Start Mapping' })).toBeEnabled());
+  expect(screen.getByRole('button', { name: 'Map Editor' })).toBeEnabled();
+  expect(screen.getByRole('button', { name: 'Save Map' })).toBeDisabled();
+  expect(screen.getByRole('button', { name: 'Stop' })).toBeDisabled();
 });
 
 test('publishes keyboard teleop commands without mapping runtime', async () => {
