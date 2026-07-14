@@ -636,7 +636,7 @@ function MappingTeleopPanel({ disabled, onPublish, onMessage }) {
     },
   }), [angularSpeed, linearSpeed]);
 
-  const handleKeyDown = (event) => {
+  const handleKeyDown = useCallback((event) => {
     if (controlsDisabled || event.repeat || isTextInputTarget(event.target)) return;
     const key = event.key === " " ? "space" : event.key.toLowerCase();
     if (key === "space") {
@@ -648,15 +648,26 @@ function MappingTeleopPanel({ disabled, onPublish, onMessage }) {
     if (!command) return;
     event.preventDefault();
     startTeleop(command.label, command.motion);
-  };
+  }, [commandByKey, controlsDisabled, startTeleop, stopTeleop]);
 
-  const handleKeyUp = (event) => {
-    if (controlsDisabled || isTextInputTarget(event.target)) return;
+  const handleKeyUp = useCallback((event) => {
+    if (controlsDisabled) return;
     const key = event.key.toLowerCase();
     if (!commandByKey[key]) return;
+    if (isTextInputTarget(event.target) && !activeMotionRef.current) return;
     event.preventDefault();
     stopTeleop();
-  };
+  }, [commandByKey, controlsDisabled, stopTeleop]);
+
+  useEffect(() => {
+    if (controlsDisabled) return undefined;
+    window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("keyup", handleKeyUp);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("keyup", handleKeyUp);
+    };
+  }, [controlsDisabled, handleKeyDown, handleKeyUp]);
 
   const updateLinearSpeed = (value) => {
     const nextSpeed = clampNumber(value, 0.05, 1.2);
@@ -703,13 +714,6 @@ function MappingTeleopPanel({ disabled, onPublish, onMessage }) {
         role="group"
         aria-label="Mobile Teleop"
         tabIndex={controlsDisabled ? -1 : 0}
-        onKeyDown={handleKeyDown}
-        onKeyUp={handleKeyUp}
-        onBlur={(event) => {
-          if (!event.currentTarget.contains(event.relatedTarget)) {
-            stopTeleop();
-          }
-        }}
         className="grid gap-4 outline-none"
       >
         <div className="grid grid-cols-3 gap-2 justify-self-center">

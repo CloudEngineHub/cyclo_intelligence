@@ -265,14 +265,14 @@ test('publishes keyboard teleop commands while mapping is running', async () => 
   await waitFor(() => expect(screen.getByRole('button', { name: 'Activate' })).toBeEnabled());
   expect(teleop).toHaveAttribute('tabindex', '-1');
 
-  fireEvent.keyDown(teleop, { key: 'w' });
+  fireEvent.keyDown(window, { key: 'w' });
   expect(mockPublishRosTopic).not.toHaveBeenCalled();
 
   fireEvent.click(screen.getByRole('button', { name: 'Activate' }));
   await waitFor(() => expect(screen.getByRole('button', { name: 'Deactivate' })).toBeInTheDocument());
   expect(teleop).toHaveAttribute('tabindex', '0');
 
-  fireEvent.keyDown(teleop, { key: 'w' });
+  fireEvent.keyDown(window, { key: 'w' });
 
   await waitFor(() => expect(mockPublishRosTopic).toHaveBeenCalledWith(
     '/cmd_vel',
@@ -283,7 +283,7 @@ test('publishes keyboard teleop commands while mapping is running', async () => 
     },
   ));
 
-  fireEvent.keyUp(teleop, { key: 'w' });
+  fireEvent.keyUp(window, { key: 'w' });
 
   await waitFor(() => expect(mockPublishRosTopic).toHaveBeenCalledWith(
     '/cmd_vel',
