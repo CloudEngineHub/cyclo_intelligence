@@ -379,11 +379,9 @@ function LoadMapDialog({
 function LayerToggle({ label, checked, compact = false, onChange }) {
   return (
     <label
-      className={`${compact ? "h-8 px-2" : "h-9 px-2.5"} border rounded-md flex items-center justify-between gap-3 text-xs font-medium cursor-pointer select-none`}
+      className={`${compact ? "min-h-7" : "min-h-8"} flex items-center justify-between gap-3 text-xs font-medium cursor-pointer select-none`}
       style={{
         color: MISSION_TEXT,
-        borderColor: MISSION_PANEL_BORDER,
-        backgroundColor: MISSION_STAGE_EMPTY,
       }}
     >
       <span className="truncate">{label}</span>

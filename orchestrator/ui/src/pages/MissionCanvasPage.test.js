@@ -137,6 +137,7 @@ test('updates mapping topics when layer toggles change', async () => {
   expect(screen.getByLabelText('Lidar')).toHaveAttribute('type', 'checkbox');
   expect(screen.getByLabelText('Lidar')).toHaveClass('sr-only');
   expect(screen.getByLabelText('Lidar').parentElement).toHaveClass('justify-between');
+  expect(screen.getByLabelText('Lidar').parentElement).not.toHaveClass('border');
   expect(screen.getByLabelText('Lidar').parentElement.lastElementChild).toHaveClass('inline-flex');
 
   fireEvent.click(screen.getByLabelText('Lidar'));
@@ -473,6 +474,7 @@ test('enables navigation runtime layers in the run stage', async () => {
   expect(screen.getByLabelText('Global costmap')).toHaveAttribute('type', 'checkbox');
   expect(screen.getByLabelText('Global costmap')).toHaveClass('sr-only');
   expect(screen.getByLabelText('Global costmap').parentElement).toHaveClass('justify-between');
+  expect(screen.getByLabelText('Global costmap').parentElement).not.toHaveClass('border');
   expect(screen.getByLabelText('Global costmap').parentElement.lastElementChild).toHaveClass('inline-flex');
 
   fireEvent.click(screen.getByLabelText('Global costmap'));
