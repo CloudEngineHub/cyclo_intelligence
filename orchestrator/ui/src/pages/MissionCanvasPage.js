@@ -452,21 +452,18 @@ function SessionRow({ label, value, stacked = false }) {
 function MappingSessionPanel({ mappingEditorActive, selectedPath, dirty }) {
   return (
     <Panel title="Mapping Session" compact className="grid gap-1">
-      <div className="grid grid-cols-2 gap-x-3 gap-y-1">
+      <div className="grid gap-1">
         <SessionRow
           label="Source"
           value={mappingEditorActive ? "Saved map" : "Live mapping"}
-          stacked
         />
         <SessionRow
           label="Map"
           value={mappingEditorActive && selectedPath ? selectedPath : "Not saved"}
-          stacked
         />
         <SessionRow
           label="Edits"
           value={mappingEditorActive && dirty ? "Unsaved changes" : "Clean"}
-          stacked
         />
       </div>
     </Panel>
