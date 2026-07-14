@@ -324,16 +324,6 @@ test('publishes keyboard teleop commands without mapping runtime', async () => {
 
 test('asks for a map name before saving from Mission Canvas', async () => {
   getServiceStatus.mockResolvedValueOnce({ is_up: true });
-  getPgmFiles.mockResolvedValue({
-    files: [{ path: 'factory.pgm', name: 'factory.pgm' }],
-  });
-  getPgmImage.mockResolvedValue({
-    path: 'factory.pgm',
-    width: 1,
-    height: 1,
-    maxval: 255,
-    pixels_base64: 'AA==',
-  });
 
   render(<MissionCanvasPage />);
 
@@ -346,9 +336,11 @@ test('asks for a map name before saving from Mission Canvas', async () => {
   fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
   await waitFor(() => expect(saveNavigationMap).toHaveBeenCalledWith('factory'));
-  await waitFor(() => expect(getPgmFiles).toHaveBeenCalled());
-  await waitFor(() => expect(getPgmImage).toHaveBeenCalledWith('factory.pgm'));
-  expect(screen.getByDisplayValue('factory.pgm')).toBeInTheDocument();
+  await waitFor(() => expect(screen.getByText('Saved map')).toBeInTheDocument());
+  expect(getPgmFiles).not.toHaveBeenCalled();
+  expect(getPgmImage).not.toHaveBeenCalled();
+  expect(screen.queryByDisplayValue('factory.pgm')).not.toBeInTheDocument();
+  expect(screen.getByText('Live mapping')).toBeInTheDocument();
 });
 
 test('loads saved maps into the mapping fix editor', async () => {

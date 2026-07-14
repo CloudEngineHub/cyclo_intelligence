@@ -1334,7 +1334,6 @@ export default function MissionCanvasPage() {
         setMapName(targetMapName);
         setWorkspaceStage(STAGE_MAPPING);
         setInteractionMode("view");
-        setShowPgmFix(true);
         setMapEditorReloadToken((value) => value + 1);
         setShowSaveMapDialog(false);
         return result;
