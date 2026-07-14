@@ -1636,7 +1636,9 @@ export default function MissionCanvasPage() {
                     image={mapEditor.image}
                     dirty={mapEditor.dirty}
                     canUndo={mapEditor.canUndo}
+                    canRedo={mapEditor.canRedo}
                     undo={mapEditor.undo}
+                    redo={mapEditor.redo}
                     save={mapEditor.save}
                   />
                 </>

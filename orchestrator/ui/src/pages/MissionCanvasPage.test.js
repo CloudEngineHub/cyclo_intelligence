@@ -375,11 +375,11 @@ test('edits and saves loaded map pixels from the fix editor', async () => {
 
   await waitFor(() => expect(getPgmImage).toHaveBeenCalledWith('factory.pgm'));
   fireEvent.change(screen.getByLabelText('Brush size'), {
-    target: { value: '8' },
+    target: { value: '10' },
   });
-  expect(screen.getByLabelText('Brush size')).toHaveValue('8');
+  expect(screen.getByLabelText('Brush size')).toHaveValue('10');
 
-  fireEvent.click(screen.getByRole('button', { name: '+' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Add Obstacle' }));
   await waitFor(() => expect(latestMapViewerProps().editorActive).toBe(true));
 
   await act(async () => {
@@ -387,6 +387,13 @@ test('edits and saves loaded map pixels from the fix editor', async () => {
   });
 
   expect(screen.getByText('Unsaved changes')).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Undo' })).toBeEnabled();
+  expect(screen.getByRole('button', { name: 'Redo' })).toBeDisabled();
+
+  fireEvent.click(screen.getByRole('button', { name: 'Undo' }));
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Redo' })).toBeEnabled());
+
+  fireEvent.click(screen.getByRole('button', { name: 'Redo' }));
   await waitFor(() => expect(screen.getByRole('button', { name: 'Save' })).toBeEnabled());
   fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 

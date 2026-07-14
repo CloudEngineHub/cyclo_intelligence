@@ -16,6 +16,7 @@
 
 "use client";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { MdRedo, MdUndo } from "react-icons/md";
 import { getPgmFiles, getPgmImage, savePgmImage } from "../../utils/navigationApi";
 const FREE_VALUE = 254;
 const OCCUPIED_VALUE = 0;
@@ -23,6 +24,16 @@ const FREE_THRESHOLD = 250;
 const OCCUPIED_THRESHOLD = 50;
 const DEFAULT_BRUSH_SIZE_CELLS = 1;
 const MAX_BRUSH_SIZE_CELLS = 10;
+const BRUSH_SIZE_OPTIONS = [
+    { label: "Small", value: 1 },
+    { label: "Medium", value: 3 },
+    { label: "Large", value: 6 },
+    { label: "XL", value: 10 },
+];
+const EDIT_TOOLS = [
+    { id: "erase_black", label: "Clear Space" },
+    { id: "draw_black", label: "Add Obstacle" },
+];
 function decodePgmPixels(image) {
     const binary = window.atob(image.pixels_base64);
     const pixels = new Uint8Array(binary.length);
@@ -112,6 +123,7 @@ export function useMapEditor({ open, mapName, onMessage, reloadToken = 0 }) {
     const [image, setImage] = useState(null);
     const [pixels, setPixels] = useState(null);
     const [undoStack, setUndoStack] = useState([]);
+    const [redoStack, setRedoStack] = useState([]);
     const [dirty, setDirty] = useState(false);
     const [tool, setTool] = useState("view");
     const [brushSize, setBrushSize] = useState(DEFAULT_BRUSH_SIZE_CELLS);
@@ -154,6 +166,9 @@ export function useMapEditor({ open, mapName, onMessage, reloadToken = 0 }) {
             setImage(null);
             setPixels(null);
             pixelsRef.current = null;
+            setUndoStack([]);
+            setRedoStack([]);
+            setDirty(false);
             return;
         }
         let cancelled = false;
@@ -167,6 +182,7 @@ export function useMapEditor({ open, mapName, onMessage, reloadToken = 0 }) {
             pixelsRef.current = decodedPixels;
             setPixels(decodedPixels);
             setUndoStack([]);
+            setRedoStack([]);
             setDirty(false);
             onMessage(`Loaded ${response.path}`);
         })
@@ -209,20 +225,37 @@ export function useMapEditor({ open, mapName, onMessage, reloadToken = 0 }) {
         }
         pixelsRef.current = nextPixels;
         setUndoStack((stack) => [...stack, currentPixels]);
+        setRedoStack([]);
         setPixels(nextPixels);
         setDirty(true);
         const action = tool === "erase_black" ? "Removed" : "Added";
         onMessage(`${action} ${editedPixels} pixels locally`);
     }, [brushSize, busy, image, onMessage, open, tool]);
     const undo = useCallback(() => {
+        const currentPixels = pixelsRef.current;
         setUndoStack((stack) => {
             const previous = stack[stack.length - 1];
-            if (!previous)
+            if (!previous || !currentPixels)
                 return stack;
+            setRedoStack((redo) => [...redo, currentPixels]);
             pixelsRef.current = previous;
             setPixels(previous);
             setDirty(stack.length > 1);
             onMessage("Undid last edit");
+            return stack.slice(0, -1);
+        });
+    }, [onMessage]);
+    const redo = useCallback(() => {
+        const currentPixels = pixelsRef.current;
+        setRedoStack((stack) => {
+            const next = stack[stack.length - 1];
+            if (!next || !currentPixels)
+                return stack;
+            setUndoStack((undoHistory) => [...undoHistory, currentPixels]);
+            pixelsRef.current = next;
+            setPixels(next);
+            setDirty(true);
+            onMessage("Redid last edit");
             return stack.slice(0, -1);
         });
     }, [onMessage]);
@@ -233,6 +266,7 @@ export function useMapEditor({ open, mapName, onMessage, reloadToken = 0 }) {
         savePgmImage(image.path, image.width, image.height, image.maxval, encodePgmPixels(pixels))
             .then((response) => {
             setUndoStack([]);
+            setRedoStack([]);
             setDirty(false);
             onMessage(`Saved ${response.path}`);
         })
@@ -254,7 +288,9 @@ export function useMapEditor({ open, mapName, onMessage, reloadToken = 0 }) {
         busy,
         dirty,
         canUndo: undoStack.length > 0,
+        canRedo: redoStack.length > 0,
         undo,
+        redo,
         save,
         editAtMapPoint,
     };
@@ -269,8 +305,7 @@ function ViewToolIcon() {
       <path d="m9 19 3 3 3-3"/>
     </svg>);
 }
-export function MapEditorControls({ files, selectedPath, setSelectedPath, tool, setTool, brushSize, setBrushSize, busy, image, dirty, canUndo, undo, save, }) {
-    const brushSizeOptions = Array.from({ length: MAX_BRUSH_SIZE_CELLS }, (_, index) => index + 1);
+export function MapEditorControls({ files, selectedPath, setSelectedPath, tool, setTool, brushSize, setBrushSize, busy, image, dirty, canUndo, canRedo, undo, redo, save, }) {
     const toolStyle = (selected) => ({
         color: selected
             ? "var(--vscode-list-activeSelectionForeground, var(--vscode-button-foreground))"
@@ -312,13 +347,19 @@ export function MapEditorControls({ files, selectedPath, setSelectedPath, tool, 
           </option>))}
       </select>
       <div className="h-6 w-px" aria-hidden="true" style={{ backgroundColor: "var(--vscode-panel-border)" }}/>
+      <span className="text-xs font-semibold" style={{ color: "var(--vscode-descriptionForeground)" }}>
+        Mode
+      </span>
       <button type="button" disabled={busy} aria-pressed={tool === "view"} onClick={() => setTool("view")} className="h-8 w-8 border inline-flex items-center justify-center transition-all active:translate-y-px disabled:opacity-50 disabled:active:translate-y-0" title="View" aria-label="View" style={toolStyle(tool === "view")}>
         <ViewToolIcon />
       </button>
-      {["erase_black", "draw_black"].map((value) => (<button key={value} type="button" disabled={busy} aria-pressed={tool === value} onClick={() => setTool(value)} className="h-8 px-3 border text-sm font-semibold transition-all active:translate-y-px disabled:opacity-50 disabled:active:translate-y-0" style={toolStyle(tool === value)}>
-          {value === "erase_black" ? "-" : "+"}
+      {EDIT_TOOLS.map((editTool) => (<button key={editTool.id} type="button" disabled={busy} aria-pressed={tool === editTool.id} onClick={() => setTool(editTool.id)} className="h-8 px-3 border text-sm font-semibold transition-all active:translate-y-px disabled:opacity-50 disabled:active:translate-y-0" style={toolStyle(tool === editTool.id)}>
+          {editTool.label}
         </button>))}
-      <select value={brushSize} disabled={busy} onChange={(event) => setBrushSize(Number(event.currentTarget.value))} className="h-8 w-12 border text-center text-sm font-semibold disabled:opacity-50" title="Brush size" aria-label="Brush size" style={{
+      <span className="text-xs font-semibold" style={{ color: "var(--vscode-descriptionForeground)" }}>
+        Brush
+      </span>
+      <select value={brushSize} disabled={busy} onChange={(event) => setBrushSize(Number(event.currentTarget.value))} className="h-8 min-w-24 px-2 border text-sm font-semibold disabled:opacity-50" title="Brush size" aria-label="Brush size" style={{
             color: "var(--vscode-input-foreground)",
             backgroundColor: "var(--vscode-input-background)",
             borderColor: brushSize !== DEFAULT_BRUSH_SIZE_CELLS
@@ -328,13 +369,16 @@ export function MapEditorControls({ files, selectedPath, setSelectedPath, tool, 
                 ? "inset 0 0 0 1px var(--vscode-focusBorder)"
                 : "none",
         }}>
-        {brushSizeOptions.map((value) => (<option key={value} value={value}>
-            {value}
+        {BRUSH_SIZE_OPTIONS.map((option) => (<option key={option.value} value={option.value}>
+            {option.label}
           </option>))}
       </select>
       <div className="h-6 w-px" aria-hidden="true" style={{ backgroundColor: "var(--vscode-panel-border)" }}/>
-      <button type="button" disabled={busy || !canUndo} onClick={undo} className="h-8 px-3 border text-sm font-semibold transition-all active:translate-y-px disabled:opacity-50 disabled:active:translate-y-0" style={commandStyle(false, canUndo)}>
-        Back
+      <button type="button" disabled={busy || !canUndo} onClick={undo} className="h-8 w-8 border inline-flex items-center justify-center transition-all active:translate-y-px disabled:opacity-50 disabled:active:translate-y-0" title="Undo" aria-label="Undo" style={commandStyle(false, canUndo)}>
+        <MdUndo size={18} />
+      </button>
+      <button type="button" disabled={busy || !canRedo} onClick={redo} className="h-8 w-8 border inline-flex items-center justify-center transition-all active:translate-y-px disabled:opacity-50 disabled:active:translate-y-0" title="Redo" aria-label="Redo" style={commandStyle(false, canRedo)}>
+        <MdRedo size={18} />
       </button>
       <button type="button" disabled={busy || !dirty} onClick={save} className="h-8 px-3 border text-sm font-semibold transition-all active:translate-y-px disabled:opacity-50 disabled:active:translate-y-0" style={commandStyle(true, dirty)}>
         Save
