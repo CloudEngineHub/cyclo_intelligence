@@ -146,8 +146,11 @@ const MISSION_BUTTON_BORDER = "#cbd5e1";
 const MISSION_PANEL_BORDER = "#cbd5e1";
 const MISSION_STAGE_FILL = MISSION_BORDER;
 const MISSION_STAGE_EMPTY = "#ffffff";
-const MISSION_SURFACE = "color-mix(in srgb, var(--vscode-foreground, #ffffff) 5%, transparent)";
-const MISSION_SURFACE_STRONG = "color-mix(in srgb, var(--vscode-foreground, #ffffff) 8%, transparent)";
+const MISSION_SURFACE = "#f8fafc";
+const MISSION_SURFACE_STRONG = "#eef2f7";
+const MISSION_TEXT = "#111827";
+const MISSION_TEXT_MUTED = "#475569";
+const MISSION_LIVE = "#15803d";
 const MISSION_DESIGN_STORAGE_KEY = "mission_canvas_designs";
 const TELEOP_TOPIC = "/cmd_vel";
 const TELEOP_MESSAGE_TYPE = "geometry_msgs/msg/Twist";
@@ -227,7 +230,7 @@ function Panel({ title, children, className = "", compact = false }) {
     <div
       className={`border ${compact ? "p-2" : "p-3"} ${className}`}
       style={{
-        color: "var(--vscode-foreground)",
+        color: MISSION_TEXT,
         borderColor: MISSION_PANEL_BORDER,
         backgroundColor: MISSION_STAGE_EMPTY,
       }}
@@ -378,7 +381,7 @@ function LayerToggle({ label, checked, compact = false, onChange }) {
     <label
       className={`${compact ? "h-6 px-1.5 gap-1.5" : "h-8 px-2 gap-2"} border flex items-center text-xs font-medium`}
       style={{
-        color: "var(--vscode-foreground)",
+        color: MISSION_TEXT,
         borderColor: MISSION_PANEL_BORDER,
         backgroundColor: MISSION_STAGE_EMPTY,
       }}
@@ -421,7 +424,7 @@ function TopicStatusPanel({ topicRows }) {
           </div>
           <span
             className="shrink-0"
-            style={{ color: isLive ? "#22c55e" : "var(--vscode-descriptionForeground)" }}
+            style={{ color: isLive ? MISSION_LIVE : MISSION_TEXT_MUTED }}
           >
             {isLive ? "live" : "wait"}
           </span>
@@ -435,7 +438,7 @@ function SessionRow({ label, value, stacked = false }) {
   if (stacked) {
     return (
       <div className="grid gap-0.5 text-xs min-w-0">
-        <span style={{ color: "var(--vscode-descriptionForeground)" }}>{label}</span>
+        <span style={{ color: MISSION_TEXT_MUTED }}>{label}</span>
         <span className="font-mono truncate">{value}</span>
       </div>
     );
@@ -443,7 +446,7 @@ function SessionRow({ label, value, stacked = false }) {
 
   return (
     <div className="flex items-center justify-between gap-2 text-xs min-w-0">
-      <span style={{ color: "var(--vscode-descriptionForeground)" }}>{label}</span>
+      <span style={{ color: MISSION_TEXT_MUTED }}>{label}</span>
       <span className="font-mono truncate text-right">{value}</span>
     </div>
   );
@@ -538,7 +541,7 @@ function TeleopButton({
       onPointerLeave={handlePointerStop}
       className="h-12 w-14 border text-base font-bold transition-all active:translate-y-px disabled:opacity-45"
       style={{
-        color: active ? "var(--vscode-button-foreground)" : "var(--vscode-foreground)",
+        color: active ? "var(--vscode-button-foreground)" : MISSION_TEXT,
         backgroundColor: active ? "var(--vscode-button-background)" : MISSION_STAGE_EMPTY,
         borderColor: MISSION_BUTTON_BORDER,
         boxShadow: "none",
@@ -698,7 +701,7 @@ function MappingTeleopPanel({ disabled, onPublish, onMessage }) {
   return (
     <Panel title="Mobile Teleop" className="grid gap-3 min-h-0">
       <div className="flex items-center justify-between gap-2">
-        <div className="text-xs" style={{ color: "var(--vscode-descriptionForeground)" }}>
+        <div className="text-xs" style={{ color: MISSION_TEXT_MUTED }}>
           {disabled ? "Unavailable" : activated ? "Active" : "Inactive"}
         </div>
         <ActionButton
@@ -769,7 +772,7 @@ function MappingTeleopPanel({ disabled, onPublish, onMessage }) {
 
         <div className="grid gap-2 min-w-0">
           <label className="grid grid-cols-[52px_1fr_44px] items-center gap-2 text-xs">
-            <span style={{ color: "var(--vscode-descriptionForeground)" }}>Linear</span>
+            <span style={{ color: MISSION_TEXT_MUTED }}>Linear</span>
             <input
               type="range"
               min="0.05"
@@ -783,7 +786,7 @@ function MappingTeleopPanel({ disabled, onPublish, onMessage }) {
             <span className="font-mono text-right">{linearSpeed.toFixed(2)}</span>
           </label>
           <label className="grid grid-cols-[52px_1fr_44px] items-center gap-2 text-xs">
-            <span style={{ color: "var(--vscode-descriptionForeground)" }}>Angular</span>
+            <span style={{ color: MISSION_TEXT_MUTED }}>Angular</span>
             <input
               type="range"
               min="0.05"
@@ -831,7 +834,7 @@ function BehaviorPalette({ selectedTag = "", onNodeSelect }) {
           <div key={group.id} className="min-w-0">
             <div
               className="text-[10px] uppercase font-semibold mb-2"
-              style={{ color: "var(--vscode-descriptionForeground)" }}
+              style={{ color: MISSION_TEXT_MUTED }}
             >
               {group.label}
             </div>
@@ -846,9 +849,7 @@ function BehaviorPalette({ selectedTag = "", onNodeSelect }) {
                   onDragStart={(event) => handleDragStart(event, node.tag)}
                   className="h-8 px-2 border text-xs font-medium transition-all active:translate-y-px"
                   style={{
-                    color: selectedTag === node.tag
-                      ? "var(--vscode-foreground)"
-                      : "var(--vscode-foreground)",
+                    color: MISSION_TEXT,
                     backgroundColor: selectedTag === node.tag
                       ? MISSION_SURFACE_STRONG
                       : MISSION_SURFACE,
@@ -864,7 +865,7 @@ function BehaviorPalette({ selectedTag = "", onNodeSelect }) {
                 <div
                   className="h-8 px-2 border flex items-center text-xs"
                   style={{
-                    color: "var(--vscode-descriptionForeground)",
+                    color: MISSION_TEXT_MUTED,
                     backgroundColor: MISSION_STAGE_EMPTY,
                     borderColor: MISSION_PANEL_BORDER,
                   }}
@@ -895,12 +896,12 @@ function ActionButton({
       borderColor: MISSION_BUTTON_BORDER,
     },
     secondary: {
-      color: "var(--vscode-foreground)",
+      color: MISSION_TEXT,
       backgroundColor: MISSION_STAGE_EMPTY,
       borderColor: MISSION_BUTTON_BORDER,
     },
     danger: {
-      color: "#000000",
+      color: "#ffffff",
       backgroundColor: "var(--vscode-inputValidation-errorBackground, #b91c1c)",
       borderColor: "var(--vscode-inputValidation-errorBorder, #ef4444)",
     },
@@ -909,7 +910,7 @@ function ActionButton({
     ? {
       color: variant === "danger"
         ? styles.danger.color
-        : "var(--vscode-foreground)",
+        : MISSION_TEXT,
       backgroundColor: variant === "danger"
         ? styles.danger.backgroundColor
         : MISSION_SURFACE_STRONG,
@@ -1555,9 +1556,7 @@ export default function MissionCanvasPage() {
               }}
               className="relative h-10 w-24 px-3 border border-b-0 rounded-t-md text-sm font-semibold transition-colors"
               style={{
-                color: selected
-                  ? "var(--vscode-foreground)"
-                  : "var(--vscode-foreground)",
+                color: MISSION_TEXT,
                 backgroundColor: selected
                   ? MISSION_STAGE_FILL
                   : MISSION_STAGE_EMPTY,
@@ -1577,7 +1576,7 @@ export default function MissionCanvasPage() {
       <div
         className="flex-1 min-h-0 border border-t-0 p-3 flex flex-col gap-4"
         style={{
-          color: "var(--vscode-foreground)",
+          color: MISSION_TEXT,
           borderColor: MISSION_BORDER,
           backgroundColor: MISSION_STAGE_FILL,
         }}
@@ -1812,14 +1811,14 @@ export default function MissionCanvasPage() {
               ) : selectedSpot ? (
                 <div className="grid gap-2 text-xs">
                   <label className="grid gap-1">
-                    <span style={{ color: "var(--vscode-descriptionForeground)" }}>Label</span>
+                    <span style={{ color: MISSION_TEXT_MUTED }}>Label</span>
                     <input
                       value={selectedSpot.label}
                       onChange={handleRenameSpot}
                       className="h-8 px-2 border text-sm"
                       style={{
-                        color: "var(--vscode-input-foreground)",
-                        backgroundColor: "var(--vscode-input-background)",
+                        color: MISSION_TEXT,
+                        backgroundColor: MISSION_SURFACE,
                         borderColor: MISSION_BORDER,
                       }}
                     />
@@ -1838,7 +1837,7 @@ export default function MissionCanvasPage() {
                   </div>
                 </div>
               ) : (
-                <div className="text-xs leading-5" style={{ color: "var(--vscode-descriptionForeground)" }}>
+                <div className="text-xs leading-5" style={{ color: MISSION_TEXT_MUTED }}>
                   No selection.
                 </div>
               )}
@@ -1849,7 +1848,7 @@ export default function MissionCanvasPage() {
                 <div className="grid gap-2">
                   <div
                     className="text-[10px] uppercase font-semibold"
-                    style={{ color: "var(--vscode-descriptionForeground)" }}
+                    style={{ color: MISSION_TEXT_MUTED }}
                   >
                     Behavior Nodes
                   </div>
@@ -1862,7 +1861,7 @@ export default function MissionCanvasPage() {
                       style={{
                         color: node.id === selectedBehaviorNodeId
                           ? "var(--vscode-button-foreground)"
-                          : "var(--vscode-foreground)",
+                          : MISSION_TEXT,
                         backgroundColor: node.id === selectedBehaviorNodeId
                           ? "var(--vscode-button-background)"
                           : MISSION_STAGE_EMPTY,
@@ -1873,7 +1872,7 @@ export default function MissionCanvasPage() {
                     </button>
                   ))}
                   {activeBehaviorNodes.length === 0 && (
-                    <div className="text-xs" style={{ color: "var(--vscode-descriptionForeground)" }}>
+                    <div className="text-xs" style={{ color: MISSION_TEXT_MUTED }}>
                       No behavior nodes placed yet.
                     </div>
                   )}
@@ -1881,7 +1880,7 @@ export default function MissionCanvasPage() {
                 <div className="grid gap-2">
                   <div
                     className="text-[10px] uppercase font-semibold"
-                    style={{ color: "var(--vscode-descriptionForeground)" }}
+                    style={{ color: MISSION_TEXT_MUTED }}
                   >
                     Spots
                   </div>
@@ -1894,7 +1893,7 @@ export default function MissionCanvasPage() {
                       style={{
                         color: spot.id === selectedSpotId
                           ? "var(--vscode-button-foreground)"
-                          : "var(--vscode-foreground)",
+                          : MISSION_TEXT,
                         backgroundColor: spot.id === selectedSpotId
                           ? "var(--vscode-button-background)"
                           : MISSION_STAGE_EMPTY,
@@ -1905,7 +1904,7 @@ export default function MissionCanvasPage() {
                     </button>
                   ))}
                   {spots.length === 0 && (
-                    <div className="text-xs" style={{ color: "var(--vscode-descriptionForeground)" }}>
+                    <div className="text-xs" style={{ color: MISSION_TEXT_MUTED }}>
                       No spots for this map yet.
                     </div>
                   )}
