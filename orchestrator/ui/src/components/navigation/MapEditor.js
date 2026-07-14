@@ -308,16 +308,16 @@ function ViewToolIcon() {
 export function MapEditorControls({ files, selectedPath, setSelectedPath, tool, setTool, brushSize, setBrushSize, busy, image, dirty, canUndo, canRedo, undo, redo, save, }) {
     const toolStyle = (selected) => ({
         color: selected
-            ? "var(--vscode-list-activeSelectionForeground, var(--vscode-button-foreground))"
+            ? "var(--vscode-foreground)"
             : "var(--vscode-foreground)",
         backgroundColor: selected
-            ? "var(--vscode-list-activeSelectionBackground, var(--vscode-button-background))"
-            : "var(--vscode-editor-background)",
+            ? "color-mix(in srgb, var(--vscode-button-background, #2563eb) 18%, var(--vscode-editor-background, #ffffff))"
+            : "color-mix(in srgb, var(--vscode-foreground, #111827) 5%, var(--vscode-editor-background, #ffffff))",
         borderColor: selected
-            ? "var(--vscode-focusBorder)"
+            ? "var(--vscode-button-background, #2563eb)"
             : "var(--vscode-panel-border)",
         boxShadow: selected
-            ? "inset 0 0 0 1px var(--vscode-focusBorder), inset 3px 0 0 var(--vscode-focusBorder)"
+            ? "inset 0 0 0 1px var(--vscode-button-background, #2563eb), inset 3px 0 0 var(--vscode-button-background, #2563eb)"
             : "none",
     });
     const commandStyle = (primary = false, active = false) => ({
@@ -336,6 +336,10 @@ export function MapEditorControls({ files, selectedPath, setSelectedPath, tool, 
             ? "inset 0 0 0 1px var(--vscode-focusBorder)"
             : "none",
     });
+    const groupStyle = {
+        borderColor: "var(--vscode-panel-border)",
+        backgroundColor: "color-mix(in srgb, var(--vscode-foreground, #111827) 3%, var(--vscode-editor-background, #ffffff))",
+    };
     return (<div className="flex flex-wrap items-center gap-2">
       <select value={selectedPath} disabled={busy || files.length === 0} onChange={(event) => setSelectedPath(event.currentTarget.value)} className="h-8 min-w-64 px-2 border text-sm" style={{
             color: "var(--vscode-input-foreground)",
@@ -347,32 +351,39 @@ export function MapEditorControls({ files, selectedPath, setSelectedPath, tool, 
           </option>))}
       </select>
       <div className="h-6 w-px" aria-hidden="true" style={{ backgroundColor: "var(--vscode-panel-border)" }}/>
-      <span className="text-xs font-semibold" style={{ color: "var(--vscode-descriptionForeground)" }}>
-        Mode
-      </span>
-      <button type="button" disabled={busy} aria-pressed={tool === "view"} onClick={() => setTool("view")} className="h-8 w-8 border inline-flex items-center justify-center transition-all active:translate-y-px disabled:opacity-50 disabled:active:translate-y-0" title="View" aria-label="View" style={toolStyle(tool === "view")}>
-        <ViewToolIcon />
-      </button>
-      {EDIT_TOOLS.map((editTool) => (<button key={editTool.id} type="button" disabled={busy} aria-pressed={tool === editTool.id} onClick={() => setTool(editTool.id)} className="h-8 px-3 border text-sm font-semibold transition-all active:translate-y-px disabled:opacity-50 disabled:active:translate-y-0" style={toolStyle(tool === editTool.id)}>
-          {editTool.label}
-        </button>))}
-      <span className="text-xs font-semibold" style={{ color: "var(--vscode-descriptionForeground)" }}>
-        Brush
-      </span>
-      <select value={brushSize} disabled={busy} onChange={(event) => setBrushSize(Number(event.currentTarget.value))} className="h-8 min-w-24 px-2 border text-sm font-semibold disabled:opacity-50" title="Brush size" aria-label="Brush size" style={{
-            color: "var(--vscode-input-foreground)",
-            backgroundColor: "var(--vscode-input-background)",
-            borderColor: brushSize !== DEFAULT_BRUSH_SIZE_CELLS
-                ? "var(--vscode-focusBorder)"
-                : "var(--vscode-input-border, var(--vscode-panel-border))",
-            boxShadow: brushSize !== DEFAULT_BRUSH_SIZE_CELLS
-                ? "inset 0 0 0 1px var(--vscode-focusBorder)"
-                : "none",
-        }}>
-        {BRUSH_SIZE_OPTIONS.map((option) => (<option key={option.value} value={option.value}>
-            {option.label}
-          </option>))}
-      </select>
+      <div className="h-11 px-2 border grid grid-cols-[auto_auto] items-center gap-2" style={groupStyle}>
+        <span className="text-[10px] uppercase font-semibold" style={{ color: "var(--vscode-descriptionForeground)" }}>
+          Edit Tool
+        </span>
+        <div className="flex items-center gap-1">
+          <button type="button" disabled={busy} aria-pressed={tool === "view"} onClick={() => setTool("view")} className="h-8 px-2 border inline-flex items-center gap-1 text-sm font-semibold transition-all active:translate-y-px disabled:opacity-50 disabled:active:translate-y-0" title="View" aria-label="View" style={toolStyle(tool === "view")}>
+            <ViewToolIcon />
+            <span>View</span>
+          </button>
+          {EDIT_TOOLS.map((editTool) => (<button key={editTool.id} type="button" disabled={busy} aria-pressed={tool === editTool.id} onClick={() => setTool(editTool.id)} className="h-8 px-3 border text-sm font-semibold transition-all active:translate-y-px disabled:opacity-50 disabled:active:translate-y-0" style={toolStyle(tool === editTool.id)}>
+              {editTool.label}
+            </button>))}
+        </div>
+      </div>
+      <div className="h-11 px-2 border grid grid-cols-[auto_auto] items-center gap-2" style={groupStyle}>
+        <span className="text-[10px] uppercase font-semibold" style={{ color: "var(--vscode-descriptionForeground)" }}>
+          Brush Size
+        </span>
+        <select value={brushSize} disabled={busy} onChange={(event) => setBrushSize(Number(event.currentTarget.value))} className="h-8 min-w-24 px-2 border text-sm font-semibold disabled:opacity-50" title="Brush size" aria-label="Brush size" style={{
+                color: "var(--vscode-input-foreground)",
+                backgroundColor: "var(--vscode-input-background)",
+                borderColor: brushSize !== DEFAULT_BRUSH_SIZE_CELLS
+                    ? "var(--vscode-button-background, #2563eb)"
+                    : "var(--vscode-input-border, var(--vscode-panel-border))",
+                boxShadow: brushSize !== DEFAULT_BRUSH_SIZE_CELLS
+                    ? "inset 0 0 0 1px var(--vscode-button-background, #2563eb)"
+                    : "none",
+            }}>
+          {BRUSH_SIZE_OPTIONS.map((option) => (<option key={option.value} value={option.value}>
+              {option.label}
+            </option>))}
+        </select>
+      </div>
       <div className="h-6 w-px" aria-hidden="true" style={{ backgroundColor: "var(--vscode-panel-border)" }}/>
       <button type="button" disabled={busy || !canUndo} onClick={undo} className="h-8 w-8 border inline-flex items-center justify-center transition-all active:translate-y-px disabled:opacity-50 disabled:active:translate-y-0" title="Undo" aria-label="Undo" style={commandStyle(false, canUndo)}>
         <MdUndo size={18} />
