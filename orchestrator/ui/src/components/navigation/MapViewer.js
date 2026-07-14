@@ -25,6 +25,15 @@ const CAMERA_FAR = 2000;
 const MAP_DISPLAY_ROTATION = Math.PI;
 const CLICK_DRAG_THRESHOLD_PX = 8;
 const TF_AXIS_LENGTH = 0.2;
+const WAYPOINT_RING_INNER_RADIUS = 0.28;
+const WAYPOINT_RING_OUTER_RADIUS = 0.38;
+const WAYPOINT_SELECTED_HALO_INNER_RADIUS = 0.44;
+const WAYPOINT_SELECTED_HALO_OUTER_RADIUS = 0.52;
+const WAYPOINT_CENTER_RADIUS = 0.16;
+const WAYPOINT_HEADING_LENGTH = 0.62;
+const WAYPOINT_LABEL_OFFSET_Y = -0.58;
+const WAYPOINT_LABEL_SCALE_X = 0.72;
+const WAYPOINT_LABEL_SCALE_Y = 0.18;
 function gridMeta(grid) {
     var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k;
     const info = grid === null || grid === void 0 ? void 0 : grid.info;
@@ -288,7 +297,17 @@ function makeSpotMarker(spot, selected = false) {
     group.position.set(x, y, 0.24);
     group.rotation.z = yaw;
     group.userData.spotId = spot.id;
-    const ring = new THREE.Mesh(new THREE.RingGeometry(0.16, 0.22, 32), new THREE.MeshBasicMaterial({
+    if (selected) {
+        const halo = new THREE.Mesh(new THREE.RingGeometry(WAYPOINT_SELECTED_HALO_INNER_RADIUS, WAYPOINT_SELECTED_HALO_OUTER_RADIUS, 40), new THREE.MeshBasicMaterial({
+            color,
+            transparent: true,
+            opacity: 0.34,
+            side: THREE.DoubleSide,
+        }));
+        halo.userData.spotId = spot.id;
+        group.add(halo);
+    }
+    const ring = new THREE.Mesh(new THREE.RingGeometry(WAYPOINT_RING_INNER_RADIUS, WAYPOINT_RING_OUTER_RADIUS, 40), new THREE.MeshBasicMaterial({
         color,
         transparent: true,
         opacity: 0.95,
@@ -296,7 +315,7 @@ function makeSpotMarker(spot, selected = false) {
     }));
     ring.userData.spotId = spot.id;
     group.add(ring);
-    const center = new THREE.Mesh(new THREE.CircleGeometry(0.09, 24), new THREE.MeshBasicMaterial({
+    const center = new THREE.Mesh(new THREE.CircleGeometry(WAYPOINT_CENTER_RADIUS, 32), new THREE.MeshBasicMaterial({
         color,
         transparent: true,
         opacity: selected ? 0.95 : 0.78,
@@ -306,7 +325,7 @@ function makeSpotMarker(spot, selected = false) {
     group.add(center);
     const heading = makeLine([
         new THREE.Vector3(0, 0, 0.025),
-        new THREE.Vector3(0.34, 0, 0.025),
+        new THREE.Vector3(WAYPOINT_HEADING_LENGTH, 0, 0.025),
     ], selected ? 0xffffff : 0xdcfce7, 2);
     if (heading) {
         heading.userData.spotId = spot.id;
@@ -315,8 +334,8 @@ function makeSpotMarker(spot, selected = false) {
     const label = String((_d = spot.label) !== null && _d !== void 0 ? _d : spot.id);
     if (label) {
         const sprite = makeTfLabelSprite(label);
-        sprite.position.set(0, -0.34, 0.04);
-        sprite.scale.set(0.48, 0.12, 1);
+        sprite.position.set(0, WAYPOINT_LABEL_OFFSET_Y, 0.04);
+        sprite.scale.set(WAYPOINT_LABEL_SCALE_X, WAYPOINT_LABEL_SCALE_Y, 1);
         sprite.userData.spotId = spot.id;
         group.add(sprite);
     }
