@@ -100,7 +100,8 @@ test('renders Mission Canvas foundation', async () => {
   expect(screen.getByText('Mobile Teleop')).toBeInTheDocument();
   expect(screen.getByRole('group', { name: 'Mobile Teleop' })).toBeInTheDocument();
   expect(screen.getByText('/cmd_vel')).toBeInTheDocument();
-  expect(screen.getByText('Unavailable')).toBeInTheDocument();
+  expect(screen.getAllByText('Unavailable').length).toBeGreaterThan(0);
+  expect(screen.getByRole('button', { name: 'Activate' })).toBeDisabled();
   expect(screen.getByText('Layers')).toBeInTheDocument();
   expect(screen.getByText('Topics')).toBeInTheDocument();
   expect(screen.getByText('/map')).toBeInTheDocument();
@@ -261,7 +262,15 @@ test('publishes keyboard teleop commands while mapping is running', async () => 
   render(<MissionCanvasPage />);
 
   const teleop = screen.getByRole('group', { name: 'Mobile Teleop' });
-  await waitFor(() => expect(teleop).toHaveAttribute('tabindex', '0'));
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Activate' })).toBeEnabled());
+  expect(teleop).toHaveAttribute('tabindex', '-1');
+
+  fireEvent.keyDown(teleop, { key: 'w' });
+  expect(mockPublishRosTopic).not.toHaveBeenCalled();
+
+  fireEvent.click(screen.getByRole('button', { name: 'Activate' }));
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Deactivate' })).toBeInTheDocument());
+  expect(teleop).toHaveAttribute('tabindex', '0');
 
   fireEvent.keyDown(teleop, { key: 'w' });
 
@@ -284,6 +293,9 @@ test('publishes keyboard teleop commands while mapping is running', async () => 
       angular: { x: 0, y: 0, z: 0 },
     },
   ));
+
+  fireEvent.click(screen.getByRole('button', { name: 'Deactivate' }));
+  expect(screen.getByRole('button', { name: 'Activate' })).toBeInTheDocument();
 });
 
 test('asks for a map name before saving from Mission Canvas', async () => {

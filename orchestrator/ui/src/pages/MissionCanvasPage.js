@@ -543,11 +543,14 @@ function TeleopButton({
 function MappingTeleopPanel({ disabled, onPublish, onMessage }) {
   const [linearSpeed, setLinearSpeed] = useState(TELEOP_DEFAULT_LINEAR_SPEED);
   const [angularSpeed, setAngularSpeed] = useState(TELEOP_DEFAULT_ANGULAR_SPEED);
+  const [activated, setActivated] = useState(false);
   const [activeLabel, setActiveLabel] = useState("");
   const activeMotionRef = useRef(null);
+  const controlsDisabled = disabled || !activated;
 
   const publishMotion = useCallback((motion) => {
     void onPublish(motion).catch((error) => {
+      setActivated(false);
       setActiveLabel("");
       activeMotionRef.current = null;
       onMessage(error instanceof Error ? error.message : "Teleop publish failed");
@@ -560,20 +563,35 @@ function MappingTeleopPanel({ disabled, onPublish, onMessage }) {
     publishMotion(TELEOP_STOP);
   }, [publishMotion]);
 
-  const startTeleop = useCallback((label, motion) => {
+  const deactivateTeleop = useCallback(() => {
+    activeMotionRef.current = null;
+    setActiveLabel("");
+    setActivated(false);
+    publishMotion(TELEOP_STOP);
+  }, [publishMotion]);
+
+  const activateTeleop = useCallback(() => {
     if (disabled) return;
+    setActivated(true);
+    setActiveLabel("");
+    onMessage("Mobile teleop activated");
+  }, [disabled, onMessage]);
+
+  const startTeleop = useCallback((label, motion) => {
+    if (controlsDisabled) return;
     activeMotionRef.current = motion;
     setActiveLabel(label);
     publishMotion(motion);
-  }, [disabled, publishMotion]);
+  }, [controlsDisabled, publishMotion]);
 
   useEffect(() => {
     if (disabled) {
-      if (activeMotionRef.current) {
+      if (activated || activeMotionRef.current) {
         publishMotion(TELEOP_STOP);
       }
       activeMotionRef.current = null;
       setActiveLabel("");
+      setActivated(false);
       return undefined;
     }
     const interval = window.setInterval(() => {
@@ -582,7 +600,7 @@ function MappingTeleopPanel({ disabled, onPublish, onMessage }) {
       }
     }, TELEOP_REPEAT_MS);
     return () => window.clearInterval(interval);
-  }, [disabled, publishMotion]);
+  }, [activated, disabled, publishMotion]);
 
   useEffect(() => () => {
     if (activeMotionRef.current) {
@@ -610,7 +628,7 @@ function MappingTeleopPanel({ disabled, onPublish, onMessage }) {
   }), [angularSpeed, linearSpeed]);
 
   const handleKeyDown = (event) => {
-    if (disabled || event.repeat || isTextInputTarget(event.target)) return;
+    if (controlsDisabled || event.repeat || isTextInputTarget(event.target)) return;
     const key = event.key === " " ? "space" : event.key.toLowerCase();
     if (key === "space") {
       event.preventDefault();
@@ -624,7 +642,7 @@ function MappingTeleopPanel({ disabled, onPublish, onMessage }) {
   };
 
   const handleKeyUp = (event) => {
-    if (disabled || isTextInputTarget(event.target)) return;
+    if (controlsDisabled || isTextInputTarget(event.target)) return;
     const key = event.key.toLowerCase();
     if (!commandByKey[key]) return;
     event.preventDefault();
@@ -659,10 +677,23 @@ function MappingTeleopPanel({ disabled, onPublish, onMessage }) {
 
   return (
     <Panel title="Mobile Teleop" className="grid gap-3 min-h-0">
+      <div className="flex items-center justify-between gap-2">
+        <div className="text-xs" style={{ color: "var(--vscode-descriptionForeground)" }}>
+          {disabled ? "Unavailable" : activated ? "Active" : "Inactive"}
+        </div>
+        <ActionButton
+          active={activated}
+          disabled={disabled}
+          onClick={activated ? deactivateTeleop : activateTeleop}
+          variant="secondary"
+        >
+          {activated ? "Deactivate" : "Activate"}
+        </ActionButton>
+      </div>
       <div
         role="group"
         aria-label="Mobile Teleop"
-        tabIndex={disabled ? -1 : 0}
+        tabIndex={controlsDisabled ? -1 : 0}
         onKeyDown={handleKeyDown}
         onKeyUp={handleKeyUp}
         onBlur={(event) => {
@@ -676,7 +707,7 @@ function MappingTeleopPanel({ disabled, onPublish, onMessage }) {
           <div />
           <TeleopButton
             active={activeLabel === "W"}
-            disabled={disabled}
+            disabled={controlsDisabled}
             title="Forward"
             onStart={() => startTeleop("W", { linearX: linearSpeed, angularZ: 0 })}
             onStop={stopTeleop}
@@ -686,7 +717,7 @@ function MappingTeleopPanel({ disabled, onPublish, onMessage }) {
           <div />
           <TeleopButton
             active={activeLabel === "A"}
-            disabled={disabled}
+            disabled={controlsDisabled}
             title="Left"
             onStart={() => startTeleop("A", { linearX: 0, angularZ: angularSpeed })}
             onStop={stopTeleop}
@@ -694,7 +725,7 @@ function MappingTeleopPanel({ disabled, onPublish, onMessage }) {
             A
           </TeleopButton>
           <TeleopButton
-            disabled={disabled}
+            disabled={controlsDisabled}
             title="Stop"
             onStart={stopTeleop}
             onStop={stopTeleop}
@@ -703,7 +734,7 @@ function MappingTeleopPanel({ disabled, onPublish, onMessage }) {
           </TeleopButton>
           <TeleopButton
             active={activeLabel === "D"}
-            disabled={disabled}
+            disabled={controlsDisabled}
             title="Right"
             onStart={() => startTeleop("D", { linearX: 0, angularZ: -angularSpeed })}
             onStop={stopTeleop}
@@ -713,7 +744,7 @@ function MappingTeleopPanel({ disabled, onPublish, onMessage }) {
           <div />
           <TeleopButton
             active={activeLabel === "S"}
-            disabled={disabled}
+            disabled={controlsDisabled}
             title="Backward"
             onStart={() => startTeleop("S", { linearX: -linearSpeed, angularZ: 0 })}
             onStop={stopTeleop}
@@ -732,7 +763,7 @@ function MappingTeleopPanel({ disabled, onPublish, onMessage }) {
               max="1.2"
               step="0.05"
               value={linearSpeed}
-              disabled={disabled}
+              disabled={controlsDisabled}
               onChange={(event) => updateLinearSpeed(event.currentTarget.value)}
               style={speedControlStyle}
             />
@@ -746,7 +777,7 @@ function MappingTeleopPanel({ disabled, onPublish, onMessage }) {
               max="2"
               step="0.05"
               value={angularSpeed}
-              disabled={disabled}
+              disabled={controlsDisabled}
               onChange={(event) => updateAngularSpeed(event.currentTarget.value)}
               style={speedControlStyle}
             />
@@ -754,7 +785,10 @@ function MappingTeleopPanel({ disabled, onPublish, onMessage }) {
           </label>
           <div className="grid grid-cols-2 gap-2">
             <SessionRow label="Topic" value={TELEOP_TOPIC} />
-            <SessionRow label="Command" value={disabled ? "Unavailable" : activeLabel || "Stop"} />
+            <SessionRow
+              label="Command"
+              value={disabled ? "Unavailable" : activated ? activeLabel || "Stop" : "Inactive"}
+            />
           </div>
         </div>
       </div>
