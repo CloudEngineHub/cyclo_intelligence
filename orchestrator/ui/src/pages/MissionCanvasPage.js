@@ -151,6 +151,9 @@ const MISSION_SURFACE_STRONG = "#eef2f7";
 const MISSION_TEXT = "#111827";
 const MISSION_TEXT_MUTED = "#475569";
 const MISSION_LIVE = "#15803d";
+const MISSION_SWITCH_OFF = "#cbd5e1";
+const MISSION_SWITCH_BORDER = "#94a3b8";
+const MISSION_SWITCH_KNOB_BORDER = "#e2e8f0";
 const MISSION_DESIGN_STORAGE_KEY = "mission_canvas_designs";
 const TELEOP_TOPIC = "/cmd_vel";
 const TELEOP_MESSAGE_TYPE = "geometry_msgs/msg/Twist";
@@ -391,22 +394,27 @@ function LayerToggle({ label, checked, compact = false, onChange }) {
         aria-checked={checked}
         aria-label={label}
         onClick={() => onChange(!checked)}
-        className={`${compact ? "h-4 w-8" : "h-5 w-9"} inline-flex rounded-full relative shrink-0 border cursor-pointer transition-colors active:translate-y-px`}
+        className={`${compact ? "h-5 w-9" : "h-6 w-11"} inline-flex rounded-full relative shrink-0 border cursor-pointer transition-colors active:translate-y-px`}
         style={{
           backgroundColor: checked
-            ? "var(--vscode-button-background)"
-            : MISSION_SURFACE,
+            ? MISSION_LIVE
+            : MISSION_SWITCH_OFF,
           borderColor: checked
-            ? "var(--vscode-button-background)"
-            : MISSION_BUTTON_BORDER,
+            ? MISSION_LIVE
+            : MISSION_SWITCH_BORDER,
+          boxShadow: checked
+            ? "inset 0 0 0 1px rgba(255,255,255,0.18)"
+            : "inset 0 0 0 1px rgba(15,23,42,0.08)",
         }}
       >
         <span
           aria-hidden="true"
-          className={`${compact ? "h-3 w-3 top-0.5" : "h-4 w-4 top-0.5"} block absolute left-0.5 rounded-full bg-white shadow-sm transition-transform`}
+          className={`${compact ? "h-4 w-4 top-0.5" : "h-5 w-5 top-0.5"} block absolute left-0.5 rounded-full bg-white transition-transform duration-150 ease-out`}
           style={{
+            border: `1px solid ${MISSION_SWITCH_KNOB_BORDER}`,
+            boxShadow: "0 1px 3px rgba(15,23,42,0.24)",
             transform: checked
-              ? `translateX(${compact ? "16px" : "16px"})`
+              ? `translateX(${compact ? "16px" : "20px"})`
               : "translateX(0)",
           }}
         />

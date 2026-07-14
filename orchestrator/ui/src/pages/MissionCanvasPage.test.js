@@ -137,10 +137,14 @@ test('updates mapping topics when layer toggles change', async () => {
   const lidarSwitch = screen.getByRole('switch', { name: 'Lidar' });
   expect(lidarSwitch).toHaveAttribute('aria-checked', 'true');
   expect(lidarSwitch).toHaveClass('inline-flex');
+  expect(lidarSwitch).toHaveStyle({ backgroundColor: '#15803d' });
+  expect(lidarSwitch.firstChild).toHaveClass('rounded-full');
   expect(lidarSwitch.parentElement).toHaveClass('justify-between');
   expect(lidarSwitch.parentElement).not.toHaveClass('border');
 
   fireEvent.click(lidarSwitch);
+  expect(lidarSwitch).toHaveAttribute('aria-checked', 'false');
+  expect(lidarSwitch).toHaveStyle({ backgroundColor: '#cbd5e1' });
   expect(screen.queryByText('/scan')).not.toBeInTheDocument();
   expect(screen.queryByText('/amcl_pose')).not.toBeInTheDocument();
 
@@ -474,10 +478,12 @@ test('enables navigation runtime layers in the run stage', async () => {
   const globalCostmapSwitch = screen.getByRole('switch', { name: 'Global costmap' });
   expect(globalCostmapSwitch).toHaveAttribute('aria-checked', 'true');
   expect(globalCostmapSwitch).toHaveClass('inline-flex');
+  expect(globalCostmapSwitch.firstChild).toHaveClass('rounded-full');
   expect(globalCostmapSwitch.parentElement).toHaveClass('justify-between');
   expect(globalCostmapSwitch.parentElement).not.toHaveClass('border');
 
   fireEvent.click(globalCostmapSwitch);
+  expect(globalCostmapSwitch).toHaveAttribute('aria-checked', 'false');
   expect(screen.queryByText('/global_costmap/costmap')).not.toBeInTheDocument();
 
   fireEvent.click(screen.getByRole('switch', { name: 'TF' }));
