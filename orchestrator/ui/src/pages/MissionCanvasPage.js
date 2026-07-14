@@ -228,7 +228,7 @@ function behaviorNodeSerialFromNodes(nodes) {
 function Panel({ title, children, className = "", compact = false }) {
   return (
     <div
-      className={`border min-h-0 min-w-0 ${compact ? "p-2" : "p-3"} ${className}`}
+      className={`border rounded-md min-h-0 min-w-0 ${compact ? "p-2" : "p-3"} ${className}`}
       style={{
         color: MISSION_TEXT,
         borderColor: MISSION_PANEL_BORDER,
@@ -263,7 +263,7 @@ function SaveMapDialog({
       aria-labelledby="mission-save-map-title"
     >
       <form
-        className="w-full max-w-sm border p-4 grid gap-3 shadow-2xl"
+        className="w-full max-w-sm border rounded-md p-4 grid gap-3 shadow-2xl"
         style={{
           color: "#111827",
           backgroundColor: "#ffffff",
@@ -285,7 +285,7 @@ function SaveMapDialog({
             value={value}
             disabled={busy}
             onChange={(event) => onChange(event.currentTarget.value)}
-            className="h-8 px-2 border text-sm"
+            className="h-8 px-2 border rounded-md text-sm"
             style={{
               color: "#111827",
               backgroundColor: "#f9fafb",
@@ -326,7 +326,7 @@ function LoadMapDialog({
       aria-labelledby="mission-load-map-title"
     >
       <form
-        className="w-full max-w-sm border p-4 grid gap-3 shadow-2xl"
+        className="w-full max-w-sm border rounded-md p-4 grid gap-3 shadow-2xl"
         style={{
           color: "#111827",
           backgroundColor: "#ffffff",
@@ -347,7 +347,7 @@ function LoadMapDialog({
             value={selectedPath}
             disabled={busy || files.length === 0}
             onChange={(event) => onChange(event.currentTarget.value)}
-            className="h-8 px-2 border text-sm"
+            className="h-8 px-2 border rounded-md text-sm"
             style={{
               color: "#111827",
               backgroundColor: "#f9fafb",
@@ -379,7 +379,7 @@ function LoadMapDialog({
 function LayerToggle({ label, checked, compact = false, onChange }) {
   return (
     <label
-      className={`${compact ? "h-6 px-1.5 gap-1.5" : "h-8 px-2 gap-2"} border flex items-center text-xs font-medium`}
+      className={`${compact ? "h-6 px-1.5 gap-1.5" : "h-8 px-2 gap-2"} border rounded-md flex items-center text-xs font-medium`}
       style={{
         color: MISSION_TEXT,
         borderColor: MISSION_PANEL_BORDER,
@@ -539,7 +539,7 @@ function TeleopButton({
       onPointerUp={handlePointerStop}
       onPointerCancel={handlePointerStop}
       onPointerLeave={handlePointerStop}
-      className="h-12 w-14 border text-base font-bold transition-all active:translate-y-px disabled:opacity-45"
+      className="h-12 w-14 border rounded-md text-base font-bold transition-all active:translate-y-px disabled:opacity-45"
       style={{
         color: active ? "var(--vscode-button-foreground)" : MISSION_TEXT,
         backgroundColor: active ? "var(--vscode-button-background)" : MISSION_STAGE_EMPTY,
@@ -847,7 +847,7 @@ function BehaviorPalette({ selectedTag = "", onNodeSelect }) {
                   aria-pressed={selectedTag === node.tag}
                   onClick={() => onNodeSelect(node.tag)}
                   onDragStart={(event) => handleDragStart(event, node.tag)}
-                  className="h-8 px-2 border text-xs font-medium transition-all active:translate-y-px"
+                  className="h-8 px-2 border rounded-md text-xs font-medium transition-all active:translate-y-px"
                   style={{
                     color: MISSION_TEXT,
                     backgroundColor: selectedTag === node.tag
@@ -863,7 +863,7 @@ function BehaviorPalette({ selectedTag = "", onNodeSelect }) {
               ))}
               {group.nodes.length === 0 && (
                 <div
-                  className="h-8 px-2 border flex items-center text-xs"
+                  className="h-8 px-2 border rounded-md flex items-center text-xs"
                   style={{
                     color: MISSION_TEXT_MUTED,
                     backgroundColor: MISSION_STAGE_EMPTY,
@@ -926,7 +926,7 @@ function ActionButton({
       onClick={onClick}
       aria-pressed={active ? true : undefined}
       className={[
-        "h-8 px-3 border text-sm font-semibold transition-all active:translate-y-px",
+        "h-8 px-3 border rounded-md text-sm font-semibold transition-all active:translate-y-px",
         active ? "disabled:opacity-90" : "disabled:opacity-50",
         "disabled:active:translate-y-0",
       ].join(" ")}
@@ -1573,7 +1573,7 @@ export default function MissionCanvasPage() {
       </div>
 
       <div
-        className="flex-1 min-h-0 border border-t-0 p-3 flex flex-col gap-4"
+        className="flex-1 min-h-0 border border-t-0 rounded-b-md p-3 flex flex-col gap-4"
         style={{
           color: MISSION_TEXT,
           borderColor: MISSION_BORDER,
@@ -1814,7 +1814,7 @@ export default function MissionCanvasPage() {
                     <input
                       value={selectedSpot.label}
                       onChange={handleRenameSpot}
-                      className="h-8 px-2 border text-sm"
+                      className="h-8 px-2 border rounded-md text-sm"
                       style={{
                         color: MISSION_TEXT,
                         backgroundColor: MISSION_SURFACE,
@@ -1856,7 +1856,7 @@ export default function MissionCanvasPage() {
                       key={node.id}
                       type="button"
                       onClick={() => handleSelectBehaviorNode(node.id)}
-                      className="h-8 px-2 border text-left text-xs min-w-0"
+                      className="h-8 px-2 border rounded-md text-left text-xs min-w-0"
                       style={{
                         color: node.id === selectedBehaviorNodeId
                           ? "var(--vscode-button-foreground)"
@@ -1888,7 +1888,7 @@ export default function MissionCanvasPage() {
                       key={spot.id}
                       type="button"
                       onClick={() => handleSelectSpot(spot.id)}
-                      className="h-8 px-2 border text-left text-xs min-w-0"
+                      className="h-8 px-2 border rounded-md text-left text-xs min-w-0"
                       style={{
                         color: spot.id === selectedSpotId
                           ? "var(--vscode-button-foreground)"

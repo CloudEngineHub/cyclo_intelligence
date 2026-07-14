@@ -1050,7 +1050,7 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, 
             renderer.domElement.removeEventListener("contextmenu", handleContextMenu);
         };
     }, [editorActive, interactionDisabled, interactionMode, map, onBehaviorNodeClick, onEditorMapPoint, onMapPose, onSpotClick, pose]);
-    return (<div className={`relative border min-h-0 overflow-hidden ${fitContainer ? "h-full w-full" : ""}`} style={{
+    return (<div className={`relative border rounded-md min-h-0 overflow-hidden ${fitContainer ? "h-full w-full" : ""}`} style={{
             ...(fitContainer
                 ? { height: "100%", width: "100%" }
                 : { aspectRatio: "1 / 1" }),
