@@ -431,7 +431,16 @@ function TopicStatusPanel({ topicRows }) {
   );
 }
 
-function SessionRow({ label, value }) {
+function SessionRow({ label, value, stacked = false }) {
+  if (stacked) {
+    return (
+      <div className="grid gap-0.5 text-xs min-w-0">
+        <span style={{ color: "var(--vscode-descriptionForeground)" }}>{label}</span>
+        <span className="font-mono truncate">{value}</span>
+      </div>
+    );
+  }
+
   return (
     <div className="flex items-center justify-between gap-2 text-xs min-w-0">
       <span style={{ color: "var(--vscode-descriptionForeground)" }}>{label}</span>
@@ -447,14 +456,17 @@ function MappingSessionPanel({ mappingEditorActive, selectedPath, dirty }) {
         <SessionRow
           label="Source"
           value={mappingEditorActive ? "Saved map" : "Live mapping"}
+          stacked
         />
         <SessionRow
           label="Map"
           value={mappingEditorActive && selectedPath ? selectedPath : "Not saved"}
+          stacked
         />
         <SessionRow
           label="Edits"
           value={mappingEditorActive && dirty ? "Unsaved changes" : "Clean"}
+          stacked
         />
       </div>
     </Panel>
@@ -784,10 +796,11 @@ function MappingTeleopPanel({ disabled, onPublish, onMessage }) {
             <span className="font-mono text-right">{angularSpeed.toFixed(2)}</span>
           </label>
           <div className="grid grid-cols-2 gap-2">
-            <SessionRow label="Topic" value={TELEOP_TOPIC} />
+            <SessionRow label="Topic" value={TELEOP_TOPIC} stacked />
             <SessionRow
               label="Command"
               value={disabled ? "Unavailable" : activated ? activeLabel || "Stop" : "Inactive"}
+              stacked
             />
           </div>
         </div>
