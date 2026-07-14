@@ -134,6 +134,9 @@ test('updates mapping topics when layer toggles change', async () => {
   expect(screen.getByText('/tf')).toBeInTheDocument();
   expect(screen.getByText('/tf_static')).toBeInTheDocument();
   expect(screen.getByText('/local_costmap/published_footprint')).toBeInTheDocument();
+  expect(screen.getByLabelText('Lidar')).toHaveAttribute('type', 'checkbox');
+  expect(screen.getByLabelText('Lidar')).toHaveClass('sr-only');
+  expect(screen.getByLabelText('Lidar').parentElement).toHaveClass('justify-between');
 
   fireEvent.click(screen.getByLabelText('Lidar'));
   expect(screen.queryByText('/scan')).not.toBeInTheDocument();
@@ -466,6 +469,9 @@ test('enables navigation runtime layers in the run stage', async () => {
   expect(screen.getByText('/goal_pose')).toBeInTheDocument();
   expect(screen.getByText('/bt/status')).toBeInTheDocument();
   expect(screen.queryByText('/tf')).not.toBeInTheDocument();
+  expect(screen.getByLabelText('Global costmap')).toHaveAttribute('type', 'checkbox');
+  expect(screen.getByLabelText('Global costmap')).toHaveClass('sr-only');
+  expect(screen.getByLabelText('Global costmap').parentElement).toHaveClass('justify-between');
 
   fireEvent.click(screen.getByLabelText('Global costmap'));
   expect(screen.queryByText('/global_costmap/costmap')).not.toBeInTheDocument();

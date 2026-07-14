@@ -379,19 +379,38 @@ function LoadMapDialog({
 function LayerToggle({ label, checked, compact = false, onChange }) {
   return (
     <label
-      className={`${compact ? "h-6 px-1.5 gap-1.5" : "h-8 px-2 gap-2"} border rounded-md flex items-center text-xs font-medium`}
+      className={`${compact ? "h-8 px-2" : "h-9 px-2.5"} border rounded-md flex items-center justify-between gap-3 text-xs font-medium cursor-pointer select-none`}
       style={{
         color: MISSION_TEXT,
         borderColor: MISSION_PANEL_BORDER,
         backgroundColor: MISSION_STAGE_EMPTY,
       }}
     >
+      <span className="truncate">{label}</span>
       <input
         type="checkbox"
         checked={checked}
+        className="sr-only"
         onChange={(event) => onChange(event.currentTarget.checked)}
       />
-      {label}
+      <span
+        aria-hidden="true"
+        className={`${compact ? "h-4 w-8" : "h-5 w-9"} rounded-full relative shrink-0 transition-colors`}
+        style={{
+          backgroundColor: checked
+            ? "var(--vscode-button-background)"
+            : MISSION_BUTTON_BORDER,
+        }}
+      >
+        <span
+          className={`${compact ? "h-3 w-3 top-0.5" : "h-4 w-4 top-0.5"} absolute left-0.5 rounded-full bg-white shadow-sm transition-transform`}
+          style={{
+            transform: checked
+              ? `translateX(${compact ? "16px" : "16px"})`
+              : "translateX(0)",
+          }}
+        />
+      </span>
     </label>
   );
 }
@@ -399,7 +418,7 @@ function LayerToggle({ label, checked, compact = false, onChange }) {
 function LayersPanel({ layerToggles, compact = false }) {
   return (
     <Panel title="Layers" compact={compact} className={`grid content-start overflow-auto ${compact ? "gap-1" : "gap-2"}`}>
-      <div className={`flex flex-wrap min-w-0 ${compact ? "gap-1" : "gap-2"}`}>
+      <div className={`grid min-w-0 ${compact ? "gap-1" : "gap-2"}`}>
         {layerToggles.map((layer) => (
           <LayerToggle
             key={layer.id}
