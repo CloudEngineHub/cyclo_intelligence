@@ -134,25 +134,25 @@ test('updates mapping topics when layer toggles change', async () => {
   expect(screen.getByText('/tf')).toBeInTheDocument();
   expect(screen.getByText('/tf_static')).toBeInTheDocument();
   expect(screen.getByText('/local_costmap/published_footprint')).toBeInTheDocument();
-  expect(screen.getByLabelText('Lidar')).toHaveAttribute('type', 'checkbox');
-  expect(screen.getByLabelText('Lidar')).toHaveClass('sr-only');
-  expect(screen.getByLabelText('Lidar').parentElement).toHaveClass('justify-between');
-  expect(screen.getByLabelText('Lidar').parentElement).not.toHaveClass('border');
-  expect(screen.getByLabelText('Lidar').parentElement.lastElementChild).toHaveClass('inline-flex');
+  const lidarSwitch = screen.getByRole('switch', { name: 'Lidar' });
+  expect(lidarSwitch).toHaveAttribute('aria-checked', 'true');
+  expect(lidarSwitch).toHaveClass('inline-flex');
+  expect(lidarSwitch.parentElement).toHaveClass('justify-between');
+  expect(lidarSwitch.parentElement).not.toHaveClass('border');
 
-  fireEvent.click(screen.getByLabelText('Lidar'));
+  fireEvent.click(lidarSwitch);
   expect(screen.queryByText('/scan')).not.toBeInTheDocument();
   expect(screen.queryByText('/amcl_pose')).not.toBeInTheDocument();
 
-  fireEvent.click(screen.getByLabelText('Robot Model'));
+  fireEvent.click(screen.getByRole('switch', { name: 'Robot Model' }));
   expect(screen.queryByText('/amcl_pose')).not.toBeInTheDocument();
   expect(screen.queryByText('/local_costmap/published_footprint')).not.toBeInTheDocument();
 
-  fireEvent.click(screen.getByLabelText('TF'));
+  fireEvent.click(screen.getByRole('switch', { name: 'TF' }));
   expect(screen.queryByText('/tf')).not.toBeInTheDocument();
   expect(screen.queryByText('/tf_static')).not.toBeInTheDocument();
 
-  fireEvent.click(screen.getByLabelText('Lidar'));
+  fireEvent.click(lidarSwitch);
   expect(screen.getByText('/scan')).toBeInTheDocument();
   expect(screen.queryByText('/amcl_pose')).not.toBeInTheDocument();
 
@@ -471,16 +471,16 @@ test('enables navigation runtime layers in the run stage', async () => {
   expect(screen.getByText('/goal_pose')).toBeInTheDocument();
   expect(screen.getByText('/bt/status')).toBeInTheDocument();
   expect(screen.queryByText('/tf')).not.toBeInTheDocument();
-  expect(screen.getByLabelText('Global costmap')).toHaveAttribute('type', 'checkbox');
-  expect(screen.getByLabelText('Global costmap')).toHaveClass('sr-only');
-  expect(screen.getByLabelText('Global costmap').parentElement).toHaveClass('justify-between');
-  expect(screen.getByLabelText('Global costmap').parentElement).not.toHaveClass('border');
-  expect(screen.getByLabelText('Global costmap').parentElement.lastElementChild).toHaveClass('inline-flex');
+  const globalCostmapSwitch = screen.getByRole('switch', { name: 'Global costmap' });
+  expect(globalCostmapSwitch).toHaveAttribute('aria-checked', 'true');
+  expect(globalCostmapSwitch).toHaveClass('inline-flex');
+  expect(globalCostmapSwitch.parentElement).toHaveClass('justify-between');
+  expect(globalCostmapSwitch.parentElement).not.toHaveClass('border');
 
-  fireEvent.click(screen.getByLabelText('Global costmap'));
+  fireEvent.click(globalCostmapSwitch);
   expect(screen.queryByText('/global_costmap/costmap')).not.toBeInTheDocument();
 
-  fireEvent.click(screen.getByLabelText('TF'));
+  fireEvent.click(screen.getByRole('switch', { name: 'TF' }));
   expect(screen.getByText('/tf')).toBeInTheDocument();
   expect(screen.getByText('/tf_static')).toBeInTheDocument();
 

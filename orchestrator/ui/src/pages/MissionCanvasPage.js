@@ -378,29 +378,31 @@ function LoadMapDialog({
 
 function LayerToggle({ label, checked, compact = false, onChange }) {
   return (
-    <label
-      className={`${compact ? "min-h-7" : "min-h-8"} flex items-center justify-between gap-3 text-xs font-medium cursor-pointer select-none`}
+    <div
+      className={`${compact ? "min-h-7" : "min-h-8"} flex items-center justify-between gap-3 text-xs font-medium select-none`}
       style={{
         color: MISSION_TEXT,
       }}
     >
       <span className="truncate">{label}</span>
-      <input
-        type="checkbox"
-        checked={checked}
-        className="sr-only"
-        onChange={(event) => onChange(event.currentTarget.checked)}
-      />
-      <span
-        aria-hidden="true"
-        className={`${compact ? "h-4 w-8" : "h-5 w-9"} inline-flex rounded-full relative shrink-0 transition-colors`}
+      <button
+        type="button"
+        role="switch"
+        aria-checked={checked}
+        aria-label={label}
+        onClick={() => onChange(!checked)}
+        className={`${compact ? "h-4 w-8" : "h-5 w-9"} inline-flex rounded-full relative shrink-0 border cursor-pointer transition-colors active:translate-y-px`}
         style={{
           backgroundColor: checked
+            ? "var(--vscode-button-background)"
+            : MISSION_SURFACE,
+          borderColor: checked
             ? "var(--vscode-button-background)"
             : MISSION_BUTTON_BORDER,
         }}
       >
         <span
+          aria-hidden="true"
           className={`${compact ? "h-3 w-3 top-0.5" : "h-4 w-4 top-0.5"} block absolute left-0.5 rounded-full bg-white shadow-sm transition-transform`}
           style={{
             transform: checked
@@ -408,8 +410,8 @@ function LayerToggle({ label, checked, compact = false, onChange }) {
               : "translateX(0)",
           }}
         />
-      </span>
-    </label>
+      </button>
+    </div>
   );
 }
 
