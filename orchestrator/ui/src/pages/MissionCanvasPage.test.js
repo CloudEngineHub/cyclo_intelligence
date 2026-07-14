@@ -100,8 +100,8 @@ test('renders Mission Canvas foundation', async () => {
   expect(screen.getByText('Mobile Teleop')).toBeInTheDocument();
   expect(screen.getByRole('group', { name: 'Mobile Teleop' })).toBeInTheDocument();
   expect(screen.getByText('/cmd_vel')).toBeInTheDocument();
-  expect(screen.getAllByText('Unavailable').length).toBeGreaterThan(0);
-  expect(screen.getByRole('button', { name: 'Activate' })).toBeDisabled();
+  expect(screen.getAllByText('Inactive').length).toBeGreaterThan(0);
+  expect(screen.getByRole('button', { name: 'Activate' })).toBeEnabled();
   expect(screen.getByText('Layers')).toBeInTheDocument();
   expect(screen.getByText('Topics')).toBeInTheDocument();
   expect(screen.getByText('/map')).toBeInTheDocument();
@@ -256,9 +256,7 @@ test('starts mapping mode from Mission Canvas', async () => {
   await waitFor(() => expect(startNavigation).toHaveBeenCalledWith('map', 'map'));
 });
 
-test('publishes keyboard teleop commands while mapping is running', async () => {
-  getServiceStatus.mockResolvedValueOnce({ is_up: true });
-
+test('publishes keyboard teleop commands without mapping runtime', async () => {
   render(<MissionCanvasPage />);
 
   const teleop = screen.getByRole('group', { name: 'Mobile Teleop' });

@@ -1119,7 +1119,7 @@ export default function MissionCanvasPage() {
     tfStatic,
     workspaceStage,
   ]);
-  const teleopDisabled = !running || !!busy || mappingEditorActive;
+  const teleopDisabled = !!busy || mappingEditorActive;
 
   const loadStatus = useCallback(async () => {
     if (statusLoadingRef.current || document.visibilityState === "hidden") {
