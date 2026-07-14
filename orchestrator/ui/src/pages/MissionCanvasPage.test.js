@@ -9,7 +9,7 @@ import {
   startNavigation,
   stopNavigation,
 } from '../utils/navigationApi';
-import { getNavigationSpots } from '../utils/navigationSpotsApi';
+import { createNavigationSpot, getNavigationSpots } from '../utils/navigationSpotsApi';
 
 const mockMapViewer = jest.fn(() => <div>Mission Canvas Map</div>);
 const mockPublishRosTopic = jest.fn();
@@ -38,7 +38,7 @@ jest.mock('../utils/navigationSpotsApi', () => ({
   createNavigationSpot: jest.fn().mockResolvedValue({
     id: 'spot_a',
     map_name: 'map',
-    label: 'Spot A',
+    label: 'Waypoint A',
     pose: { frame_id: 'map', x: 1, y: 2, yaw: 0 },
     linked_bt_tree: '',
     metadata: {},
@@ -48,7 +48,7 @@ jest.mock('../utils/navigationSpotsApi', () => ({
   updateNavigationSpot: jest.fn().mockResolvedValue({
     id: 'spot_a',
     map_name: 'map',
-    label: 'Spot A',
+    label: 'Waypoint A',
     pose: { frame_id: 'map', x: 1, y: 2, yaw: 0 },
     linked_bt_tree: '',
     metadata: {},
@@ -64,6 +64,14 @@ beforeEach(() => {
   jest.clearAllMocks();
   window.localStorage.clear();
   mockPublishRosTopic.mockResolvedValue(undefined);
+  createNavigationSpot.mockResolvedValue({
+    id: 'spot_a',
+    map_name: 'factory',
+    label: 'Waypoint A',
+    pose: { frame_id: 'map', x: 1, y: 2, yaw: 0 },
+    linked_bt_tree: '',
+    metadata: {},
+  });
   getPgmFiles.mockResolvedValue({ files: [] });
   getPgmImage.mockResolvedValue({
     path: 'map.pgm',
@@ -164,7 +172,7 @@ test('updates mapping topics when layer toggles change', async () => {
   await waitFor(() => expect(getNavigationSpots).toHaveBeenCalledWith('map'));
 });
 
-test('shows Spot and BT authoring panels in the authoring stage', async () => {
+test('shows Waypoint and BT authoring panels in the authoring stage', async () => {
   render(<MissionCanvasPage />);
 
   fireEvent.click(screen.getByRole('tab', { name: 'Design' }));
@@ -175,17 +183,18 @@ test('shows Spot and BT authoring panels in the authoring stage', async () => {
   expect(screen.getByText('Decorators')).toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'SendCommand' })).toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Sequence' })).toBeInTheDocument();
-  expect(screen.getByText('Inspector')).toBeInTheDocument();
+  expect(screen.getByText('Properties')).toBeInTheDocument();
   expect(screen.getByText('Design Objects')).toBeInTheDocument();
   expect(screen.getByText('Behavior Nodes')).toBeInTheDocument();
-  expect(screen.getByText('Spots')).toBeInTheDocument();
+  expect(screen.getByText('Waypoints')).toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Load Map' })).toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Save Map' })).toBeInTheDocument();
-  expect(screen.getByRole('button', { name: 'Spot' })).toBeInTheDocument();
-  expect(screen.getByRole('button', { name: 'Delete Spot' })).toBeInTheDocument();
-  expect(screen.getByRole('button', { name: 'Delete Node' })).toBeDisabled();
-  expect(screen.getByRole('button', { name: 'Create BT' })).toBeDisabled();
-  expect(screen.getByRole('button', { name: 'Edit BT' })).toBeDisabled();
+  expect(screen.getByRole('button', { name: 'Waypoint' })).toBeInTheDocument();
+  expect(screen.getByText('Select a waypoint or behavior node on the map.')).toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Delete Waypoint' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Delete Node' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Create BT' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Edit BT' })).not.toBeInTheDocument();
   expect(screen.queryByRole('button', { name: 'Start Mapping' })).not.toBeInTheDocument();
   expect(screen.getByText('/map')).toBeInTheDocument();
   expect(screen.getByText('/bt/status')).toBeInTheDocument();
@@ -225,8 +234,52 @@ test('loads a saved map into the design stage', async () => {
   await waitFor(() => expect(latestMapViewerProps().map).toMatchObject({
     info: { width: 1, height: 1 },
   }));
-  expect(screen.getByRole('button', { name: 'Spot' })).toBeEnabled();
+  expect(screen.getByRole('button', { name: 'Waypoint' })).toBeEnabled();
   await waitFor(() => expect(getNavigationSpots).toHaveBeenCalledWith('factory'));
+});
+
+test('shows waypoint actions in Properties after placing a waypoint', async () => {
+  const latestMapViewerProps = () => (
+    mockMapViewer.mock.calls[mockMapViewer.mock.calls.length - 1][0]
+  );
+  getPgmFiles.mockResolvedValue({
+    files: [{ path: 'factory.pgm', name: 'factory.pgm' }],
+  });
+  getPgmImage.mockResolvedValue({
+    path: 'factory.pgm',
+    width: 1,
+    height: 1,
+    maxval: 255,
+    pixels_base64: 'AA==',
+  });
+
+  render(<MissionCanvasPage />);
+
+  fireEvent.click(screen.getByRole('tab', { name: 'Design' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Load Map' }));
+  await screen.findByRole('combobox', { name: 'Design map file' });
+  fireEvent.click(screen.getByRole('button', { name: 'Load' }));
+  await waitFor(() => expect(latestMapViewerProps().map).toMatchObject({
+    info: { width: 1, height: 1 },
+  }));
+
+  fireEvent.click(screen.getByRole('button', { name: 'Waypoint' }));
+
+  expect(screen.getByRole('button', { name: 'Waypoint' })).toHaveAttribute('aria-pressed', 'true');
+
+  await act(async () => {
+    await latestMapViewerProps().onMapPose(1, 2, 0.25);
+  });
+
+  await waitFor(() => expect(createNavigationSpot).toHaveBeenCalledWith({
+    map_name: 'factory',
+    label: 'Waypoint 1',
+    pose: { frame_id: 'map', x: 1, y: 2, yaw: 0.25 },
+  }));
+  expect(screen.getByDisplayValue('Waypoint A')).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Create BT' })).toBeDisabled();
+  expect(screen.getByRole('button', { name: 'Edit BT' })).toBeDisabled();
+  expect(screen.getByRole('button', { name: 'Delete Waypoint' })).toBeEnabled();
 });
 
 test('places behavior palette nodes on the map overlay', async () => {

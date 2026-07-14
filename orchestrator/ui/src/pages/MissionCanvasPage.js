@@ -1171,7 +1171,7 @@ export default function MissionCanvasPage() {
         result.spots?.some((spot) => spot.id === current) ? current : ""
       ));
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Failed to load spots");
+      setMessage(error instanceof Error ? error.message : "Failed to load waypoints");
     }
   }, [mapName]);
 
@@ -1434,7 +1434,7 @@ export default function MissionCanvasPage() {
       return;
     }
     if (interactionMode !== "spot") return;
-    const label = `Spot ${spots.length + 1}`;
+    const label = `Waypoint ${spots.length + 1}`;
     try {
       const created = await createNavigationSpot({
         map_name: currentMapName,
@@ -1447,7 +1447,7 @@ export default function MissionCanvasPage() {
       setInteractionMode("view");
       setMessage(`Created ${created.label}`);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Failed to create spot");
+      setMessage(error instanceof Error ? error.message : "Failed to create waypoint");
     }
   }, [
     currentMapName,
@@ -1471,7 +1471,7 @@ export default function MissionCanvasPage() {
         spot.id === updated.id ? updated : spot
       )));
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Failed to update spot");
+      setMessage(error instanceof Error ? error.message : "Failed to update waypoint");
     }
   }, [selectedSpot]);
 
@@ -1483,7 +1483,7 @@ export default function MissionCanvasPage() {
       setSelectedSpotId("");
       setMessage(`Deleted ${selectedSpot.label}`);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Failed to delete spot");
+      setMessage(error instanceof Error ? error.message : "Failed to delete waypoint");
     }
   }, [selectedSpot]);
 
@@ -1694,27 +1694,7 @@ export default function MissionCanvasPage() {
                 onClick={handleToggleSpotMode}
                 variant="secondary"
               >
-                Spot
-              </ActionButton>
-              <ActionButton
-                disabled={!selectedSpot}
-                onClick={handleDeleteSelectedSpot}
-                variant="secondary"
-              >
-                Delete Spot
-              </ActionButton>
-              <ActionButton
-                disabled={!selectedBehaviorNode}
-                onClick={handleDeleteSelectedBehaviorNode}
-                variant="secondary"
-              >
-                Delete Node
-              </ActionButton>
-              <ActionButton disabled variant="secondary">
-                Create BT
-              </ActionButton>
-              <ActionButton disabled variant="secondary">
-                Edit BT
+                Waypoint
               </ActionButton>
             </>
           )}
@@ -1813,7 +1793,7 @@ export default function MissionCanvasPage() {
 
         {workspaceStage === STAGE_AUTHORING ? (
           <aside className="min-h-0 grid grid-rows-[auto_1fr_minmax(160px,220px)] gap-4">
-            <Panel title="Inspector" className="grid gap-3">
+            <Panel title="Properties" className="grid gap-3">
               {selectedBehaviorNode ? (
                 <div className="grid gap-2 text-xs">
                   <div>
@@ -1832,6 +1812,14 @@ export default function MissionCanvasPage() {
                       {selectedBehaviorNode.pose.y.toFixed(2)}, yaw{" "}
                       {selectedBehaviorNode.pose.yaw.toFixed(2)}
                     </span>
+                  </div>
+                  <div className="pt-2 border-t grid justify-start" style={{ borderColor: MISSION_PANEL_BORDER }}>
+                    <ActionButton
+                      onClick={handleDeleteSelectedBehaviorNode}
+                      variant="danger"
+                    >
+                      Delete Node
+                    </ActionButton>
                   </div>
                 </div>
               ) : selectedSpot ? (
@@ -1861,10 +1849,28 @@ export default function MissionCanvasPage() {
                   <div>
                     BT: <span className="font-mono">{selectedSpot.linked_bt_tree || "-"}</span>
                   </div>
+                  <div className="pt-2 border-t grid gap-2" style={{ borderColor: MISSION_PANEL_BORDER }}>
+                    <div className="flex flex-wrap gap-2">
+                      <ActionButton disabled variant="secondary">
+                        Create BT
+                      </ActionButton>
+                      <ActionButton disabled variant="secondary">
+                        Edit BT
+                      </ActionButton>
+                    </div>
+                    <div className="grid justify-start">
+                      <ActionButton
+                        onClick={handleDeleteSelectedSpot}
+                        variant="danger"
+                      >
+                        Delete Waypoint
+                      </ActionButton>
+                    </div>
+                  </div>
                 </div>
               ) : (
                 <div className="text-xs leading-5" style={{ color: MISSION_TEXT_MUTED }}>
-                  No selection.
+                  Select a waypoint or behavior node on the map.
                 </div>
               )}
             </Panel>
@@ -1908,7 +1914,7 @@ export default function MissionCanvasPage() {
                     className="text-[10px] uppercase font-semibold"
                     style={{ color: MISSION_TEXT_MUTED }}
                   >
-                    Spots
+                    Waypoints
                   </div>
                   {spots.map((spot) => (
                     <button
@@ -1931,7 +1937,7 @@ export default function MissionCanvasPage() {
                   ))}
                   {spots.length === 0 && (
                     <div className="text-xs" style={{ color: MISSION_TEXT_MUTED }}>
-                      No spots for this map yet.
+                      No waypoints for this map yet.
                     </div>
                   )}
                 </div>
