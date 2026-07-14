@@ -558,6 +558,8 @@ def navigation_start(request: NavigationStartRequest):
     _force_stop_navigation_processes()
     _s6_command(NAVIGATION_SERVICE, "down", retries=15, retry_delay=0.2)
     _clear_navigation_runtime_files()
+    if request.mode == "map":
+        GRID_CACHES["/map"].clear()
     _write_runtime_file("/run/navigation_type", request.mode)
     _write_runtime_file(
         f"/run/launch_args/{NAVIGATION_SERVICE}",

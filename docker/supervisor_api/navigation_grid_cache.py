@@ -120,6 +120,7 @@ class OccupancyGridCache:
         self._marker: tuple[Any, ...] | None = None
         self._payload: str | None = None
         self._listeners: dict[int, tuple[Any, Any]] = {}
+        self._reset_serial = 0
 
     @staticmethod
     def _metadata_marker(message: Any) -> tuple[Any, ...]:
@@ -161,6 +162,21 @@ class OccupancyGridCache:
                 "data": occupancy_grid_to_dict(message),
             }, separators=(",", ":"))
             listeners = list(self._listeners.items())
+        self._notify_listeners(listeners)
+
+    def clear(self) -> None:
+        """Drop the cached grid and notify current clients to clear the map."""
+        with self._lock:
+            self._reset_serial += 1
+            self._marker = ("clear", self._reset_serial)
+            self._payload = json.dumps(
+                {"available": False},
+                separators=(",", ":"),
+            )
+            listeners = list(self._listeners.items())
+        self._notify_listeners(listeners)
+
+    def _notify_listeners(self, listeners: list[tuple[int, tuple[Any, Any]]]) -> None:
         stale_listeners = []
         for listener_id, (loop, event) in listeners:
             try:

@@ -193,6 +193,11 @@ def test_navigation_start_clears_stale_runtime_before_up(monkeypatch):
         "_write_runtime_file",
         lambda path, content: events.append(("write", path, content)),
     )
+    monkeypatch.setitem(
+        navigation.GRID_CACHES,
+        "/map",
+        SimpleNamespace(clear=lambda: events.append("clear_map_cache")),
+    )
     monkeypatch.setattr(
         navigation,
         "_s6_command",
@@ -211,10 +216,55 @@ def test_navigation_start_clears_stale_runtime_before_up(monkeypatch):
         "force",
         ("s6", "ai_worker_navigation", "down"),
         "clear",
+        "clear_map_cache",
         ("write", "/run/navigation_type", "map"),
         ("write", "/run/launch_args/ai_worker_navigation", "map_name:=factory"),
         ("s6", "ai_worker_navigation", "up"),
     ]
+
+
+def test_navigation_start_keeps_map_cache_for_nav_mode(monkeypatch):
+    events = []
+
+    monkeypatch.setattr(
+        navigation,
+        "_request_s6_service_down",
+        lambda service: events.append(("request_down", service))
+        or f"{service} down requested",
+    )
+    monkeypatch.setattr(
+        navigation,
+        "_clear_navigation_runtime_files",
+        lambda: events.append("clear"),
+    )
+    monkeypatch.setattr(
+        navigation,
+        "_force_stop_navigation_processes",
+        lambda: events.append("force") or "",
+    )
+    monkeypatch.setattr(
+        navigation,
+        "_write_runtime_file",
+        lambda path, content: events.append(("write", path, content)),
+    )
+    monkeypatch.setitem(
+        navigation.GRID_CACHES,
+        "/map",
+        SimpleNamespace(clear=lambda: events.append("clear_map_cache")),
+    )
+    monkeypatch.setattr(
+        navigation,
+        "_s6_command",
+        lambda service, action, **kwargs: events.append(("s6", service, action))
+        or f"{service} {action}",
+    )
+
+    result = navigation.navigation_start(
+        navigation.NavigationStartRequest(mode="nav", map_name="factory")
+    )
+
+    assert result.ok
+    assert "clear_map_cache" not in events
 
 
 def test_navigation_stop_clears_runtime_and_forces_process_group(monkeypatch):
@@ -398,6 +448,16 @@ def test_navigation_grid_cache_serializes_only_changed_data():
     changed_marker, changed_payload = cache.serialized_if_changed(metadata_marker)
     assert changed_marker != metadata_marker
     assert json.loads(changed_payload)["data"]["data"] == [0, 2]
+
+    cache.clear()
+    cleared_marker, cleared_payload = cache.serialized_if_changed(changed_marker)
+    assert cleared_marker != changed_marker
+    assert json.loads(cleared_payload) == {"available": False}
+
+    cache.cache_ros_message({"info": {"width": 2}, "data": [0, 2]})
+    restored_marker, restored_payload = cache.serialized_if_changed(cleared_marker)
+    assert restored_marker != cleared_marker
+    assert json.loads(restored_payload)["data"]["data"] == [0, 2]
 
 
 def test_navigation_grid_websocket_sends_cached_original_topic(monkeypatch):
