@@ -34,9 +34,9 @@ const WAYPOINT_HEADING_LENGTH = 4.4;
 const WAYPOINT_HEADING_SHAFT_WIDTH = 0.56;
 const WAYPOINT_HEADING_HEAD_LENGTH = 1.05;
 const WAYPOINT_HEADING_HEAD_WIDTH = 1.42;
-const WAYPOINT_LABEL_OFFSET_Y = -5.05;
-const WAYPOINT_LABEL_SCALE_X = 6.4;
-const WAYPOINT_LABEL_SCALE_Y = 1.56;
+const WAYPOINT_LABEL_OFFSET_Y = -7.2;
+const WAYPOINT_LABEL_SCALE_X = 24;
+const WAYPOINT_LABEL_SCALE_Y = 6;
 function gridMeta(grid) {
     var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k;
     const info = grid === null || grid === void 0 ? void 0 : grid.info;
@@ -266,6 +266,28 @@ function makeLine(points, color, lineWidth = 2) {
     const material = new THREE.LineBasicMaterial({ color, linewidth: lineWidth });
     return new THREE.Line(geometry, material);
 }
+function makeTextSprite(text, { width = 256, height = 64, fontSize = 22, backgroundAlpha = 0.58 } = {}) {
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext("2d");
+    if (ctx) {
+        ctx.fillStyle = `rgba(0, 0, 0, ${backgroundAlpha})`;
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = "#ffffff";
+        ctx.shadowColor = "rgba(0, 0, 0, 0.82)";
+        ctx.shadowBlur = Math.max(4, Math.round(fontSize * 0.15));
+        ctx.shadowOffsetX = 1;
+        ctx.shadowOffsetY = 1;
+        ctx.font = `700 ${fontSize}px sans-serif`;
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText(text, canvas.width / 2, canvas.height / 2);
+    }
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    return new THREE.Sprite(new THREE.SpriteMaterial({ map: texture, transparent: true }));
+}
 function waypointHeadingShape(shaftWidth, headWidth, headLength) {
     const start = WAYPOINT_CENTER_RADIUS * 0.32;
     const tip = WAYPOINT_HEADING_LENGTH;
@@ -360,7 +382,12 @@ function makeSpotMarker(spot, selected = false) {
     group.add(heading);
     const label = String((_d = spot.label) !== null && _d !== void 0 ? _d : spot.id);
     if (label) {
-        const sprite = makeTfLabelSprite(label);
+        const sprite = makeTextSprite(label, {
+            width: 512,
+            height: 128,
+            fontSize: 64,
+            backgroundAlpha: 0.68,
+        });
         sprite.position.set(0, WAYPOINT_LABEL_OFFSET_Y, 0.04);
         sprite.scale.set(WAYPOINT_LABEL_SCALE_X, WAYPOINT_LABEL_SCALE_Y, 1);
         sprite.userData = { spotId: spot.id, dragAction: "move" };
@@ -499,27 +526,7 @@ function makeFootprintMarker(footprint, framePose) {
     return group;
 }
 function makeTfLabelSprite(text) {
-    const canvas = document.createElement("canvas");
-    canvas.width = 256;
-    canvas.height = 64;
-    const ctx = canvas.getContext("2d");
-    if (ctx) {
-        ctx.fillStyle = "rgba(0, 0, 0, 0.58)";
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-        ctx.fillStyle = "#ffffff";
-        ctx.shadowColor = "rgba(0, 0, 0, 0.82)";
-        ctx.shadowBlur = 4;
-        ctx.shadowOffsetX = 1;
-        ctx.shadowOffsetY = 1;
-        ctx.font = "22px sans-serif";
-        ctx.textAlign = "center";
-        ctx.textBaseline = "middle";
-        ctx.fillText(text, canvas.width / 2, canvas.height / 2);
-    }
-    const texture = new THREE.CanvasTexture(canvas);
-    texture.colorSpace = THREE.SRGBColorSpace;
-    const material = new THREE.SpriteMaterial({ map: texture, transparent: true });
-    const sprite = new THREE.Sprite(material);
+    const sprite = makeTextSprite(text);
     sprite.scale.set(TF_AXIS_LENGTH * 1.8, TF_AXIS_LENGTH * 0.45, 1);
     return sprite;
 }
