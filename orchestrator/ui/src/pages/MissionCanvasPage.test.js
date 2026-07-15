@@ -250,6 +250,48 @@ test('loads a saved map into the design stage', async () => {
   await waitFor(() => expect(getNavigationSpots).toHaveBeenCalledWith('factory'));
 });
 
+test('hides loaded design waypoints after returning to mapping stage', async () => {
+  const latestMapViewerProps = () => (
+    mockMapViewer.mock.calls[mockMapViewer.mock.calls.length - 1][0]
+  );
+  getPgmFiles.mockResolvedValue({
+    files: [{ path: 'factory.pgm', name: 'factory.pgm' }],
+  });
+  getPgmImage.mockResolvedValue({
+    path: 'factory.pgm',
+    width: 1,
+    height: 1,
+    maxval: 255,
+    pixels_base64: 'AA==',
+  });
+  getNavigationSpots.mockImplementation((mapName) => Promise.resolve({
+    map_name: mapName,
+    spots: mapName === 'factory' ? [{
+      id: 'spot_factory',
+      map_name: 'factory',
+      label: 'Waypoint Factory',
+      pose: { frame_id: 'map', x: 1, y: 2, yaw: 0 },
+      linked_bt_tree: '',
+      metadata: {},
+    }] : [],
+  }));
+
+  render(<MissionCanvasPage />);
+
+  fireEvent.click(screen.getByRole('tab', { name: 'Design' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Load Map' }));
+  await screen.findByRole('combobox', { name: 'Design map file' });
+  fireEvent.click(screen.getByRole('button', { name: 'Load' }));
+
+  await waitFor(() => expect(latestMapViewerProps().spots).toHaveLength(1));
+
+  fireEvent.click(screen.getByRole('tab', { name: 'Mapping' }));
+
+  await waitFor(() => expect(latestMapViewerProps().spots).toEqual([]));
+  expect(latestMapViewerProps().selectedSpotId).toBe('');
+  expect(latestMapViewerProps().map).toBeNull();
+});
+
 test('shows waypoint actions in Properties after placing a waypoint', async () => {
   const latestMapViewerProps = () => (
     mockMapViewer.mock.calls[mockMapViewer.mock.calls.length - 1][0]

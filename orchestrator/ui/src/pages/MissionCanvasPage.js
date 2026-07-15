@@ -1002,6 +1002,7 @@ export default function MissionCanvasPage() {
 
   const running = status?.is_up ?? false;
   const mappingEditorActive = workspaceStage === STAGE_MAPPING && showPgmFix;
+  const missionOverlayActive = workspaceStage !== STAGE_MAPPING && !mappingEditorActive;
   const designMapActive = workspaceStage === STAGE_AUTHORING && !!designMapPath;
   const navigationTopicsActive = running && busy !== "Stop" && !mappingEditorActive;
   const activeLayers = layersByStage[workspaceStage] || LAYER_PRESETS[workspaceStage];
@@ -1787,11 +1788,11 @@ export default function MissionCanvasPage() {
             goalPose={mappingEditorActive ? null : needsGoalPose ? goalPose : null}
             footprint={mappingEditorActive ? null : needsRobotModel ? footprint : null}
             tf={mappingEditorActive ? null : needsTf ? bufferedTf : null}
-            spots={mappingEditorActive ? [] : spots}
-            selectedSpotId={mappingEditorActive ? "" : selectedSpotId}
-            behaviorNodes={mappingEditorActive ? [] : activeBehaviorNodes}
-            selectedBehaviorNodeId={mappingEditorActive ? "" : selectedBehaviorNodeId}
-            behaviorPreviewNode={behaviorPreviewNode}
+            spots={missionOverlayActive ? spots : []}
+            selectedSpotId={missionOverlayActive ? selectedSpotId : ""}
+            behaviorNodes={missionOverlayActive ? activeBehaviorNodes : []}
+            selectedBehaviorNodeId={missionOverlayActive ? selectedBehaviorNodeId : ""}
+            behaviorPreviewNode={missionOverlayActive ? behaviorPreviewNode : null}
             showMap={mappingEditorActive ? true : activeLayers.map}
             showGlobalCostmap={mappingEditorActive ? false : needsGlobalCostmap}
             showLocalCostmap={mappingEditorActive ? false : needsLocalCostmap}
