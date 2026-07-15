@@ -35,6 +35,7 @@ const WAYPOINT_HEADING_SHAFT_WIDTH = 0.56;
 const WAYPOINT_HEADING_HEAD_LENGTH = 1.05;
 const WAYPOINT_HEADING_HEAD_WIDTH = 1.42;
 const WAYPOINT_HEADING_OUTLINE_EXTRA = 0.28;
+const WAYPOINT_HEADING_OUTLINE_LENGTH_EXTRA = 0.34;
 const WAYPOINT_LABEL_OFFSET_Y = -4.1;
 const WAYPOINT_LABEL_SCALE_X = 3.2;
 const WAYPOINT_LABEL_SCALE_Y = 0.78;
@@ -267,9 +268,9 @@ function makeLine(points, color, lineWidth = 2) {
     const material = new THREE.LineBasicMaterial({ color, linewidth: lineWidth });
     return new THREE.Line(geometry, material);
 }
-function waypointHeadingShape(shaftWidth, headWidth, headLength) {
-    const start = WAYPOINT_CENTER_RADIUS * 0.32;
-    const tip = WAYPOINT_HEADING_LENGTH;
+function waypointHeadingShape(shaftWidth, headWidth, headLength, lengthExtra = 0) {
+    const start = Math.max(0, WAYPOINT_CENTER_RADIUS * 0.32 - lengthExtra);
+    const tip = WAYPOINT_HEADING_LENGTH + lengthExtra;
     const headBase = Math.max(start, tip - headLength);
     const shaftHalf = shaftWidth / 2;
     const headHalf = headWidth / 2;
@@ -286,7 +287,7 @@ function waypointHeadingShape(shaftWidth, headWidth, headLength) {
 }
 function makeWaypointHeadingArrow(color) {
     const group = new THREE.Group();
-    const outline = new THREE.Mesh(new THREE.ShapeGeometry(waypointHeadingShape(WAYPOINT_HEADING_SHAFT_WIDTH + WAYPOINT_HEADING_OUTLINE_EXTRA, WAYPOINT_HEADING_HEAD_WIDTH + WAYPOINT_HEADING_OUTLINE_EXTRA, WAYPOINT_HEADING_HEAD_LENGTH + WAYPOINT_HEADING_OUTLINE_EXTRA * 0.8)), new THREE.MeshBasicMaterial({
+    const outline = new THREE.Mesh(new THREE.ShapeGeometry(waypointHeadingShape(WAYPOINT_HEADING_SHAFT_WIDTH + WAYPOINT_HEADING_OUTLINE_EXTRA, WAYPOINT_HEADING_HEAD_WIDTH + WAYPOINT_HEADING_OUTLINE_EXTRA, WAYPOINT_HEADING_HEAD_LENGTH + WAYPOINT_HEADING_OUTLINE_EXTRA * 0.8, WAYPOINT_HEADING_OUTLINE_LENGTH_EXTRA)), new THREE.MeshBasicMaterial({
         color: 0x111827,
         transparent: true,
         opacity: 0.72,
