@@ -34,8 +34,6 @@ const WAYPOINT_HEADING_LENGTH = 4.4;
 const WAYPOINT_HEADING_SHAFT_WIDTH = 0.56;
 const WAYPOINT_HEADING_HEAD_LENGTH = 1.05;
 const WAYPOINT_HEADING_HEAD_WIDTH = 1.42;
-const WAYPOINT_HEADING_OUTLINE_EXTRA = 0.28;
-const WAYPOINT_HEADING_OUTLINE_LENGTH_EXTRA = 0.34;
 const WAYPOINT_LABEL_OFFSET_Y = -5.05;
 const WAYPOINT_LABEL_SCALE_X = 6.4;
 const WAYPOINT_LABEL_SCALE_Y = 1.56;
@@ -268,9 +266,9 @@ function makeLine(points, color, lineWidth = 2) {
     const material = new THREE.LineBasicMaterial({ color, linewidth: lineWidth });
     return new THREE.Line(geometry, material);
 }
-function waypointHeadingShape(shaftWidth, headWidth, headLength, lengthExtra = 0) {
-    const start = Math.max(0, WAYPOINT_CENTER_RADIUS * 0.32 - lengthExtra);
-    const tip = WAYPOINT_HEADING_LENGTH + lengthExtra;
+function waypointHeadingShape(shaftWidth, headWidth, headLength) {
+    const start = WAYPOINT_CENTER_RADIUS * 0.32;
+    const tip = WAYPOINT_HEADING_LENGTH;
     const headBase = Math.max(start, tip - headLength);
     const shaftHalf = shaftWidth / 2;
     const headHalf = headWidth / 2;
@@ -285,25 +283,15 @@ function waypointHeadingShape(shaftWidth, headWidth, headLength, lengthExtra = 0
     shape.closePath();
     return shape;
 }
-function makeWaypointHeadingArrow(color) {
-    const group = new THREE.Group();
-    const outline = new THREE.Mesh(new THREE.ShapeGeometry(waypointHeadingShape(WAYPOINT_HEADING_SHAFT_WIDTH + WAYPOINT_HEADING_OUTLINE_EXTRA, WAYPOINT_HEADING_HEAD_WIDTH + WAYPOINT_HEADING_OUTLINE_EXTRA, WAYPOINT_HEADING_HEAD_LENGTH + WAYPOINT_HEADING_OUTLINE_EXTRA * 0.8, WAYPOINT_HEADING_OUTLINE_LENGTH_EXTRA)), new THREE.MeshBasicMaterial({
+function makeWaypointHeadingArrow() {
+    const arrow = new THREE.Mesh(new THREE.ShapeGeometry(waypointHeadingShape(WAYPOINT_HEADING_SHAFT_WIDTH, WAYPOINT_HEADING_HEAD_WIDTH, WAYPOINT_HEADING_HEAD_LENGTH)), new THREE.MeshBasicMaterial({
         color: 0x111827,
         transparent: true,
-        opacity: 0.72,
+        opacity: 0.94,
         side: THREE.DoubleSide,
     }));
-    outline.position.z = 0.03;
-    group.add(outline);
-    const arrow = new THREE.Mesh(new THREE.ShapeGeometry(waypointHeadingShape(WAYPOINT_HEADING_SHAFT_WIDTH, WAYPOINT_HEADING_HEAD_WIDTH, WAYPOINT_HEADING_HEAD_LENGTH)), new THREE.MeshBasicMaterial({
-        color,
-        transparent: true,
-        opacity: 0.96,
-        side: THREE.DoubleSide,
-    }));
-    arrow.position.z = 0.045;
-    group.add(arrow);
-    return group;
+    arrow.position.z = 0.04;
+    return arrow;
 }
 function makePoseMarker(pose, color, z) {
     var _a, _b, _c, _d;
@@ -365,7 +353,7 @@ function makeSpotMarker(spot, selected = false) {
     center.position.z = 0.01;
     center.userData = { spotId: spot.id, dragAction: "move" };
     group.add(center);
-    const heading = makeWaypointHeadingArrow(selected ? 0xffffff : 0xdcfce7);
+    const heading = makeWaypointHeadingArrow();
     heading.traverse((child) => {
         child.userData = { spotId: spot.id, dragAction: "rotate" };
     });
