@@ -979,6 +979,7 @@ export default function MissionCanvasPage() {
   const [busy, setBusy] = useState("");
   const [message, setMessage] = useState("Ready");
   const [interactionMode, setInteractionMode] = useState("view");
+  const [showWaypointOptions, setShowWaypointOptions] = useState(false);
   const [tfBufferRevision, setTfBufferRevision] = useState(0);
   const [workspaceStage, setWorkspaceStage] = useState(STAGE_MAPPING);
   const [showPgmFix, setShowPgmFix] = useState(false);
@@ -1257,6 +1258,7 @@ export default function MissionCanvasPage() {
   const handleOpenDesignMapDialog = useCallback(() => {
     setWorkspaceStage(STAGE_AUTHORING);
     setShowPgmFix(false);
+    setShowWaypointOptions(false);
     setShowDesignMapDialog(true);
     setDesignMapBusy(true);
     setMessage("Loading saved maps");
@@ -1399,6 +1401,7 @@ export default function MissionCanvasPage() {
     setSelectedSpotId(spotId);
     setSelectedBehaviorNodeId("");
     setPendingBehaviorNodeTag("");
+    setShowWaypointOptions(false);
     setInteractionMode("view");
   }, []);
 
@@ -1406,6 +1409,7 @@ export default function MissionCanvasPage() {
     setSelectedBehaviorNodeId(nodeId);
     setSelectedSpotId("");
     setPendingBehaviorNodeTag("");
+    setShowWaypointOptions(false);
     setInteractionMode("view");
   }, []);
 
@@ -1413,14 +1417,21 @@ export default function MissionCanvasPage() {
     setWorkspaceStage(STAGE_AUTHORING);
     setPendingBehaviorNodeTag(tag);
     setSelectedSpotId("");
+    setShowWaypointOptions(false);
     setInteractionMode("behavior");
     setMessage(`${tag} selected`);
+  }, []);
+
+  const handleToggleWaypointOptions = useCallback(() => {
+    setWorkspaceStage(STAGE_AUTHORING);
+    setShowWaypointOptions((value) => !value);
   }, []);
 
   const handleToggleSpotMode = useCallback(() => {
     setWorkspaceStage(STAGE_AUTHORING);
     setPendingBehaviorNodeTag("");
     setSelectedBehaviorNodeId("");
+    setShowWaypointOptions(false);
     setInteractionMode((value) => (value === "spot" ? "view" : "spot"));
   }, []);
 
@@ -1493,6 +1504,7 @@ export default function MissionCanvasPage() {
       setSelectedBehaviorNodeId("");
       setPendingBehaviorNodeTag("");
       setInteractionMode("view");
+      setShowWaypointOptions(false);
       setMessage(`Created ${created.label} at robot`);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Failed to create waypoint at robot");
@@ -1663,6 +1675,7 @@ export default function MissionCanvasPage() {
                 if (stage.id !== STAGE_AUTHORING) {
                   setInteractionMode("view");
                   setPendingBehaviorNodeTag("");
+                  setShowWaypointOptions(false);
                 }
               }}
               className="relative h-10 w-24 px-3 border border-b-0 rounded-t-md text-sm font-semibold transition-colors"
@@ -1773,21 +1786,43 @@ export default function MissionCanvasPage() {
               >
                 Save Map
               </ActionButton>
-              <ActionButton
-                active={interactionMode === "spot"}
-                disabled={!designMapAvailable}
-                onClick={handleToggleSpotMode}
-                variant="secondary"
-              >
-                Waypoint
-              </ActionButton>
-              <ActionButton
-                disabled={!!busy || !designMapAvailable || !robotPoseAvailable}
-                onClick={handleCreateSpotAtRobot}
-                variant="secondary"
-              >
-                At Robot
-              </ActionButton>
+              <div className="flex items-center gap-1">
+                <ActionButton
+                  active={showWaypointOptions || interactionMode === "spot"}
+                  disabled={!designMapAvailable}
+                  onClick={handleToggleWaypointOptions}
+                  variant="secondary"
+                >
+                  Waypoint
+                </ActionButton>
+                {showWaypointOptions && (
+                  <div
+                    className="flex items-center gap-1 border rounded-md p-1"
+                    role="menu"
+                    aria-label="Waypoint creation options"
+                    style={{
+                      backgroundColor: MISSION_STAGE_EMPTY,
+                      borderColor: MISSION_BUTTON_BORDER,
+                    }}
+                  >
+                    <ActionButton
+                      active={interactionMode === "spot"}
+                      disabled={!designMapAvailable}
+                      onClick={handleToggleSpotMode}
+                      variant="secondary"
+                    >
+                      On Map
+                    </ActionButton>
+                    <ActionButton
+                      disabled={!!busy || !designMapAvailable || !robotPoseAvailable}
+                      onClick={handleCreateSpotAtRobot}
+                      variant="secondary"
+                    >
+                      At Robot
+                    </ActionButton>
+                  </div>
+                )}
+              </div>
             </>
           )}
 

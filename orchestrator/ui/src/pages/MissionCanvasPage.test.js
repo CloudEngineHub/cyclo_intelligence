@@ -209,7 +209,8 @@ test('shows Waypoint and BT authoring panels in the authoring stage', async () =
   expect(screen.getByRole('button', { name: 'Load Map' })).toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Save Map' })).toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Waypoint' })).toBeInTheDocument();
-  expect(screen.getByRole('button', { name: 'At Robot' })).toBeDisabled();
+  expect(screen.queryByRole('menu', { name: 'Waypoint creation options' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'At Robot' })).not.toBeInTheDocument();
   expect(screen.getByText('Select a waypoint or behavior node on the map.')).toBeInTheDocument();
   expect(screen.queryByRole('button', { name: 'Delete Waypoint' })).not.toBeInTheDocument();
   expect(screen.queryByRole('button', { name: 'Delete Node' })).not.toBeInTheDocument();
@@ -255,6 +256,10 @@ test('loads a saved map into the design stage', async () => {
     info: { width: 1, height: 1 },
   }));
   expect(screen.getByRole('button', { name: 'Waypoint' })).toBeEnabled();
+  fireEvent.click(screen.getByRole('button', { name: 'Waypoint' }));
+  expect(screen.getByRole('menu', { name: 'Waypoint creation options' })).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'On Map' })).toBeEnabled();
+  expect(screen.getByRole('button', { name: 'At Robot' })).toBeDisabled();
   await waitFor(() => expect(getNavigationSpots).toHaveBeenCalledWith('factory'));
 });
 
@@ -326,6 +331,7 @@ test('shows waypoint actions in Properties after placing a waypoint', async () =
   }));
 
   fireEvent.click(screen.getByRole('button', { name: 'Waypoint' }));
+  fireEvent.click(screen.getByRole('button', { name: 'On Map' }));
 
   expect(screen.getByRole('button', { name: 'Waypoint' })).toHaveAttribute('aria-pressed', 'true');
 
@@ -360,6 +366,7 @@ test('shows waypoint actions in Properties after placing a waypoint', async () =
   }));
 
   fireEvent.click(screen.getByRole('button', { name: 'Waypoint' }));
+  fireEvent.click(screen.getByRole('button', { name: 'On Map' }));
   expect(screen.getByRole('button', { name: 'Waypoint' })).not.toHaveAttribute('aria-pressed');
 });
 
@@ -393,6 +400,9 @@ test('creates a waypoint at the current robot pose from the design toolbar', asy
   await screen.findByRole('combobox', { name: 'Design map file' });
   fireEvent.click(screen.getByRole('button', { name: 'Load' }));
 
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Waypoint' })).toBeEnabled());
+  fireEvent.click(screen.getByRole('button', { name: 'Waypoint' }));
+  await waitFor(() => expect(screen.getByRole('menu', { name: 'Waypoint creation options' })).toBeInTheDocument());
   await waitFor(() => expect(screen.getByRole('button', { name: 'At Robot' })).toBeEnabled());
   fireEvent.click(screen.getByRole('button', { name: 'At Robot' }));
 
