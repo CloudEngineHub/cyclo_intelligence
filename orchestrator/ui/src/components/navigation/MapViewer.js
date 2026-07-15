@@ -36,9 +36,9 @@ const WAYPOINT_HEADING_HEAD_LENGTH = 1.05;
 const WAYPOINT_HEADING_HEAD_WIDTH = 1.42;
 const WAYPOINT_HEADING_OUTLINE_EXTRA = 0.28;
 const WAYPOINT_HEADING_OUTLINE_LENGTH_EXTRA = 0.34;
-const WAYPOINT_LABEL_OFFSET_Y = -4.1;
-const WAYPOINT_LABEL_SCALE_X = 3.2;
-const WAYPOINT_LABEL_SCALE_Y = 0.78;
+const WAYPOINT_LABEL_OFFSET_Y = -5.05;
+const WAYPOINT_LABEL_SCALE_X = 6.4;
+const WAYPOINT_LABEL_SCALE_Y = 1.56;
 function gridMeta(grid) {
     var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k;
     const info = grid === null || grid === void 0 ? void 0 : grid.info;
