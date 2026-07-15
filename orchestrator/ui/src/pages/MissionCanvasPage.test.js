@@ -17,6 +17,7 @@ import {
 
 const mockMapViewer = jest.fn(() => <div>Mission Canvas Map</div>);
 const mockPublishRosTopic = jest.fn();
+const mockTopicDataByName = {};
 
 jest.mock('../components/navigation/MapViewer', () => ({
   MapViewer: (props) => mockMapViewer(props),
@@ -60,12 +61,18 @@ jest.mock('../utils/navigationSpotsApi', () => ({
 }));
 
 jest.mock('../hooks/useNavigationRosTopic', () => ({
-  useNavigationRosTopic: () => ({ status: 'disconnected', topicData: null }),
+  useNavigationRosTopic: (topic) => ({
+    status: topic && mockTopicDataByName[topic] ? 'connected' : 'disconnected',
+    topicData: topic ? mockTopicDataByName[topic] || null : null,
+  }),
   useNavigationRosPublisher: () => mockPublishRosTopic,
 }));
 
 beforeEach(() => {
   jest.clearAllMocks();
+  Object.keys(mockTopicDataByName).forEach((topic) => {
+    delete mockTopicDataByName[topic];
+  });
   window.localStorage.clear();
   mockPublishRosTopic.mockResolvedValue(undefined);
   createNavigationSpot.mockResolvedValue({
@@ -202,6 +209,7 @@ test('shows Waypoint and BT authoring panels in the authoring stage', async () =
   expect(screen.getByRole('button', { name: 'Load Map' })).toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Save Map' })).toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Waypoint' })).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'At Robot' })).toBeDisabled();
   expect(screen.getByText('Select a waypoint or behavior node on the map.')).toBeInTheDocument();
   expect(screen.queryByRole('button', { name: 'Delete Waypoint' })).not.toBeInTheDocument();
   expect(screen.queryByRole('button', { name: 'Delete Node' })).not.toBeInTheDocument();
@@ -353,6 +361,50 @@ test('shows waypoint actions in Properties after placing a waypoint', async () =
 
   fireEvent.click(screen.getByRole('button', { name: 'Waypoint' }));
   expect(screen.getByRole('button', { name: 'Waypoint' })).not.toHaveAttribute('aria-pressed');
+});
+
+test('creates a waypoint at the current robot pose from the design toolbar', async () => {
+  const robotYaw = 0.5;
+  mockTopicDataByName['/tf'] = {
+    transforms: [{
+      header: { frame_id: 'map' },
+      child_frame_id: 'base_link',
+      transform: {
+        translation: { x: 2.5, y: -1.25, z: 0 },
+        rotation: { x: 0, y: 0, z: Math.sin(robotYaw / 2), w: Math.cos(robotYaw / 2) },
+      },
+    }],
+  };
+  getPgmFiles.mockResolvedValue({
+    files: [{ path: 'factory.pgm', name: 'factory.pgm' }],
+  });
+  getPgmImage.mockResolvedValue({
+    path: 'factory.pgm',
+    width: 1,
+    height: 1,
+    maxval: 255,
+    pixels_base64: 'AA==',
+  });
+
+  render(<MissionCanvasPage />);
+
+  fireEvent.click(screen.getByRole('tab', { name: 'Design' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Load Map' }));
+  await screen.findByRole('combobox', { name: 'Design map file' });
+  fireEvent.click(screen.getByRole('button', { name: 'Load' }));
+
+  await waitFor(() => expect(screen.getByRole('button', { name: 'At Robot' })).toBeEnabled());
+  fireEvent.click(screen.getByRole('button', { name: 'At Robot' }));
+
+  await waitFor(() => expect(createNavigationSpot).toHaveBeenCalled());
+  const [payload] = createNavigationSpot.mock.calls[0];
+  expect(payload.map_name).toBe('factory');
+  expect(payload.label).toBe('Waypoint 1');
+  expect(payload.pose.frame_id).toBe('map');
+  expect(payload.pose.x).toBeCloseTo(2.5);
+  expect(payload.pose.y).toBeCloseTo(-1.25);
+  expect(payload.pose.yaw).toBeCloseTo(robotYaw);
+  await waitFor(() => expect(screen.getByText('Created Waypoint A at robot')).toBeInTheDocument());
 });
 
 test('places behavior palette nodes on the map overlay', async () => {

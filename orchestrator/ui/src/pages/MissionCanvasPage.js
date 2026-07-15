@@ -27,6 +27,7 @@ import {
   poseFromBaseLinkTf,
   tfMessageFromBuffer,
   updateTfBuffer,
+  yawFromPose,
 } from "../utils/navigationTf";
 import { FALLBACK_CATALOG } from "../constants/btNodeCatalogFallback";
 
@@ -1004,6 +1005,7 @@ export default function MissionCanvasPage() {
   const mappingEditorActive = workspaceStage === STAGE_MAPPING && showPgmFix;
   const missionOverlayActive = workspaceStage !== STAGE_MAPPING && !mappingEditorActive;
   const designMapActive = workspaceStage === STAGE_AUTHORING && !!designMapPath;
+  const robotPoseCaptureActive = workspaceStage === STAGE_AUTHORING;
   const navigationTopicsActive = running && busy !== "Stop" && !mappingEditorActive;
   const activeLayers = layersByStage[workspaceStage] || LAYER_PRESETS[workspaceStage];
   const currentMapName = mapName.trim() || DEFAULT_MAP_NAME;
@@ -1025,10 +1027,15 @@ export default function MissionCanvasPage() {
   const needsGoalPose = navigationTopicsActive && activeLayers.goalPose;
   const needsPlan = navigationTopicsActive && activeLayers.globalPlan;
   const needsRobotModel = navigationTopicsActive && activeLayers.robotModel;
-  const needsTf = navigationTopicsActive && (
-    activeLayers.tf ||
-    activeLayers.scan ||
-    activeLayers.robotModel
+  const needsAmclPose = robotPoseCaptureActive || (
+    navigationTopicsActive && (needsRobotModel || needsScan)
+  );
+  const needsTf = robotPoseCaptureActive || (
+    navigationTopicsActive && (
+      activeLayers.tf ||
+      activeLayers.scan ||
+      activeLayers.robotModel
+    )
   );
   const selectedSpot = useMemo(
     () => spots.find((spot) => spot.id === selectedSpotId) || null,
@@ -1063,7 +1070,7 @@ export default function MissionCanvasPage() {
     ROS2_WS_FAST_TOPIC_OPTIONS,
   );
   const { topicData: amclData } = useNavigationRosTopic(
-    navigationTopicsActive && (needsRobotModel || needsScan) ? "/amcl_pose" : null,
+    needsAmclPose ? "/amcl_pose" : null,
     ROS2_WS_FAST_TOPIC_OPTIONS,
   );
   const { topicData: planData } = useNavigationRosTopic(
@@ -1094,6 +1101,8 @@ export default function MissionCanvasPage() {
   const bufferedTf = tfMessageFromBuffer(tfBufferRef.current) ?? latestTf;
   const fallbackPose = amclPose?.pose?.pose ?? null;
   const currentPose = poseFromBaseLinkTf(bufferedTf) ?? fallbackPose;
+  const designMapAvailable = !!map || !!designMapEditor.map;
+  const robotPoseAvailable = !!currentPose?.position;
   const layerToggles = useMemo(() => (
     STAGE_LAYER_IDS[workspaceStage].map((id) => ({
       id,
@@ -1459,6 +1468,42 @@ export default function MissionCanvasPage() {
     spots.length,
   ]);
 
+  const handleCreateSpotAtRobot = useCallback(async () => {
+    const position = currentPose?.position;
+    if (!designMapAvailable) {
+      setMessage("Load a map before creating a waypoint");
+      return;
+    }
+    if (!position) {
+      setMessage("Robot pose unavailable");
+      return;
+    }
+    const x = Number(position.x ?? 0);
+    const y = Number(position.y ?? 0);
+    const yaw = yawFromPose(currentPose);
+    const label = `Waypoint ${spots.length + 1}`;
+    try {
+      const created = await createNavigationSpot({
+        map_name: currentMapName,
+        label,
+        pose: spotPoseFromMapPose(x, y, yaw),
+      });
+      setSpots((current) => [...current, created]);
+      setSelectedSpotId(created.id);
+      setSelectedBehaviorNodeId("");
+      setPendingBehaviorNodeTag("");
+      setInteractionMode("view");
+      setMessage(`Created ${created.label} at robot`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Failed to create waypoint at robot");
+    }
+  }, [
+    currentMapName,
+    currentPose,
+    designMapAvailable,
+    spots.length,
+  ]);
+
   const handleMoveSpot = useCallback(async (spotId, x, y, yaw) => {
     const spot = spots.find((item) => item.id === spotId);
     if (!spot) return;
@@ -1730,11 +1775,18 @@ export default function MissionCanvasPage() {
               </ActionButton>
               <ActionButton
                 active={interactionMode === "spot"}
-                disabled={!map && !designMapEditor.map}
+                disabled={!designMapAvailable}
                 onClick={handleToggleSpotMode}
                 variant="secondary"
               >
                 Waypoint
+              </ActionButton>
+              <ActionButton
+                disabled={!!busy || !designMapAvailable || !robotPoseAvailable}
+                onClick={handleCreateSpotAtRobot}
+                variant="secondary"
+              >
+                At Robot
               </ActionButton>
             </>
           )}
