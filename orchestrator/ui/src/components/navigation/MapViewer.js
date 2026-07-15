@@ -31,6 +31,10 @@ const WAYPOINT_SELECTED_HALO_INNER_RADIUS = 3.28;
 const WAYPOINT_SELECTED_HALO_OUTER_RADIUS = 3.72;
 const WAYPOINT_CENTER_RADIUS = 1.25;
 const WAYPOINT_HEADING_LENGTH = 4.4;
+const WAYPOINT_HEADING_SHAFT_WIDTH = 0.56;
+const WAYPOINT_HEADING_HEAD_LENGTH = 1.05;
+const WAYPOINT_HEADING_HEAD_WIDTH = 1.42;
+const WAYPOINT_HEADING_OUTLINE_EXTRA = 0.28;
 const WAYPOINT_LABEL_OFFSET_Y = -4.1;
 const WAYPOINT_LABEL_SCALE_X = 3.2;
 const WAYPOINT_LABEL_SCALE_Y = 0.78;
@@ -263,6 +267,43 @@ function makeLine(points, color, lineWidth = 2) {
     const material = new THREE.LineBasicMaterial({ color, linewidth: lineWidth });
     return new THREE.Line(geometry, material);
 }
+function waypointHeadingShape(shaftWidth, headWidth, headLength) {
+    const start = WAYPOINT_CENTER_RADIUS * 0.32;
+    const tip = WAYPOINT_HEADING_LENGTH;
+    const headBase = Math.max(start, tip - headLength);
+    const shaftHalf = shaftWidth / 2;
+    const headHalf = headWidth / 2;
+    const shape = new THREE.Shape();
+    shape.moveTo(start, -shaftHalf);
+    shape.lineTo(headBase, -shaftHalf);
+    shape.lineTo(headBase, -headHalf);
+    shape.lineTo(tip, 0);
+    shape.lineTo(headBase, headHalf);
+    shape.lineTo(headBase, shaftHalf);
+    shape.lineTo(start, shaftHalf);
+    shape.closePath();
+    return shape;
+}
+function makeWaypointHeadingArrow(color) {
+    const group = new THREE.Group();
+    const outline = new THREE.Mesh(new THREE.ShapeGeometry(waypointHeadingShape(WAYPOINT_HEADING_SHAFT_WIDTH + WAYPOINT_HEADING_OUTLINE_EXTRA, WAYPOINT_HEADING_HEAD_WIDTH + WAYPOINT_HEADING_OUTLINE_EXTRA, WAYPOINT_HEADING_HEAD_LENGTH + WAYPOINT_HEADING_OUTLINE_EXTRA * 0.8)), new THREE.MeshBasicMaterial({
+        color: 0x111827,
+        transparent: true,
+        opacity: 0.72,
+        side: THREE.DoubleSide,
+    }));
+    outline.position.z = 0.03;
+    group.add(outline);
+    const arrow = new THREE.Mesh(new THREE.ShapeGeometry(waypointHeadingShape(WAYPOINT_HEADING_SHAFT_WIDTH, WAYPOINT_HEADING_HEAD_WIDTH, WAYPOINT_HEADING_HEAD_LENGTH)), new THREE.MeshBasicMaterial({
+        color,
+        transparent: true,
+        opacity: 0.96,
+        side: THREE.DoubleSide,
+    }));
+    arrow.position.z = 0.045;
+    group.add(arrow);
+    return group;
+}
 function makePoseMarker(pose, color, z) {
     var _a, _b, _c, _d;
     const group = new THREE.Group();
@@ -296,7 +337,7 @@ function makeSpotMarker(spot, selected = false) {
     const group = new THREE.Group();
     group.position.set(x, y, 0.24);
     group.rotation.z = yaw;
-    group.userData.spotId = spot.id;
+    group.userData = { spotId: spot.id, dragAction: "move" };
     if (selected) {
         const halo = new THREE.Mesh(new THREE.RingGeometry(WAYPOINT_SELECTED_HALO_INNER_RADIUS, WAYPOINT_SELECTED_HALO_OUTER_RADIUS, 40), new THREE.MeshBasicMaterial({
             color,
@@ -304,7 +345,7 @@ function makeSpotMarker(spot, selected = false) {
             opacity: 0.34,
             side: THREE.DoubleSide,
         }));
-        halo.userData.spotId = spot.id;
+        halo.userData = { spotId: spot.id, dragAction: "move" };
         group.add(halo);
     }
     const ring = new THREE.Mesh(new THREE.RingGeometry(WAYPOINT_RING_INNER_RADIUS, WAYPOINT_RING_OUTER_RADIUS, 40), new THREE.MeshBasicMaterial({
@@ -313,7 +354,7 @@ function makeSpotMarker(spot, selected = false) {
         opacity: 0.95,
         side: THREE.DoubleSide,
     }));
-    ring.userData.spotId = spot.id;
+    ring.userData = { spotId: spot.id, dragAction: "move" };
     group.add(ring);
     const center = new THREE.Mesh(new THREE.CircleGeometry(WAYPOINT_CENTER_RADIUS, 32), new THREE.MeshBasicMaterial({
         color,
@@ -321,22 +362,19 @@ function makeSpotMarker(spot, selected = false) {
         opacity: selected ? 0.95 : 0.78,
     }));
     center.position.z = 0.01;
-    center.userData.spotId = spot.id;
+    center.userData = { spotId: spot.id, dragAction: "move" };
     group.add(center);
-    const heading = makeLine([
-        new THREE.Vector3(0, 0, 0.025),
-        new THREE.Vector3(WAYPOINT_HEADING_LENGTH, 0, 0.025),
-    ], selected ? 0xffffff : 0xdcfce7, 2);
-    if (heading) {
-        heading.userData.spotId = spot.id;
-        group.add(heading);
-    }
+    const heading = makeWaypointHeadingArrow(selected ? 0xffffff : 0xdcfce7);
+    heading.traverse((child) => {
+        child.userData = { spotId: spot.id, dragAction: "rotate" };
+    });
+    group.add(heading);
     const label = String((_d = spot.label) !== null && _d !== void 0 ? _d : spot.id);
     if (label) {
         const sprite = makeTfLabelSprite(label);
         sprite.position.set(0, WAYPOINT_LABEL_OFFSET_Y, 0.04);
         sprite.scale.set(WAYPOINT_LABEL_SCALE_X, WAYPOINT_LABEL_SCALE_Y, 1);
-        sprite.userData.spotId = spot.id;
+        sprite.userData = { spotId: spot.id, dragAction: "move" };
         group.add(sprite);
     }
     return group;
@@ -940,9 +978,13 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, 
                 let object = hit.object;
                 while (object) {
                     if (object.userData && object.userData.behaviorNodeId && typeof onBehaviorNodeClick === "function")
-                        return { type: "behaviorNode", id: object.userData.behaviorNodeId };
+                        return { type: "behaviorNode", id: object.userData.behaviorNodeId, dragAction: "move" };
                     if (object.userData && object.userData.spotId && typeof onSpotClick === "function")
-                        return { type: "spot", id: object.userData.spotId };
+                        return {
+                            type: "spot",
+                            id: object.userData.spotId,
+                            dragAction: object.userData.dragAction || "move",
+                        };
                     object = object.parent;
                 }
             }
@@ -952,7 +994,7 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, 
             var _a;
             if ((target === null || target === void 0 ? void 0 : target.type) === "spot") {
                 const spot = spots.find((item) => item.id === target.id);
-                if (!spot || spot.id !== selectedSpotId || typeof onSpotPoseChange !== "function")
+                if (!spot || typeof onSpotPoseChange !== "function")
                     return null;
                 const spotPose = spot.pose;
                 if (!spotPose)
@@ -1043,6 +1085,7 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, 
                         nodeDragRef.current = {
                             type: target.type,
                             id: target.id,
+                            dragAction: target.dragAction || "move",
                             clientX: event.clientX,
                             clientY: event.clientY,
                             offsetX: point.x - targetPose.x,
@@ -1096,10 +1139,18 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, 
                 event.preventDefault();
                 event.stopImmediatePropagation();
                 const moved = Math.hypot(event.clientX - nodeDrag.clientX, event.clientY - nodeDrag.clientY);
-                const nextX = point.x - nodeDrag.offsetX;
-                const nextY = point.y - nodeDrag.offsetY;
+                const nextX = nodeDrag.dragAction === "rotate"
+                    ? nodeDrag.x
+                    : point.x - nodeDrag.offsetX;
+                const nextY = nodeDrag.dragAction === "rotate"
+                    ? nodeDrag.y
+                    : point.y - nodeDrag.offsetY;
+                const nextYaw = nodeDrag.dragAction === "rotate"
+                    ? Math.atan2(point.y - nodeDrag.y, point.x - nodeDrag.x)
+                    : nodeDrag.yaw;
                 nodeDrag.x = nextX;
                 nodeDrag.y = nextY;
+                nodeDrag.yaw = nextYaw;
                 nodeDrag.dragging = nodeDrag.dragging || moved > CLICK_DRAG_THRESHOLD_PX;
                 if (nodeDrag.dragging) {
                     setNodeDragPreview({
@@ -1107,7 +1158,7 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, 
                         id: nodeDrag.id,
                         x: nextX,
                         y: nextY,
-                        yaw: nodeDrag.yaw,
+                        yaw: nextYaw,
                     });
                 }
                 return;
