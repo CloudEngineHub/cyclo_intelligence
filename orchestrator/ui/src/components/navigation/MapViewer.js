@@ -34,7 +34,7 @@ const WAYPOINT_HEADING_LENGTH = 4.4;
 const WAYPOINT_HEADING_SHAFT_WIDTH = 0.56;
 const WAYPOINT_HEADING_HEAD_LENGTH = 1.05;
 const WAYPOINT_HEADING_HEAD_WIDTH = 1.42;
-const WAYPOINT_LABEL_OFFSET_Y = -7.2;
+const WAYPOINT_LABEL_OFFSET_Y = 7.2;
 const WAYPOINT_LABEL_SCALE_X = 24;
 const WAYPOINT_LABEL_SCALE_Y = 6;
 function gridMeta(grid) {
@@ -347,8 +347,10 @@ function makeSpotMarker(spot, selected = false) {
     const color = selected ? 0xf59e0b : 0x22c55e;
     const group = new THREE.Group();
     group.position.set(x, y, 0.24);
-    group.rotation.z = yaw;
     group.userData = { spotId: spot.id, dragAction: "move" };
+    const marker = new THREE.Group();
+    marker.rotation.z = yaw;
+    marker.userData = { spotId: spot.id, dragAction: "move" };
     if (selected) {
         const halo = new THREE.Mesh(new THREE.RingGeometry(WAYPOINT_SELECTED_HALO_INNER_RADIUS, WAYPOINT_SELECTED_HALO_OUTER_RADIUS, 40), new THREE.MeshBasicMaterial({
             color,
@@ -357,7 +359,7 @@ function makeSpotMarker(spot, selected = false) {
             side: THREE.DoubleSide,
         }));
         halo.userData = { spotId: spot.id, dragAction: "move" };
-        group.add(halo);
+        marker.add(halo);
     }
     const ring = new THREE.Mesh(new THREE.RingGeometry(WAYPOINT_RING_INNER_RADIUS, WAYPOINT_RING_OUTER_RADIUS, 40), new THREE.MeshBasicMaterial({
         color,
@@ -366,7 +368,7 @@ function makeSpotMarker(spot, selected = false) {
         side: THREE.DoubleSide,
     }));
     ring.userData = { spotId: spot.id, dragAction: "move" };
-    group.add(ring);
+    marker.add(ring);
     const center = new THREE.Mesh(new THREE.CircleGeometry(WAYPOINT_CENTER_RADIUS, 32), new THREE.MeshBasicMaterial({
         color,
         transparent: true,
@@ -374,12 +376,13 @@ function makeSpotMarker(spot, selected = false) {
     }));
     center.position.z = 0.01;
     center.userData = { spotId: spot.id, dragAction: "move" };
-    group.add(center);
+    marker.add(center);
     const heading = makeWaypointHeadingArrow();
     heading.traverse((child) => {
         child.userData = { spotId: spot.id, dragAction: "rotate" };
     });
-    group.add(heading);
+    marker.add(heading);
+    group.add(marker);
     const label = String((_d = spot.label) !== null && _d !== void 0 ? _d : spot.id);
     if (label) {
         const sprite = makeTextSprite(label, {
