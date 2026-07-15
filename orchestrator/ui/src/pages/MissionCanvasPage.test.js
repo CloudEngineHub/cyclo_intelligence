@@ -259,6 +259,7 @@ test('loads a saved map into the design stage', async () => {
   fireEvent.click(screen.getByRole('button', { name: 'Waypoint' }));
   expect(screen.getByRole('menu', { name: 'Waypoint creation options' })).toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'On Map' })).toBeEnabled();
+  expect(screen.getByRole('button', { name: 'Set Robot Pose' })).toBeEnabled();
   expect(screen.getByRole('button', { name: 'At Robot' })).toBeDisabled();
   await waitFor(() => expect(getNavigationSpots).toHaveBeenCalledWith('factory'));
 });
@@ -370,8 +371,61 @@ test('shows waypoint actions in Properties after placing a waypoint', async () =
   expect(screen.getByRole('button', { name: 'Waypoint' })).not.toHaveAttribute('aria-pressed');
 });
 
+test('starts localization and publishes an initial robot pose from the waypoint menu', async () => {
+  const latestMapViewerProps = () => (
+    mockMapViewer.mock.calls[mockMapViewer.mock.calls.length - 1][0]
+  );
+  getPgmFiles.mockResolvedValue({
+    files: [{ path: 'factory.pgm', name: 'factory.pgm' }],
+  });
+  getPgmImage.mockResolvedValue({
+    path: 'factory.pgm',
+    width: 1,
+    height: 1,
+    maxval: 255,
+    pixels_base64: 'AA==',
+  });
+
+  render(<MissionCanvasPage />);
+
+  fireEvent.click(screen.getByRole('tab', { name: 'Design' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Load Map' }));
+  await screen.findByRole('combobox', { name: 'Design map file' });
+  fireEvent.click(screen.getByRole('button', { name: 'Load' }));
+
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Waypoint' })).toBeEnabled());
+  fireEvent.click(screen.getByRole('button', { name: 'Waypoint' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Set Robot Pose' }));
+
+  await waitFor(() => expect(startNavigation).toHaveBeenCalledWith('nav', 'factory'));
+  await waitFor(() => expect(latestMapViewerProps().interactionMode).toBe('initial'));
+
+  await act(async () => {
+    latestMapViewerProps().onMapPose(1.25, -0.5, 0.75);
+  });
+
+  await waitFor(() => expect(mockPublishRosTopic).toHaveBeenCalledWith(
+    '/initialpose',
+    'geometry_msgs/msg/PoseWithCovarianceStamped',
+    expect.objectContaining({
+      header: expect.objectContaining({ frame_id: 'map' }),
+      pose: expect.objectContaining({
+        pose: expect.objectContaining({
+          position: { x: 1.25, y: -0.5, z: 0 },
+          orientation: expect.objectContaining({
+            z: Math.sin(0.75 / 2),
+            w: Math.cos(0.75 / 2),
+          }),
+        }),
+      }),
+    }),
+  ));
+  await waitFor(() => expect(screen.getByText('Initial pose 1.25, -0.50, yaw 43 deg')).toBeInTheDocument());
+});
+
 test('creates a waypoint at the current robot pose from the design toolbar', async () => {
   const robotYaw = 0.5;
+  getServiceStatus.mockResolvedValue({ is_up: true });
   mockTopicDataByName['/tf'] = {
     transforms: [{
       header: { frame_id: 'map' },

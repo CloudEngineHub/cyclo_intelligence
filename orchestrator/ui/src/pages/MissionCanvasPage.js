@@ -24,6 +24,7 @@ import { MapEditorControls, useMapEditor } from "../components/navigation/MapEdi
 import { MapViewer } from "../components/navigation/MapViewer";
 import {
   mergeTfMessages,
+  orientationFromYaw,
   poseFromBaseLinkTf,
   tfMessageFromBuffer,
   updateTfBuffer,
@@ -162,6 +163,13 @@ const TELEOP_REPEAT_MS = 200;
 const TELEOP_DEFAULT_LINEAR_SPEED = 0.4;
 const TELEOP_DEFAULT_ANGULAR_SPEED = 0.8;
 const TELEOP_STOP = { linearX: 0, angularZ: 0 };
+
+function rosTimestampNow() {
+  const nowMs = Date.now();
+  const sec = Math.floor(nowMs / 1000);
+  const nanosec = Math.floor((nowMs % 1000) * 1000000);
+  return { sec, nanosec };
+}
 
 function messageData(value) {
   if (!value || typeof value !== "object") return null;
@@ -967,6 +975,7 @@ function ActionButton({
 
 export default function MissionCanvasPage() {
   const statusLoadingRef = useRef(false);
+  const posePublishBusyRef = useRef(false);
   const tfBufferRef = useRef(new Map());
   const behaviorNodeSerialRef = useRef(0);
   const [mapName, setMapName] = useState(DEFAULT_MAP_NAME);
@@ -980,6 +989,7 @@ export default function MissionCanvasPage() {
   const [message, setMessage] = useState("Ready");
   const [interactionMode, setInteractionMode] = useState("view");
   const [showWaypointOptions, setShowWaypointOptions] = useState(false);
+  const [posePublishBusy, setPosePublishBusy] = useState(false);
   const [tfBufferRevision, setTfBufferRevision] = useState(0);
   const [workspaceStage, setWorkspaceStage] = useState(STAGE_MAPPING);
   const [showPgmFix, setShowPgmFix] = useState(false);
@@ -1104,6 +1114,7 @@ export default function MissionCanvasPage() {
   const currentPose = poseFromBaseLinkTf(bufferedTf) ?? fallbackPose;
   const designMapAvailable = !!map || !!designMapEditor.map;
   const robotPoseAvailable = !!currentPose?.position;
+  const robotLocalized = running && robotPoseAvailable;
   const layerToggles = useMemo(() => (
     STAGE_LAYER_IDS[workspaceStage].map((id) => ({
       id,
@@ -1427,6 +1438,65 @@ export default function MissionCanvasPage() {
     setShowWaypointOptions((value) => !value);
   }, []);
 
+  const sendInitialPose = useCallback(async (x, y, yaw) => {
+    const orientation = orientationFromYaw(yaw);
+    try {
+      await publishRosTopic(
+        "/initialpose",
+        "geometry_msgs/msg/PoseWithCovarianceStamped",
+        {
+          header: {
+            frame_id: "map",
+            stamp: rosTimestampNow(),
+          },
+          pose: {
+            pose: {
+              position: { x, y, z: 0 },
+              orientation,
+            },
+            covariance: [
+              0.25, 0, 0, 0, 0, 0,
+              0, 0.25, 0, 0, 0, 0,
+              0, 0, 0, 0, 0, 0,
+              0, 0, 0, 0, 0, 0,
+              0, 0, 0, 0, 0, 0,
+              0, 0, 0, 0, 0, 0.0685,
+            ],
+          },
+        },
+      );
+      setMessage(`Initial pose ${x.toFixed(2)}, ${y.toFixed(2)}, yaw ${(yaw * 180 / Math.PI).toFixed(0)} deg`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Initial pose publish failed");
+    }
+  }, [publishRosTopic]);
+
+  const handleSetRobotPoseMode = useCallback(() => {
+    if (!designMapAvailable) {
+      setMessage("Load a map before localizing robot");
+      return;
+    }
+    setWorkspaceStage(STAGE_AUTHORING);
+    setPendingBehaviorNodeTag("");
+    setSelectedBehaviorNodeId("");
+    setShowWaypointOptions(false);
+    void runCommand(
+      "Localize robot",
+      async () => {
+        if (!running) {
+          await startNavigation("nav", currentMapName);
+        }
+        setInteractionMode("initial");
+        return "Click and drag the robot pose on the map";
+      },
+    );
+  }, [
+    currentMapName,
+    designMapAvailable,
+    runCommand,
+    running,
+  ]);
+
   const handleToggleSpotMode = useCallback(() => {
     setWorkspaceStage(STAGE_AUTHORING);
     setPendingBehaviorNodeTag("");
@@ -1436,6 +1506,18 @@ export default function MissionCanvasPage() {
   }, []);
 
   const handleCreateSpotAtPose = useCallback(async (x, y, yaw) => {
+    if (interactionMode === "initial") {
+      if (posePublishBusyRef.current) return;
+      posePublishBusyRef.current = true;
+      setPosePublishBusy(true);
+      setInteractionMode("view");
+      setShowWaypointOptions(false);
+      void sendInitialPose(x, y, yaw).finally(() => {
+        posePublishBusyRef.current = false;
+        setPosePublishBusy(false);
+      });
+      return;
+    }
     if (interactionMode === "behavior" && pendingBehaviorNodeTag) {
       const definition = behaviorNodeDefinition(pendingBehaviorNodeTag);
       behaviorNodeSerialRef.current += 1;
@@ -1476,6 +1558,7 @@ export default function MissionCanvasPage() {
     currentMapName,
     interactionMode,
     pendingBehaviorNodeTag,
+    sendInitialPose,
     spots.length,
   ]);
 
@@ -1483,6 +1566,10 @@ export default function MissionCanvasPage() {
     const position = currentPose?.position;
     if (!designMapAvailable) {
       setMessage("Load a map before creating a waypoint");
+      return;
+    }
+    if (!running) {
+      setMessage("Set robot pose before creating a waypoint at robot");
       return;
     }
     if (!position) {
@@ -1513,6 +1600,7 @@ export default function MissionCanvasPage() {
     currentMapName,
     currentPose,
     designMapAvailable,
+    running,
     spots.length,
   ]);
 
@@ -1814,7 +1902,15 @@ export default function MissionCanvasPage() {
                       On Map
                     </ActionButton>
                     <ActionButton
-                      disabled={!!busy || !designMapAvailable || !robotPoseAvailable}
+                      active={interactionMode === "initial" || busy === "Localize robot"}
+                      disabled={!!busy || !designMapAvailable}
+                      onClick={handleSetRobotPoseMode}
+                      variant="secondary"
+                    >
+                      Set Robot Pose
+                    </ActionButton>
+                    <ActionButton
+                      disabled={!!busy || !designMapAvailable || !robotLocalized}
                       onClick={handleCreateSpotAtRobot}
                       variant="secondary"
                     >
@@ -1890,6 +1986,7 @@ export default function MissionCanvasPage() {
             showRobotModel={mappingEditorActive ? false : needsRobotModel}
             interactionDisabled={
               !!busy ||
+              posePublishBusy ||
               (mappingEditorActive && mapEditor.busy) ||
               (designMapActive && designMapEditor.busy)
             }
