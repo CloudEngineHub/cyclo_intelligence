@@ -158,6 +158,7 @@ const MISSION_SWITCH_OFF = "#cbd5e1";
 const MISSION_SWITCH_BORDER = "#94a3b8";
 const MISSION_SWITCH_KNOB_BORDER = "#e2e8f0";
 const MISSION_DESIGN_STORAGE_KEY = "mission_canvas_designs";
+const MISSION_SESSION_STORAGE_KEY = "mission_canvas_session";
 const TELEOP_TOPIC = "/cmd_vel";
 const TELEOP_MESSAGE_TYPE = "geometry_msgs/msg/Twist";
 const TELEOP_REPEAT_MS = 200;
@@ -274,6 +275,43 @@ function behaviorNodeId(tag, index) {
 function mapNameFromPgmPath(path) {
   const fileName = String(path || "").split("/").filter(Boolean).pop() || "";
   return fileName.replace(/\.pgm$/i, "") || DEFAULT_MAP_NAME;
+}
+
+function pgmPathFromMapName(mapName) {
+  const trimmed = String(mapName || "").trim();
+  return trimmed ? `${trimmed}.pgm` : "";
+}
+
+function readMissionSession() {
+  if (typeof window === "undefined" || !window.sessionStorage) return {};
+  try {
+    const raw = window.sessionStorage.getItem(MISSION_SESSION_STORAGE_KEY);
+    const parsed = raw ? JSON.parse(raw) : {};
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function saveMissionSession(patch) {
+  if (typeof window === "undefined" || !window.sessionStorage) return;
+  const current = readMissionSession();
+  const next = {
+    ...current,
+    ...patch,
+    updatedAt: new Date().toISOString(),
+  };
+  window.sessionStorage.setItem(MISSION_SESSION_STORAGE_KEY, JSON.stringify(next));
+}
+
+function initialWorkspaceStage(session) {
+  const stage = session?.workspaceStage;
+  return WORKSPACE_STAGES.some((item) => item.id === stage) ? stage : STAGE_MAPPING;
+}
+
+function initialNavigationRuntimeMode(session) {
+  const mode = session?.navigationRuntimeMode;
+  return ["idle", "mapping", "localization", "run"].includes(mode) ? mode : "idle";
 }
 
 function readDesignStore() {
@@ -1047,11 +1085,20 @@ function ActionButton({
 }
 
 export default function MissionCanvasPage() {
+  const initialSessionRef = useRef(null);
+  if (initialSessionRef.current === null) {
+    initialSessionRef.current = readMissionSession();
+  }
+  const initialSession = initialSessionRef.current;
   const statusLoadingRef = useRef(false);
   const posePublishBusyRef = useRef(false);
   const tfBufferRef = useRef(new Map());
   const behaviorNodeSerialRef = useRef(0);
-  const [mapName, setMapName] = useState(DEFAULT_MAP_NAME);
+  const [mapName, setMapName] = useState(() => (
+    typeof initialSession.mapName === "string" && initialSession.mapName.trim()
+      ? initialSession.mapName
+      : DEFAULT_MAP_NAME
+  ));
   const [status, setStatus] = useState(null);
   const [spots, setSpots] = useState([]);
   const [selectedSpotId, setSelectedSpotId] = useState("");
@@ -1063,15 +1110,23 @@ export default function MissionCanvasPage() {
   const [interactionMode, setInteractionMode] = useState("view");
   const [showWaypointOptions, setShowWaypointOptions] = useState(false);
   const [posePublishBusy, setPosePublishBusy] = useState(false);
-  const [navigationRuntimeMode, setNavigationRuntimeMode] = useState("idle");
+  const [navigationRuntimeMode, setNavigationRuntimeMode] = useState(() => (
+    initialNavigationRuntimeMode(initialSession)
+  ));
   const [tfBufferRevision, setTfBufferRevision] = useState(0);
-  const [workspaceStage, setWorkspaceStage] = useState(STAGE_MAPPING);
+  const [workspaceStage, setWorkspaceStage] = useState(() => initialWorkspaceStage(initialSession));
   const [showPgmFix, setShowPgmFix] = useState(false);
   const [showSaveMapDialog, setShowSaveMapDialog] = useState(false);
   const [saveMapName, setSaveMapName] = useState(DEFAULT_MAP_NAME);
   const [showDesignMapDialog, setShowDesignMapDialog] = useState(false);
   const [designMapFiles, setDesignMapFiles] = useState([]);
-  const [designMapPath, setDesignMapPath] = useState("");
+  const [designMapPath, setDesignMapPath] = useState(() => (
+    typeof initialSession.designMapPath === "string" && initialSession.designMapPath.trim()
+      ? initialSession.designMapPath
+      : initialWorkspaceStage(initialSession) === STAGE_AUTHORING
+        ? pgmPathFromMapName(initialSession.mapName || DEFAULT_MAP_NAME)
+        : ""
+  ));
   const [designMapBusy, setDesignMapBusy] = useState(false);
   const [designMapReloadToken, setDesignMapReloadToken] = useState(0);
   const [showRunMapDialog, setShowRunMapDialog] = useState(false);
@@ -1315,10 +1370,19 @@ export default function MissionCanvasPage() {
   }, [loadSpots]);
 
   useEffect(() => {
-    if (!running) {
+    saveMissionSession({
+      mapName: currentMapName,
+      workspaceStage,
+      designMapPath,
+      navigationRuntimeMode,
+    });
+  }, [currentMapName, designMapPath, navigationRuntimeMode, workspaceStage]);
+
+  useEffect(() => {
+    if (status?.is_up === false) {
       setNavigationRuntimeMode("idle");
     }
-  }, [running]);
+  }, [status]);
 
   useEffect(() => {
     if (updateTfBuffer(tfBufferRef.current, latestTf)) {
@@ -1405,10 +1469,16 @@ export default function MissionCanvasPage() {
     setInteractionMode("view");
     setDesignMapReloadToken((value) => value + 1);
     const loadedDesign = loadSavedDesignForMap(selectedMapName);
+    saveMissionSession({
+      mapName: selectedMapName,
+      workspaceStage: STAGE_AUTHORING,
+      designMapPath,
+      navigationRuntimeMode,
+    });
     setMessage(loadedDesign
       ? `Loaded design for ${selectedMapName}`
       : `Loaded map ${selectedMapName}`);
-  }, [designMapPath, loadSavedDesignForMap]);
+  }, [designMapPath, loadSavedDesignForMap, navigationRuntimeMode]);
 
   const handleSaveDesign = useCallback(() => {
     try {
@@ -1425,6 +1495,11 @@ export default function MissionCanvasPage() {
       setWorkspaceStage(STAGE_RUN);
       await startNavigation("nav", mapName.trim() || DEFAULT_MAP_NAME);
       setNavigationRuntimeMode("run");
+      saveMissionSession({
+        mapName: mapName.trim() || DEFAULT_MAP_NAME,
+        workspaceStage: STAGE_RUN,
+        navigationRuntimeMode: "run",
+      });
     },
   ), [mapName, runCommand]);
 
@@ -1471,6 +1546,11 @@ export default function MissionCanvasPage() {
       setShowPgmFix(false);
       await startNavigation("map", mapName.trim() || DEFAULT_MAP_NAME);
       setNavigationRuntimeMode("mapping");
+      saveMissionSession({
+        mapName: mapName.trim() || DEFAULT_MAP_NAME,
+        workspaceStage: STAGE_MAPPING,
+        navigationRuntimeMode: "mapping",
+      });
     },
   ), [mapName, runCommand]);
 
@@ -1513,6 +1593,7 @@ export default function MissionCanvasPage() {
     async () => {
       const result = await stopNavigation();
       setNavigationRuntimeMode("idle");
+      saveMissionSession({ navigationRuntimeMode: "idle" });
       return result;
     },
   ), [runCommand]);
@@ -1599,6 +1680,12 @@ export default function MissionCanvasPage() {
           await startNavigation("nav", currentMapName);
         }
         setNavigationRuntimeMode("localization");
+        saveMissionSession({
+          mapName: currentMapName,
+          workspaceStage: STAGE_AUTHORING,
+          designMapPath: designMapPath || pgmPathFromMapName(currentMapName),
+          navigationRuntimeMode: "localization",
+        });
         setInteractionMode("initial");
         return "Click and drag the robot pose on the map";
       },
@@ -1606,6 +1693,7 @@ export default function MissionCanvasPage() {
   }, [
     currentMapName,
     designMapAvailable,
+    designMapPath,
     runCommand,
     running,
   ]);

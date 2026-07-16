@@ -76,6 +76,7 @@ beforeEach(() => {
     delete mockTopicDataByName[topic];
   });
   window.localStorage.clear();
+  window.sessionStorage.clear();
   mockPublishRosTopic.mockResolvedValue(undefined);
   createNavigationSpot.mockResolvedValue({
     id: 'spot_a',
@@ -497,6 +498,71 @@ test('starts localization and publishes an initial robot pose from the waypoint 
     }),
   ));
   await waitFor(() => expect(screen.getByText('Initial pose 1.25, -0.50, yaw 43 deg')).toBeInTheDocument());
+
+  fireEvent.click(screen.getByRole('tab', { name: 'Mapping' }));
+  const startMappingButton = screen.getByRole('button', { name: 'Start Mapping' });
+  expect(startMappingButton).toBeDisabled();
+  expect(startMappingButton).not.toHaveAttribute('aria-pressed');
+});
+
+test('restores design localization after returning to Mission Canvas', async () => {
+  const latestMapViewerProps = () => (
+    mockMapViewer.mock.calls[mockMapViewer.mock.calls.length - 1][0]
+  );
+  getServiceStatus
+    .mockResolvedValueOnce({ is_up: false })
+    .mockResolvedValue({ is_up: true });
+  mockTopicDataByName['/tf'] = {
+    transforms: [{
+      header: { frame_id: 'map' },
+      child_frame_id: 'base_link',
+      transform: {
+        translation: { x: 1.25, y: -0.5, z: 0 },
+        rotation: { x: 0, y: 0, z: 0, w: 1 },
+      },
+    }],
+  };
+  getPgmFiles.mockResolvedValue({
+    files: [{ path: 'factory.pgm', name: 'factory.pgm' }],
+  });
+  getPgmImage.mockResolvedValue({
+    path: 'factory.pgm',
+    width: 1,
+    height: 1,
+    maxval: 255,
+    pixels_base64: 'AA==',
+  });
+
+  const firstRender = render(<MissionCanvasPage />);
+
+  fireEvent.click(screen.getByRole('tab', { name: 'Design' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Load Map' }));
+  await screen.findByRole('combobox', { name: 'Design map file' });
+  fireEvent.click(screen.getByRole('button', { name: 'Load' }));
+
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Waypoint' })).toBeEnabled());
+  fireEvent.click(screen.getByRole('button', { name: 'Waypoint' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Set Robot Pose' }));
+
+  await waitFor(() => expect(startNavigation).toHaveBeenCalledWith('nav', 'factory'));
+  await waitFor(() => expect(latestMapViewerProps().interactionMode).toBe('initial'));
+
+  await act(async () => {
+    latestMapViewerProps().onMapPose(1.25, -0.5, 0.75);
+  });
+  await waitFor(() => expect(sendInitialPoseEstimate).toHaveBeenCalled());
+
+  firstRender.unmount();
+  mockMapViewer.mockClear();
+
+  render(<MissionCanvasPage />);
+
+  await waitFor(() => (
+    expect(screen.getByRole('tab', { name: 'Design' })).toHaveAttribute('aria-selected', 'true')
+  ));
+  await waitFor(() => expect(latestMapViewerProps().showScan).toBe(true));
+  expect(latestMapViewerProps().showRobotModel).toBe(true);
+  expect(latestMapViewerProps().pose).not.toBeNull();
 
   fireEvent.click(screen.getByRole('tab', { name: 'Mapping' }));
   const startMappingButton = screen.getByRole('button', { name: 'Start Mapping' });
