@@ -465,7 +465,7 @@ test('starts localization and publishes an initial robot pose from the waypoint 
   fireEvent.click(screen.getByRole('button', { name: 'Waypoint' }));
   fireEvent.click(screen.getByRole('button', { name: 'Set Robot Pose' }));
 
-  await waitFor(() => expect(startNavigation).toHaveBeenCalledWith('nav', 'factory'));
+  await waitFor(() => expect(startNavigation).toHaveBeenCalledWith('localize', 'factory'));
   await waitFor(() => expect(latestMapViewerProps().interactionMode).toBe('initial'));
   await waitFor(() => expect(latestMapViewerProps().showScan).toBe(true));
   expect(latestMapViewerProps().showRobotModel).toBe(true);
@@ -544,7 +544,7 @@ test('restores design localization after returning to Mission Canvas', async () 
   fireEvent.click(screen.getByRole('button', { name: 'Waypoint' }));
   fireEvent.click(screen.getByRole('button', { name: 'Set Robot Pose' }));
 
-  await waitFor(() => expect(startNavigation).toHaveBeenCalledWith('nav', 'factory'));
+  await waitFor(() => expect(startNavigation).toHaveBeenCalledWith('localize', 'factory'));
   await waitFor(() => expect(latestMapViewerProps().interactionMode).toBe('initial'));
 
   await act(async () => {

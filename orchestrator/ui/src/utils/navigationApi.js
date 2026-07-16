@@ -35,7 +35,7 @@ export function startNavigation(mode, mapName = 'map') {
   return request('/start', {
     method: 'POST',
     body: JSON.stringify({
-      mode: mode === 'map' ? 'map' : 'nav',
+      mode: mode === 'map' ? 'map' : mode === 'localize' ? 'localize' : 'nav',
       map_name: mapName,
     }),
   });

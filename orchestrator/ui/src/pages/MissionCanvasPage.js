@@ -1676,9 +1676,7 @@ export default function MissionCanvasPage() {
     void runCommand(
       "Localize robot",
       async () => {
-        if (!running) {
-          await startNavigation("nav", currentMapName);
-        }
+        await startNavigation("localize", currentMapName);
         setNavigationRuntimeMode("localization");
         saveMissionSession({
           mapName: currentMapName,
@@ -1695,7 +1693,6 @@ export default function MissionCanvasPage() {
     designMapAvailable,
     designMapPath,
     runCommand,
-    running,
   ]);
 
   const handleToggleSpotMode = useCallback(() => {

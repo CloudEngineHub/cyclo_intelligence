@@ -40,6 +40,18 @@ test('maps a mapping restart to the self-hosted start endpoint', async () => {
   );
 });
 
+test('maps localization starts to the supervisor localize mode', async () => {
+  await startNavigation('localize', 'factory');
+
+  expect(global.fetch).toHaveBeenCalledWith(
+    '/api/navigation/start',
+    expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({ mode: 'localize', map_name: 'factory' }),
+    })
+  );
+});
+
 test('saves maps with the requested basename', async () => {
   await saveNavigationMap('factory');
 

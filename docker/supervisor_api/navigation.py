@@ -58,6 +58,11 @@ NAVIGATION_SERVICE = "ai_worker_navigation"
 MAPS_DIR = PurePosixPath(
     "/root/ros2_ws/src/ai_worker/ffw_navigation/maps"
 )
+LOCALIZATION_PGID_FILE = "/run/cyclo_navigation_localization.pgid"
+LOCALIZATION_LOG_FILE = "/var/log/cyclo_navigation_localization.log"
+NAVIGATION_PARAMS_FILE = (
+    "/root/ros2_ws/src/ai_worker/ffw_navigation/config/navigation.yaml"
+)
 MAP_SAVE_CLI_TIMEOUT_SECONDS = 20
 SAVE_MAP_WAIT_SECONDS = 12.0
 _SAFE_MAP_NAME = re.compile(r"^[A-Za-z0-9_.-]+$")
@@ -106,10 +111,11 @@ class NavigationStatus(BaseModel):
     pid: Optional[int] = None
     uptime_seconds: Optional[int] = None
     raw: str = ""
+    mode: Optional[str] = None
 
 
 class NavigationStartRequest(BaseModel):
-    mode: Literal["map", "nav"]
+    mode: Literal["map", "nav", "localize"]
     map_name: str = Field(default="map", min_length=1, max_length=128)
 
 
@@ -342,6 +348,7 @@ def _clear_navigation_runtime_files() -> None:
             "-f",
             "/run/navigation_type",
             f"/run/launch_args/{NAVIGATION_SERVICE}",
+            LOCALIZATION_PGID_FILE,
         ]
     )
     if code != 0:
@@ -349,6 +356,36 @@ def _clear_navigation_runtime_files() -> None:
             503,
             output or "Failed to clear navigation runtime files",
         )
+
+
+def _stop_localization_processes() -> str:
+    script = f"""
+set +e
+PGID_FILE={shlex.quote(LOCALIZATION_PGID_FILE)}
+if [ -f "${{PGID_FILE}}" ]; then
+  PGID=$(cat "${{PGID_FILE}}" 2>/dev/null | tr -d " " || true)
+  case "${{PGID}}" in
+    ""|*[!0-9]*|1)
+      echo "[localization stop] Ignoring invalid process group '${{PGID}}'"
+      ;;
+    *)
+      echo "[localization stop] Terminating process group ${{PGID}}"
+      kill -TERM -- -"${{PGID}}" 2>/dev/null || true
+      sleep 1
+      kill -KILL -- -"${{PGID}}" 2>/dev/null || true
+      ;;
+  esac
+  rm -f "${{PGID_FILE}}"
+fi
+exit 0
+"""
+    code, output = _exec(["sh", "-lc", script])
+    if code != 0:
+        raise HTTPException(
+            503,
+            output or "Failed to stop localization processes",
+        )
+    return output
 
 
 def _force_stop_navigation_processes() -> str:
@@ -375,6 +412,7 @@ PIDS=$(ps -eo pid=,comm=,args= | awk -v self="$$" '
   $1 == self {{ next }}
   $2 ~ /^(awk|sh|bash|ps)$/ {{ next }}
   /ros2 launch ffw_navigation/ ||
+  /ros2 launch nav2_bringup/ ||
   /\\/slam_toolbox\\// ||
   /\\/nav2_/ ||
   /\\/opennav_docking/ {{
@@ -401,7 +439,10 @@ exit 0
             503,
             output or "Failed to force stop navigation processes",
         )
-    return output
+    localization_output = _stop_localization_processes()
+    return "\n".join(
+        part for part in [output, localization_output] if part
+    )
 
 
 def _service_status(service: str) -> NavigationStatus:
@@ -424,6 +465,51 @@ def _service_status(service: str) -> NavigationStatus:
         pid=int(pid_match.group(1)) if pid_match else None,
         uptime_seconds=int(uptime_match.group(1)) if uptime_match else None,
         raw=raw,
+        mode=_runtime_mode() if is_up else None,
+    )
+
+
+def _runtime_mode() -> Optional[str]:
+    code, output = _exec(["cat", "/run/navigation_type"])
+    if code != 0:
+        return None
+    mode = output.strip().lower()
+    return mode or None
+
+
+def _localization_status() -> NavigationStatus:
+    script = f"""
+PGID_FILE={shlex.quote(LOCALIZATION_PGID_FILE)}
+if [ ! -f "${{PGID_FILE}}" ]; then
+  echo "down"
+  exit 3
+fi
+PGID=$(cat "${{PGID_FILE}}" 2>/dev/null | tr -d " " || true)
+case "${{PGID}}" in
+  ""|*[!0-9]*|1)
+    echo "down invalid pgid"
+    exit 3
+    ;;
+esac
+if kill -0 -- -"${{PGID}}" 2>/dev/null; then
+  ELAPSED=$(ps -o etimes= -p "${{PGID}}" 2>/dev/null | tr -d " " || true)
+  echo "up (pid ${{PGID}} pgid ${{PGID}}) ${{ELAPSED:-0}} seconds"
+  exit 0
+fi
+echo "down"
+exit 3
+"""
+    code, raw = _exec(["sh", "-lc", script])
+    if code != 0:
+        return NavigationStatus(is_up=False, raw=raw)
+    pid_match = re.search(r"\(pid\s+(\d+)", raw)
+    uptime_match = re.search(r"(\d+)\s+seconds", raw)
+    return NavigationStatus(
+        is_up=True,
+        pid=int(pid_match.group(1)) if pid_match else None,
+        uptime_seconds=int(uptime_match.group(1)) if uptime_match else None,
+        raw=raw,
+        mode="localize",
     )
 
 
@@ -599,6 +685,47 @@ def _save_map_with_cli(map_name: str) -> str:
     return output or "map_saver_cli complete"
 
 
+def _start_localization_process(map_name: str) -> str:
+    map_path = MAPS_DIR / f"{map_name}.yaml"
+    ros_command = (
+        _ros_shell_prefix()
+        + "exec ros2 launch nav2_bringup localization_launch.py "
+        + f"use_sim_time:=false "
+        + f"map:={shlex.quote(str(map_path))} "
+        + f"params_file:={shlex.quote(NAVIGATION_PARAMS_FILE)}"
+    )
+    script = f"""
+set -e
+MAP_PATH={shlex.quote(str(map_path))}
+PARAMS_FILE={shlex.quote(NAVIGATION_PARAMS_FILE)}
+LOG_FILE={shlex.quote(LOCALIZATION_LOG_FILE)}
+PGID_FILE={shlex.quote(LOCALIZATION_PGID_FILE)}
+[ -f "${{MAP_PATH}}" ] || {{ echo "Map file not found: ${{MAP_PATH}}"; exit 2; }}
+[ -f "${{PARAMS_FILE}}" ] || {{ echo "Params file not found: ${{PARAMS_FILE}}"; exit 2; }}
+mkdir -p "$(dirname "${{LOG_FILE}}")"
+rm -f "${{PGID_FILE}}"
+: > "${{LOG_FILE}}"
+nohup setsid bash --noprofile --norc -lc {shlex.quote(ros_command)} \
+  >> "${{LOG_FILE}}" 2>&1 < /dev/null &
+PID=$!
+echo "${{PID}}" > "${{PGID_FILE}}"
+sleep 0.8
+if ! kill -0 -- -"${{PID}}" 2>/dev/null; then
+  cat "${{LOG_FILE}}" 2>/dev/null || true
+  rm -f "${{PGID_FILE}}"
+  exit 1
+fi
+echo "localization launched pid=${{PID}} map=${{MAP_PATH}}"
+"""
+    code, output = _exec(
+        ["bash", "--noprofile", "--norc", "-c", script],
+        environment=_ros_exec_environment(),
+    )
+    if code != 0:
+        raise HTTPException(503, output or "Localization launch failed")
+    return output or "Localization launched"
+
+
 def _finite_pose_value(value: float, name: str) -> float:
     number = float(value)
     if not math.isfinite(number):
@@ -649,7 +776,7 @@ rclpy.init()
 node = rclpy.create_node("cyclo_initial_pose_publisher")
 publisher = node.create_publisher(PoseWithCovarianceStamped, "/initialpose", 10)
 
-deadline = time.monotonic() + 3.0
+deadline = time.monotonic() + 8.0
 while publisher.get_subscription_count() == 0 and time.monotonic() < deadline:
     rclpy.spin_once(node, timeout_sec=0.1)
 
@@ -681,7 +808,7 @@ print(
 """
     command = (
         _ros_shell_prefix()
-        + "timeout 8s python3 -c "
+        + "timeout 12s python3 -c "
         + shlex.quote(script)
     )
     code, output = _exec(
@@ -695,7 +822,13 @@ print(
 
 @router.get("/status", response_model=NavigationStatus)
 def navigation_status():
-    return _service_status(NAVIGATION_SERVICE)
+    service_status = _service_status(NAVIGATION_SERVICE)
+    if service_status.is_up:
+        return service_status
+    localization_status = _localization_status()
+    if localization_status.is_up:
+        return localization_status
+    return service_status
 
 
 @router.post("/start", response_model=ActionResult)
@@ -705,6 +838,14 @@ def navigation_start(request: NavigationStartRequest):
     _force_stop_navigation_processes()
     _s6_command(NAVIGATION_SERVICE, "down", retries=15, retry_delay=0.2)
     _clear_navigation_runtime_files()
+    if request.mode == "localize":
+        _write_runtime_file("/run/navigation_type", request.mode)
+        _write_runtime_file(
+            f"/run/launch_args/{NAVIGATION_SERVICE}",
+            f"map_name:={map_name}",
+        )
+        message = _start_localization_process(map_name)
+        return ActionResult(ok=True, message=message)
     if request.mode == "map":
         GRID_CACHES["/map"].clear()
     _write_runtime_file("/run/navigation_type", request.mode)

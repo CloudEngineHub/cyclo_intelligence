@@ -293,6 +293,60 @@ def test_navigation_start_keeps_map_cache_for_nav_mode(monkeypatch):
     assert "clear_map_cache" not in events
 
 
+def test_navigation_start_launches_localization_only(monkeypatch):
+    events = []
+
+    monkeypatch.setattr(
+        navigation,
+        "_request_s6_service_down",
+        lambda service: events.append(("request_down", service))
+        or f"{service} down requested",
+    )
+    monkeypatch.setattr(
+        navigation,
+        "_clear_navigation_runtime_files",
+        lambda: events.append("clear"),
+    )
+    monkeypatch.setattr(
+        navigation,
+        "_force_stop_navigation_processes",
+        lambda: events.append("force") or "",
+    )
+    monkeypatch.setattr(
+        navigation,
+        "_write_runtime_file",
+        lambda path, content: events.append(("write", path, content)),
+    )
+    monkeypatch.setattr(
+        navigation,
+        "_s6_command",
+        lambda service, action, **kwargs: events.append(("s6", service, action))
+        or f"{service} {action}",
+    )
+    monkeypatch.setattr(
+        navigation,
+        "_start_localization_process",
+        lambda map_name: events.append(("localize", map_name))
+        or "localization launched",
+    )
+
+    result = navigation.navigation_start(
+        navigation.NavigationStartRequest(mode="localize", map_name="factory")
+    )
+
+    assert result.ok
+    assert result.message == "localization launched"
+    assert events == [
+        ("request_down", "ai_worker_navigation"),
+        "force",
+        ("s6", "ai_worker_navigation", "down"),
+        "clear",
+        ("write", "/run/navigation_type", "localize"),
+        ("write", "/run/launch_args/ai_worker_navigation", "map_name:=factory"),
+        ("localize", "factory"),
+    ]
+
+
 def test_navigation_stop_clears_runtime_and_forces_process_group(monkeypatch):
     events = []
 
@@ -339,6 +393,7 @@ def test_navigation_force_stop_kills_process_group_with_separator(monkeypatch):
         return 0, "forced"
 
     monkeypatch.setattr(navigation, "_exec", fake_exec)
+    monkeypatch.setattr(navigation, "_stop_localization_processes", lambda: "")
 
     assert navigation._force_stop_navigation_processes() == "forced"
     script = captured["command"][-1]
