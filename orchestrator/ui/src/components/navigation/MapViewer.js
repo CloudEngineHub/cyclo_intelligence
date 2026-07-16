@@ -336,7 +336,7 @@ function makePoseMarker(pose, color, z) {
     group.add(arrow);
     return group;
 }
-function makeSpotMarker(spot, selected = false) {
+function makeSpotMarker(spot, selected = false, scale = 1) {
     var _a, _b, _c, _d;
     const pose = spot === null || spot === void 0 ? void 0 : spot.pose;
     if (!pose)
@@ -347,6 +347,7 @@ function makeSpotMarker(spot, selected = false) {
     const color = selected ? 0xf59e0b : 0x22c55e;
     const group = new THREE.Group();
     group.position.set(x, y, 0.24);
+    group.scale.setScalar(scale);
     group.userData = { spotId: spot.id, dragAction: "move" };
     const marker = new THREE.Group();
     marker.rotation.z = yaw;
@@ -745,6 +746,7 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, 
         layers.clear();
         const meta = gridMeta(map);
         const mapKey = meta ? `${meta.width}:${meta.height}:${meta.resolution}:${meta.originX}:${meta.originY}` : null;
+        const waypointScale = meta?.resolution && meta.resolution > 0 ? meta.resolution : 1;
         const tfSyncedFootprint = tfSyncedFootprintRef.current;
         const tfFramePoses = buildTfFramePoses(tf, "map");
         const tfFramePoseByName = new Map(tfFramePoses.map(({ frame, pose: framePose }) => [frame, framePose]));
@@ -790,7 +792,7 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, 
                     id: "__waypoint_preview__",
                     label: "Waypoint",
                     pose: { x: previewX, y: previewY, yaw: previewYaw },
-                }, true));
+                }, true, waypointScale));
             }
             else if (interactionMode === "behavior" && behaviorPreviewNode) {
                 layers.add(makeBehaviorNodeMarker({
@@ -819,7 +821,7 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, 
                         yaw: preview.yaw,
                     },
                 }
-                : spot, spot.id === selectedSpotId);
+                : spot, spot.id === selectedSpotId, waypointScale);
             if (marker)
                 layers.add(marker);
         });
