@@ -28,6 +28,7 @@ import base64
 import asyncio
 import io
 import json
+import math
 import os
 from pathlib import PurePosixPath
 import re
@@ -124,6 +125,13 @@ class ActionResult(BaseModel):
 class NavigateGoalRequest(BaseModel):
     pose: dict
     behavior_tree: str = ""
+
+
+class InitialPoseRequest(BaseModel):
+    x: float
+    y: float
+    yaw: float
+    frame_id: str = Field(default="map", min_length=1, max_length=64)
 
 
 class PgmSaveRequest(BaseModel):
@@ -508,8 +516,6 @@ def _encode_pgm(width: int, height: int, maxval: int, pixels: list[int]) -> byte
 
 
 def _orientation_from_yaw(yaw: float) -> dict[str, float]:
-    import math
-
     return {
         "x": 0.0,
         "y": 0.0,
@@ -591,6 +597,100 @@ def _save_map_with_cli(map_name: str) -> str:
     if code != 0:
         raise HTTPException(503, output or "Map saver failed")
     return output or "map_saver_cli complete"
+
+
+def _finite_pose_value(value: float, name: str) -> float:
+    number = float(value)
+    if not math.isfinite(number):
+        raise HTTPException(400, f"{name} must be finite")
+    return number
+
+
+def _safe_frame_id(value: str) -> str:
+    frame_id = value.strip()
+    if not re.fullmatch(r"[A-Za-z0-9_/.-]+", frame_id):
+        raise HTTPException(
+            400,
+            "Frame id may contain only letters, numbers, '/', '.', '_' and '-'",
+        )
+    return frame_id
+
+
+def _publish_initial_pose(request: InitialPoseRequest) -> str:
+    x = _finite_pose_value(request.x, "x")
+    y = _finite_pose_value(request.y, "y")
+    yaw = _finite_pose_value(request.yaw, "yaw")
+    frame_id = _safe_frame_id(request.frame_id)
+    payload = {
+        "frame_id": frame_id,
+        "x": x,
+        "y": y,
+        "yaw": yaw,
+        "orientation": _orientation_from_yaw(yaw),
+        "covariance": [
+            0.25, 0, 0, 0, 0, 0,
+            0, 0.25, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0.0685,
+        ],
+    }
+    script = f"""
+import json
+import time
+
+import rclpy
+from geometry_msgs.msg import PoseWithCovarianceStamped
+
+payload = json.loads({json.dumps(json.dumps(payload))})
+
+rclpy.init()
+node = rclpy.create_node("cyclo_initial_pose_publisher")
+publisher = node.create_publisher(PoseWithCovarianceStamped, "/initialpose", 10)
+
+deadline = time.monotonic() + 3.0
+while publisher.get_subscription_count() == 0 and time.monotonic() < deadline:
+    rclpy.spin_once(node, timeout_sec=0.1)
+
+subscriber_count = publisher.get_subscription_count()
+message = PoseWithCovarianceStamped()
+message.header.frame_id = payload["frame_id"]
+message.pose.pose.position.x = payload["x"]
+message.pose.pose.position.y = payload["y"]
+message.pose.pose.position.z = 0.0
+message.pose.pose.orientation.x = payload["orientation"]["x"]
+message.pose.pose.orientation.y = payload["orientation"]["y"]
+message.pose.pose.orientation.z = payload["orientation"]["z"]
+message.pose.pose.orientation.w = payload["orientation"]["w"]
+message.pose.covariance = payload["covariance"]
+
+for _ in range(5):
+    message.header.stamp = node.get_clock().now().to_msg()
+    publisher.publish(message)
+    rclpy.spin_once(node, timeout_sec=0.05)
+    time.sleep(0.1)
+
+node.destroy_node()
+rclpy.shutdown()
+print(
+    f"Published initial pose to /initialpose "
+    f"({{payload['x']:.3f}}, {{payload['y']:.3f}}, yaw={{payload['yaw']:.3f}}, "
+    f"subscribers={{subscriber_count}})"
+)
+"""
+    command = (
+        _ros_shell_prefix()
+        + "timeout 8s python3 -c "
+        + shlex.quote(script)
+    )
+    code, output = _exec(
+        ["bash", "--noprofile", "--norc", "-c", command],
+        environment=_ros_exec_environment(),
+    )
+    if code != 0:
+        raise HTTPException(503, output or "Initial pose publish failed")
+    return output or "Published initial pose"
 
 
 @router.get("/status", response_model=NavigationStatus)
@@ -694,6 +794,11 @@ def cancel_goal():
     if code != 0:
         raise HTTPException(503, output or "NavigateToPose cancel failed")
     return ActionResult(ok=True, message=output or "Goals cancelled")
+
+
+@router.post("/initial-pose", response_model=ActionResult)
+def send_initial_pose(request: InitialPoseRequest):
+    return ActionResult(ok=True, message=_publish_initial_pose(request))
 
 
 @router.get("/logs")

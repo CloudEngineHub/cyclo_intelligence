@@ -90,6 +90,18 @@ export function cancelNavigateToPoseGoal() {
   return request('/cancel', { method: 'POST' });
 }
 
+export function sendInitialPoseEstimate({ x, y, yaw, frameId = 'map' }) {
+  return request('/initial-pose', {
+    method: 'POST',
+    body: JSON.stringify({
+      x,
+      y,
+      yaw,
+      frame_id: frameId,
+    }),
+  });
+}
+
 export function getServiceLogs({ tail = 300, cursor } = {}) {
   const params = new URLSearchParams({ tail: String(tail) });
   if (cursor !== undefined && cursor !== null) {

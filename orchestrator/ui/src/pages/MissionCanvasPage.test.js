@@ -6,6 +6,7 @@ import {
   getServiceStatus,
   saveNavigationMap,
   savePgmImage,
+  sendInitialPoseEstimate,
   startNavigation,
   stopNavigation,
 } from '../utils/navigationApi';
@@ -35,6 +36,7 @@ jest.mock('../utils/navigationApi', () => ({
   getServiceStatus: jest.fn().mockResolvedValue({ is_up: false }),
   saveNavigationMap: jest.fn().mockResolvedValue({ ok: true }),
   savePgmImage: jest.fn().mockResolvedValue({ path: 'map.pgm', saved: true }),
+  sendInitialPoseEstimate: jest.fn().mockResolvedValue({ ok: true }),
   startNavigation: jest.fn().mockResolvedValue({ ok: true }),
   stopNavigation: jest.fn().mockResolvedValue({ ok: true }),
 }));
@@ -103,6 +105,7 @@ beforeEach(() => {
   getNavigationSpots.mockResolvedValue({ map_name: 'map', spots: [] });
   saveNavigationMap.mockResolvedValue({ ok: true, message: 'Saved map' });
   savePgmImage.mockResolvedValue({ path: 'map.pgm', saved: true });
+  sendInitialPoseEstimate.mockResolvedValue({ ok: true });
   startNavigation.mockResolvedValue({ ok: true });
   mockMapViewer.mockImplementation(() => <div>Mission Canvas Map</div>);
 });
@@ -471,6 +474,12 @@ test('starts localization and publishes an initial robot pose from the waypoint 
     latestMapViewerProps().onMapPose(1.25, -0.5, 0.75);
   });
 
+  await waitFor(() => expect(sendInitialPoseEstimate).toHaveBeenCalledWith({
+    x: 1.25,
+    y: -0.5,
+    yaw: 0.75,
+    frameId: 'map',
+  }));
   await waitFor(() => expect(mockPublishRosTopic).toHaveBeenCalledWith(
     '/initialpose',
     'geometry_msgs/msg/PoseWithCovarianceStamped',

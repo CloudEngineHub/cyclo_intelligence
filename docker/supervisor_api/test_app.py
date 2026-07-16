@@ -396,6 +396,7 @@ def test_navigation_routes_are_registered():
 
     assert "/navigation/status" in paths
     assert "/navigation/start" in paths
+    assert "/navigation/initial-pose" in paths
     assert "/navigation/maps/pgm/save" in paths
     assert "/navigation/topics/ws" in paths
     assert "/navigation/spots" in paths
@@ -566,6 +567,33 @@ def test_navigation_goal_passes_ros_environment(monkeypatch):
     assert captured["command"][:4] == [
         "bash", "--noprofile", "--norc", "-c"
     ]
+    assert captured["environment"] == {
+        "ROS_DOMAIN_ID": "30",
+        "RMW_IMPLEMENTATION": "rmw_fastrtps_cpp",
+    }
+
+
+def test_navigation_initial_pose_publishes_from_ai_worker(monkeypatch):
+    captured = {}
+
+    def fake_exec(command, *, environment=None, timeout=None):
+        captured["command"] = command
+        captured["environment"] = environment
+        return 0, "Published initial pose"
+
+    monkeypatch.setattr(navigation, "_exec", fake_exec)
+    monkeypatch.setenv("ROS_DOMAIN_ID", "30")
+    monkeypatch.setenv("RMW_IMPLEMENTATION", "rmw_fastrtps_cpp")
+
+    result = navigation.send_initial_pose(
+        navigation.InitialPoseRequest(x=1.25, y=-0.5, yaw=0.75)
+    )
+
+    assert result.ok
+    command_text = captured["command"][-1]
+    assert "python3 -c" in command_text
+    assert "/initialpose" in command_text
+    assert "PoseWithCovarianceStamped" in command_text
     assert captured["environment"] == {
         "ROS_DOMAIN_ID": "30",
         "RMW_IMPLEMENTATION": "rmw_fastrtps_cpp",

@@ -10,6 +10,7 @@ import {
   getServiceStatus,
   getPgmFiles,
   saveNavigationMap,
+  sendInitialPoseEstimate,
   startNavigation,
   stopNavigation,
 } from "../utils/navigationApi";
@@ -1549,7 +1550,8 @@ export default function MissionCanvasPage() {
   const sendInitialPose = useCallback(async (x, y, yaw) => {
     const orientation = orientationFromYaw(yaw);
     try {
-      await publishRosTopic(
+      const result = await sendInitialPoseEstimate({ x, y, yaw, frameId: "map" });
+      publishRosTopic(
         "/initialpose",
         "geometry_msgs/msg/PoseWithCovarianceStamped",
         {
@@ -1572,8 +1574,10 @@ export default function MissionCanvasPage() {
             ],
           },
         },
-      );
-      setMessage(`Initial pose ${x.toFixed(2)}, ${y.toFixed(2)}, yaw ${(yaw * 180 / Math.PI).toFixed(0)} deg`);
+      ).catch((error) => {
+        console.warn("Fallback /initialpose publish failed:", error);
+      });
+      setMessage(result?.message || `Initial pose ${x.toFixed(2)}, ${y.toFixed(2)}, yaw ${(yaw * 180 / Math.PI).toFixed(0)} deg`);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Initial pose publish failed");
     }
