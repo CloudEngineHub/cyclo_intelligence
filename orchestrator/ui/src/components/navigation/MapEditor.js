@@ -18,6 +18,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { MdRedo, MdUndo } from "react-icons/md";
 import { getPgmFiles, getPgmImage, savePgmImage } from "../../utils/navigationApi";
+import { yawFromPose } from "../../utils/navigationTf";
 const FREE_VALUE = 254;
 const OCCUPIED_VALUE = 0;
 const FREE_THRESHOLD = 250;
@@ -69,6 +70,11 @@ function paintPgmPixels(pixels, width, height, pixelX, pixelY, operation, brushS
     return next;
 }
 function pgmPixelsToGrid(image, pixels) {
+    const resolution = Number(image.resolution ?? 1) || 1;
+    const origin = image.origin ?? {
+        position: { x: 0, y: 0, z: 0 },
+        orientation: { x: 0, y: 0, z: 0, w: 1 },
+    };
     const data = new Array(image.width * image.height);
     for (let pgmY = 0; pgmY < image.height; pgmY += 1) {
         for (let x = 0; x < image.width; x += 1) {
@@ -85,20 +91,29 @@ function pgmPixelsToGrid(image, pixels) {
     return {
         header: { frame_id: "map" },
         info: {
-            resolution: 1,
+            resolution,
             width: image.width,
             height: image.height,
-            origin: {
-                position: { x: 0, y: 0, z: 0 },
-                orientation: { x: 0, y: 0, z: 0, w: 1 },
-            },
+            origin,
         },
         data,
     };
 }
 function mapPointToPgmPixel(image, x, y) {
-    const pixelX = Math.floor(x);
-    const pixelY = image.height - 1 - Math.floor(y);
+    const resolution = Number(image.resolution ?? 1) || 1;
+    const origin = image.origin ?? {
+        position: { x: 0, y: 0, z: 0 },
+        orientation: { x: 0, y: 0, z: 0, w: 1 },
+    };
+    const originX = Number(origin.position?.x ?? 0);
+    const originY = Number(origin.position?.y ?? 0);
+    const originYaw = yawFromPose(origin);
+    const dx = x - originX;
+    const dy = y - originY;
+    const localX = Math.cos(originYaw) * dx + Math.sin(originYaw) * dy;
+    const localY = -Math.sin(originYaw) * dx + Math.cos(originYaw) * dy;
+    const pixelX = Math.floor(localX / resolution);
+    const pixelY = image.height - 1 - Math.floor(localY / resolution);
     if (pixelX < 0 || pixelX >= image.width || pixelY < 0 || pixelY >= image.height) {
         return null;
     }

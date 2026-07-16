@@ -77,6 +77,32 @@ def test_navigation_parses_binary_pgm():
     )
 
 
+def test_navigation_parses_map_yaml_metadata():
+    metadata = navigation._parse_map_yaml_metadata(
+        b"image: factory.pgm\nresolution: 0.05\norigin: [-1.2, 2.4, 1.570796]\n"
+    )
+
+    assert metadata["resolution"] == 0.05
+    assert metadata["origin"]["position"] == {"x": -1.2, "y": 2.4, "z": 0.0}
+    assert metadata["origin"]["orientation"]["z"] != 0
+
+
+def test_navigation_get_pgm_includes_yaml_metadata(monkeypatch):
+    files = {
+        navigation.MAPS_DIR / "factory.pgm": b"P5\n2 2\n255\n" + bytes([0, 127, 254, 255]),
+        navigation.MAPS_DIR / "factory.yaml": b"resolution: 0.05\norigin: [-1.0, -2.0, 0.0]\n",
+    }
+
+    monkeypatch.setattr(navigation, "_read_container_file", lambda path: files[path])
+
+    result = navigation.get_pgm("factory.pgm")
+
+    assert result["resolution"] == 0.05
+    assert result["origin"]["position"] == {"x": -1.0, "y": -2.0, "z": 0.0}
+    assert result["width"] == 2
+    assert result["height"] == 2
+
+
 def test_navigation_rejects_map_path_escape():
     import pytest
     from fastapi import HTTPException

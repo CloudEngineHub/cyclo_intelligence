@@ -507,6 +507,53 @@ def _encode_pgm(width: int, height: int, maxval: int, pixels: list[int]) -> byte
     return header.encode("ascii") + bytes(pixels)
 
 
+def _orientation_from_yaw(yaw: float) -> dict[str, float]:
+    import math
+
+    return {
+        "x": 0.0,
+        "y": 0.0,
+        "z": math.sin(yaw / 2.0),
+        "w": math.cos(yaw / 2.0),
+    }
+
+
+def _parse_map_yaml_metadata(data: bytes) -> dict[str, object]:
+    text = data.decode("utf-8", errors="replace")
+    resolution_match = re.search(
+        r"(?m)^\s*resolution\s*:\s*([-+]?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?)\s*(?:#.*)?$",
+        text,
+    )
+    origin_match = re.search(r"(?m)^\s*origin\s*:\s*\[([^\]]+)\]", text)
+    metadata: dict[str, object] = {}
+    if resolution_match:
+        metadata["resolution"] = float(resolution_match.group(1))
+    if origin_match:
+        values = [
+            float(value)
+            for value in re.findall(
+                r"[-+]?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?",
+                origin_match.group(1),
+            )
+        ]
+        if len(values) >= 3:
+            metadata["origin"] = {
+                "position": {"x": values[0], "y": values[1], "z": 0.0},
+                "orientation": _orientation_from_yaw(values[2]),
+            }
+    return metadata
+
+
+def _map_yaml_metadata_for_pgm(path: PurePosixPath) -> dict[str, object]:
+    yaml_path = path.with_suffix(".yaml")
+    try:
+        return _parse_map_yaml_metadata(_read_container_file(yaml_path))
+    except FileNotFoundError:
+        return {}
+    except ValueError as exc:
+        raise HTTPException(422, f"Invalid map YAML metadata: {exc}") from exc
+
+
 def _ros_shell_prefix() -> str:
     return (
         'for setup_file in /opt/ros/*/setup.bash; do '
@@ -714,6 +761,7 @@ def get_pgm(path: str):
         "width": width,
         "height": height,
         "maxval": maxval,
+        **_map_yaml_metadata_for_pgm(resolved),
         "pixels_base64": base64.b64encode(bytes(pixels)).decode("ascii"),
     }
 
