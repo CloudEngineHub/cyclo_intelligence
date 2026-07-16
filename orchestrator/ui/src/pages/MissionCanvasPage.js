@@ -1062,6 +1062,7 @@ export default function MissionCanvasPage() {
   const [interactionMode, setInteractionMode] = useState("view");
   const [showWaypointOptions, setShowWaypointOptions] = useState(false);
   const [posePublishBusy, setPosePublishBusy] = useState(false);
+  const [navigationRuntimeMode, setNavigationRuntimeMode] = useState("idle");
   const [tfBufferRevision, setTfBufferRevision] = useState(0);
   const [workspaceStage, setWorkspaceStage] = useState(STAGE_MAPPING);
   const [showPgmFix, setShowPgmFix] = useState(false);
@@ -1090,6 +1091,12 @@ export default function MissionCanvasPage() {
   const designMapActive = workspaceStage === STAGE_AUTHORING && !!designMapPath;
   const robotPoseCaptureActive = workspaceStage === STAGE_AUTHORING;
   const navigationTopicsActive = running && busy !== "Stop" && !mappingEditorActive;
+  const mappingRuntimeActive = running && navigationRuntimeMode === "mapping";
+  const designLocalizationActive = (
+    workspaceStage === STAGE_AUTHORING &&
+    running &&
+    navigationRuntimeMode === "localization"
+  );
   const activeLayers = layersByStage[workspaceStage] || LAYER_PRESETS[workspaceStage];
   const currentMapName = mapName.trim() || DEFAULT_MAP_NAME;
   const mapEditor = useMapEditor({
@@ -1106,10 +1113,12 @@ export default function MissionCanvasPage() {
   });
   const needsGlobalCostmap = navigationTopicsActive && activeLayers.globalCostmap;
   const needsLocalCostmap = navigationTopicsActive && activeLayers.localCostmap;
-  const needsScan = navigationTopicsActive && activeLayers.scan;
+  const needsScan = designLocalizationActive || (navigationTopicsActive && activeLayers.scan);
   const needsGoalPose = navigationTopicsActive && activeLayers.goalPose;
   const needsPlan = navigationTopicsActive && activeLayers.globalPlan;
-  const needsRobotModel = navigationTopicsActive && activeLayers.robotModel;
+  const needsRobotModel = designLocalizationActive || (
+    navigationTopicsActive && activeLayers.robotModel
+  );
   const needsAmclPose = robotPoseCaptureActive || (
     navigationTopicsActive && (needsRobotModel || needsScan)
   );
@@ -1232,6 +1241,11 @@ export default function MissionCanvasPage() {
       if (!activeLayers[layerId]) return;
       (LAYER_TOPIC_IDS[layerId] || []).forEach((topic) => selectedTopics.add(topic));
     });
+    if (designLocalizationActive) {
+      ["/scan", "/amcl_pose", "/tf", "/tf_static", "/local_costmap/published_footprint"].forEach((topic) => {
+        selectedTopics.add(topic);
+      });
+    }
     if (workspaceStage === STAGE_MAPPING) {
       selectedTopics.delete("/amcl_pose");
     }
@@ -1252,6 +1266,7 @@ export default function MissionCanvasPage() {
     tf,
     tfStatic,
     workspaceStage,
+    designLocalizationActive,
   ]);
   const teleopDisabled = !!busy || mappingEditorActive;
 
@@ -1297,6 +1312,12 @@ export default function MissionCanvasPage() {
   useEffect(() => {
     void loadSpots();
   }, [loadSpots]);
+
+  useEffect(() => {
+    if (!running) {
+      setNavigationRuntimeMode("idle");
+    }
+  }, [running]);
 
   useEffect(() => {
     if (updateTfBuffer(tfBufferRef.current, latestTf)) {
@@ -1402,6 +1423,7 @@ export default function MissionCanvasPage() {
     async () => {
       setWorkspaceStage(STAGE_RUN);
       await startNavigation("nav", mapName.trim() || DEFAULT_MAP_NAME);
+      setNavigationRuntimeMode("run");
     },
   ), [mapName, runCommand]);
 
@@ -1447,6 +1469,7 @@ export default function MissionCanvasPage() {
       setWorkspaceStage(STAGE_MAPPING);
       setShowPgmFix(false);
       await startNavigation("map", mapName.trim() || DEFAULT_MAP_NAME);
+      setNavigationRuntimeMode("mapping");
     },
   ), [mapName, runCommand]);
 
@@ -1486,7 +1509,11 @@ export default function MissionCanvasPage() {
 
   const handleStopNavigation = useCallback(() => runCommand(
     "Stop",
-    () => stopNavigation(),
+    async () => {
+      const result = await stopNavigation();
+      setNavigationRuntimeMode("idle");
+      return result;
+    },
   ), [runCommand]);
 
   const handleSelectSpot = useCallback((spotId) => {
@@ -1567,6 +1594,7 @@ export default function MissionCanvasPage() {
         if (!running) {
           await startNavigation("nav", currentMapName);
         }
+        setNavigationRuntimeMode("localization");
         setInteractionMode("initial");
         return "Click and drag the robot pose on the map";
       },
@@ -1884,7 +1912,7 @@ export default function MissionCanvasPage() {
           {workspaceStage === STAGE_MAPPING && (
             <>
               <ActionButton
-                active={busy === "Mapping" || (running && !mappingEditorActive)}
+                active={busy === "Mapping" || (mappingRuntimeActive && !mappingEditorActive)}
                 disabled={!!busy || running}
                 onClick={handleStartMapping}
                 variant="secondary"
@@ -2020,7 +2048,7 @@ export default function MissionCanvasPage() {
                 Load Map
               </ActionButton>
               <ActionButton
-                active={busy === "Run mission" || (running && workspaceStage === STAGE_RUN)}
+                active={busy === "Run mission" || (running && navigationRuntimeMode === "run")}
                 disabled={!!busy || running}
                 onClick={handleRunMission}
                 variant="secondary"

@@ -426,6 +426,19 @@ test('starts localization and publishes an initial robot pose from the waypoint 
   const latestMapViewerProps = () => (
     mockMapViewer.mock.calls[mockMapViewer.mock.calls.length - 1][0]
   );
+  getServiceStatus
+    .mockResolvedValueOnce({ is_up: false })
+    .mockResolvedValue({ is_up: true });
+  mockTopicDataByName['/tf'] = {
+    transforms: [{
+      header: { frame_id: 'map' },
+      child_frame_id: 'base_link',
+      transform: {
+        translation: { x: 1.25, y: -0.5, z: 0 },
+        rotation: { x: 0, y: 0, z: 0, w: 1 },
+      },
+    }],
+  };
   getPgmFiles.mockResolvedValue({
     files: [{ path: 'factory.pgm', name: 'factory.pgm' }],
   });
@@ -450,6 +463,9 @@ test('starts localization and publishes an initial robot pose from the waypoint 
 
   await waitFor(() => expect(startNavigation).toHaveBeenCalledWith('nav', 'factory'));
   await waitFor(() => expect(latestMapViewerProps().interactionMode).toBe('initial'));
+  await waitFor(() => expect(latestMapViewerProps().showScan).toBe(true));
+  expect(latestMapViewerProps().showRobotModel).toBe(true);
+  expect(latestMapViewerProps().pose).not.toBeNull();
 
   await act(async () => {
     latestMapViewerProps().onMapPose(1.25, -0.5, 0.75);
@@ -472,6 +488,11 @@ test('starts localization and publishes an initial robot pose from the waypoint 
     }),
   ));
   await waitFor(() => expect(screen.getByText('Initial pose 1.25, -0.50, yaw 43 deg')).toBeInTheDocument());
+
+  fireEvent.click(screen.getByRole('tab', { name: 'Mapping' }));
+  const startMappingButton = screen.getByRole('button', { name: 'Start Mapping' });
+  expect(startMappingButton).toBeDisabled();
+  expect(startMappingButton).not.toHaveAttribute('aria-pressed');
 });
 
 test('creates a waypoint at the current robot pose from the design toolbar', async () => {
