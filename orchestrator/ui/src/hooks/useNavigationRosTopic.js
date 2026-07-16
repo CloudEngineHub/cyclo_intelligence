@@ -19,6 +19,8 @@ const TOPIC_TYPES = {
   '/goal_pose': 'geometry_msgs/msg/PoseStamped',
   '/tf': 'tf2_msgs/msg/TFMessage',
   '/tf_static': 'tf2_msgs/msg/TFMessage',
+  '/bt/status': 'std_msgs/msg/String',
+  '/bt/active_nodes': 'std_msgs/msg/String',
 };
 
 const SERVER_GRID_TOPICS = new Set([
@@ -43,6 +45,7 @@ export function useNavigationRosTopic(topic, options = {}) {
 
   useEffect(() => {
     const usesServerGridSocket = SERVER_GRID_TOPICS.has(topic);
+    const staleMs = Math.max(0, Number(options.staleMs || 0));
     if (!topic || (!usesServerGridSocket && !rosbridgeUrl)) {
       setTopicData(null);
       setStatus('disconnected');
@@ -51,6 +54,14 @@ export function useNavigationRosTopic(topic, options = {}) {
 
     let mounted = true;
     let subscription = null;
+    let staleTimer = null;
+    const resetStaleTimer = () => {
+      if (staleTimer) window.clearTimeout(staleTimer);
+      if (!staleMs) return;
+      staleTimer = window.setTimeout(() => {
+        if (mounted) setTopicData(null);
+      }, staleMs);
+    };
 
     if (usesServerGridSocket) {
       setStatus('connecting');
@@ -62,6 +73,7 @@ export function useNavigationRosTopic(topic, options = {}) {
         if (!mounted) return;
         try {
           setTopicData(JSON.parse(event.data));
+          resetStaleTimer();
         } catch (error) {
           console.error(`Failed to decode Navigation grid ${topic}:`, error);
           setStatus('error');
@@ -75,6 +87,7 @@ export function useNavigationRosTopic(topic, options = {}) {
       };
       return () => {
         mounted = false;
+        if (staleTimer) window.clearTimeout(staleTimer);
         socket.close();
       };
     }
@@ -98,7 +111,10 @@ export function useNavigationRosTopic(topic, options = {}) {
           // Preserve the page's transport envelope. OccupancyGrid itself has
           // a `data` array, so passing the raw message would be mistaken for
           // an envelope and discard its header/info fields.
-          if (mounted) setTopicData(wrapNavigationRosMessage(message));
+          if (mounted) {
+            setTopicData(wrapNavigationRosMessage(message));
+            resetStaleTimer();
+          }
         });
         setStatus('connected');
       } catch (error) {
@@ -112,9 +128,10 @@ export function useNavigationRosTopic(topic, options = {}) {
     subscribe();
     return () => {
       mounted = false;
+      if (staleTimer) window.clearTimeout(staleTimer);
       if (subscription) subscription.unsubscribe();
     };
-  }, [options.throttleMs, rosbridgeUrl, topic]);
+  }, [options.staleMs, options.throttleMs, rosbridgeUrl, topic]);
 
   return { status, topicData };
 }

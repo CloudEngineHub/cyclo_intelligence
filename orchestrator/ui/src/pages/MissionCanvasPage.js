@@ -43,6 +43,7 @@ const AUTO_LOCALIZE_UPDATE_DELAY_MS = 700;
 const AUTO_LOCALIZE_XY_COVARIANCE_MAX = 0.6;
 const AUTO_LOCALIZE_YAW_COVARIANCE_MAX = 0.5;
 const ROS2_WS_FAST_TOPIC_OPTIONS = { throttleMs: 100 };
+const BT_TOPIC_OPTIONS = { staleMs: 3000 };
 const STAGE_MAPPING = "mapping";
 const STAGE_AUTHORING = "authoring";
 const STAGE_RUN = "run";
@@ -1233,6 +1234,10 @@ export default function MissionCanvasPage() {
     stageNavigationTopicsActive ||
     designLocalizationActive
   ) && activeLayers.map;
+  const needsBtTopics = (
+    workspaceStage === STAGE_AUTHORING ||
+    workspaceStage === STAGE_RUN
+  );
   const activeBehaviorNodes = useMemo(
     () => behaviorNodes.filter((node) => node.map_name === currentMapName),
     [behaviorNodes, currentMapName],
@@ -1278,6 +1283,14 @@ export default function MissionCanvasPage() {
   const { topicData: tfStaticData } = useNavigationRosTopic(
     needsTf ? "/tf_static" : null,
   );
+  const { topicData: btStatusData } = useNavigationRosTopic(
+    needsBtTopics ? "/bt/status" : null,
+    BT_TOPIC_OPTIONS,
+  );
+  const { topicData: btActiveNodesData } = useNavigationRosTopic(
+    needsBtTopics ? "/bt/active_nodes" : null,
+    BT_TOPIC_OPTIONS,
+  );
   const map = useMemo(() => messageData(mapData), [mapData]);
   const globalCostmap = useMemo(() => messageData(globalCostmapData), [globalCostmapData]);
   const localCostmap = useMemo(() => messageData(localCostmapData), [localCostmapData]);
@@ -1288,6 +1301,8 @@ export default function MissionCanvasPage() {
   const goalPose = useMemo(() => messageData(goalPoseData), [goalPoseData]);
   const tf = useMemo(() => messageData(tfData), [tfData]);
   const tfStatic = useMemo(() => messageData(tfStaticData), [tfStaticData]);
+  const btStatus = useMemo(() => messageData(btStatusData), [btStatusData]);
+  const btActiveNodes = useMemo(() => messageData(btActiveNodesData), [btActiveNodesData]);
   const latestTf = useMemo(() => mergeTfMessages(tfStatic, tf), [tf, tfStatic]);
   void tfBufferRevision;
   const bufferedTf = tfMessageFromBuffer(tfBufferRef.current) ?? latestTf;
@@ -1335,8 +1350,8 @@ export default function MissionCanvasPage() {
       "/local_costmap/costmap": !!localCostmap,
       "/plan": !!plan,
       "/goal_pose": !!goalPose,
-      "/bt/status": false,
-      "/bt/active_nodes": false,
+      "/bt/status": !!btStatus,
+      "/bt/active_nodes": !!btActiveNodes,
     };
     const selectedTopics = new Set(STAGE_EXTRA_TOPIC_IDS[workspaceStage] || []);
     (STAGE_LAYER_IDS[workspaceStage] || []).forEach((layerId) => {
@@ -1358,6 +1373,8 @@ export default function MissionCanvasPage() {
   }, [
     activeLayers,
     amclPose,
+    btActiveNodes,
+    btStatus,
     footprint,
     globalCostmap,
     goalPose,

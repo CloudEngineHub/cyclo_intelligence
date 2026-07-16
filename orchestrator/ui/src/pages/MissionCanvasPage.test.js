@@ -41,6 +41,14 @@ function amclPoseMessage(x, y, yaw, covarianceValue = 0.05) {
   };
 }
 
+function stringTopicMessage(data) {
+  return { available: true, data: { data } };
+}
+
+function topicRow(topic) {
+  return screen.getByText(topic).parentElement;
+}
+
 jest.mock('../components/navigation/MapViewer', () => ({
   MapViewer: (props) => mockMapViewer(props),
 }));
@@ -250,10 +258,25 @@ test('shows Waypoint and BT authoring panels in the authoring stage', async () =
   expect(screen.getByText('/map')).toBeInTheDocument();
   expect(screen.getByText('/bt/status')).toBeInTheDocument();
   expect(screen.getByText('/bt/active_nodes')).toBeInTheDocument();
+  expect(topicRow('/bt/status')).toHaveTextContent('wait');
+  expect(topicRow('/bt/active_nodes')).toHaveTextContent('wait');
   expect(screen.queryByText('/scan')).not.toBeInTheDocument();
   expect(screen.queryByText('/global_costmap/costmap')).not.toBeInTheDocument();
   await waitFor(() => expect(getServiceStatus).toHaveBeenCalled());
   await waitFor(() => expect(getNavigationSpots).toHaveBeenCalledWith('map'));
+});
+
+test('marks BT topics live when BT topic messages are available', async () => {
+  mockTopicDataByName['/bt/status'] = stringTopicMessage('stopped');
+  mockTopicDataByName['/bt/active_nodes'] = stringTopicMessage('');
+
+  render(<MissionCanvasPage />);
+
+  fireEvent.click(screen.getByRole('tab', { name: 'Design' }));
+
+  expect(topicRow('/bt/status')).toHaveTextContent('live');
+  expect(topicRow('/bt/active_nodes')).toHaveTextContent('live');
+  await waitFor(() => expect(getServiceStatus).toHaveBeenCalled());
 });
 
 test('loads a saved map into the design stage', async () => {
