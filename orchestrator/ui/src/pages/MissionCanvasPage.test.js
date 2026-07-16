@@ -480,6 +480,7 @@ test('starts localization and publishes an initial robot pose from the waypoint 
     y: -0.5,
     yaw: 0.75,
     frameId: 'map',
+    mapName: 'factory',
   }));
   await waitFor(() => expect(mockPublishRosTopic).toHaveBeenCalledWith(
     '/initialpose',

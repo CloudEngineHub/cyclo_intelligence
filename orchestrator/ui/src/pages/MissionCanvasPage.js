@@ -1631,7 +1631,13 @@ export default function MissionCanvasPage() {
   const sendInitialPose = useCallback(async (x, y, yaw) => {
     const orientation = orientationFromYaw(yaw);
     try {
-      const result = await sendInitialPoseEstimate({ x, y, yaw, frameId: "map" });
+      const result = await sendInitialPoseEstimate({
+        x,
+        y,
+        yaw,
+        frameId: "map",
+        mapName: currentMapName,
+      });
       publishRosTopic(
         "/initialpose",
         "geometry_msgs/msg/PoseWithCovarianceStamped",
@@ -1662,7 +1668,7 @@ export default function MissionCanvasPage() {
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Initial pose publish failed");
     }
-  }, [publishRosTopic]);
+  }, [currentMapName, publishRosTopic]);
 
   const handleSetRobotPoseMode = useCallback(() => {
     if (!designMapAvailable) {

@@ -637,6 +637,7 @@ def test_navigation_initial_pose_publishes_from_ai_worker(monkeypatch):
         return 0, "Published initial pose"
 
     monkeypatch.setattr(navigation, "_exec", fake_exec)
+    monkeypatch.setattr(navigation, "_initialpose_subscription_count", lambda: 1)
     monkeypatch.setenv("ROS_DOMAIN_ID", "30")
     monkeypatch.setenv("RMW_IMPLEMENTATION", "rmw_fastrtps_cpp")
 
@@ -665,6 +666,7 @@ def test_navigation_initial_pose_filters_zenoh_warning(monkeypatch):
         )
 
     monkeypatch.setattr(navigation, "_exec", fake_exec)
+    monkeypatch.setattr(navigation, "_initialpose_subscription_count", lambda: 1)
 
     result = navigation.send_initial_pose(
         navigation.InitialPoseRequest(x=-2.351, y=0.168, yaw=3.142)
@@ -676,6 +678,39 @@ def test_navigation_initial_pose_filters_zenoh_warning(monkeypatch):
         "(-2.351, 0.168, yaw=3.142, subscribers=1)"
     )
     assert "WARN" not in result.message
+
+
+def test_navigation_initial_pose_starts_localization_when_amcl_missing(monkeypatch):
+    calls = []
+
+    monkeypatch.setattr(
+        navigation,
+        "_initialpose_subscription_count",
+        lambda: calls.append("count") or 0,
+    )
+    monkeypatch.setattr(
+        navigation,
+        "_start_localization_mode",
+        lambda map_name: calls.append(("localize", map_name)) or "started",
+    )
+    monkeypatch.setattr(
+        navigation,
+        "_publish_initial_pose",
+        lambda request: calls.append(("publish", request.map_name)) or "published",
+    )
+
+    result = navigation.send_initial_pose(
+        navigation.InitialPoseRequest(
+            x=1.0,
+            y=2.0,
+            yaw=0.5,
+            map_name="factory",
+        )
+    )
+
+    assert result.ok
+    assert result.message == "published"
+    assert calls == ["count", ("localize", "factory"), ("publish", "factory")]
 
 
 def _container_with_mounts(*destinations):

@@ -90,7 +90,7 @@ export function cancelNavigateToPoseGoal() {
   return request('/cancel', { method: 'POST' });
 }
 
-export function sendInitialPoseEstimate({ x, y, yaw, frameId = 'map' }) {
+export function sendInitialPoseEstimate({ x, y, yaw, frameId = 'map', mapName }) {
   return request('/initial-pose', {
     method: 'POST',
     body: JSON.stringify({
@@ -98,6 +98,7 @@ export function sendInitialPoseEstimate({ x, y, yaw, frameId = 'map' }) {
       y,
       yaw,
       frame_id: frameId,
+      ...(mapName ? { map_name: mapName } : {}),
     }),
   });
 }

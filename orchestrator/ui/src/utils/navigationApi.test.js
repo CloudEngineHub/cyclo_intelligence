@@ -75,7 +75,12 @@ test('uses self-hosted endpoints for map files and action cancellation', async (
 });
 
 test('sends initial pose estimates through the supervisor API', async () => {
-  await sendInitialPoseEstimate({ x: 1.2, y: -0.4, yaw: 0.7 });
+  await sendInitialPoseEstimate({
+    x: 1.2,
+    y: -0.4,
+    yaw: 0.7,
+    mapName: 'factory',
+  });
 
   expect(global.fetch).toHaveBeenCalledWith(
     '/api/navigation/initial-pose',
@@ -86,6 +91,7 @@ test('sends initial pose estimates through the supervisor API', async () => {
         y: -0.4,
         yaw: 0.7,
         frame_id: 'map',
+        map_name: 'factory',
       }),
     })
   );

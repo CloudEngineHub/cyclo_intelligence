@@ -139,6 +139,7 @@ class InitialPoseRequest(BaseModel):
     y: float
     yaw: float
     frame_id: str = Field(default="map", min_length=1, max_length=64)
+    map_name: Optional[str] = Field(default=None, min_length=1, max_length=128)
 
 
 class PgmSaveRequest(BaseModel):
@@ -727,6 +728,34 @@ echo "localization launched pid=${{PID}} map=${{MAP_PATH}}"
     return output or "Localization launched"
 
 
+def _start_localization_mode(map_name: str) -> str:
+    _request_s6_service_down(NAVIGATION_SERVICE)
+    _force_stop_navigation_processes()
+    _s6_command(NAVIGATION_SERVICE, "down", retries=15, retry_delay=0.2)
+    _clear_navigation_runtime_files()
+    _write_runtime_file("/run/navigation_type", "localize")
+    _write_runtime_file(
+        f"/run/launch_args/{NAVIGATION_SERVICE}",
+        f"map_name:={map_name}",
+    )
+    return _start_localization_process(map_name)
+
+
+def _initialpose_subscription_count() -> int:
+    command = (
+        _ros_shell_prefix()
+        + "timeout 5s ros2 topic info /initialpose"
+    )
+    code, output = _exec(
+        ["bash", "--noprofile", "--norc", "-c", command],
+        environment=_ros_exec_environment(),
+    )
+    if code != 0:
+        return 0
+    match = re.search(r"Subscription count:\s*(\d+)", output)
+    return int(match.group(1)) if match else 0
+
+
 def _finite_pose_value(value: float, name: str) -> float:
     number = float(value)
     if not math.isfinite(number):
@@ -795,6 +824,12 @@ while publisher.get_subscription_count() == 0 and time.monotonic() < deadline:
     rclpy.spin_once(node, timeout_sec=0.1)
 
 subscriber_count = publisher.get_subscription_count()
+if subscriber_count == 0:
+    node.destroy_node()
+    rclpy.shutdown()
+    print("No AMCL subscriber found on /initialpose")
+    raise SystemExit(2)
+
 message = PoseWithCovarianceStamped()
 message.header.frame_id = payload["frame_id"]
 message.pose.pose.position.x = payload["x"]
@@ -848,18 +883,13 @@ def navigation_status():
 @router.post("/start", response_model=ActionResult)
 def navigation_start(request: NavigationStartRequest):
     map_name = _validate_map_name(request.map_name)
+    if request.mode == "localize":
+        message = _start_localization_mode(map_name)
+        return ActionResult(ok=True, message=message)
     _request_s6_service_down(NAVIGATION_SERVICE)
     _force_stop_navigation_processes()
     _s6_command(NAVIGATION_SERVICE, "down", retries=15, retry_delay=0.2)
     _clear_navigation_runtime_files()
-    if request.mode == "localize":
-        _write_runtime_file("/run/navigation_type", request.mode)
-        _write_runtime_file(
-            f"/run/launch_args/{NAVIGATION_SERVICE}",
-            f"map_name:={map_name}",
-        )
-        message = _start_localization_process(map_name)
-        return ActionResult(ok=True, message=message)
     if request.mode == "map":
         GRID_CACHES["/map"].clear()
     _write_runtime_file("/run/navigation_type", request.mode)
@@ -953,6 +983,8 @@ def cancel_goal():
 
 @router.post("/initial-pose", response_model=ActionResult)
 def send_initial_pose(request: InitialPoseRequest):
+    if request.map_name and _initialpose_subscription_count() == 0:
+        _start_localization_mode(_validate_map_name(request.map_name))
     return ActionResult(ok=True, message=_publish_initial_pose(request))
 
 
