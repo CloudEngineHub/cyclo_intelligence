@@ -66,6 +66,7 @@ NAVIGATION_PARAMS_FILE = (
 MAP_SAVE_CLI_TIMEOUT_SECONDS = 20
 SAVE_MAP_WAIT_SECONDS = 12.0
 _SAFE_MAP_NAME = re.compile(r"^[A-Za-z0-9_.-]+$")
+_ANSI_ESCAPE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
 @router.websocket("/topics/ws")
 async def navigation_grid_websocket(websocket: WebSocket, topic: str):
     """Send the latest grid initially, then only when its data CRC changes."""
@@ -743,6 +744,19 @@ def _safe_frame_id(value: str) -> str:
     return frame_id
 
 
+def _strip_ansi(value: str) -> str:
+    return _ANSI_ESCAPE.sub("", value)
+
+
+def _initial_pose_success_message(output: str) -> str:
+    cleaned = _strip_ansi(output or "")
+    for line in reversed(cleaned.splitlines()):
+        text = line.strip()
+        if text.startswith("Published initial pose to /initialpose"):
+            return text
+    return "Published initial pose"
+
+
 def _publish_initial_pose(request: InitialPoseRequest) -> str:
     x = _finite_pose_value(request.x, "x")
     y = _finite_pose_value(request.y, "y")
@@ -817,7 +831,7 @@ print(
     )
     if code != 0:
         raise HTTPException(503, output or "Initial pose publish failed")
-    return output or "Published initial pose"
+    return _initial_pose_success_message(output)
 
 
 @router.get("/status", response_model=NavigationStatus)

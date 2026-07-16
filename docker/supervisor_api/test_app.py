@@ -655,6 +655,29 @@ def test_navigation_initial_pose_publishes_from_ai_worker(monkeypatch):
     }
 
 
+def test_navigation_initial_pose_filters_zenoh_warning(monkeypatch):
+    def fake_exec(command, *, environment=None, timeout=None):
+        return 0, (
+            "\x1b[2m2026-07-16T02:40:40.578237Z\x1b[0m "
+            "\x1b[33m WARN\x1b[0m zenoh: Scouting delay elapsed\n"
+            "Published initial pose to /initialpose "
+            "(-2.351, 0.168, yaw=3.142, subscribers=1)"
+        )
+
+    monkeypatch.setattr(navigation, "_exec", fake_exec)
+
+    result = navigation.send_initial_pose(
+        navigation.InitialPoseRequest(x=-2.351, y=0.168, yaw=3.142)
+    )
+
+    assert result.ok
+    assert result.message == (
+        "Published initial pose to /initialpose "
+        "(-2.351, 0.168, yaw=3.142, subscribers=1)"
+    )
+    assert "WARN" not in result.message
+
+
 def _container_with_mounts(*destinations):
     return SimpleNamespace(
         attrs={
