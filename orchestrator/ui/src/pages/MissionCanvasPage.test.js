@@ -306,6 +306,55 @@ test('hides loaded design waypoints after returning to mapping stage', async () 
   expect(latestMapViewerProps().map).toBeNull();
 });
 
+test('renders legacy pixel-coordinate waypoints in loaded map coordinates', async () => {
+  const latestMapViewerProps = () => (
+    mockMapViewer.mock.calls[mockMapViewer.mock.calls.length - 1][0]
+  );
+  getPgmFiles.mockResolvedValue({
+    files: [{ path: 'factory.pgm', name: 'factory.pgm' }],
+  });
+  getPgmImage.mockResolvedValue({
+    path: 'factory.pgm',
+    width: 100,
+    height: 100,
+    resolution: 0.05,
+    origin: {
+      position: { x: -1, y: -2, z: 0 },
+      orientation: { x: 0, y: 0, z: 0, w: 1 },
+    },
+    maxval: 255,
+    pixels_base64: 'AA==',
+  });
+  getNavigationSpots.mockResolvedValue({
+    map_name: 'factory',
+    spots: [{
+      id: 'legacy_spot',
+      map_name: 'factory',
+      label: 'Legacy Waypoint',
+      pose: { frame_id: 'map', x: 50, y: 20, yaw: 0.5 },
+      linked_bt_tree: '',
+      metadata: {},
+    }],
+  });
+
+  render(<MissionCanvasPage />);
+
+  fireEvent.click(screen.getByRole('tab', { name: 'Design' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Load Map' }));
+  await screen.findByRole('combobox', { name: 'Design map file' });
+  fireEvent.click(screen.getByRole('button', { name: 'Load' }));
+
+  await waitFor(() => expect(latestMapViewerProps().map).toMatchObject({
+    info: { resolution: 0.05 },
+  }));
+  await waitFor(() => {
+    expect(latestMapViewerProps().spots).toHaveLength(1);
+    expect(latestMapViewerProps().spots[0].pose.x).toBeCloseTo(1.5);
+    expect(latestMapViewerProps().spots[0].pose.y).toBeCloseTo(-1);
+    expect(latestMapViewerProps().spots[0].metadata.coordinate_space).toBe('legacy_cell_display');
+  });
+});
+
 test('shows waypoint actions in Properties after placing a waypoint', async () => {
   const latestMapViewerProps = () => (
     mockMapViewer.mock.calls[mockMapViewer.mock.calls.length - 1][0]
@@ -344,6 +393,7 @@ test('shows waypoint actions in Properties after placing a waypoint', async () =
     map_name: 'factory',
     label: 'Waypoint 1',
     pose: { frame_id: 'map', x: 1, y: 2, yaw: 0.25 },
+    metadata: { source: 'mission_canvas', coordinate_space: 'map' },
   }));
   expect(screen.getByDisplayValue('Waypoint A')).toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Waypoint' })).toHaveAttribute('aria-pressed', 'true');
@@ -359,6 +409,7 @@ test('shows waypoint actions in Properties after placing a waypoint', async () =
   await waitFor(() => expect(updateNavigationSpot).toHaveBeenCalledWith('spot_a', {
     map_name: 'factory',
     pose: { frame_id: 'map', x: 4, y: 5, yaw: 0.25 },
+    metadata: { coordinate_space: 'map' },
   }));
   await waitFor(() => expect(latestMapViewerProps().spots[0].pose).toMatchObject({
     x: 4,
@@ -468,6 +519,7 @@ test('creates a waypoint at the current robot pose from the design toolbar', asy
   expect(payload.pose.x).toBeCloseTo(2.5);
   expect(payload.pose.y).toBeCloseTo(-1.25);
   expect(payload.pose.yaw).toBeCloseTo(robotYaw);
+  expect(payload.metadata).toEqual({ source: 'mission_canvas', coordinate_space: 'map' });
   await waitFor(() => expect(screen.getByText('Created Waypoint A at robot')).toBeInTheDocument());
 });
 

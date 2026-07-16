@@ -187,6 +187,78 @@ function spotPoseFromMapPose(x, y, yaw) {
   };
 }
 
+function mapPlacementMeta(grid) {
+  const info = grid?.info;
+  const width = Number(info?.width ?? 0);
+  const height = Number(info?.height ?? 0);
+  const resolution = Number(info?.resolution ?? 0);
+  const origin = info?.origin ?? {};
+  const originX = Number(origin.position?.x ?? 0);
+  const originY = Number(origin.position?.y ?? 0);
+  const originYaw = yawFromPose(origin);
+  if (!width || !height || !resolution) return null;
+  return {
+    width,
+    height,
+    resolution,
+    widthMeters: width * resolution,
+    heightMeters: height * resolution,
+    originX,
+    originY,
+    originYaw,
+  };
+}
+
+function pointInMapBounds(x, y, meta) {
+  const dx = x - meta.originX;
+  const dy = y - meta.originY;
+  const cos = Math.cos(meta.originYaw);
+  const sin = Math.sin(meta.originYaw);
+  const localX = cos * dx + sin * dy;
+  const localY = -sin * dx + cos * dy;
+  const padding = meta.resolution * 4;
+  return (
+    localX >= -padding &&
+    localX <= meta.widthMeters + padding &&
+    localY >= -padding &&
+    localY <= meta.heightMeters + padding
+  );
+}
+
+function legacyCellPointToMap(x, y, meta) {
+  const localX = x * meta.resolution;
+  const localY = y * meta.resolution;
+  const cos = Math.cos(meta.originYaw);
+  const sin = Math.sin(meta.originYaw);
+  return {
+    x: meta.originX + cos * localX - sin * localY,
+    y: meta.originY + sin * localX + cos * localY,
+  };
+}
+
+function spotForMapDisplay(spot, grid) {
+  const pose = spot?.pose;
+  const meta = mapPlacementMeta(grid);
+  if (!pose || !meta || spot.metadata?.coordinate_space === "map") return spot;
+  const x = Number(pose.x ?? 0);
+  const y = Number(pose.y ?? 0);
+  const looksLikeLegacyCell = x >= 0 && x <= meta.width && y >= 0 && y <= meta.height;
+  if (!looksLikeLegacyCell || pointInMapBounds(x, y, meta)) return spot;
+  const converted = legacyCellPointToMap(x, y, meta);
+  return {
+    ...spot,
+    pose: {
+      ...pose,
+      x: converted.x,
+      y: converted.y,
+    },
+    metadata: {
+      ...(spot.metadata ?? {}),
+      coordinate_space: "legacy_cell_display",
+    },
+  };
+}
+
 function behaviorNodeDefinition(tag) {
   return FALLBACK_CATALOG.find((node) => node.tag === tag) || {
     tag,
@@ -1048,10 +1120,6 @@ export default function MissionCanvasPage() {
       activeLayers.robotModel
     )
   );
-  const selectedSpot = useMemo(
-    () => spots.find((spot) => spot.id === selectedSpotId) || null,
-    [selectedSpotId, spots],
-  );
   const activeBehaviorNodes = useMemo(
     () => behaviorNodes.filter((node) => node.map_name === currentMapName),
     [behaviorNodes, currentMapName],
@@ -1112,9 +1180,22 @@ export default function MissionCanvasPage() {
   const bufferedTf = tfMessageFromBuffer(tfBufferRef.current) ?? latestTf;
   const fallbackPose = amclPose?.pose?.pose ?? null;
   const currentPose = poseFromBaseLinkTf(bufferedTf) ?? fallbackPose;
+  const displayedMap = mappingEditorActive
+    ? mapEditor.map
+    : designMapActive
+      ? designMapEditor.map
+      : map;
   const designMapAvailable = !!map || !!designMapEditor.map;
   const robotPoseAvailable = !!currentPose?.position;
   const robotLocalized = running && robotPoseAvailable;
+  const visibleSpots = useMemo(
+    () => spots.map((spot) => spotForMapDisplay(spot, displayedMap)),
+    [displayedMap, spots],
+  );
+  const selectedSpot = useMemo(
+    () => visibleSpots.find((spot) => spot.id === selectedSpotId) || null,
+    [selectedSpotId, visibleSpots],
+  );
   const layerToggles = useMemo(() => (
     STAGE_LAYER_IDS[workspaceStage].map((id) => ({
       id,
@@ -1546,6 +1627,7 @@ export default function MissionCanvasPage() {
         map_name: currentMapName,
         label,
         pose: spotPoseFromMapPose(x, y, yaw),
+        metadata: { source: "mission_canvas", coordinate_space: "map" },
       });
       setSpots((current) => [...current, created]);
       setSelectedSpotId(created.id);
@@ -1585,6 +1667,7 @@ export default function MissionCanvasPage() {
         map_name: currentMapName,
         label,
         pose: spotPoseFromMapPose(x, y, yaw),
+        metadata: { source: "mission_canvas", coordinate_space: "map" },
       });
       setSpots((current) => [...current, created]);
       setSelectedSpotId(created.id);
@@ -1615,6 +1698,10 @@ export default function MissionCanvasPage() {
       const updated = await updateNavigationSpot(spotId, {
         map_name: spot.map_name,
         pose: nextPose,
+        metadata: {
+          ...(spot.metadata ?? {}),
+          coordinate_space: "map",
+        },
       });
       setSpots((current) => current.map((item) => (
         item.id === updated.id ? updated : item
@@ -1962,7 +2049,7 @@ export default function MissionCanvasPage() {
           ].join(" ")}
         >
           <MapViewer
-            map={mappingEditorActive ? mapEditor.map : designMapActive ? designMapEditor.map : map}
+            map={displayedMap}
             globalCostmap={mappingEditorActive ? null : needsGlobalCostmap ? globalCostmap : null}
             localCostmap={mappingEditorActive ? null : needsLocalCostmap ? localCostmap : null}
             scan={mappingEditorActive ? null : needsScan ? scan : null}
@@ -1971,7 +2058,7 @@ export default function MissionCanvasPage() {
             goalPose={mappingEditorActive ? null : needsGoalPose ? goalPose : null}
             footprint={mappingEditorActive ? null : needsRobotModel ? footprint : null}
             tf={mappingEditorActive ? null : needsTf ? bufferedTf : null}
-            spots={missionOverlayActive ? spots : []}
+            spots={missionOverlayActive ? visibleSpots : []}
             selectedSpotId={missionOverlayActive ? selectedSpotId : ""}
             behaviorNodes={missionOverlayActive ? activeBehaviorNodes : []}
             selectedBehaviorNodeId={missionOverlayActive ? selectedBehaviorNodeId : ""}
