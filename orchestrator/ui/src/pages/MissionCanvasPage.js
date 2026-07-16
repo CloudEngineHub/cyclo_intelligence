@@ -7,8 +7,10 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  configureDesignLocalizationAmcl,
   getServiceStatus,
   getPgmFiles,
+  requestNoMotionUpdate,
   saveNavigationMap,
   sendInitialPoseEstimate,
   startNavigation,
@@ -25,7 +27,6 @@ import { MapEditorControls, useMapEditor } from "../components/navigation/MapEdi
 import { MapViewer } from "../components/navigation/MapViewer";
 import {
   mergeTfMessages,
-  orientationFromYaw,
   poseFromBaseLinkTf,
   tfMessageFromBuffer,
   updateTfBuffer,
@@ -35,6 +36,12 @@ import { FALLBACK_CATALOG } from "../constants/btNodeCatalogFallback";
 
 const DEFAULT_MAP_NAME = "map";
 const STATUS_POLL_MS = 10000;
+const NOMOTION_UPDATE_INTERVAL_MS = 1000;
+const AUTO_LOCALIZE_MAX_UPDATES = 10;
+const AUTO_LOCALIZE_MIN_UPDATES = 3;
+const AUTO_LOCALIZE_UPDATE_DELAY_MS = 700;
+const AUTO_LOCALIZE_XY_COVARIANCE_MAX = 0.6;
+const AUTO_LOCALIZE_YAW_COVARIANCE_MAX = 0.5;
 const ROS2_WS_FAST_TOPIC_OPTIONS = { throttleMs: 100 };
 const STAGE_MAPPING = "mapping";
 const STAGE_AUTHORING = "authoring";
@@ -144,7 +151,6 @@ const TOPIC_ORDER = [
 ];
 
 const MISSION_BORDER = "#e5e7eb";
-const MISSION_BORDER_SOFT = "#e5e7eb";
 const MISSION_BUTTON_BORDER = "#cbd5e1";
 const MISSION_PANEL_BORDER = "#cbd5e1";
 const MISSION_STAGE_FILL = MISSION_BORDER;
@@ -166,18 +172,30 @@ const TELEOP_DEFAULT_LINEAR_SPEED = 0.4;
 const TELEOP_DEFAULT_ANGULAR_SPEED = 0.8;
 const TELEOP_STOP = { linearX: 0, angularZ: 0 };
 
-function rosTimestampNow() {
-  const nowMs = Date.now();
-  const sec = Math.floor(nowMs / 1000);
-  const nanosec = Math.floor((nowMs % 1000) * 1000000);
-  return { sec, nanosec };
-}
-
 function messageData(value) {
   if (!value || typeof value !== "object") return null;
   if (value.available === false) return null;
   const data = "data" in value ? value.data : value;
   return data && typeof data === "object" ? data : null;
+}
+
+function delay(ms) {
+  return new Promise((resolve) => {
+    window.setTimeout(resolve, ms);
+  });
+}
+
+function amclPoseLooksLocalized(amclPose) {
+  const covariance = amclPose?.pose?.covariance;
+  if (!Array.isArray(covariance) || covariance.length < 36) return false;
+  const xVariance = Number(covariance[0]);
+  const yVariance = Number(covariance[7]);
+  const yawVariance = Number(covariance[35]);
+  if (![xVariance, yVariance, yawVariance].every(Number.isFinite)) return false;
+  return (
+    Math.max(xVariance, yVariance) <= AUTO_LOCALIZE_XY_COVARIANCE_MAX &&
+    yawVariance <= AUTO_LOCALIZE_YAW_COVARIANCE_MAX
+  );
 }
 
 function spotPoseFromMapPose(x, y, yaw) {
@@ -312,6 +330,15 @@ function initialWorkspaceStage(session) {
 function initialNavigationRuntimeMode(session) {
   const mode = session?.navigationRuntimeMode;
   return ["idle", "mapping", "localization", "run"].includes(mode) ? mode : "idle";
+}
+
+function navigationRuntimeModeFromStatus(status) {
+  if (status?.is_up === false) return "idle";
+  if (!status?.is_up) return "";
+  if (status.mode === "map" || status.mode === "mapping") return "mapping";
+  if (status.mode === "localize" || status.mode === "localization") return "localization";
+  if (status.mode === "nav" || status.mode === "run") return "run";
+  return "";
 }
 
 function readDesignStore() {
@@ -1091,8 +1118,10 @@ export default function MissionCanvasPage() {
   }
   const initialSession = initialSessionRef.current;
   const statusLoadingRef = useRef(false);
-  const posePublishBusyRef = useRef(false);
+  const nomotionUpdateBusyRef = useRef(false);
   const tfBufferRef = useRef(new Map());
+  const currentPoseRef = useRef(null);
+  const amclPoseRef = useRef(null);
   const behaviorNodeSerialRef = useRef(0);
   const [mapName, setMapName] = useState(() => (
     typeof initialSession.mapName === "string" && initialSession.mapName.trim()
@@ -1109,7 +1138,10 @@ export default function MissionCanvasPage() {
   const [message, setMessage] = useState("Ready");
   const [interactionMode, setInteractionMode] = useState("view");
   const [showWaypointOptions, setShowWaypointOptions] = useState(false);
-  const [posePublishBusy, setPosePublishBusy] = useState(false);
+  const [designPoseInitialized, setDesignPoseInitialized] = useState(() => (
+    initialNavigationRuntimeMode(initialSession) === "localization" &&
+    initialSession.designPoseInitialized === true
+  ));
   const [navigationRuntimeMode, setNavigationRuntimeMode] = useState(() => (
     initialNavigationRuntimeMode(initialSession)
   ));
@@ -1146,13 +1178,25 @@ export default function MissionCanvasPage() {
   const missionOverlayActive = workspaceStage !== STAGE_MAPPING && !mappingEditorActive;
   const designMapActive = workspaceStage === STAGE_AUTHORING && !!designMapPath;
   const robotPoseCaptureActive = workspaceStage === STAGE_AUTHORING;
-  const navigationTopicsActive = running && busy !== "Stop" && !mappingEditorActive;
   const mappingRuntimeActive = running && navigationRuntimeMode === "mapping";
+  const runRuntimeActive = running && navigationRuntimeMode === "run";
   const designLocalizationActive = (
     workspaceStage === STAGE_AUTHORING &&
     running &&
     navigationRuntimeMode === "localization"
   );
+  const mappingTopicsActive = (
+    workspaceStage === STAGE_MAPPING &&
+    mappingRuntimeActive &&
+    busy !== "Stop" &&
+    !mappingEditorActive
+  );
+  const runTopicsActive = (
+    workspaceStage === STAGE_RUN &&
+    runRuntimeActive &&
+    busy !== "Stop"
+  );
+  const stageNavigationTopicsActive = mappingTopicsActive || runTopicsActive;
   const activeLayers = layersByStage[workspaceStage] || LAYER_PRESETS[workspaceStage];
   const currentMapName = mapName.trim() || DEFAULT_MAP_NAME;
   const mapEditor = useMapEditor({
@@ -1167,24 +1211,28 @@ export default function MissionCanvasPage() {
     onMessage: setMessage,
     reloadToken: designMapReloadToken,
   });
-  const needsGlobalCostmap = navigationTopicsActive && activeLayers.globalCostmap;
-  const needsLocalCostmap = navigationTopicsActive && activeLayers.localCostmap;
-  const needsScan = designLocalizationActive || (navigationTopicsActive && activeLayers.scan);
-  const needsGoalPose = navigationTopicsActive && activeLayers.goalPose;
-  const needsPlan = navigationTopicsActive && activeLayers.globalPlan;
+  const needsGlobalCostmap = stageNavigationTopicsActive && activeLayers.globalCostmap;
+  const needsLocalCostmap = stageNavigationTopicsActive && activeLayers.localCostmap;
+  const needsScan = designLocalizationActive || (stageNavigationTopicsActive && activeLayers.scan);
+  const needsGoalPose = stageNavigationTopicsActive && activeLayers.goalPose;
+  const needsPlan = stageNavigationTopicsActive && activeLayers.globalPlan;
   const needsRobotModel = designLocalizationActive || (
-    navigationTopicsActive && activeLayers.robotModel
+    stageNavigationTopicsActive && activeLayers.robotModel
   );
   const needsAmclPose = robotPoseCaptureActive || (
-    navigationTopicsActive && (needsRobotModel || needsScan)
+    stageNavigationTopicsActive && (needsRobotModel || needsScan)
   );
   const needsTf = robotPoseCaptureActive || (
-    navigationTopicsActive && (
+    stageNavigationTopicsActive && (
       activeLayers.tf ||
       activeLayers.scan ||
       activeLayers.robotModel
     )
   );
+  const needsMap = (
+    stageNavigationTopicsActive ||
+    designLocalizationActive
+  ) && activeLayers.map;
   const activeBehaviorNodes = useMemo(
     () => behaviorNodes.filter((node) => node.map_name === currentMapName),
     [behaviorNodes, currentMapName],
@@ -1197,7 +1245,7 @@ export default function MissionCanvasPage() {
     pendingBehaviorNodeTag ? behaviorNodeDefinition(pendingBehaviorNodeTag) : null
   ), [pendingBehaviorNodeTag]);
   const { topicData: mapData } = useNavigationRosTopic(
-    navigationTopicsActive && activeLayers.map ? "/map" : null,
+    needsMap ? "/map" : null,
   );
   const { topicData: globalCostmapData } = useNavigationRosTopic(
     needsGlobalCostmap ? "/global_costmap/costmap" : null,
@@ -1251,8 +1299,6 @@ export default function MissionCanvasPage() {
       ? designMapEditor.map
       : map;
   const designMapAvailable = !!map || !!designMapEditor.map;
-  const robotPoseAvailable = !!currentPose?.position;
-  const robotLocalized = running && robotPoseAvailable;
   const visibleSpots = useMemo(
     () => spots.map((spot) => spotForMapDisplay(spot, displayedMap)),
     [displayedMap, spots],
@@ -1370,25 +1416,73 @@ export default function MissionCanvasPage() {
   }, [loadSpots]);
 
   useEffect(() => {
+    currentPoseRef.current = currentPose;
+  }, [currentPose]);
+
+  useEffect(() => {
+    amclPoseRef.current = amclPose;
+  }, [amclPose]);
+
+  useEffect(() => {
+    if (workspaceStage !== STAGE_AUTHORING || designMapPath) return;
+    const fallbackPath = pgmPathFromMapName(currentMapName);
+    if (fallbackPath) setDesignMapPath(fallbackPath);
+  }, [currentMapName, designMapPath, workspaceStage]);
+
+  useEffect(() => {
     saveMissionSession({
       mapName: currentMapName,
       workspaceStage,
       designMapPath,
       navigationRuntimeMode,
+      designPoseInitialized,
     });
-  }, [currentMapName, designMapPath, navigationRuntimeMode, workspaceStage]);
+  }, [currentMapName, designMapPath, designPoseInitialized, navigationRuntimeMode, workspaceStage]);
 
   useEffect(() => {
-    if (status?.is_up === false) {
-      setNavigationRuntimeMode("idle");
+    const statusMode = navigationRuntimeModeFromStatus(status);
+    if (statusMode) {
+      setNavigationRuntimeMode(statusMode);
+      if (statusMode === "idle") setDesignPoseInitialized(false);
     }
   }, [status]);
+
+  useEffect(() => {
+    if (!designLocalizationActive || !designPoseInitialized) {
+      return undefined;
+    }
+    let cancelled = false;
+    const tick = async () => {
+      if (cancelled || nomotionUpdateBusyRef.current) return;
+      nomotionUpdateBusyRef.current = true;
+      try {
+        await requestNoMotionUpdate();
+      } catch (error) {
+        console.warn("No-motion AMCL update failed:", error);
+      } finally {
+        nomotionUpdateBusyRef.current = false;
+      }
+    };
+    void tick();
+    const interval = window.setInterval(tick, NOMOTION_UPDATE_INTERVAL_MS);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [designLocalizationActive, designPoseInitialized]);
 
   useEffect(() => {
     if (updateTfBuffer(tfBufferRef.current, latestTf)) {
       setTfBufferRevision((value) => value + 1);
     }
   }, [latestTf]);
+
+  const clearLocalizationPoseCache = useCallback(() => {
+    tfBufferRef.current.clear();
+    currentPoseRef.current = null;
+    amclPoseRef.current = null;
+    setTfBufferRevision((value) => value + 1);
+  }, []);
 
   useEffect(() => {
     if (!mappingEditorActive || !mapEditor.selectedPath) return;
@@ -1495,10 +1589,12 @@ export default function MissionCanvasPage() {
       setWorkspaceStage(STAGE_RUN);
       await startNavigation("nav", mapName.trim() || DEFAULT_MAP_NAME);
       setNavigationRuntimeMode("run");
+      setDesignPoseInitialized(false);
       saveMissionSession({
         mapName: mapName.trim() || DEFAULT_MAP_NAME,
         workspaceStage: STAGE_RUN,
         navigationRuntimeMode: "run",
+        designPoseInitialized: false,
       });
     },
   ), [mapName, runCommand]);
@@ -1546,10 +1642,12 @@ export default function MissionCanvasPage() {
       setShowPgmFix(false);
       await startNavigation("map", mapName.trim() || DEFAULT_MAP_NAME);
       setNavigationRuntimeMode("mapping");
+      setDesignPoseInitialized(false);
       saveMissionSession({
         mapName: mapName.trim() || DEFAULT_MAP_NAME,
         workspaceStage: STAGE_MAPPING,
         navigationRuntimeMode: "mapping",
+        designPoseInitialized: false,
       });
     },
   ), [mapName, runCommand]);
@@ -1593,7 +1691,8 @@ export default function MissionCanvasPage() {
     async () => {
       const result = await stopNavigation();
       setNavigationRuntimeMode("idle");
-      saveMissionSession({ navigationRuntimeMode: "idle" });
+      setDesignPoseInitialized(false);
+      saveMissionSession({ navigationRuntimeMode: "idle", designPoseInitialized: false });
       return result;
     },
   ), [runCommand]);
@@ -1628,79 +1727,6 @@ export default function MissionCanvasPage() {
     setShowWaypointOptions((value) => !value);
   }, []);
 
-  const sendInitialPose = useCallback(async (x, y, yaw) => {
-    const orientation = orientationFromYaw(yaw);
-    try {
-      const result = await sendInitialPoseEstimate({
-        x,
-        y,
-        yaw,
-        frameId: "map",
-        mapName: currentMapName,
-      });
-      publishRosTopic(
-        "/initialpose",
-        "geometry_msgs/msg/PoseWithCovarianceStamped",
-        {
-          header: {
-            frame_id: "map",
-            stamp: rosTimestampNow(),
-          },
-          pose: {
-            pose: {
-              position: { x, y, z: 0 },
-              orientation,
-            },
-            covariance: [
-              0.25, 0, 0, 0, 0, 0,
-              0, 0.25, 0, 0, 0, 0,
-              0, 0, 0, 0, 0, 0,
-              0, 0, 0, 0, 0, 0,
-              0, 0, 0, 0, 0, 0,
-              0, 0, 0, 0, 0, 0.0685,
-            ],
-          },
-        },
-      ).catch((error) => {
-        console.warn("Fallback /initialpose publish failed:", error);
-      });
-      setMessage(result?.message || `Initial pose ${x.toFixed(2)}, ${y.toFixed(2)}, yaw ${(yaw * 180 / Math.PI).toFixed(0)} deg`);
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Initial pose publish failed");
-    }
-  }, [currentMapName, publishRosTopic]);
-
-  const handleSetRobotPoseMode = useCallback(() => {
-    if (!designMapAvailable) {
-      setMessage("Load a map before localizing robot");
-      return;
-    }
-    setWorkspaceStage(STAGE_AUTHORING);
-    setPendingBehaviorNodeTag("");
-    setSelectedBehaviorNodeId("");
-    setShowWaypointOptions(false);
-    void runCommand(
-      "Localize robot",
-      async () => {
-        await startNavigation("localize", currentMapName);
-        setNavigationRuntimeMode("localization");
-        saveMissionSession({
-          mapName: currentMapName,
-          workspaceStage: STAGE_AUTHORING,
-          designMapPath: designMapPath || pgmPathFromMapName(currentMapName),
-          navigationRuntimeMode: "localization",
-        });
-        setInteractionMode("initial");
-        return "Click and drag the robot pose on the map";
-      },
-    );
-  }, [
-    currentMapName,
-    designMapAvailable,
-    designMapPath,
-    runCommand,
-  ]);
-
   const handleToggleSpotMode = useCallback(() => {
     setWorkspaceStage(STAGE_AUTHORING);
     setPendingBehaviorNodeTag("");
@@ -1709,17 +1735,72 @@ export default function MissionCanvasPage() {
     setInteractionMode((value) => (value === "spot" ? "view" : "spot"));
   }, []);
 
+  const waitForAutoLocalizedPose = useCallback(async () => {
+    let latestPose = null;
+    for (let attempt = 0; attempt < AUTO_LOCALIZE_MAX_UPDATES; attempt += 1) {
+      await requestNoMotionUpdate();
+      await delay(AUTO_LOCALIZE_UPDATE_DELAY_MS);
+      const amclPoseMessage = amclPoseRef.current;
+      const pose = amclPoseMessage?.pose?.pose;
+      if (pose?.position) {
+        latestPose = pose;
+        if (
+          attempt + 1 >= AUTO_LOCALIZE_MIN_UPDATES &&
+          amclPoseLooksLocalized(amclPoseMessage)
+        ) {
+          return pose;
+        }
+      }
+    }
+    if (latestPose?.position) return latestPose;
+    throw new Error("Robot pose unavailable after automatic localization");
+  }, []);
+
   const handleCreateSpotAtPose = useCallback(async (x, y, yaw) => {
     if (interactionMode === "initial") {
-      if (posePublishBusyRef.current) return;
-      posePublishBusyRef.current = true;
-      setPosePublishBusy(true);
       setInteractionMode("view");
       setShowWaypointOptions(false);
-      void sendInitialPose(x, y, yaw).finally(() => {
-        posePublishBusyRef.current = false;
-        setPosePublishBusy(false);
-      });
+      void runCommand(
+        "At Robot",
+        async () => {
+          clearLocalizationPoseCache();
+          await sendInitialPoseEstimate({
+            x,
+            y,
+            yaw,
+            frameId: "map",
+            mapName: currentMapName,
+          });
+          setDesignPoseInitialized(true);
+          saveMissionSession({ designPoseInitialized: true });
+          const localizedPose = await waitForAutoLocalizedPose();
+          const position = localizedPose.position;
+          const localizedX = Number(position.x ?? 0);
+          const localizedY = Number(position.y ?? 0);
+          const localizedYaw = yawFromPose(localizedPose);
+          const label = `Waypoint ${spots.length + 1}`;
+          const created = await createNavigationSpot({
+            map_name: currentMapName,
+            label,
+            pose: spotPoseFromMapPose(localizedX, localizedY, localizedYaw),
+            metadata: { source: "mission_canvas", coordinate_space: "map" },
+          });
+          setSpots((current) => [...current, created]);
+          setSelectedSpotId(created.id);
+          setSelectedBehaviorNodeId("");
+          await stopNavigation();
+          setNavigationRuntimeMode("idle");
+          setDesignPoseInitialized(false);
+          saveMissionSession({
+            mapName: currentMapName,
+            workspaceStage: STAGE_AUTHORING,
+            designMapPath: designMapPath || pgmPathFromMapName(currentMapName),
+            navigationRuntimeMode: "idle",
+            designPoseInitialized: false,
+          });
+          return `Created ${created.label} at robot`;
+        },
+      );
       return;
     }
     if (interactionMode === "behavior" && pendingBehaviorNodeTag) {
@@ -1761,53 +1842,52 @@ export default function MissionCanvasPage() {
     }
   }, [
     currentMapName,
+    clearLocalizationPoseCache,
+    designMapPath,
     interactionMode,
     pendingBehaviorNodeTag,
-    sendInitialPose,
+    runCommand,
     spots.length,
+    waitForAutoLocalizedPose,
   ]);
 
-  const handleCreateSpotAtRobot = useCallback(async () => {
-    const position = currentPose?.position;
+  const handleCreateSpotAtRobot = useCallback(() => {
     if (!designMapAvailable) {
       setMessage("Load a map before creating a waypoint");
       return;
     }
-    if (!running) {
-      setMessage("Set robot pose before creating a waypoint at robot");
-      return;
-    }
-    if (!position) {
-      setMessage("Robot pose unavailable");
-      return;
-    }
-    const x = Number(position.x ?? 0);
-    const y = Number(position.y ?? 0);
-    const yaw = yawFromPose(currentPose);
-    const label = `Waypoint ${spots.length + 1}`;
-    try {
-      const created = await createNavigationSpot({
-        map_name: currentMapName,
-        label,
-        pose: spotPoseFromMapPose(x, y, yaw),
-        metadata: { source: "mission_canvas", coordinate_space: "map" },
-      });
-      setSpots((current) => [...current, created]);
-      setSelectedSpotId(created.id);
-      setSelectedBehaviorNodeId("");
-      setPendingBehaviorNodeTag("");
-      setInteractionMode("view");
-      setShowWaypointOptions(false);
-      setMessage(`Created ${created.label} at robot`);
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Failed to create waypoint at robot");
-    }
+    const resolvedDesignMapPath = designMapPath || pgmPathFromMapName(currentMapName);
+    setWorkspaceStage(STAGE_AUTHORING);
+    setDesignMapPath(resolvedDesignMapPath);
+    setPendingBehaviorNodeTag("");
+    setSelectedBehaviorNodeId("");
+    setSelectedSpotId("");
+    setShowWaypointOptions(false);
+    setDesignPoseInitialized(false);
+    clearLocalizationPoseCache();
+    void runCommand(
+      "At Robot",
+      async () => {
+        await startNavigation("localize", currentMapName);
+        await configureDesignLocalizationAmcl();
+        setNavigationRuntimeMode("localization");
+        saveMissionSession({
+          mapName: currentMapName,
+          workspaceStage: STAGE_AUTHORING,
+          designMapPath: resolvedDesignMapPath,
+          navigationRuntimeMode: "localization",
+          designPoseInitialized: false,
+        });
+        setInteractionMode("initial");
+        return "Click and drag the robot pose on the map";
+      },
+    );
   }, [
     currentMapName,
-    currentPose,
+    clearLocalizationPoseCache,
     designMapAvailable,
-    running,
-    spots.length,
+    designMapPath,
+    runCommand,
   ]);
 
   const handleMoveSpot = useCallback(async (spotId, x, y, yaw) => {
@@ -2008,7 +2088,7 @@ export default function MissionCanvasPage() {
             <>
               <ActionButton
                 active={busy === "Mapping" || (mappingRuntimeActive && !mappingEditorActive)}
-                disabled={!!busy || running}
+                disabled={!!busy || mappingRuntimeActive || runRuntimeActive}
                 onClick={handleStartMapping}
                 variant="secondary"
               >
@@ -2016,7 +2096,7 @@ export default function MissionCanvasPage() {
               </ActionButton>
               <ActionButton
                 active={busy === "Stop"}
-                disabled={!!busy || !running}
+                disabled={!!busy || !mappingRuntimeActive}
                 onClick={handleStopNavigation}
                 variant="danger"
               >
@@ -2024,7 +2104,7 @@ export default function MissionCanvasPage() {
               </ActionButton>
               <ActionButton
                 active={showSaveMapDialog || busy === "Save map"}
-                disabled={!!busy || !running}
+                disabled={!!busy || !mappingRuntimeActive}
                 onClick={handleOpenSaveMapDialog}
                 variant="secondary"
               >
@@ -2032,7 +2112,7 @@ export default function MissionCanvasPage() {
               </ActionButton>
               <ActionButton
                 active={mappingEditorActive}
-                disabled={!!busy || running}
+                disabled={!!busy || mappingRuntimeActive || runRuntimeActive}
                 onClick={handleToggleMapEditor}
                 variant="secondary"
               >
@@ -2091,7 +2171,7 @@ export default function MissionCanvasPage() {
                   onClick={handleToggleWaypointOptions}
                   variant="secondary"
                 >
-                  Waypoint
+                  Create Waypoint
                 </ActionButton>
                 {showWaypointOptions && (
                   <div
@@ -2112,15 +2192,8 @@ export default function MissionCanvasPage() {
                       On Map
                     </ActionButton>
                     <ActionButton
-                      active={interactionMode === "initial" || busy === "Localize robot"}
+                      active={interactionMode === "initial" || busy === "At Robot"}
                       disabled={!!busy || !designMapAvailable}
-                      onClick={handleSetRobotPoseMode}
-                      variant="secondary"
-                    >
-                      Set Robot Pose
-                    </ActionButton>
-                    <ActionButton
-                      disabled={!!busy || !designMapAvailable || !robotLocalized}
                       onClick={handleCreateSpotAtRobot}
                       variant="secondary"
                     >
@@ -2176,7 +2249,7 @@ export default function MissionCanvasPage() {
             globalCostmap={mappingEditorActive ? null : needsGlobalCostmap ? globalCostmap : null}
             localCostmap={mappingEditorActive ? null : needsLocalCostmap ? localCostmap : null}
             scan={mappingEditorActive ? null : needsScan ? scan : null}
-            pose={mappingEditorActive ? null : navigationTopicsActive ? currentPose : null}
+            pose={mappingEditorActive ? null : (designLocalizationActive || stageNavigationTopicsActive) ? currentPose : null}
             plan={mappingEditorActive ? null : needsPlan ? plan : null}
             goalPose={mappingEditorActive ? null : needsGoalPose ? goalPose : null}
             footprint={mappingEditorActive ? null : needsRobotModel ? footprint : null}
@@ -2192,11 +2265,10 @@ export default function MissionCanvasPage() {
             showScan={mappingEditorActive ? false : needsScan}
             showGlobalPlan={mappingEditorActive ? false : needsPlan}
             showGoalPose={mappingEditorActive ? false : needsGoalPose}
-            showTf={mappingEditorActive ? false : navigationTopicsActive && activeLayers.tf}
+            showTf={mappingEditorActive ? false : stageNavigationTopicsActive && activeLayers.tf}
             showRobotModel={mappingEditorActive ? false : needsRobotModel}
             interactionDisabled={
               !!busy ||
-              posePublishBusy ||
               (mappingEditorActive && mapEditor.busy) ||
               (designMapActive && designMapEditor.busy)
             }

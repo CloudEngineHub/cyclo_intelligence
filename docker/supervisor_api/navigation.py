@@ -65,6 +65,15 @@ NAVIGATION_PARAMS_FILE = (
 )
 MAP_SAVE_CLI_TIMEOUT_SECONDS = 20
 SAVE_MAP_WAIT_SECONDS = 12.0
+INITIAL_POSE_NOMOTION_BURST_COUNT = 8
+INITIAL_POSE_NOMOTION_BURST_INTERVAL_SECONDS = 0.25
+DESIGN_LOCALIZATION_AMCL_PARAMETERS = {
+    "laser_likelihood_max_dist": 2.0,
+    "max_beams": 80,
+    "resample_interval": 1,
+}
+AMCL_PARAMETER_SET_TIMEOUT_SECONDS = 8.0
+AMCL_PARAMETER_SET_RETRY_INTERVAL_SECONDS = 0.4
 _SAFE_MAP_NAME = re.compile(r"^[A-Za-z0-9_.-]+$")
 _ANSI_ESCAPE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
 @router.websocket("/topics/ws")
@@ -372,9 +381,9 @@ if [ -f "${{PGID_FILE}}" ]; then
       ;;
     *)
       echo "[localization stop] Terminating process group ${{PGID}}"
-      kill -TERM -- -"${{PGID}}" 2>/dev/null || true
+      kill -TERM -"${{PGID}}" 2>/dev/null || true
       sleep 1
-      kill -KILL -- -"${{PGID}}" 2>/dev/null || true
+      kill -KILL -"${{PGID}}" 2>/dev/null || true
       ;;
   esac
   rm -f "${{PGID_FILE}}"
@@ -403,9 +412,9 @@ if [ -f "${{PGID_FILE}}" ]; then
       ;;
     *)
       echo "[navigation stop] Terminating process group ${{PGID}}"
-      kill -TERM -- -"${{PGID}}" 2>/dev/null || true
+      kill -TERM -"${{PGID}}" 2>/dev/null || true
       sleep 1
-      kill -KILL -- -"${{PGID}}" 2>/dev/null || true
+      kill -KILL -"${{PGID}}" 2>/dev/null || true
       ;;
   esac
   rm -f "${{PGID_FILE}}"
@@ -493,7 +502,7 @@ case "${{PGID}}" in
     exit 3
     ;;
 esac
-if kill -0 -- -"${{PGID}}" 2>/dev/null; then
+if kill -0 -"${{PGID}}" 2>/dev/null; then
   ELAPSED=$(ps -o etimes= -p "${{PGID}}" 2>/dev/null | tr -d " " || true)
   echo "up (pid ${{PGID}} pgid ${{PGID}}) ${{ELAPSED:-0}} seconds"
   exit 0
@@ -797,6 +806,8 @@ def _publish_initial_pose(request: InitialPoseRequest) -> str:
         "y": y,
         "yaw": yaw,
         "orientation": _orientation_from_yaw(yaw),
+        "nomotion_update_count": INITIAL_POSE_NOMOTION_BURST_COUNT,
+        "nomotion_update_interval": INITIAL_POSE_NOMOTION_BURST_INTERVAL_SECONDS,
         "covariance": [
             0.25, 0, 0, 0, 0, 0,
             0, 0.25, 0, 0, 0, 0,
@@ -811,13 +822,16 @@ import json
 import time
 
 import rclpy
+from rclpy.duration import Duration
 from geometry_msgs.msg import PoseWithCovarianceStamped
+from std_srvs.srv import Empty
 
 payload = json.loads({json.dumps(json.dumps(payload))})
 
 rclpy.init()
 node = rclpy.create_node("cyclo_initial_pose_publisher")
 publisher = node.create_publisher(PoseWithCovarianceStamped, "/initialpose", 10)
+nomotion_client = node.create_client(Empty, "/request_nomotion_update")
 
 deadline = time.monotonic() + 8.0
 while publisher.get_subscription_count() == 0 and time.monotonic() < deadline:
@@ -842,22 +856,62 @@ message.pose.pose.orientation.w = payload["orientation"]["w"]
 message.pose.covariance = payload["covariance"]
 
 for _ in range(5):
-    message.header.stamp = node.get_clock().now().to_msg()
+    message.header.stamp = (
+        node.get_clock().now() - Duration(seconds=0.2)
+    ).to_msg()
     publisher.publish(message)
     rclpy.spin_once(node, timeout_sec=0.05)
     time.sleep(0.1)
+
+nomotion_update = "unavailable"
+nomotion_attempts = max(1, int(payload.get("nomotion_update_count", 1)))
+nomotion_interval = max(0.0, float(payload.get("nomotion_update_interval", 0.0)))
+if nomotion_client.wait_for_service(timeout_sec=2.0):
+    successes = 0
+    failures = 0
+    for attempt in range(nomotion_attempts):
+        future = nomotion_client.call_async(Empty.Request())
+        deadline = time.monotonic() + 1.0
+        while rclpy.ok() and not future.done() and time.monotonic() < deadline:
+            rclpy.spin_once(node, timeout_sec=0.05)
+        if future.done() and future.exception() is None:
+            successes += 1
+        else:
+            failures += 1
+            if future.done():
+                print(f"No-motion AMCL update failed: {{future.exception()}}")
+            else:
+                print("No-motion AMCL update timed out")
+        if attempt + 1 < nomotion_attempts and nomotion_interval > 0:
+            time.sleep(nomotion_interval)
+    if successes == nomotion_attempts:
+        nomotion_update = f"requested:{{successes}}"
+    elif successes > 0:
+        nomotion_update = f"partial:{{successes}}/{{nomotion_attempts}}"
+    elif failures:
+        nomotion_update = "failed"
+else:
+    print("No AMCL /request_nomotion_update service found")
 
 node.destroy_node()
 rclpy.shutdown()
 print(
     f"Published initial pose to /initialpose "
     f"({{payload['x']:.3f}}, {{payload['y']:.3f}}, yaw={{payload['yaw']:.3f}}, "
-    f"subscribers={{subscriber_count}})"
+    f"subscribers={{subscriber_count}}, nomotion_update={{nomotion_update}})"
 )
 """
+    timeout_seconds = max(
+        12,
+        math.ceil(
+            6
+            + INITIAL_POSE_NOMOTION_BURST_COUNT
+            * (1.0 + INITIAL_POSE_NOMOTION_BURST_INTERVAL_SECONDS)
+        ),
+    )
     command = (
         _ros_shell_prefix()
-        + "timeout 12s python3 -c "
+        + f"timeout {timeout_seconds}s python3 -c "
         + shlex.quote(script)
     )
     code, output = _exec(
@@ -867,6 +921,73 @@ print(
     if code != 0:
         raise HTTPException(503, output or "Initial pose publish failed")
     return _initial_pose_success_message(output)
+
+
+def _request_nomotion_update() -> str:
+    command = (
+        _ros_shell_prefix()
+        + "timeout 8s ros2 service call "
+        + "/request_nomotion_update std_srvs/srv/Empty "
+        + shlex.quote("{}")
+    )
+    code, output = _exec(
+        ["bash", "--noprofile", "--norc", "-c", command],
+        environment=_ros_exec_environment(),
+    )
+    if code != 0:
+        raise HTTPException(503, output or "No-motion AMCL update failed")
+    return output or "No-motion AMCL update requested"
+
+
+def _request_global_localization() -> str:
+    command = (
+        _ros_shell_prefix()
+        + "timeout 8s ros2 service call "
+        + "/reinitialize_global_localization std_srvs/srv/Empty "
+        + shlex.quote("{}")
+    )
+    code, output = _exec(
+        ["bash", "--noprofile", "--norc", "-c", command],
+        environment=_ros_exec_environment(),
+    )
+    if code != 0:
+        raise HTTPException(503, output or "Global AMCL localization failed")
+    return output or "Global AMCL localization requested"
+
+
+def _format_ros_param_value(value: object) -> str:
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    return str(value)
+
+
+def _set_amcl_parameters(parameters: dict[str, object]) -> str:
+    applied: list[str] = []
+    for name, value in parameters.items():
+        command = (
+            _ros_shell_prefix()
+            + "timeout 8s ros2 param set /amcl "
+            + f"{shlex.quote(name)} "
+            + shlex.quote(_format_ros_param_value(value))
+        )
+        deadline = time.monotonic() + AMCL_PARAMETER_SET_TIMEOUT_SECONDS
+        last_output = ""
+        while True:
+            code, output = _exec(
+                ["bash", "--noprofile", "--norc", "-c", command],
+                environment=_ros_exec_environment(),
+            )
+            if code == 0:
+                applied.append(f"{name}={_format_ros_param_value(value)}")
+                break
+            last_output = output
+            if time.monotonic() >= deadline:
+                raise HTTPException(
+                    503,
+                    last_output or f"Failed to set AMCL parameter: {name}",
+                )
+            time.sleep(AMCL_PARAMETER_SET_RETRY_INTERVAL_SECONDS)
+    return "Applied AMCL parameters: " + ", ".join(applied)
 
 
 @router.get("/status", response_model=NavigationStatus)
@@ -986,6 +1107,24 @@ def send_initial_pose(request: InitialPoseRequest):
     if request.map_name and _initialpose_subscription_count() == 0:
         _start_localization_mode(_validate_map_name(request.map_name))
     return ActionResult(ok=True, message=_publish_initial_pose(request))
+
+
+@router.post("/nomotion-update", response_model=ActionResult)
+def request_nomotion_update():
+    return ActionResult(ok=True, message=_request_nomotion_update())
+
+
+@router.post("/global-localization", response_model=ActionResult)
+def request_global_localization():
+    return ActionResult(ok=True, message=_request_global_localization())
+
+
+@router.post("/amcl/design-localization-params", response_model=ActionResult)
+def set_design_localization_amcl_parameters():
+    return ActionResult(
+        ok=True,
+        message=_set_amcl_parameters(DESIGN_LOCALIZATION_AMCL_PARAMETERS),
+    )
 
 
 @router.get("/logs")

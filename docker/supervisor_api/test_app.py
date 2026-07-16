@@ -397,9 +397,29 @@ def test_navigation_force_stop_kills_process_group_with_separator(monkeypatch):
 
     assert navigation._force_stop_navigation_processes() == "forced"
     script = captured["command"][-1]
-    assert 'kill -TERM -- -"${PGID}"' in script
-    assert 'kill -KILL -- -"${PGID}"' in script
+    assert 'kill -TERM -"${PGID}"' in script
+    assert 'kill -KILL -"${PGID}"' in script
+    assert 'kill -TERM -- -"${PGID}"' not in script
     assert "pkill" not in script
+
+
+def test_navigation_localization_status_uses_dash_compatible_process_group_check(monkeypatch):
+    captured = {}
+
+    def fake_exec(command, *, environment=None, timeout=None):
+        captured["command"] = command
+        return 0, "up (pid 123 pgid 123) 7 seconds"
+
+    monkeypatch.setattr(navigation, "_exec", fake_exec)
+
+    status = navigation._localization_status()
+
+    assert status.is_up
+    assert status.pid == 123
+    assert status.uptime_seconds == 7
+    script = captured["command"][-1]
+    assert 'kill -0 -"${PGID}"' in script
+    assert 'kill -0 -- -"${PGID}"' not in script
 
 
 def test_navigation_stop_defers_busy_s6_lock(monkeypatch):
@@ -452,6 +472,9 @@ def test_navigation_routes_are_registered():
     assert "/navigation/status" in paths
     assert "/navigation/start" in paths
     assert "/navigation/initial-pose" in paths
+    assert "/navigation/nomotion-update" in paths
+    assert "/navigation/global-localization" in paths
+    assert "/navigation/amcl/design-localization-params" in paths
     assert "/navigation/maps/pgm/save" in paths
     assert "/navigation/topics/ws" in paths
     assert "/navigation/spots" in paths
@@ -649,7 +672,10 @@ def test_navigation_initial_pose_publishes_from_ai_worker(monkeypatch):
     command_text = captured["command"][-1]
     assert "python3 -c" in command_text
     assert "/initialpose" in command_text
+    assert "/request_nomotion_update" in command_text
+    assert "Duration(seconds=0.2)" in command_text
     assert "PoseWithCovarianceStamped" in command_text
+    assert "std_srvs.srv import Empty" in command_text
     assert captured["environment"] == {
         "ROS_DOMAIN_ID": "30",
         "RMW_IMPLEMENTATION": "rmw_fastrtps_cpp",
@@ -678,6 +704,85 @@ def test_navigation_initial_pose_filters_zenoh_warning(monkeypatch):
         "(-2.351, 0.168, yaw=3.142, subscribers=1)"
     )
     assert "WARN" not in result.message
+
+
+def test_navigation_nomotion_update_calls_amcl_service(monkeypatch):
+    captured = {}
+
+    def fake_exec(command, *, environment=None, timeout=None):
+        captured["command"] = command
+        captured["environment"] = environment
+        return 0, "response:\nstd_srvs.srv.Empty_Response()"
+
+    monkeypatch.setattr(navigation, "_exec", fake_exec)
+    monkeypatch.setenv("ROS_DOMAIN_ID", "30")
+    monkeypatch.setenv("RMW_IMPLEMENTATION", "rmw_fastrtps_cpp")
+
+    result = navigation.request_nomotion_update()
+
+    assert result.ok
+    command_text = captured["command"][-1]
+    assert "ros2 service call" in command_text
+    assert "/request_nomotion_update" in command_text
+    assert "std_srvs/srv/Empty" in command_text
+    assert captured["environment"] == {
+        "ROS_DOMAIN_ID": "30",
+        "RMW_IMPLEMENTATION": "rmw_fastrtps_cpp",
+    }
+
+
+def test_navigation_global_localization_calls_amcl_service(monkeypatch):
+    captured = {}
+
+    def fake_exec(command, *, environment=None, timeout=None):
+        captured["command"] = command
+        captured["environment"] = environment
+        return 0, "response:\nstd_srvs.srv.Empty_Response()"
+
+    monkeypatch.setattr(navigation, "_exec", fake_exec)
+    monkeypatch.setenv("ROS_DOMAIN_ID", "30")
+    monkeypatch.setenv("RMW_IMPLEMENTATION", "rmw_fastrtps_cpp")
+
+    result = navigation.request_global_localization()
+
+    assert result.ok
+    command_text = captured["command"][-1]
+    assert "ros2 service call" in command_text
+    assert "/reinitialize_global_localization" in command_text
+    assert "std_srvs/srv/Empty" in command_text
+    assert captured["environment"] == {
+        "ROS_DOMAIN_ID": "30",
+        "RMW_IMPLEMENTATION": "rmw_fastrtps_cpp",
+    }
+
+
+def test_navigation_design_localization_sets_amcl_parameters(monkeypatch):
+    captured = []
+
+    def fake_exec(command, *, environment=None, timeout=None):
+        captured.append((command, environment))
+        return 0, "Set parameter successful"
+
+    monkeypatch.setattr(navigation, "_exec", fake_exec)
+    monkeypatch.setenv("ROS_DOMAIN_ID", "30")
+    monkeypatch.setenv("RMW_IMPLEMENTATION", "rmw_fastrtps_cpp")
+
+    result = navigation.set_design_localization_amcl_parameters()
+
+    assert result.ok
+    assert "laser_likelihood_max_dist=2.0" in result.message
+    assert "max_beams=80" in result.message
+    assert "resample_interval=1" in result.message
+    command_text = "\n".join(command[-1] for command, _environment in captured)
+    assert "ros2 param set /amcl laser_likelihood_max_dist 2.0" in command_text
+    assert "ros2 param set /amcl max_beams 80" in command_text
+    assert "ros2 param set /amcl resample_interval 1" in command_text
+    assert {tuple(environment.items()) for _command, environment in captured} == {
+        (
+            ("ROS_DOMAIN_ID", "30"),
+            ("RMW_IMPLEMENTATION", "rmw_fastrtps_cpp"),
+        )
+    }
 
 
 def test_navigation_initial_pose_starts_localization_when_amcl_missing(monkeypatch):

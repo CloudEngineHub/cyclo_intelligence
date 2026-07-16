@@ -1,9 +1,11 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import MissionCanvasPage from './MissionCanvasPage';
 import {
+  configureDesignLocalizationAmcl,
   getPgmFiles,
   getPgmImage,
   getServiceStatus,
+  requestNoMotionUpdate,
   saveNavigationMap,
   savePgmImage,
   sendInitialPoseEstimate,
@@ -20,11 +22,31 @@ const mockMapViewer = jest.fn(() => <div>Mission Canvas Map</div>);
 const mockPublishRosTopic = jest.fn();
 const mockTopicDataByName = {};
 
+function amclPoseMessage(x, y, yaw, covarianceValue = 0.05) {
+  return {
+    pose: {
+      pose: {
+        position: { x, y, z: 0 },
+        orientation: { x: 0, y: 0, z: Math.sin(yaw / 2), w: Math.cos(yaw / 2) },
+      },
+      covariance: [
+        covarianceValue, 0, 0, 0, 0, 0,
+        0, covarianceValue, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, covarianceValue,
+      ],
+    },
+  };
+}
+
 jest.mock('../components/navigation/MapViewer', () => ({
   MapViewer: (props) => mockMapViewer(props),
 }));
 
 jest.mock('../utils/navigationApi', () => ({
+  configureDesignLocalizationAmcl: jest.fn().mockResolvedValue({ ok: true }),
   getPgmFiles: jest.fn().mockResolvedValue({ files: [] }),
   getPgmImage: jest.fn().mockResolvedValue({
     path: 'map.pgm',
@@ -34,6 +56,7 @@ jest.mock('../utils/navigationApi', () => ({
     pixels_base64: 'AA==',
   }),
   getServiceStatus: jest.fn().mockResolvedValue({ is_up: false }),
+  requestNoMotionUpdate: jest.fn().mockResolvedValue({ ok: true }),
   saveNavigationMap: jest.fn().mockResolvedValue({ ok: true }),
   savePgmImage: jest.fn().mockResolvedValue({ path: 'map.pgm', saved: true }),
   sendInitialPoseEstimate: jest.fn().mockResolvedValue({ ok: true }),
@@ -103,11 +126,14 @@ beforeEach(() => {
     pixels_base64: 'AA==',
   });
   getServiceStatus.mockResolvedValue({ is_up: false });
+  configureDesignLocalizationAmcl.mockResolvedValue({ ok: true });
+  requestNoMotionUpdate.mockResolvedValue({ ok: true });
   getNavigationSpots.mockResolvedValue({ map_name: 'map', spots: [] });
   saveNavigationMap.mockResolvedValue({ ok: true, message: 'Saved map' });
   savePgmImage.mockResolvedValue({ path: 'map.pgm', saved: true });
   sendInitialPoseEstimate.mockResolvedValue({ ok: true });
   startNavigation.mockResolvedValue({ ok: true });
+  stopNavigation.mockResolvedValue({ ok: true });
   mockMapViewer.mockImplementation(() => <div>Mission Canvas Map</div>);
 });
 
@@ -212,7 +238,7 @@ test('shows Waypoint and BT authoring panels in the authoring stage', async () =
   expect(screen.getByText('Waypoints')).toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Load Map' })).toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Save Map' })).toBeInTheDocument();
-  expect(screen.getByRole('button', { name: 'Waypoint' })).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Create Waypoint' })).toBeInTheDocument();
   expect(screen.queryByRole('menu', { name: 'Waypoint creation options' })).not.toBeInTheDocument();
   expect(screen.queryByRole('button', { name: 'At Robot' })).not.toBeInTheDocument();
   expect(screen.getByText('Select a waypoint or behavior node on the map.')).toBeInTheDocument();
@@ -259,12 +285,12 @@ test('loads a saved map into the design stage', async () => {
   await waitFor(() => expect(latestMapViewerProps().map).toMatchObject({
     info: { width: 1, height: 1 },
   }));
-  expect(screen.getByRole('button', { name: 'Waypoint' })).toBeEnabled();
-  fireEvent.click(screen.getByRole('button', { name: 'Waypoint' }));
+  expect(screen.getByRole('button', { name: 'Create Waypoint' })).toBeEnabled();
+  fireEvent.click(screen.getByRole('button', { name: 'Create Waypoint' }));
   expect(screen.getByRole('menu', { name: 'Waypoint creation options' })).toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'On Map' })).toBeEnabled();
-  expect(screen.getByRole('button', { name: 'Set Robot Pose' })).toBeEnabled();
-  expect(screen.getByRole('button', { name: 'At Robot' })).toBeDisabled();
+  expect(screen.queryByRole('button', { name: 'Set Robot Pose' })).not.toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'At Robot' })).toBeEnabled();
   await waitFor(() => expect(getNavigationSpots).toHaveBeenCalledWith('factory'));
 });
 
@@ -384,10 +410,10 @@ test('shows waypoint actions in Properties after placing a waypoint', async () =
     info: { width: 1, height: 1 },
   }));
 
-  fireEvent.click(screen.getByRole('button', { name: 'Waypoint' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Create Waypoint' }));
   fireEvent.click(screen.getByRole('button', { name: 'On Map' }));
 
-  expect(screen.getByRole('button', { name: 'Waypoint' })).toHaveAttribute('aria-pressed', 'true');
+  expect(screen.getByRole('button', { name: 'Create Waypoint' })).toHaveAttribute('aria-pressed', 'true');
 
   await act(async () => {
     await latestMapViewerProps().onMapPose(1, 2, 0.25);
@@ -400,7 +426,7 @@ test('shows waypoint actions in Properties after placing a waypoint', async () =
     metadata: { source: 'mission_canvas', coordinate_space: 'map' },
   }));
   expect(screen.getByDisplayValue('Waypoint A')).toBeInTheDocument();
-  expect(screen.getByRole('button', { name: 'Waypoint' })).toHaveAttribute('aria-pressed', 'true');
+  expect(screen.getByRole('button', { name: 'Create Waypoint' })).toHaveAttribute('aria-pressed', 'true');
   expect(latestMapViewerProps().interactionMode).toBe('spot');
   expect(screen.getByRole('button', { name: 'Create BT' })).toBeDisabled();
   expect(screen.getByRole('button', { name: 'Edit BT' })).toBeDisabled();
@@ -421,12 +447,12 @@ test('shows waypoint actions in Properties after placing a waypoint', async () =
     yaw: 0.25,
   }));
 
-  fireEvent.click(screen.getByRole('button', { name: 'Waypoint' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Create Waypoint' }));
   fireEvent.click(screen.getByRole('button', { name: 'On Map' }));
-  expect(screen.getByRole('button', { name: 'Waypoint' })).not.toHaveAttribute('aria-pressed');
+  expect(screen.getByRole('button', { name: 'Create Waypoint' })).not.toHaveAttribute('aria-pressed');
 });
 
-test('starts localization and publishes an initial robot pose from the waypoint menu', async () => {
+test('creates a waypoint at robot with automatic localization from the waypoint menu', async () => {
   const latestMapViewerProps = () => (
     mockMapViewer.mock.calls[mockMapViewer.mock.calls.length - 1][0]
   );
@@ -443,6 +469,11 @@ test('starts localization and publishes an initial robot pose from the waypoint 
       },
     }],
   };
+  mockTopicDataByName['/amcl_pose'] = amclPoseMessage(9, 9, 0);
+  sendInitialPoseEstimate.mockImplementationOnce(async () => {
+    mockTopicDataByName['/amcl_pose'] = amclPoseMessage(1.25, -0.5, 0.75);
+    return { ok: true };
+  });
   getPgmFiles.mockResolvedValue({
     files: [{ path: 'factory.pgm', name: 'factory.pgm' }],
   });
@@ -461,20 +492,18 @@ test('starts localization and publishes an initial robot pose from the waypoint 
   await screen.findByRole('combobox', { name: 'Design map file' });
   fireEvent.click(screen.getByRole('button', { name: 'Load' }));
 
-  await waitFor(() => expect(screen.getByRole('button', { name: 'Waypoint' })).toBeEnabled());
-  fireEvent.click(screen.getByRole('button', { name: 'Waypoint' }));
-  fireEvent.click(screen.getByRole('button', { name: 'Set Robot Pose' }));
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Create Waypoint' })).toBeEnabled());
+  fireEvent.click(screen.getByRole('button', { name: 'Create Waypoint' }));
+  expect(screen.queryByRole('button', { name: 'Set Robot Pose' })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'At Robot' }));
 
   await waitFor(() => expect(startNavigation).toHaveBeenCalledWith('localize', 'factory'));
+  await waitFor(() => expect(configureDesignLocalizationAmcl).toHaveBeenCalledTimes(1));
   await waitFor(() => expect(latestMapViewerProps().interactionMode).toBe('initial'));
   await waitFor(() => expect(latestMapViewerProps().showScan).toBe(true));
-  expect(latestMapViewerProps().showRobotModel).toBe(true);
-  expect(latestMapViewerProps().pose).not.toBeNull();
-
   await act(async () => {
     latestMapViewerProps().onMapPose(1.25, -0.5, 0.75);
   });
-
   await waitFor(() => expect(sendInitialPoseEstimate).toHaveBeenCalledWith({
     x: 1.25,
     y: -0.5,
@@ -482,47 +511,55 @@ test('starts localization and publishes an initial robot pose from the waypoint 
     frameId: 'map',
     mapName: 'factory',
   }));
-  await waitFor(() => expect(mockPublishRosTopic).toHaveBeenCalledWith(
+  await waitFor(() => expect(requestNoMotionUpdate).toHaveBeenCalledTimes(3), { timeout: 4000 });
+  await waitFor(() => expect(createNavigationSpot).toHaveBeenCalled(), { timeout: 5000 });
+  const [payload] = createNavigationSpot.mock.calls[0];
+  expect(payload.map_name).toBe('factory');
+  expect(payload.label).toBe('Waypoint 1');
+  expect(payload.pose.x).toBeCloseTo(1.25);
+  expect(payload.pose.y).toBeCloseTo(-0.5);
+  expect(payload.pose.yaw).toBeCloseTo(0.75);
+  expect(payload.metadata).toEqual({ source: 'mission_canvas', coordinate_space: 'map' });
+  await waitFor(() => expect(stopNavigation).toHaveBeenCalled());
+  expect(mockPublishRosTopic).not.toHaveBeenCalledWith(
     '/initialpose',
-    'geometry_msgs/msg/PoseWithCovarianceStamped',
-    expect.objectContaining({
-      header: expect.objectContaining({ frame_id: 'map' }),
-      pose: expect.objectContaining({
-        pose: expect.objectContaining({
-          position: { x: 1.25, y: -0.5, z: 0 },
-          orientation: expect.objectContaining({
-            z: Math.sin(0.75 / 2),
-            w: Math.cos(0.75 / 2),
-          }),
-        }),
-      }),
-    }),
-  ));
-  await waitFor(() => expect(screen.getByText('Initial pose 1.25, -0.50, yaw 43 deg')).toBeInTheDocument());
+    expect.any(String),
+    expect.any(Object),
+  );
+  await waitFor(() => expect(screen.getByText('Created Waypoint A at robot')).toBeInTheDocument());
+  await waitFor(() => expect(latestMapViewerProps().showScan).toBe(false));
+  expect(latestMapViewerProps().showRobotModel).toBe(false);
 
   fireEvent.click(screen.getByRole('tab', { name: 'Mapping' }));
   const startMappingButton = screen.getByRole('button', { name: 'Start Mapping' });
-  expect(startMappingButton).toBeDisabled();
+  await waitFor(() => expect(latestMapViewerProps().showScan).toBe(false));
+  expect(latestMapViewerProps().showRobotModel).toBe(false);
+  expect(latestMapViewerProps().pose).toBeNull();
+  expect(startMappingButton).toBeEnabled();
   expect(startMappingButton).not.toHaveAttribute('aria-pressed');
+  expect(screen.getByRole('button', { name: 'Stop' })).toBeDisabled();
+  expect(screen.getByRole('button', { name: 'Save Map' })).toBeDisabled();
 });
 
-test('restores design localization after returning to Mission Canvas', async () => {
+test('clears stale robot pose before a second at-robot waypoint attempt', async () => {
   const latestMapViewerProps = () => (
     mockMapViewer.mock.calls[mockMapViewer.mock.calls.length - 1][0]
   );
+  let spotSerial = 0;
   getServiceStatus
     .mockResolvedValueOnce({ is_up: false })
     .mockResolvedValue({ is_up: true });
-  mockTopicDataByName['/tf'] = {
-    transforms: [{
-      header: { frame_id: 'map' },
-      child_frame_id: 'base_link',
-      transform: {
-        translation: { x: 1.25, y: -0.5, z: 0 },
-        rotation: { x: 0, y: 0, z: 0, w: 1 },
-      },
-    }],
-  };
+  createNavigationSpot.mockImplementation((payload) => {
+    spotSerial += 1;
+    return Promise.resolve({
+      id: `spot_${spotSerial}`,
+      map_name: payload.map_name,
+      label: payload.label,
+      pose: payload.pose,
+      linked_bt_tree: '',
+      metadata: payload.metadata,
+    });
+  });
   getPgmFiles.mockResolvedValue({
     files: [{ path: 'factory.pgm', name: 'factory.pgm' }],
   });
@@ -533,28 +570,90 @@ test('restores design localization after returning to Mission Canvas', async () 
     maxval: 255,
     pixels_base64: 'AA==',
   });
+  mockTopicDataByName['/amcl_pose'] = amclPoseMessage(1, 1, 0);
+  sendInitialPoseEstimate
+    .mockImplementationOnce(async () => {
+      mockTopicDataByName['/amcl_pose'] = amclPoseMessage(1, 1, 0.1);
+      return { ok: true };
+    })
+    .mockImplementationOnce(async () => {
+      mockTopicDataByName['/amcl_pose'] = amclPoseMessage(4.5, 5.25, 0.6);
+      return { ok: true };
+    });
 
-  const firstRender = render(<MissionCanvasPage />);
+  render(<MissionCanvasPage />);
 
   fireEvent.click(screen.getByRole('tab', { name: 'Design' }));
   fireEvent.click(screen.getByRole('button', { name: 'Load Map' }));
   await screen.findByRole('combobox', { name: 'Design map file' });
   fireEvent.click(screen.getByRole('button', { name: 'Load' }));
 
-  await waitFor(() => expect(screen.getByRole('button', { name: 'Waypoint' })).toBeEnabled());
-  fireEvent.click(screen.getByRole('button', { name: 'Waypoint' }));
-  fireEvent.click(screen.getByRole('button', { name: 'Set Robot Pose' }));
-
-  await waitFor(() => expect(startNavigation).toHaveBeenCalledWith('localize', 'factory'));
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Create Waypoint' })).toBeEnabled());
+  fireEvent.click(screen.getByRole('button', { name: 'Create Waypoint' }));
+  fireEvent.click(screen.getByRole('button', { name: 'At Robot' }));
   await waitFor(() => expect(latestMapViewerProps().interactionMode).toBe('initial'));
-
+  expect(configureDesignLocalizationAmcl).toHaveBeenCalledTimes(1);
   await act(async () => {
-    latestMapViewerProps().onMapPose(1.25, -0.5, 0.75);
+    latestMapViewerProps().onMapPose(1, 1, 0.1);
   });
-  await waitFor(() => expect(sendInitialPoseEstimate).toHaveBeenCalled());
+  await waitFor(() => expect(createNavigationSpot).toHaveBeenCalledTimes(1), { timeout: 5000 });
+  expect(createNavigationSpot.mock.calls[0][0].pose.x).toBeCloseTo(1);
+  expect(createNavigationSpot.mock.calls[0][0].pose.y).toBeCloseTo(1);
+  await waitFor(() => expect(stopNavigation).toHaveBeenCalledTimes(1));
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Create Waypoint' })).toBeEnabled());
 
-  firstRender.unmount();
-  mockMapViewer.mockClear();
+  mockTopicDataByName['/amcl_pose'] = amclPoseMessage(1, 1, 0.1);
+  fireEvent.click(screen.getByRole('button', { name: 'Create Waypoint' }));
+  fireEvent.click(screen.getByRole('button', { name: 'At Robot' }));
+  await waitFor(() => expect(latestMapViewerProps().interactionMode).toBe('initial'));
+  expect(configureDesignLocalizationAmcl).toHaveBeenCalledTimes(2);
+  await act(async () => {
+    latestMapViewerProps().onMapPose(4, 5, 0.5);
+  });
+
+  await waitFor(() => expect(createNavigationSpot).toHaveBeenCalledTimes(2), { timeout: 6000 });
+  const [secondPayload] = createNavigationSpot.mock.calls[1];
+  expect(secondPayload.label).toBe('Waypoint 2');
+  expect(secondPayload.pose.x).toBeCloseTo(4.5);
+  expect(secondPayload.pose.y).toBeCloseTo(5.25);
+  expect(secondPayload.pose.yaw).toBeCloseTo(0.6);
+  expect(secondPayload.pose.x).not.toBeCloseTo(createNavigationSpot.mock.calls[0][0].pose.x);
+  expect(stopNavigation).toHaveBeenCalledTimes(2);
+});
+
+test('syncs design localization state from navigation status mode', async () => {
+  const latestMapViewerProps = () => (
+    mockMapViewer.mock.calls[mockMapViewer.mock.calls.length - 1][0]
+  );
+  window.sessionStorage.setItem('mission_canvas_session', JSON.stringify({
+    mapName: 'factory',
+    workspaceStage: 'authoring',
+    designMapPath: 'factory.pgm',
+    navigationRuntimeMode: 'idle',
+  }));
+  getServiceStatus.mockResolvedValue({
+    is_up: true,
+    mode: 'localize',
+    pid: 123,
+    raw: 'up (pid 123 pgid 123) 7 seconds',
+  });
+  mockTopicDataByName['/tf'] = {
+    transforms: [{
+      header: { frame_id: 'map' },
+      child_frame_id: 'base_link',
+      transform: {
+        translation: { x: 2.5, y: -1.25, z: 0 },
+        rotation: { x: 0, y: 0, z: 0, w: 1 },
+      },
+    }],
+  };
+  getPgmImage.mockResolvedValue({
+    path: 'factory.pgm',
+    width: 1,
+    height: 1,
+    maxval: 255,
+    pixels_base64: 'AA==',
+  });
 
   render(<MissionCanvasPage />);
 
@@ -564,14 +663,12 @@ test('restores design localization after returning to Mission Canvas', async () 
   await waitFor(() => expect(latestMapViewerProps().showScan).toBe(true));
   expect(latestMapViewerProps().showRobotModel).toBe(true);
   expect(latestMapViewerProps().pose).not.toBeNull();
-
-  fireEvent.click(screen.getByRole('tab', { name: 'Mapping' }));
-  const startMappingButton = screen.getByRole('button', { name: 'Start Mapping' });
-  expect(startMappingButton).toBeDisabled();
-  expect(startMappingButton).not.toHaveAttribute('aria-pressed');
 });
 
 test('creates a waypoint at the current robot pose from the design toolbar', async () => {
+  const latestMapViewerProps = () => (
+    mockMapViewer.mock.calls[mockMapViewer.mock.calls.length - 1][0]
+  );
   const robotYaw = 0.5;
   getServiceStatus.mockResolvedValue({ is_up: true });
   mockTopicDataByName['/tf'] = {
@@ -584,6 +681,11 @@ test('creates a waypoint at the current robot pose from the design toolbar', asy
       },
     }],
   };
+  mockTopicDataByName['/amcl_pose'] = amclPoseMessage(8, 8, 0);
+  sendInitialPoseEstimate.mockImplementationOnce(async () => {
+    mockTopicDataByName['/amcl_pose'] = amclPoseMessage(2.5, -1.25, robotYaw);
+    return { ok: true };
+  });
   getPgmFiles.mockResolvedValue({
     files: [{ path: 'factory.pgm', name: 'factory.pgm' }],
   });
@@ -602,13 +704,27 @@ test('creates a waypoint at the current robot pose from the design toolbar', asy
   await screen.findByRole('combobox', { name: 'Design map file' });
   fireEvent.click(screen.getByRole('button', { name: 'Load' }));
 
-  await waitFor(() => expect(screen.getByRole('button', { name: 'Waypoint' })).toBeEnabled());
-  fireEvent.click(screen.getByRole('button', { name: 'Waypoint' }));
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Create Waypoint' })).toBeEnabled());
+  fireEvent.click(screen.getByRole('button', { name: 'Create Waypoint' }));
   await waitFor(() => expect(screen.getByRole('menu', { name: 'Waypoint creation options' })).toBeInTheDocument());
   await waitFor(() => expect(screen.getByRole('button', { name: 'At Robot' })).toBeEnabled());
   fireEvent.click(screen.getByRole('button', { name: 'At Robot' }));
 
-  await waitFor(() => expect(createNavigationSpot).toHaveBeenCalled());
+  await waitFor(() => expect(startNavigation).toHaveBeenCalledWith('localize', 'factory'));
+  await waitFor(() => expect(configureDesignLocalizationAmcl).toHaveBeenCalledTimes(1));
+  await waitFor(() => expect(latestMapViewerProps().interactionMode).toBe('initial'));
+  await act(async () => {
+    latestMapViewerProps().onMapPose(2.25, -1, robotYaw);
+  });
+  await waitFor(() => expect(sendInitialPoseEstimate).toHaveBeenCalledWith({
+    x: 2.25,
+    y: -1,
+    yaw: robotYaw,
+    frameId: 'map',
+    mapName: 'factory',
+  }));
+  await waitFor(() => expect(requestNoMotionUpdate).toHaveBeenCalledTimes(3), { timeout: 4000 });
+  await waitFor(() => expect(createNavigationSpot).toHaveBeenCalled(), { timeout: 5000 });
   const [payload] = createNavigationSpot.mock.calls[0];
   expect(payload.map_name).toBe('factory');
   expect(payload.label).toBe('Waypoint 1');
@@ -617,6 +733,7 @@ test('creates a waypoint at the current robot pose from the design toolbar', asy
   expect(payload.pose.y).toBeCloseTo(-1.25);
   expect(payload.pose.yaw).toBeCloseTo(robotYaw);
   expect(payload.metadata).toEqual({ source: 'mission_canvas', coordinate_space: 'map' });
+  await waitFor(() => expect(stopNavigation).toHaveBeenCalled());
   await waitFor(() => expect(screen.getByText('Created Waypoint A at robot')).toBeInTheDocument());
 });
 
@@ -680,7 +797,7 @@ test('starts mapping mode from Mission Canvas', async () => {
 
 test('locks mapping controls while mapping is running', async () => {
   getServiceStatus
-    .mockResolvedValueOnce({ is_up: true })
+    .mockResolvedValueOnce({ is_up: true, mode: 'map' })
     .mockResolvedValueOnce({ is_up: false });
 
   render(<MissionCanvasPage />);
@@ -740,7 +857,7 @@ test('publishes keyboard teleop commands without mapping runtime', async () => {
 });
 
 test('asks for a map name before saving from Mission Canvas', async () => {
-  getServiceStatus.mockResolvedValueOnce({ is_up: true });
+  getServiceStatus.mockResolvedValueOnce({ is_up: true, mode: 'map' });
 
   render(<MissionCanvasPage />);
 
@@ -842,7 +959,7 @@ test('edits and saves loaded map pixels from the fix editor', async () => {
 });
 
 test('enables live robot and lidar layers while navigation runtime is active', async () => {
-  getServiceStatus.mockResolvedValueOnce({ is_up: true });
+  getServiceStatus.mockResolvedValueOnce({ is_up: true, mode: 'map' });
 
   render(<MissionCanvasPage />);
 
@@ -855,7 +972,7 @@ test('enables live robot and lidar layers while navigation runtime is active', a
 });
 
 test('enables navigation runtime layers in the run stage', async () => {
-  getServiceStatus.mockResolvedValueOnce({ is_up: true });
+  getServiceStatus.mockResolvedValueOnce({ is_up: true, mode: 'run' });
 
   render(<MissionCanvasPage />);
 
@@ -876,6 +993,14 @@ test('enables navigation runtime layers in the run stage', async () => {
   expect(screen.getByText('/goal_pose')).toBeInTheDocument();
   expect(screen.getByText('/bt/status')).toBeInTheDocument();
   expect(screen.queryByText('/tf')).not.toBeInTheDocument();
+  await waitFor(() => {
+    expect(mockMapViewer.mock.calls.some(([props]) => (
+      props.showGlobalCostmap === true &&
+      props.showLocalCostmap === true &&
+      props.showGlobalPlan === true &&
+      props.showGoalPose === true
+    ))).toBe(true);
+  });
   const globalCostmapSwitch = screen.getByRole('switch', { name: 'Global costmap' });
   expect(globalCostmapSwitch).toHaveAttribute('aria-checked', 'true');
   expect(globalCostmapSwitch).toHaveClass('inline-flex');
@@ -891,14 +1016,12 @@ test('enables navigation runtime layers in the run stage', async () => {
   expect(screen.getByText('/tf')).toBeInTheDocument();
   expect(screen.getByText('/tf_static')).toBeInTheDocument();
 
-  await waitFor(() => {
-    expect(mockMapViewer.mock.calls.some(([props]) => (
-      props.showGlobalCostmap === true &&
-      props.showLocalCostmap === true &&
-      props.showGlobalPlan === true &&
-      props.showGoalPose === true
-    ))).toBe(true);
-  });
+  expect(mockMapViewer.mock.calls.some(([props]) => (
+    props.showGlobalCostmap === true &&
+    props.showLocalCostmap === true &&
+    props.showGlobalPlan === true &&
+    props.showGoalPose === true
+  ))).toBe(true);
 });
 
 test('loads a saved map for the run stage', async () => {

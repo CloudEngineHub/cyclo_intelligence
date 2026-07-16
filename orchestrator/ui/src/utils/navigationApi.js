@@ -103,6 +103,18 @@ export function sendInitialPoseEstimate({ x, y, yaw, frameId = 'map', mapName })
   });
 }
 
+export function requestNoMotionUpdate() {
+  return request('/nomotion-update', { method: 'POST' });
+}
+
+export function requestGlobalLocalization() {
+  return request('/global-localization', { method: 'POST' });
+}
+
+export function configureDesignLocalizationAmcl() {
+  return request('/amcl/design-localization-params', { method: 'POST' });
+}
+
 export function getServiceLogs({ tail = 300, cursor } = {}) {
   const params = new URLSearchParams({ tail: String(tail) });
   if (cursor !== undefined && cursor !== null) {

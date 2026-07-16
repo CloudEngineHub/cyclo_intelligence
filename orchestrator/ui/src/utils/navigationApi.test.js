@@ -1,9 +1,12 @@
 import {
   cancelNavigateToPoseGoal,
+  configureDesignLocalizationAmcl,
   getPgmImage,
   getServiceStatus,
+  requestGlobalLocalization,
   saveNavigationMap,
   sendInitialPoseEstimate,
+  requestNoMotionUpdate,
   startNavigation,
 } from './navigationApi';
 
@@ -94,5 +97,32 @@ test('sends initial pose estimates through the supervisor API', async () => {
         map_name: 'factory',
       }),
     })
+  );
+});
+
+test('requests a no-motion AMCL update through the supervisor API', async () => {
+  await requestNoMotionUpdate();
+
+  expect(global.fetch).toHaveBeenCalledWith(
+    '/api/navigation/nomotion-update',
+    expect.objectContaining({ method: 'POST' })
+  );
+});
+
+test('requests AMCL global localization through the supervisor API', async () => {
+  await requestGlobalLocalization();
+
+  expect(global.fetch).toHaveBeenCalledWith(
+    '/api/navigation/global-localization',
+    expect.objectContaining({ method: 'POST' })
+  );
+});
+
+test('configures design localization AMCL parameters through the supervisor API', async () => {
+  await configureDesignLocalizationAmcl();
+
+  expect(global.fetch).toHaveBeenCalledWith(
+    '/api/navigation/amcl/design-localization-params',
+    expect.objectContaining({ method: 'POST' })
   );
 });
