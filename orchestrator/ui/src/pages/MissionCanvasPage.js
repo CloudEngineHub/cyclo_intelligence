@@ -6,6 +6,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { MdPowerSettingsNew, MdStop } from "react-icons/md";
 import {
   configureDesignLocalizationAmcl,
   getServiceStatus,
@@ -33,9 +34,11 @@ import {
   yawFromPose,
 } from "../utils/navigationTf";
 import { FALLBACK_CATALOG } from "../constants/btNodeCatalogFallback";
+import { BT_SUPPORTED_ROBOT_TYPE } from "../constants/btSupport";
 
 const DEFAULT_MAP_NAME = "map";
 const STATUS_POLL_MS = 10000;
+const BT_NODE_STATUS_POLL_MS = 5000;
 const NOMOTION_UPDATE_INTERVAL_MS = 1000;
 const AUTO_LOCALIZE_MAX_UPDATES = 10;
 const AUTO_LOCALIZE_MIN_UPDATES = 3;
@@ -44,6 +47,7 @@ const AUTO_LOCALIZE_XY_COVARIANCE_MAX = 0.6;
 const AUTO_LOCALIZE_YAW_COVARIANCE_MAX = 0.5;
 const ROS2_WS_FAST_TOPIC_OPTIONS = { throttleMs: 100 };
 const BT_TOPIC_OPTIONS = { staleMs: 3000 };
+const SUPERVISOR_API_BASE = "/api";
 const STAGE_MAPPING = "mapping";
 const STAGE_AUTHORING = "authoring";
 const STAGE_RUN = "run";
@@ -173,11 +177,64 @@ const TELEOP_DEFAULT_LINEAR_SPEED = 0.4;
 const TELEOP_DEFAULT_ANGULAR_SPEED = 0.8;
 const TELEOP_STOP = { linearX: 0, angularZ: 0 };
 
-function messageData(value) {
+function topicPayload(value) {
   if (!value || typeof value !== "object") return null;
   if (value.available === false) return null;
-  const data = "data" in value ? value.data : value;
+  return "data" in value ? value.data : value;
+}
+
+function messageData(value) {
+  const data = topicPayload(value);
   return data && typeof data === "object" ? data : null;
+}
+
+function hasTopicMessage(value) {
+  if (!value || typeof value !== "object") return false;
+  if (value.available === false) return false;
+  if (value.available === true) return true;
+  return topicPayload(value) !== null;
+}
+
+function rosStringData(value) {
+  const payload = topicPayload(value);
+  if (typeof payload === "string") return payload;
+  if (payload && typeof payload.data === "string") return payload.data;
+  return "";
+}
+
+async function readJsonResponse(response) {
+  const text = await response.text();
+  if (!text) return {};
+  try {
+    return JSON.parse(text);
+  } catch {
+    return { detail: text };
+  }
+}
+
+async function requestSupervisorApi(path, init) {
+  if (typeof fetch !== "function") {
+    throw new Error("Supervisor API is not available");
+  }
+  const response = await fetch(`${SUPERVISOR_API_BASE}${path}`, init);
+  const data = await readJsonResponse(response);
+  if (!response.ok || data.ok === false) {
+    throw new Error(data.detail || data.message || `Request failed (${response.status})`);
+  }
+  return data;
+}
+
+function getBtNodeServiceStatus() {
+  return requestSupervisorApi("/services/bt_node/status");
+}
+
+function setBtNodeServiceActive(active) {
+  const init = { method: "POST" };
+  if (active) {
+    init.headers = { "Content-Type": "application/json" };
+    init.body = JSON.stringify({ robot_type: BT_SUPPORTED_ROBOT_TYPE });
+  }
+  return requestSupervisorApi(`/services/bt_node/${active ? "start" : "stop"}`, init);
 }
 
 function delay(ms) {
@@ -657,6 +714,75 @@ function RunSessionPanel({ mapName, running }) {
   );
 }
 
+function btNodeStateLabel(state) {
+  if (state === "up") return "Active";
+  if (state === "down") return "Inactive";
+  return "Unknown";
+}
+
+function btNodeStateColor(state) {
+  if (state === "up") return "#22c55e";
+  if (state === "down") return "#94a3b8";
+  return "#f59e0b";
+}
+
+function BtRuntimePanel({
+  nodeState,
+  btStatus,
+  activeNodes,
+  busy,
+  onActivate,
+  onDeactivate,
+}) {
+  const isActive = nodeState === "up";
+
+  return (
+    <Panel title="BT Runtime" compact className="grid gap-2 content-start">
+      <div className="flex items-center justify-between gap-2 min-w-0">
+        <div className="flex items-center gap-2 min-w-0">
+          <span
+            className="w-2.5 h-2.5 rounded-full shrink-0"
+            style={{ backgroundColor: btNodeStateColor(nodeState) }}
+            aria-label={`BT node ${btNodeStateLabel(nodeState)}`}
+            title={`BT node ${btNodeStateLabel(nodeState)}`}
+          />
+          <span className="text-xs font-semibold truncate">
+            BT Node {btNodeStateLabel(nodeState)}
+          </span>
+        </div>
+      </div>
+      <div className="grid gap-1">
+        <SessionRow label="Status" value={btStatus || "wait"} />
+        <SessionRow label="Active nodes" value={activeNodes} />
+      </div>
+      <div className="flex flex-wrap gap-2 pt-1">
+        <ActionButton
+          disabled={busy || isActive}
+          onClick={onActivate}
+          title="Start BT node"
+          variant="secondary"
+        >
+          <span className="inline-flex items-center gap-1.5">
+            <MdPowerSettingsNew size={16} />
+            Activate BT
+          </span>
+        </ActionButton>
+        <ActionButton
+          disabled={busy || !isActive}
+          onClick={onDeactivate}
+          title="Stop BT node"
+          variant="danger"
+        >
+          <span className="inline-flex items-center gap-1.5">
+            <MdStop size={16} />
+            Deactivate BT
+          </span>
+        </ActionButton>
+      </div>
+    </Panel>
+  );
+}
+
 function clampNumber(value, min, max) {
   const number = Number(value);
   if (!Number.isFinite(number)) return min;
@@ -1061,6 +1187,7 @@ function ActionButton({
   active = false,
   disabled = false,
   onClick,
+  title,
   type = "button",
   variant = "primary",
 }) {
@@ -1099,6 +1226,7 @@ function ActionButton({
       type={type}
       disabled={disabled}
       onClick={onClick}
+      title={title}
       aria-pressed={active ? true : undefined}
       className={[
         "h-8 px-3 border rounded-md text-sm font-semibold transition-all active:translate-y-px",
@@ -1142,6 +1270,11 @@ export default function MissionCanvasPage() {
   const [pendingBehaviorNodeTag, setPendingBehaviorNodeTag] = useState("");
   const [busy, setBusy] = useState("");
   const [message, setMessage] = useState("Ready");
+  const [btNodeStatus, setBtNodeStatus] = useState({
+    state: "unknown",
+    raw: "not checked",
+  });
+  const [btNodeBusy, setBtNodeBusy] = useState("");
   const [interactionMode, setInteractionMode] = useState("view");
   const [showWaypointOptions, setShowWaypointOptions] = useState(false);
   const [designPoseInitialized, setDesignPoseInitialized] = useState(() => (
@@ -1301,8 +1434,15 @@ export default function MissionCanvasPage() {
   const goalPose = useMemo(() => messageData(goalPoseData), [goalPoseData]);
   const tf = useMemo(() => messageData(tfData), [tfData]);
   const tfStatic = useMemo(() => messageData(tfStaticData), [tfStaticData]);
-  const btStatus = useMemo(() => messageData(btStatusData), [btStatusData]);
-  const btActiveNodes = useMemo(() => messageData(btActiveNodesData), [btActiveNodesData]);
+  const btStatusText = useMemo(() => rosStringData(btStatusData), [btStatusData]);
+  const btActiveNodesText = useMemo(() => {
+    const names = rosStringData(btActiveNodesData)
+      .split(",")
+      .map((name) => name.trim())
+      .filter(Boolean);
+    return names.join(", ");
+  }, [btActiveNodesData]);
+  const btNodeIsUp = btNodeStatus.state === "up";
   const latestTf = useMemo(() => mergeTfMessages(tfStatic, tf), [tf, tfStatic]);
   void tfBufferRevision;
   const bufferedTf = tfMessageFromBuffer(tfBufferRef.current) ?? latestTf;
@@ -1354,8 +1494,8 @@ export default function MissionCanvasPage() {
       "/local_costmap/costmap": !!localCostmap,
       "/plan": !!plan,
       "/goal_pose": !!goalPose,
-      "/bt/status": !!btStatus,
-      "/bt/active_nodes": !!btActiveNodes,
+      "/bt/status": hasTopicMessage(btStatusData) || btNodeIsUp,
+      "/bt/active_nodes": hasTopicMessage(btActiveNodesData) || btNodeIsUp,
     };
     const selectedTopics = new Set(STAGE_EXTRA_TOPIC_IDS[workspaceStage] || []);
     (STAGE_LAYER_IDS[workspaceStage] || []).forEach((layerId) => {
@@ -1385,8 +1525,9 @@ export default function MissionCanvasPage() {
   }, [
     activeLayers,
     amclPose,
-    btActiveNodes,
-    btStatus,
+    btActiveNodesData,
+    btStatusData,
+    btNodeIsUp,
     footprint,
     globalCostmap,
     goalPose,
@@ -1415,6 +1556,24 @@ export default function MissionCanvasPage() {
     }
   }, []);
 
+  const refreshBtNodeStatus = useCallback(async ({ quiet = false } = {}) => {
+    try {
+      const nextStatus = await getBtNodeServiceStatus();
+      setBtNodeStatus(nextStatus);
+      return nextStatus;
+    } catch (error) {
+      const nextStatus = {
+        state: "unknown",
+        raw: error instanceof Error ? error.message : "status failed",
+      };
+      setBtNodeStatus(nextStatus);
+      if (!quiet) {
+        setMessage(error instanceof Error ? error.message : "BT node status failed");
+      }
+      return nextStatus;
+    }
+  }, []);
+
   const loadSpots = useCallback(async () => {
     try {
       const result = await getNavigationSpots(mapName.trim() || DEFAULT_MAP_NAME);
@@ -1439,6 +1598,17 @@ export default function MissionCanvasPage() {
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
   }, [loadStatus]);
+
+  useEffect(() => {
+    if (!needsBtTopics || document.visibilityState === "hidden") return undefined;
+    void refreshBtNodeStatus({ quiet: true });
+    const interval = window.setInterval(() => {
+      void refreshBtNodeStatus({ quiet: true });
+    }, BT_NODE_STATUS_POLL_MS);
+    return () => {
+      window.clearInterval(interval);
+    };
+  }, [needsBtTopics, refreshBtNodeStatus]);
 
   useEffect(() => {
     void loadSpots();
@@ -1535,6 +1705,34 @@ export default function MissionCanvasPage() {
   const publishTeleopCommand = useCallback((motion) => (
     publishRosTopic(TELEOP_TOPIC, TELEOP_MESSAGE_TYPE, teleopTwist(motion))
   ), [publishRosTopic]);
+
+  const handleBtNodeActivate = useCallback(async () => {
+    setBtNodeBusy("activate");
+    try {
+      await setBtNodeServiceActive(true);
+      setMessage("BT node activated");
+      await refreshBtNodeStatus({ quiet: true });
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Failed to activate BT node");
+      await refreshBtNodeStatus({ quiet: true });
+    } finally {
+      setBtNodeBusy("");
+    }
+  }, [refreshBtNodeStatus]);
+
+  const handleBtNodeDeactivate = useCallback(async () => {
+    setBtNodeBusy("deactivate");
+    try {
+      await setBtNodeServiceActive(false);
+      setMessage("BT node deactivated");
+      await refreshBtNodeStatus({ quiet: true });
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Failed to deactivate BT node");
+      await refreshBtNodeStatus({ quiet: true });
+    } finally {
+      setBtNodeBusy("");
+    }
+  }, [refreshBtNodeStatus]);
 
   const loadSavedDesignForMap = useCallback((targetMapName) => {
     const savedNodes = savedBehaviorNodesForMap(targetMapName);
@@ -2336,7 +2534,15 @@ export default function MissionCanvasPage() {
         </section>
 
         {workspaceStage === STAGE_AUTHORING ? (
-          <aside className="min-h-0 grid grid-rows-[auto_1fr_minmax(160px,220px)] gap-4">
+          <aside className="min-h-0 grid grid-rows-[auto_auto_1fr_minmax(160px,220px)] gap-4">
+            <BtRuntimePanel
+              nodeState={btNodeStatus.state}
+              btStatus={btStatusText || (btNodeIsUp ? "stopped" : "wait")}
+              activeNodes={btActiveNodesText || (btNodeIsUp ? "None" : "wait")}
+              busy={!!btNodeBusy}
+              onActivate={handleBtNodeActivate}
+              onDeactivate={handleBtNodeDeactivate}
+            />
             <Panel title="Properties" className="grid gap-3">
               {selectedBehaviorNode ? (
                 <div className="grid gap-2 text-xs">

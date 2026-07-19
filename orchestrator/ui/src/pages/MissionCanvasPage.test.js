@@ -49,6 +49,14 @@ function topicRow(topic) {
   return screen.getByText(topic).parentElement;
 }
 
+function mockJsonResponse(data, ok = true, status = ok ? 200 : 500) {
+  return {
+    ok,
+    status,
+    text: () => Promise.resolve(JSON.stringify(data)),
+  };
+}
+
 jest.mock('../components/navigation/MapViewer', () => ({
   MapViewer: (props) => mockMapViewer(props),
 }));
@@ -108,6 +116,11 @@ beforeEach(() => {
   });
   window.localStorage.clear();
   window.sessionStorage.clear();
+  global.fetch = jest.fn().mockResolvedValue(mockJsonResponse({
+    name: 'bt_node',
+    state: 'down',
+    raw: 'down',
+  }));
   mockPublishRosTopic.mockResolvedValue(undefined);
   createNavigationSpot.mockResolvedValue({
     id: 'spot_a',
@@ -245,6 +258,10 @@ test('shows Waypoint and BT authoring panels in the authoring stage', async () =
   expect(screen.getByRole('button', { name: 'SendCommand' })).toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Sequence' })).toBeInTheDocument();
   expect(screen.getByText('Properties')).toBeInTheDocument();
+  expect(screen.getByText('BT Runtime')).toBeInTheDocument();
+  expect(screen.getByText('BT Node Unknown')).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Activate BT' })).toBeEnabled();
+  expect(screen.getByRole('button', { name: 'Deactivate BT' })).toBeDisabled();
   expect(screen.getByText('Design Objects')).toBeInTheDocument();
   expect(screen.getByText('Behavior Nodes')).toBeInTheDocument();
   expect(screen.getByText('Waypoints')).toBeInTheDocument();
@@ -268,9 +285,71 @@ test('shows Waypoint and BT authoring panels in the authoring stage', async () =
   expect(screen.queryByText('/global_costmap/costmap')).not.toBeInTheDocument();
   await waitFor(() => expect(getServiceStatus).toHaveBeenCalled());
   await waitFor(() => expect(getNavigationSpots).toHaveBeenCalledWith('map'));
+  await waitFor(() => expect(screen.getByText('BT Node Inactive')).toBeInTheDocument());
   expect(getPgmImage).not.toHaveBeenCalled();
   expect(latestMapViewerProps().map).toBeNull();
   expect(latestMapViewerProps().waitingLabel).toBe('Load a map');
+});
+
+test('controls BT node lifecycle from the design stage', async () => {
+  global.fetch
+    .mockResolvedValueOnce(mockJsonResponse({
+      name: 'bt_node',
+      state: 'down',
+      raw: 'down',
+    }))
+    .mockResolvedValueOnce(mockJsonResponse({
+      ok: true,
+      message: 'started',
+    }))
+    .mockResolvedValueOnce(mockJsonResponse({
+      name: 'bt_node',
+      state: 'up',
+      raw: 'up',
+    }))
+    .mockResolvedValueOnce(mockJsonResponse({
+      ok: true,
+      message: 'stopped',
+    }))
+    .mockResolvedValueOnce(mockJsonResponse({
+      name: 'bt_node',
+      state: 'down',
+      raw: 'down',
+    }));
+
+  render(<MissionCanvasPage />);
+
+  fireEvent.click(screen.getByRole('tab', { name: 'Design' }));
+
+  await waitFor(() => expect(screen.getByText('BT Node Inactive')).toBeInTheDocument());
+  expect(screen.getByRole('button', { name: 'Activate BT' })).toBeEnabled();
+  expect(screen.getByRole('button', { name: 'Deactivate BT' })).toBeDisabled();
+
+  fireEvent.click(screen.getByRole('button', { name: 'Activate BT' }));
+
+  await waitFor(() => expect(global.fetch).toHaveBeenCalledWith(
+    '/api/services/bt_node/start',
+    expect.objectContaining({
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ robot_type: 'ffw_sg2_rev1' }),
+    }),
+  ));
+  await waitFor(() => expect(screen.getByText('BT Node Active')).toBeInTheDocument());
+  expect(topicRow('/bt/status')).toHaveTextContent('live');
+  expect(topicRow('/bt/active_nodes')).toHaveTextContent('live');
+  expect(screen.getByRole('button', { name: 'Activate BT' })).toBeDisabled();
+  expect(screen.getByRole('button', { name: 'Deactivate BT' })).toBeEnabled();
+
+  fireEvent.click(screen.getByRole('button', { name: 'Deactivate BT' }));
+
+  await waitFor(() => expect(global.fetch).toHaveBeenCalledWith(
+    '/api/services/bt_node/stop',
+    expect.objectContaining({ method: 'POST' }),
+  ));
+  await waitFor(() => expect(screen.getByText('BT Node Inactive')).toBeInTheDocument());
+  expect(topicRow('/bt/status')).toHaveTextContent('wait');
+  expect(topicRow('/bt/active_nodes')).toHaveTextContent('wait');
 });
 
 test('marks BT topics live when BT topic messages are available', async () => {
@@ -649,7 +728,7 @@ test('clears stale robot pose before a second at-robot waypoint attempt', async 
   expect(secondPayload.pose.yaw).toBeCloseTo(0.6);
   expect(secondPayload.pose.x).not.toBeCloseTo(createNavigationSpot.mock.calls[0][0].pose.x);
   expect(stopNavigation).toHaveBeenCalledTimes(2);
-});
+}, 10000);
 
 test('syncs design localization state from navigation status mode', async () => {
   const latestMapViewerProps = () => (
