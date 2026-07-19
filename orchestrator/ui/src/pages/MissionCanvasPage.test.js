@@ -565,6 +565,62 @@ test('shows waypoint actions in Properties after placing a waypoint', async () =
   expect(screen.getByRole('button', { name: 'Create Waypoint' })).not.toHaveAttribute('aria-pressed');
 });
 
+test('opens waypoint BT popup when selecting a waypoint with BT active', async () => {
+  const latestMapViewerProps = () => (
+    mockMapViewer.mock.calls[mockMapViewer.mock.calls.length - 1][0]
+  );
+  global.fetch.mockResolvedValue(mockJsonResponse({
+    name: 'bt_node',
+    state: 'up',
+    raw: 'up',
+  }));
+  getPgmFiles.mockResolvedValue({
+    files: [{ path: 'factory.pgm', name: 'factory.pgm' }],
+  });
+  getPgmImage.mockResolvedValue({
+    path: 'factory.pgm',
+    width: 1,
+    height: 1,
+    maxval: 255,
+    pixels_base64: 'AA==',
+  });
+  getNavigationSpots.mockImplementation((mapName) => Promise.resolve({
+    map_name: mapName,
+    spots: mapName === 'factory' ? [{
+      id: 'spot_factory',
+      map_name: 'factory',
+      label: 'Waypoint Factory',
+      pose: { frame_id: 'map', x: 1, y: 2, yaw: 0.25 },
+      linked_bt_tree: 'factory_waypoint.xml',
+      metadata: {},
+    }] : [],
+  }));
+
+  render(<MissionCanvasPage />);
+
+  fireEvent.click(screen.getByRole('tab', { name: 'Design' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Load Map' }));
+  await screen.findByRole('combobox', { name: 'Design map file' });
+  fireEvent.click(screen.getByRole('button', { name: 'Load' }));
+
+  await waitFor(() => expect(latestMapViewerProps().spots).toHaveLength(1));
+  await waitFor(() => expect(screen.getByText('BT Node Active')).toBeInTheDocument());
+
+  act(() => {
+    latestMapViewerProps().onSpotClick('spot_factory');
+  });
+
+  expect(screen.getByRole('dialog', { name: 'Waypoint BT' })).toBeInTheDocument();
+  expect(screen.getAllByText('Waypoint Factory').length).toBeGreaterThan(0);
+  expect(screen.getAllByText('factory_waypoint.xml').length).toBeGreaterThan(0);
+  expect(screen.getByRole('button', { name: 'Create BT' })).toBeDisabled();
+  expect(screen.getByRole('button', { name: 'Edit BT' })).toBeEnabled();
+
+  fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+
+  expect(screen.queryByRole('dialog', { name: 'Waypoint BT' })).not.toBeInTheDocument();
+});
+
 test('creates a waypoint at robot with automatic localization from the waypoint menu', async () => {
   const latestMapViewerProps = () => (
     mockMapViewer.mock.calls[mockMapViewer.mock.calls.length - 1][0]

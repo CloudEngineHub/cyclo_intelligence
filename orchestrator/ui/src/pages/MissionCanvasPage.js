@@ -584,6 +584,77 @@ function LoadMapDialog({
   );
 }
 
+function WaypointBtDialog({
+  open,
+  spot,
+  btNodeLabel,
+  onClose,
+}) {
+  if (!open || !spot) return null;
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 px-4"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="mission-waypoint-bt-title"
+    >
+      <section
+        className="w-full max-w-5xl h-[min(720px,85vh)] border rounded-md shadow-2xl grid grid-rows-[auto_1fr]"
+        style={{
+          color: "#111827",
+          backgroundColor: "#ffffff",
+          borderColor: "#d1d5db",
+        }}
+      >
+        <header
+          className="min-w-0 flex items-center justify-between gap-3 border-b px-4 py-3"
+          style={{ borderColor: "#d1d5db" }}
+        >
+          <div className="min-w-0">
+            <h2 id="mission-waypoint-bt-title" className="text-base font-semibold truncate">
+              Waypoint BT
+            </h2>
+            <div className="text-xs truncate" style={{ color: "#4b5563" }}>
+              {spot.label}
+            </div>
+          </div>
+          <ActionButton onClick={onClose} variant="secondary">
+            Close
+          </ActionButton>
+        </header>
+
+        <div className="min-h-0 grid grid-cols-[260px_minmax(0,1fr)] gap-4 p-4">
+          <aside
+            className="min-h-0 border rounded-md p-3 grid content-start gap-2 text-xs overflow-auto"
+            style={{ borderColor: "#cbd5e1", backgroundColor: "#f8fafc" }}
+          >
+            <SessionRow label="Waypoint" value={spot.label} />
+            <SessionRow label="BT Tree" value={spot.linked_bt_tree || "Not linked"} />
+            <SessionRow label="BT Node" value={btNodeLabel} />
+            <SessionRow
+              label="Pose"
+              value={`${spot.pose.x.toFixed(2)}, ${spot.pose.y.toFixed(2)}, yaw ${spot.pose.yaw.toFixed(2)}`}
+              stacked
+            />
+          </aside>
+
+          <div
+            className="min-h-0 border rounded-md flex items-center justify-center text-sm"
+            style={{
+              color: "#64748b",
+              borderColor: "#cbd5e1",
+              backgroundColor: "#ffffff",
+            }}
+          >
+            {spot.linked_bt_tree || "No behavior tree linked"}
+          </div>
+        </div>
+      </section>
+    </div>
+  );
+}
+
 function LayerToggle({ label, checked, compact = false, onChange }) {
   return (
     <div
@@ -1294,6 +1365,7 @@ export default function MissionCanvasPage() {
     raw: "not checked",
   });
   const [btNodeBusy, setBtNodeBusy] = useState("");
+  const [showWaypointBtDialog, setShowWaypointBtDialog] = useState(false);
   const [interactionMode, setInteractionMode] = useState("view");
   const [showWaypointOptions, setShowWaypointOptions] = useState(false);
   const [designPoseInitialized, setDesignPoseInitialized] = useState(() => (
@@ -1630,6 +1702,13 @@ export default function MissionCanvasPage() {
   }, [needsBtTopics, refreshBtNodeStatus]);
 
   useEffect(() => {
+    if (!showWaypointBtDialog) return;
+    if (workspaceStage !== STAGE_AUTHORING || !btNodeIsUp || !selectedSpot) {
+      setShowWaypointBtDialog(false);
+    }
+  }, [btNodeIsUp, selectedSpot, showWaypointBtDialog, workspaceStage]);
+
+  useEffect(() => {
     void loadSpots();
   }, [loadSpots]);
 
@@ -1951,13 +2030,17 @@ export default function MissionCanvasPage() {
     setPendingBehaviorNodeTag("");
     setShowWaypointOptions(false);
     setInteractionMode("view");
-  }, []);
+    if (workspaceStage === STAGE_AUTHORING && btNodeIsUp) {
+      setShowWaypointBtDialog(true);
+    }
+  }, [btNodeIsUp, workspaceStage]);
 
   const handleSelectBehaviorNode = useCallback((nodeId) => {
     setSelectedBehaviorNodeId(nodeId);
     setSelectedSpotId("");
     setPendingBehaviorNodeTag("");
     setShowWaypointOptions(false);
+    setShowWaypointBtDialog(false);
     setInteractionMode("view");
   }, []);
 
@@ -1965,6 +2048,7 @@ export default function MissionCanvasPage() {
     setWorkspaceStage(STAGE_AUTHORING);
     setPendingBehaviorNodeTag(tag);
     setSelectedSpotId("");
+    setShowWaypointBtDialog(false);
     setShowWaypointOptions(false);
     setInteractionMode("behavior");
     setMessage(`${tag} selected`);
@@ -1979,6 +2063,7 @@ export default function MissionCanvasPage() {
     setWorkspaceStage(STAGE_AUTHORING);
     setPendingBehaviorNodeTag("");
     setSelectedBehaviorNodeId("");
+    setShowWaypointBtDialog(false);
     setShowWaypointOptions(false);
     setInteractionMode((value) => (value === "spot" ? "view" : "spot"));
   }, []);
@@ -2178,6 +2263,15 @@ export default function MissionCanvasPage() {
     setMessage(`Moved ${node?.tag || "node"}`);
   }, [behaviorNodes]);
 
+  const handleOpenSelectedSpotBt = useCallback(() => {
+    if (!selectedSpot) return;
+    if (!btNodeIsUp) {
+      setMessage("Activate BT before opening waypoint BT");
+      return;
+    }
+    setShowWaypointBtDialog(true);
+  }, [btNodeIsUp, selectedSpot]);
+
   const handleRenameSpot = useCallback(async (event) => {
     if (!selectedSpot) return;
     const label = event.currentTarget.value;
@@ -2203,6 +2297,7 @@ export default function MissionCanvasPage() {
       await deleteNavigationSpot(selectedSpot.id, selectedSpot.map_name);
       setSpots((current) => current.filter((spot) => spot.id !== selectedSpot.id));
       setSelectedSpotId("");
+      setShowWaypointBtDialog(false);
       setMessage(`Deleted ${selectedSpot.label}`);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Failed to delete waypoint");
@@ -2250,6 +2345,12 @@ export default function MissionCanvasPage() {
         onChange={setRunMapPath}
         onCancel={() => setShowRunMapDialog(false)}
         onSubmit={handleConfirmRunMap}
+      />
+      <WaypointBtDialog
+        open={showWaypointBtDialog}
+        spot={selectedSpot}
+        btNodeLabel={btNodeStateLabel(btNodeStatus.state)}
+        onClose={() => setShowWaypointBtDialog(false)}
       />
       <header
         className="shrink-0 border-b pb-3 mb-4 flex flex-col xl:flex-row xl:items-center xl:justify-between gap-3"
@@ -2620,10 +2721,18 @@ export default function MissionCanvasPage() {
                   </div>
                   <div className="pt-2 border-t grid gap-2" style={{ borderColor: MISSION_PANEL_BORDER }}>
                     <div className="flex flex-wrap gap-2">
-                      <ActionButton disabled variant="secondary">
+                      <ActionButton
+                        disabled={!btNodeIsUp || !!selectedSpot.linked_bt_tree}
+                        onClick={handleOpenSelectedSpotBt}
+                        variant="secondary"
+                      >
                         Create BT
                       </ActionButton>
-                      <ActionButton disabled variant="secondary">
+                      <ActionButton
+                        disabled={!btNodeIsUp || !selectedSpot.linked_bt_tree}
+                        onClick={handleOpenSelectedSpotBt}
+                        variant="secondary"
+                      >
                         Edit BT
                       </ActionButton>
                     </div>
