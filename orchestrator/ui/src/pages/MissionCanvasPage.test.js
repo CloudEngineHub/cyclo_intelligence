@@ -230,6 +230,10 @@ test('updates mapping topics when layer toggles change', async () => {
 });
 
 test('shows Waypoint and BT authoring panels in the authoring stage', async () => {
+  const latestMapViewerProps = () => (
+    mockMapViewer.mock.calls[mockMapViewer.mock.calls.length - 1][0]
+  );
+
   render(<MissionCanvasPage />);
 
   fireEvent.click(screen.getByRole('tab', { name: 'Design' }));
@@ -246,7 +250,7 @@ test('shows Waypoint and BT authoring panels in the authoring stage', async () =
   expect(screen.getByText('Waypoints')).toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Load Map' })).toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Save Map' })).toBeInTheDocument();
-  expect(screen.getByRole('button', { name: 'Create Waypoint' })).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Create Waypoint' })).toBeDisabled();
   expect(screen.queryByRole('menu', { name: 'Waypoint creation options' })).not.toBeInTheDocument();
   expect(screen.queryByRole('button', { name: 'At Robot' })).not.toBeInTheDocument();
   expect(screen.getByText('Select a waypoint or behavior node on the map.')).toBeInTheDocument();
@@ -255,7 +259,7 @@ test('shows Waypoint and BT authoring panels in the authoring stage', async () =
   expect(screen.queryByRole('button', { name: 'Create BT' })).not.toBeInTheDocument();
   expect(screen.queryByRole('button', { name: 'Edit BT' })).not.toBeInTheDocument();
   expect(screen.queryByRole('button', { name: 'Start Mapping' })).not.toBeInTheDocument();
-  expect(screen.getByText('/map')).toBeInTheDocument();
+  expect(screen.queryByText('/map')).not.toBeInTheDocument();
   expect(screen.getByText('/bt/status')).toBeInTheDocument();
   expect(screen.getByText('/bt/active_nodes')).toBeInTheDocument();
   expect(topicRow('/bt/status')).toHaveTextContent('wait');
@@ -264,6 +268,9 @@ test('shows Waypoint and BT authoring panels in the authoring stage', async () =
   expect(screen.queryByText('/global_costmap/costmap')).not.toBeInTheDocument();
   await waitFor(() => expect(getServiceStatus).toHaveBeenCalled());
   await waitFor(() => expect(getNavigationSpots).toHaveBeenCalledWith('map'));
+  expect(getPgmImage).not.toHaveBeenCalled();
+  expect(latestMapViewerProps().map).toBeNull();
+  expect(latestMapViewerProps().waitingLabel).toBe('Load a map');
 });
 
 test('marks BT topics live when BT topic messages are available', async () => {
@@ -764,10 +771,18 @@ test('places behavior palette nodes on the map overlay', async () => {
   const latestMapViewerProps = () => (
     mockMapViewer.mock.calls[mockMapViewer.mock.calls.length - 1][0]
   );
+  getPgmFiles.mockResolvedValue({
+    files: [{ path: 'map.pgm', name: 'map.pgm' }],
+  });
 
   render(<MissionCanvasPage />);
 
   fireEvent.click(screen.getByRole('tab', { name: 'Design' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Load Map' }));
+  await screen.findByRole('combobox', { name: 'Design map file' });
+  fireEvent.click(screen.getByRole('button', { name: 'Load' }));
+  await waitFor(() => expect(latestMapViewerProps().map).not.toBeNull());
+
   fireEvent.click(screen.getByRole('button', { name: 'Wait' }));
 
   await waitFor(() => expect(latestMapViewerProps().interactionMode).toBe('behavior'));

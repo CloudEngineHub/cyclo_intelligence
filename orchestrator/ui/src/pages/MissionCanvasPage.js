@@ -1118,6 +1118,11 @@ export default function MissionCanvasPage() {
     initialSessionRef.current = readMissionSession();
   }
   const initialSession = initialSessionRef.current;
+  const restoredDesignMapPath = (
+    typeof initialSession.designMapPath === "string" && initialSession.designMapPath.trim()
+      ? initialSession.designMapPath.trim()
+      : ""
+  );
   const statusLoadingRef = useRef(false);
   const nomotionUpdateBusyRef = useRef(false);
   const tfBufferRef = useRef(new Map());
@@ -1153,13 +1158,8 @@ export default function MissionCanvasPage() {
   const [saveMapName, setSaveMapName] = useState(DEFAULT_MAP_NAME);
   const [showDesignMapDialog, setShowDesignMapDialog] = useState(false);
   const [designMapFiles, setDesignMapFiles] = useState([]);
-  const [designMapPath, setDesignMapPath] = useState(() => (
-    typeof initialSession.designMapPath === "string" && initialSession.designMapPath.trim()
-      ? initialSession.designMapPath
-      : initialWorkspaceStage(initialSession) === STAGE_AUTHORING
-        ? pgmPathFromMapName(initialSession.mapName || DEFAULT_MAP_NAME)
-        : ""
-  ));
+  const [designMapPath, setDesignMapPath] = useState(restoredDesignMapPath);
+  const [pendingDesignMapPath, setPendingDesignMapPath] = useState(restoredDesignMapPath);
   const [designMapBusy, setDesignMapBusy] = useState(false);
   const [designMapReloadToken, setDesignMapReloadToken] = useState(0);
   const [showRunMapDialog, setShowRunMapDialog] = useState(false);
@@ -1176,13 +1176,13 @@ export default function MissionCanvasPage() {
 
   const running = status?.is_up ?? false;
   const mappingEditorActive = workspaceStage === STAGE_MAPPING && showPgmFix;
-  const missionOverlayActive = workspaceStage !== STAGE_MAPPING && !mappingEditorActive;
   const designMapActive = workspaceStage === STAGE_AUTHORING && !!designMapPath;
-  const robotPoseCaptureActive = workspaceStage === STAGE_AUTHORING;
+  const robotPoseCaptureActive = workspaceStage === STAGE_AUTHORING && designMapActive;
   const mappingRuntimeActive = running && navigationRuntimeMode === "mapping";
   const runRuntimeActive = running && navigationRuntimeMode === "run";
   const designLocalizationActive = (
     workspaceStage === STAGE_AUTHORING &&
+    designMapActive &&
     running &&
     navigationRuntimeMode === "localization"
   );
@@ -1310,10 +1310,14 @@ export default function MissionCanvasPage() {
   const currentPose = poseFromBaseLinkTf(bufferedTf) ?? fallbackPose;
   const displayedMap = mappingEditorActive
     ? mapEditor.map
-    : designMapActive
-      ? designMapEditor.map
+    : workspaceStage === STAGE_AUTHORING
+      ? designMapActive ? designMapEditor.map : null
       : map;
-  const designMapAvailable = !!map || !!designMapEditor.map;
+  const designMapAvailable = designMapActive && !!designMapEditor.map;
+  const missionOverlayActive = (
+    workspaceStage === STAGE_RUN ||
+    (workspaceStage === STAGE_AUTHORING && designMapAvailable)
+  );
   const visibleSpots = useMemo(
     () => spots.map((spot) => spotForMapDisplay(spot, displayedMap)),
     [displayedMap, spots],
@@ -1358,6 +1362,14 @@ export default function MissionCanvasPage() {
       if (!activeLayers[layerId]) return;
       (LAYER_TOPIC_IDS[layerId] || []).forEach((topic) => selectedTopics.add(topic));
     });
+    if (workspaceStage === STAGE_AUTHORING && !designLocalizationActive) {
+      selectedTopics.delete("/map");
+      selectedTopics.delete("/scan");
+      selectedTopics.delete("/amcl_pose");
+      selectedTopics.delete("/tf");
+      selectedTopics.delete("/tf_static");
+      selectedTopics.delete("/local_costmap/published_footprint");
+    }
     if (designLocalizationActive) {
       ["/scan", "/amcl_pose", "/tf", "/tf_static", "/local_costmap/published_footprint"].forEach((topic) => {
         selectedTopics.add(topic);
@@ -1439,12 +1451,6 @@ export default function MissionCanvasPage() {
   useEffect(() => {
     amclPoseRef.current = amclPose;
   }, [amclPose]);
-
-  useEffect(() => {
-    if (workspaceStage !== STAGE_AUTHORING || designMapPath) return;
-    const fallbackPath = pgmPathFromMapName(currentMapName);
-    if (fallbackPath) setDesignMapPath(fallbackPath);
-  }, [currentMapName, designMapPath, workspaceStage]);
 
   useEffect(() => {
     saveMissionSession({
@@ -1549,15 +1555,18 @@ export default function MissionCanvasPage() {
     setShowPgmFix(false);
     setShowWaypointOptions(false);
     setShowDesignMapDialog(true);
+    setPendingDesignMapPath(designMapPath);
     setDesignMapBusy(true);
     setMessage("Loading saved maps");
     getPgmFiles()
       .then((response) => {
         const files = response.files || [];
-        const preferred = files.find((file) => mapNameFromPgmPath(file.path) === currentMapName)
+        const existing = files.find((file) => file.path === designMapPath);
+        const preferred = existing
+          || files.find((file) => mapNameFromPgmPath(file.path) === currentMapName)
           || files[0];
         setDesignMapFiles(files);
-        setDesignMapPath(preferred?.path || "");
+        setPendingDesignMapPath(preferred?.path || "");
         if (!files.length) {
           setMessage("No PGM files found");
         }
@@ -1566,15 +1575,20 @@ export default function MissionCanvasPage() {
         setMessage(error instanceof Error ? error.message : "Failed to list PGM files");
       })
       .finally(() => setDesignMapBusy(false));
-  }, [currentMapName]);
+  }, [currentMapName, designMapPath]);
 
   const handleConfirmDesignMap = useCallback(() => {
-    const selectedMapName = mapNameFromPgmPath(designMapPath);
+    if (!pendingDesignMapPath) {
+      setMessage("Map file required");
+      return;
+    }
+    const selectedMapName = mapNameFromPgmPath(pendingDesignMapPath);
     if (!selectedMapName) {
       setMessage("Map file required");
       return;
     }
     setMapName(selectedMapName);
+    setDesignMapPath(pendingDesignMapPath);
     setShowDesignMapDialog(false);
     setWorkspaceStage(STAGE_AUTHORING);
     setInteractionMode("view");
@@ -1583,13 +1597,13 @@ export default function MissionCanvasPage() {
     saveMissionSession({
       mapName: selectedMapName,
       workspaceStage: STAGE_AUTHORING,
-      designMapPath,
+      designMapPath: pendingDesignMapPath,
       navigationRuntimeMode,
     });
     setMessage(loadedDesign
       ? `Loaded design for ${selectedMapName}`
       : `Loaded map ${selectedMapName}`);
-  }, [designMapPath, loadSavedDesignForMap, navigationRuntimeMode]);
+  }, [loadSavedDesignForMap, navigationRuntimeMode, pendingDesignMapPath]);
 
   const handleSaveDesign = useCallback(() => {
     try {
@@ -1811,7 +1825,7 @@ export default function MissionCanvasPage() {
           saveMissionSession({
             mapName: currentMapName,
             workspaceStage: STAGE_AUTHORING,
-            designMapPath: designMapPath || pgmPathFromMapName(currentMapName),
+            designMapPath,
             navigationRuntimeMode: "idle",
             designPoseInitialized: false,
           });
@@ -1869,13 +1883,12 @@ export default function MissionCanvasPage() {
   ]);
 
   const handleCreateSpotAtRobot = useCallback(() => {
-    if (!designMapAvailable) {
+    if (!designMapAvailable || !designMapPath) {
       setMessage("Load a map before creating a waypoint");
       return;
     }
-    const resolvedDesignMapPath = designMapPath || pgmPathFromMapName(currentMapName);
+    const resolvedDesignMapPath = designMapPath;
     setWorkspaceStage(STAGE_AUTHORING);
-    setDesignMapPath(resolvedDesignMapPath);
     setPendingBehaviorNodeTag("");
     setSelectedBehaviorNodeId("");
     setSelectedSpotId("");
@@ -2001,11 +2014,14 @@ export default function MissionCanvasPage() {
       <LoadMapDialog
         open={showDesignMapDialog}
         files={designMapFiles}
-        selectedPath={designMapPath}
+        selectedPath={pendingDesignMapPath}
         busy={designMapBusy}
         selectAriaLabel="Design map file"
-        onChange={setDesignMapPath}
-        onCancel={() => setShowDesignMapDialog(false)}
+        onChange={setPendingDesignMapPath}
+        onCancel={() => {
+          setPendingDesignMapPath(designMapPath);
+          setShowDesignMapDialog(false);
+        }}
         onSubmit={handleConfirmDesignMap}
       />
       <LoadMapDialog
@@ -2294,13 +2310,15 @@ export default function MissionCanvasPage() {
             fitContainer
             viewKey={mappingEditorActive
               ? `mission-editor:${mapEditor.selectedPath || "none"}`
-              : designMapActive
-                ? `mission-design:${designMapEditor.selectedPath || designMapPath || "none"}`
+              : workspaceStage === STAGE_AUTHORING
+                ? designMapActive
+                  ? `mission-design:${designMapEditor.selectedPath || designMapPath || "none"}`
+                  : "mission-design:none"
                 : `mission:${mapName}`}
             waitingLabel={mappingEditorActive
               ? "Select a PGM"
-              : designMapActive
-                ? "Loading selected map"
+              : workspaceStage === STAGE_AUTHORING
+                ? designMapActive ? "Loading selected map" : "Load a map"
                 : running ? "Waiting for /map" : "Run Mission to view /map"}
             onSpotClick={handleSelectSpot}
             onBehaviorNodeClick={handleSelectBehaviorNode}
