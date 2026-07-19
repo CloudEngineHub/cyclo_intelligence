@@ -565,7 +565,7 @@ test('shows waypoint actions in Properties after placing a waypoint', async () =
   expect(screen.getByRole('button', { name: 'Create Waypoint' })).not.toHaveAttribute('aria-pressed');
 });
 
-test('opens waypoint BT popup when selecting a waypoint with BT active', async () => {
+test('opens waypoint BT map layer when selecting a waypoint with BT active', async () => {
   const latestMapViewerProps = () => (
     mockMapViewer.mock.calls[mockMapViewer.mock.calls.length - 1][0]
   );
@@ -610,15 +610,27 @@ test('opens waypoint BT popup when selecting a waypoint with BT active', async (
     latestMapViewerProps().onSpotClick('spot_factory');
   });
 
-  expect(screen.getByRole('dialog', { name: 'Waypoint BT' })).toBeInTheDocument();
+  await waitFor(() => expect(latestMapViewerProps().btLayer).toMatchObject({
+    spot: {
+      id: 'spot_factory',
+      label: 'Waypoint Factory',
+      linked_bt_tree: 'factory_waypoint.xml',
+    },
+    nodeLabel: 'Active',
+    executionLabel: 'Ready',
+    activeNodesLabel: 'Waiting for run',
+  }));
+  expect(screen.queryByRole('dialog', { name: 'Waypoint BT' })).not.toBeInTheDocument();
   expect(screen.getAllByText('Waypoint Factory').length).toBeGreaterThan(0);
   expect(screen.getAllByText('factory_waypoint.xml').length).toBeGreaterThan(0);
   expect(screen.getByRole('button', { name: 'Create BT' })).toBeDisabled();
   expect(screen.getByRole('button', { name: 'Edit BT' })).toBeEnabled();
 
-  fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+  act(() => {
+    latestMapViewerProps().onBtLayerClose();
+  });
 
-  expect(screen.queryByRole('dialog', { name: 'Waypoint BT' })).not.toBeInTheDocument();
+  await waitFor(() => expect(latestMapViewerProps().btLayer).toBeNull());
 });
 
 test('creates a waypoint at robot with automatic localization from the waypoint menu', async () => {

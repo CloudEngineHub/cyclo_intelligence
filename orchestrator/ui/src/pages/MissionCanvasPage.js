@@ -584,77 +584,6 @@ function LoadMapDialog({
   );
 }
 
-function WaypointBtDialog({
-  open,
-  spot,
-  btNodeLabel,
-  onClose,
-}) {
-  if (!open || !spot) return null;
-
-  return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 px-4"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="mission-waypoint-bt-title"
-    >
-      <section
-        className="w-full max-w-5xl h-[min(720px,85vh)] border rounded-md shadow-2xl grid grid-rows-[auto_1fr]"
-        style={{
-          color: "#111827",
-          backgroundColor: "#ffffff",
-          borderColor: "#d1d5db",
-        }}
-      >
-        <header
-          className="min-w-0 flex items-center justify-between gap-3 border-b px-4 py-3"
-          style={{ borderColor: "#d1d5db" }}
-        >
-          <div className="min-w-0">
-            <h2 id="mission-waypoint-bt-title" className="text-base font-semibold truncate">
-              Waypoint BT
-            </h2>
-            <div className="text-xs truncate" style={{ color: "#4b5563" }}>
-              {spot.label}
-            </div>
-          </div>
-          <ActionButton onClick={onClose} variant="secondary">
-            Close
-          </ActionButton>
-        </header>
-
-        <div className="min-h-0 grid grid-cols-[260px_minmax(0,1fr)] gap-4 p-4">
-          <aside
-            className="min-h-0 border rounded-md p-3 grid content-start gap-2 text-xs overflow-auto"
-            style={{ borderColor: "#cbd5e1", backgroundColor: "#f8fafc" }}
-          >
-            <SessionRow label="Waypoint" value={spot.label} />
-            <SessionRow label="BT Tree" value={spot.linked_bt_tree || "Not linked"} />
-            <SessionRow label="BT Node" value={btNodeLabel} />
-            <SessionRow
-              label="Pose"
-              value={`${spot.pose.x.toFixed(2)}, ${spot.pose.y.toFixed(2)}, yaw ${spot.pose.yaw.toFixed(2)}`}
-              stacked
-            />
-          </aside>
-
-          <div
-            className="min-h-0 border rounded-md flex items-center justify-center text-sm"
-            style={{
-              color: "#64748b",
-              borderColor: "#cbd5e1",
-              backgroundColor: "#ffffff",
-            }}
-          >
-            {spot.linked_bt_tree || "No behavior tree linked"}
-          </div>
-        </div>
-      </section>
-    </div>
-  );
-}
-
 function LayerToggle({ label, checked, compact = false, onChange }) {
   return (
     <div
@@ -1365,7 +1294,7 @@ export default function MissionCanvasPage() {
     raw: "not checked",
   });
   const [btNodeBusy, setBtNodeBusy] = useState("");
-  const [showWaypointBtDialog, setShowWaypointBtDialog] = useState(false);
+  const [btLayerSpotId, setBtLayerSpotId] = useState("");
   const [interactionMode, setInteractionMode] = useState("view");
   const [showWaypointOptions, setShowWaypointOptions] = useState(false);
   const [designPoseInitialized, setDesignPoseInitialized] = useState(() => (
@@ -1557,6 +1486,27 @@ export default function MissionCanvasPage() {
     () => visibleSpots.find((spot) => spot.id === selectedSpotId) || null,
     [selectedSpotId, visibleSpots],
   );
+  const selectedBtLayerSpot = useMemo(
+    () => visibleSpots.find((spot) => spot.id === btLayerSpotId) || null,
+    [btLayerSpotId, visibleSpots],
+  );
+  const btLayerExecutionLabel = btExecutionLabel(btStatusText, btNodeIsUp);
+  const btLayerActiveNodesLabel = btActiveNodesLabel(
+    btActiveNodesText,
+    btNodeIsUp,
+    btLayerExecutionLabel,
+  );
+  const waypointBtLayer = (
+    workspaceStage === STAGE_AUTHORING &&
+    btNodeIsUp &&
+    selectedBtLayerSpot
+  ) ? {
+      spot: selectedBtLayerSpot,
+      nodeLabel: btNodeStateLabel(btNodeStatus.state),
+      executionLabel: btLayerExecutionLabel,
+      activeNodesLabel: btLayerActiveNodesLabel,
+    }
+    : null;
   const layerToggles = useMemo(() => (
     STAGE_LAYER_IDS[workspaceStage].map((id) => ({
       id,
@@ -1702,11 +1652,15 @@ export default function MissionCanvasPage() {
   }, [needsBtTopics, refreshBtNodeStatus]);
 
   useEffect(() => {
-    if (!showWaypointBtDialog) return;
-    if (workspaceStage !== STAGE_AUTHORING || !btNodeIsUp || !selectedSpot) {
-      setShowWaypointBtDialog(false);
+    if (!btLayerSpotId) return;
+    if (
+      workspaceStage !== STAGE_AUTHORING ||
+      !btNodeIsUp ||
+      !visibleSpots.some((spot) => spot.id === btLayerSpotId)
+    ) {
+      setBtLayerSpotId("");
     }
-  }, [btNodeIsUp, selectedSpot, showWaypointBtDialog, workspaceStage]);
+  }, [btLayerSpotId, btNodeIsUp, visibleSpots, workspaceStage]);
 
   useEffect(() => {
     void loadSpots();
@@ -2031,7 +1985,9 @@ export default function MissionCanvasPage() {
     setShowWaypointOptions(false);
     setInteractionMode("view");
     if (workspaceStage === STAGE_AUTHORING && btNodeIsUp) {
-      setShowWaypointBtDialog(true);
+      setBtLayerSpotId(spotId);
+    } else {
+      setBtLayerSpotId("");
     }
   }, [btNodeIsUp, workspaceStage]);
 
@@ -2040,7 +1996,7 @@ export default function MissionCanvasPage() {
     setSelectedSpotId("");
     setPendingBehaviorNodeTag("");
     setShowWaypointOptions(false);
-    setShowWaypointBtDialog(false);
+    setBtLayerSpotId("");
     setInteractionMode("view");
   }, []);
 
@@ -2048,7 +2004,7 @@ export default function MissionCanvasPage() {
     setWorkspaceStage(STAGE_AUTHORING);
     setPendingBehaviorNodeTag(tag);
     setSelectedSpotId("");
-    setShowWaypointBtDialog(false);
+    setBtLayerSpotId("");
     setShowWaypointOptions(false);
     setInteractionMode("behavior");
     setMessage(`${tag} selected`);
@@ -2063,7 +2019,7 @@ export default function MissionCanvasPage() {
     setWorkspaceStage(STAGE_AUTHORING);
     setPendingBehaviorNodeTag("");
     setSelectedBehaviorNodeId("");
-    setShowWaypointBtDialog(false);
+    setBtLayerSpotId("");
     setShowWaypointOptions(false);
     setInteractionMode((value) => (value === "spot" ? "view" : "spot"));
   }, []);
@@ -2269,7 +2225,7 @@ export default function MissionCanvasPage() {
       setMessage("Activate BT before opening waypoint BT");
       return;
     }
-    setShowWaypointBtDialog(true);
+    setBtLayerSpotId(selectedSpot.id);
   }, [btNodeIsUp, selectedSpot]);
 
   const handleRenameSpot = useCallback(async (event) => {
@@ -2297,7 +2253,7 @@ export default function MissionCanvasPage() {
       await deleteNavigationSpot(selectedSpot.id, selectedSpot.map_name);
       setSpots((current) => current.filter((spot) => spot.id !== selectedSpot.id));
       setSelectedSpotId("");
-      setShowWaypointBtDialog(false);
+      setBtLayerSpotId("");
       setMessage(`Deleted ${selectedSpot.label}`);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Failed to delete waypoint");
@@ -2345,12 +2301,6 @@ export default function MissionCanvasPage() {
         onChange={setRunMapPath}
         onCancel={() => setShowRunMapDialog(false)}
         onSubmit={handleConfirmRunMap}
-      />
-      <WaypointBtDialog
-        open={showWaypointBtDialog}
-        spot={selectedSpot}
-        btNodeLabel={btNodeStateLabel(btNodeStatus.state)}
-        onClose={() => setShowWaypointBtDialog(false)}
       />
       <header
         className="shrink-0 border-b pb-3 mb-4 flex flex-col xl:flex-row xl:items-center xl:justify-between gap-3"
@@ -2610,6 +2560,7 @@ export default function MissionCanvasPage() {
             behaviorNodes={missionOverlayActive ? activeBehaviorNodes : []}
             selectedBehaviorNodeId={missionOverlayActive ? selectedBehaviorNodeId : ""}
             behaviorPreviewNode={missionOverlayActive ? behaviorPreviewNode : null}
+            btLayer={waypointBtLayer}
             showMap={mappingEditorActive ? true : activeLayers.map}
             showGlobalCostmap={mappingEditorActive ? false : needsGlobalCostmap}
             showLocalCostmap={mappingEditorActive ? false : needsLocalCostmap}
@@ -2644,6 +2595,7 @@ export default function MissionCanvasPage() {
             onBehaviorNodePoseChange={handleMoveBehaviorNode}
             onEditorMapPoint={mapEditor.editAtMapPoint}
             onMapPose={handleCreateSpotAtPose}
+            onBtLayerClose={() => setBtLayerSpotId("")}
           />
           {workspaceStage === STAGE_AUTHORING && (
             <BehaviorPalette

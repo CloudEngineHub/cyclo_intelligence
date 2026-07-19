@@ -559,7 +559,66 @@ function applyTopViewRoll(camera, controls, roll) {
     camera.lookAt(controls.target);
     controls.update();
 }
-export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, goalPose, footprint, tf, showMap, showGlobalCostmap, showLocalCostmap, showScan, showGlobalPlan, showGoalPose, showTf, showRobotModel, interactionDisabled, interactionMode, editorActive, viewKey, waitingLabel = "Waiting for /map", fitContainer = false, spots = [], selectedSpotId = "", behaviorNodes = [], selectedBehaviorNodeId = "", behaviorPreviewNode = null, onSpotClick, onBehaviorNodeClick, onSpotPoseChange, onBehaviorNodePoseChange, onEditorMapPoint, onMapPose, }) {
+function WaypointBtMapLayer({ layer, onClose }) {
+    var _a, _b, _c;
+    const spot = layer === null || layer === void 0 ? void 0 : layer.spot;
+    if (!spot)
+        return null;
+    const pose = (_a = spot.pose) !== null && _a !== void 0 ? _a : {};
+    const poseText = `${Number((_b = pose.x) !== null && _b !== void 0 ? _b : 0).toFixed(2)}, ${Number((_c = pose.y) !== null && _c !== void 0 ? _c : 0).toFixed(2)}, yaw ${Number(pose.yaw !== null && pose.yaw !== void 0 ? pose.yaw : 0).toFixed(2)}`;
+    return (<section className="absolute left-4 right-4 top-4 z-20 max-h-[44%] min-h-[148px] pointer-events-auto border rounded-lg shadow-xl overflow-hidden" role="region" aria-label="Waypoint BT layer" style={{
+            color: "#111827",
+            backgroundColor: "rgba(255,255,255,0.96)",
+            borderColor: "#94a3b8",
+        }}>
+      <header className="min-w-0 flex items-center justify-between gap-3 border-b px-4 py-3" style={{ borderColor: "#cbd5e1" }}>
+        <div className="min-w-0">
+          <div className="text-[10px] uppercase font-semibold tracking-wide" style={{ color: "#64748b" }}>
+            Waypoint BT
+          </div>
+          <div className="text-sm font-semibold truncate">
+            {spot.label || spot.id}
+          </div>
+        </div>
+        {typeof onClose === "function" && (<button type="button" onClick={onClose} className="h-8 px-3 border rounded-md text-xs font-semibold active:translate-y-px" style={{
+                color: "#111827",
+                backgroundColor: "#ffffff",
+                borderColor: "#cbd5e1",
+            }}>
+            Close
+          </button>)}
+      </header>
+      <div className="min-h-0 grid grid-cols-[220px_minmax(0,1fr)] gap-4 p-4 overflow-auto text-xs">
+        <aside className="grid content-start gap-2 min-w-0">
+          <div className="flex items-center justify-between gap-2 min-w-0">
+            <span style={{ color: "#64748b" }}>BT Node</span>
+            <span className="font-mono truncate">{layer.nodeLabel || "Unknown"}</span>
+          </div>
+          <div className="flex items-center justify-between gap-2 min-w-0">
+            <span style={{ color: "#64748b" }}>Execution</span>
+            <span className="font-mono truncate">{layer.executionLabel || "wait"}</span>
+          </div>
+          <div className="grid gap-0.5 min-w-0">
+            <span style={{ color: "#64748b" }}>Active nodes</span>
+            <span className="font-mono truncate">{layer.activeNodesLabel || "wait"}</span>
+          </div>
+          <div className="grid gap-0.5 min-w-0">
+            <span style={{ color: "#64748b" }}>Pose</span>
+            <span className="font-mono truncate">{poseText}</span>
+          </div>
+        </aside>
+        <div className="min-w-0 grid content-start gap-2 border-l pl-4" style={{ borderColor: "#cbd5e1" }}>
+          <div className="text-[10px] uppercase font-semibold tracking-wide" style={{ color: "#64748b" }}>
+            Behavior Tree
+          </div>
+          <div className="font-mono text-sm truncate">
+            {spot.linked_bt_tree || "No behavior tree linked"}
+          </div>
+        </div>
+      </div>
+    </section>);
+}
+export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, goalPose, footprint, tf, showMap, showGlobalCostmap, showLocalCostmap, showScan, showGlobalPlan, showGoalPose, showTf, showRobotModel, interactionDisabled, interactionMode, editorActive, viewKey, waitingLabel = "Waiting for /map", fitContainer = false, spots = [], selectedSpotId = "", behaviorNodes = [], selectedBehaviorNodeId = "", behaviorPreviewNode = null, btLayer = null, onBtLayerClose, onSpotClick, onBehaviorNodeClick, onSpotPoseChange, onBehaviorNodePoseChange, onEditorMapPoint, onMapPose, }) {
     const containerRef = useRef(null);
     const sceneRef = useRef(null);
     const rendererRef = useRef(null);
@@ -1297,5 +1356,6 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, 
       {!viewerError && showMap && !map && (<div className="absolute inset-0 flex items-center justify-center text-sm pointer-events-none" style={{ color: "var(--vscode-descriptionForeground)" }}>
           {waitingLabel}
         </div>)}
+      <WaypointBtMapLayer layer={btLayer} onClose={onBtLayerClose}/>
     </div>);
 }
