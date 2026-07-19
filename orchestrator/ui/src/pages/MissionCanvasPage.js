@@ -726,6 +726,23 @@ function btNodeStateColor(state) {
   return "#f59e0b";
 }
 
+function btExecutionLabel(status, nodeActive) {
+  const normalized = String(status || "").trim().toLowerCase();
+  if (!nodeActive) return "wait";
+  if (!normalized || normalized === "stopped") return "Ready";
+  if (normalized === "running") return "Running";
+  if (normalized === "completed") return "Completed";
+  if (normalized === "failed" || normalized === "failure") return "Failed";
+  if (normalized === "stopping") return "Stopping";
+  return status;
+}
+
+function btActiveNodesLabel(activeNodes, nodeActive, executionLabel) {
+  if (!nodeActive) return "wait";
+  if (activeNodes) return activeNodes;
+  return executionLabel === "Running" ? "None" : "Waiting for run";
+}
+
 function BtRuntimePanel({
   nodeState,
   btStatus,
@@ -735,6 +752,8 @@ function BtRuntimePanel({
   onDeactivate,
 }) {
   const isActive = nodeState === "up";
+  const executionLabel = btExecutionLabel(btStatus, isActive);
+  const activeNodesLabel = btActiveNodesLabel(activeNodes, isActive, executionLabel);
 
   return (
     <Panel title="BT Runtime" compact className="grid gap-2 content-start">
@@ -752,8 +771,8 @@ function BtRuntimePanel({
         </div>
       </div>
       <div className="grid gap-1">
-        <SessionRow label="Status" value={btStatus || "wait"} />
-        <SessionRow label="Active nodes" value={activeNodes} />
+        <SessionRow label="Execution" value={executionLabel} />
+        <SessionRow label="Active nodes" value={activeNodesLabel} />
       </div>
       <div className="flex flex-wrap gap-2 pt-1">
         <ActionButton
@@ -2537,8 +2556,8 @@ export default function MissionCanvasPage() {
           <aside className="min-h-0 grid grid-rows-[auto_auto_1fr_minmax(160px,220px)] gap-4">
             <BtRuntimePanel
               nodeState={btNodeStatus.state}
-              btStatus={btStatusText || (btNodeIsUp ? "stopped" : "wait")}
-              activeNodes={btActiveNodesText || (btNodeIsUp ? "None" : "wait")}
+              btStatus={btStatusText}
+              activeNodes={btActiveNodesText}
               busy={!!btNodeBusy}
               onActivate={handleBtNodeActivate}
               onDeactivate={handleBtNodeDeactivate}

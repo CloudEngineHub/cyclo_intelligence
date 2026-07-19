@@ -322,6 +322,8 @@ test('controls BT node lifecycle from the design stage', async () => {
   fireEvent.click(screen.getByRole('tab', { name: 'Design' }));
 
   await waitFor(() => expect(screen.getByText('BT Node Inactive')).toBeInTheDocument());
+  expect(screen.getByText('Execution')).toBeInTheDocument();
+  expect(screen.getAllByText('wait').length).toBeGreaterThan(0);
   expect(screen.getByRole('button', { name: 'Activate BT' })).toBeEnabled();
   expect(screen.getByRole('button', { name: 'Deactivate BT' })).toBeDisabled();
 
@@ -336,6 +338,8 @@ test('controls BT node lifecycle from the design stage', async () => {
     }),
   ));
   await waitFor(() => expect(screen.getByText('BT Node Active')).toBeInTheDocument());
+  expect(screen.getAllByText('Ready').length).toBeGreaterThan(0);
+  expect(screen.getByText('Waiting for run')).toBeInTheDocument();
   expect(topicRow('/bt/status')).toHaveTextContent('live');
   expect(topicRow('/bt/active_nodes')).toHaveTextContent('live');
   expect(screen.getByRole('button', { name: 'Activate BT' })).toBeDisabled();
