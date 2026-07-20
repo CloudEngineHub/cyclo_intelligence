@@ -329,9 +329,11 @@ test('shows Waypoint and BT authoring panels in the authoring stage', async () =
   expect(screen.getByText('Design Objects')).toBeInTheDocument();
   expect(screen.getByText('Behavior Nodes')).toBeInTheDocument();
   expect(screen.getByText('Waypoints / Local BT')).toBeInTheDocument();
+  expect(screen.getByText('Mission Route')).toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Load Mission' })).toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Save Mission' })).toBeInTheDocument();
-  expect(screen.getByRole('button', { name: 'Mission Route' })).toBeDisabled();
+  expect(screen.getByRole('button', { name: 'Edit On Map' })).toBeDisabled();
+  expect(screen.getByRole('button', { name: 'Add Selected' })).toBeDisabled();
   expect(screen.getByRole('button', { name: 'Create Waypoint' })).toBeDisabled();
   expect(screen.queryByRole('menu', { name: 'Waypoint creation options' })).not.toBeInTheDocument();
   expect(screen.queryByRole('button', { name: 'At Robot' })).not.toBeInTheDocument();
@@ -1222,7 +1224,7 @@ test('edits the mission route directly on the map', async () => {
     { id: 'spot_b', order: 2 },
   ]);
 
-  fireEvent.click(screen.getByRole('button', { name: 'Mission Route' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Edit On Map' }));
 
   await waitFor(() => expect(latestMapViewerProps().missionRouteMode).toBe(true));
   expect(latestMapViewerProps().onSpotPoseChange).toBeUndefined();
@@ -1230,14 +1232,12 @@ test('edits the mission route directly on the map', async () => {
   fireEvent.click(screen.getByRole('button', { name: 'Clear Route' }));
   await waitFor(() => expect(latestMapViewerProps().missionRouteEdges).toEqual([]));
 
-  act(() => {
-    latestMapViewerProps().onMissionRouteSpotClick('spot_b');
-  });
+  fireEvent.click(screen.getByRole('button', { name: 'Waypoint B' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Add Selected' }));
   await waitFor(() => expect(latestMapViewerProps().selectedMissionRouteSourceId).toBe('spot_b'));
 
-  act(() => {
-    latestMapViewerProps().onMissionRouteSpotClick('spot_a');
-  });
+  fireEvent.click(screen.getByRole('button', { name: 'Waypoint A' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Add Selected' }));
   await waitFor(() => expect(latestMapViewerProps().missionRouteEdges).toEqual([
     expect.objectContaining({ source: 'spot_b', target: 'spot_a' }),
   ]));

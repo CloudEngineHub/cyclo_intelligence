@@ -1795,10 +1795,12 @@ export default function MissionCanvasPage() {
     ),
     [missionRouteOrderedSpots],
   );
-  const missionRouteSourceSpot = useMemo(
-    () => visibleSpots.find((spot) => spot.id === missionRouteSourceId) || null,
-    [missionRouteSourceId, visibleSpots],
-  );
+  const missionRouteTreeSpots = useMemo(() => {
+    if (missionRouteOrderedSpots.length > 0) return missionRouteOrderedSpots;
+    if (!missionRouteSourceId) return [];
+    const sourceSpot = visibleSpots.find((spot) => spot.id === missionRouteSourceId);
+    return sourceSpot ? [sourceSpot] : [];
+  }, [missionRouteOrderedSpots, missionRouteSourceId, visibleSpots]);
   const selectedBtLayerSpot = useMemo(
     () => visibleSpots.find((spot) => spot.id === btLayerSpotId) || null,
     [btLayerSpotId, visibleSpots],
@@ -2665,6 +2667,56 @@ export default function MissionCanvasPage() {
     setMessage("Mission route cleared");
   }, []);
 
+  const handleSetMissionRouteOrder = useCallback((orderedIds) => {
+    const validIds = orderedIds.filter((id, index) => (
+      visibleSpots.some((spot) => spot.id === id) && orderedIds.indexOf(id) === index
+    ));
+    setMissionFlowNodes((current) => syncMissionFlowNodesWithSpots(current, visibleSpots));
+    setMissionFlowEdges(validIds.slice(0, -1).map((source, index) => {
+      const target = validIds[index + 1];
+      return {
+        id: missionFlowEdgeId(source, target),
+        source,
+        target,
+        type: "smoothstep",
+        animated: false,
+      };
+    }));
+    setMissionRouteSourceId(validIds[validIds.length - 1] || "");
+  }, [visibleSpots]);
+
+  const handleAppendSelectedSpotToRoute = useCallback(() => {
+    if (!selectedSpotId) {
+      setMessage("Select a waypoint before adding it to the route");
+      return;
+    }
+    const selectedSpot = visibleSpots.find((spot) => spot.id === selectedSpotId);
+    if (!selectedSpot) return;
+    const currentIds = missionRouteTreeSpots.map((spot) => spot.id);
+    if (currentIds.includes(selectedSpotId)) {
+      setMessage(`${selectedSpot.label || selectedSpot.id} is already in the route`);
+      return;
+    }
+    handleSetMissionRouteOrder([...currentIds, selectedSpotId]);
+    setMessage(`Added ${selectedSpot.label || selectedSpot.id} to route`);
+  }, [handleSetMissionRouteOrder, missionRouteTreeSpots, selectedSpotId, visibleSpots]);
+
+  const handleRemoveRouteSpot = useCallback((spotId) => {
+    const currentIds = missionRouteTreeSpots.map((spot) => spot.id);
+    handleSetMissionRouteOrder(currentIds.filter((id) => id !== spotId));
+    setMessage("Removed waypoint from route");
+  }, [handleSetMissionRouteOrder, missionRouteTreeSpots]);
+
+  const handleMoveRouteSpot = useCallback((spotId, direction) => {
+    const currentIds = missionRouteTreeSpots.map((spot) => spot.id);
+    const index = currentIds.indexOf(spotId);
+    const nextIndex = index + direction;
+    if (index < 0 || nextIndex < 0 || nextIndex >= currentIds.length) return;
+    const nextIds = [...currentIds];
+    [nextIds[index], nextIds[nextIndex]] = [nextIds[nextIndex], nextIds[index]];
+    handleSetMissionRouteOrder(nextIds);
+  }, [handleSetMissionRouteOrder, missionRouteTreeSpots]);
+
   const handleClearMapSelection = useCallback(() => {
     if (btLayerSpotId) {
       setBtLayerSpotId("");
@@ -3292,7 +3344,7 @@ export default function MissionCanvasPage() {
           )}
         </div>
 
-        <div className="flex-1 min-h-0 grid grid-cols-1 xl:grid-cols-[minmax(520px,1fr)_360px] gap-4">
+        <div className="flex-1 min-h-0 grid grid-cols-1 xl:grid-cols-[minmax(460px,1fr)_460px] gap-4">
         <section
           className="min-h-0 overflow-hidden grid gap-4 grid-rows-[minmax(0,1fr)]"
         >
@@ -3359,7 +3411,7 @@ export default function MissionCanvasPage() {
         </section>
 
         {workspaceStage === STAGE_AUTHORING ? (
-          <aside className="min-h-0 grid grid-rows-[auto_minmax(0,1fr)] gap-4">
+          <aside className="min-h-0 grid grid-rows-[auto_minmax(0,1fr)_minmax(230px,0.75fr)] gap-4">
             <BtRuntimePanel
               nodeState={btNodeStatus.state}
               btStatus={btStatusText}
@@ -3522,86 +3574,6 @@ export default function MissionCanvasPage() {
                     </div>
                   )}
                 </div>
-                <div
-                  className="grid gap-2 border rounded-md p-2"
-                  style={{
-                    backgroundColor: MISSION_STAGE_EMPTY,
-                    borderColor: MISSION_PANEL_BORDER,
-                  }}
-                >
-                  <div
-                    className="flex items-center justify-between gap-2"
-                  >
-                    <div
-                      className="text-[10px] uppercase font-semibold"
-                      style={{ color: MISSION_TEXT_MUTED }}
-                    >
-                      Mission Route
-                    </div>
-                    <div className="flex items-center gap-1">
-                      <ActionButton
-                        active={missionRouteMode}
-                        disabled={!!busy || !designMapAvailable || btNodeIsUp}
-                        onClick={handleToggleMissionRouteMode}
-                        title={btNodeIsUp ? "Deactivate BT before editing mission route" : undefined}
-                        variant="secondary"
-                      >
-                        Mission Route
-                      </ActionButton>
-                      <ActionButton
-                        disabled={!!busy || missionRouteEdges.length === 0}
-                        onClick={handleClearMissionRoute}
-                        variant="secondary"
-                      >
-                        Clear Route
-                      </ActionButton>
-                    </div>
-                  </div>
-                  <div className="grid grid-cols-3 gap-2">
-                    <SessionRow label="Mode" value={missionRouteMode ? "Editing" : "Idle"} stacked />
-                    <SessionRow
-                      label="Source"
-                      value={missionRouteSourceSpot
-                        ? missionRouteSourceSpot.label || missionRouteSourceSpot.id
-                        : "None"}
-                      stacked
-                    />
-                    <SessionRow label="Links" value={String(missionRouteEdges.length)} stacked />
-                  </div>
-                  <div className="grid gap-1">
-                    {missionRouteOrderedSpots.map((spot, index) => (
-                      <button
-                        key={spot.id}
-                        type="button"
-                        onClick={() => handleSelectSpot(spot.id)}
-                        className="h-8 px-2 border rounded-md flex items-center gap-2 text-left text-xs min-w-0"
-                        style={{
-                          color: spot.id === selectedSpotId ? "var(--vscode-button-foreground)" : MISSION_TEXT,
-                          backgroundColor: spot.id === selectedSpotId
-                            ? "var(--vscode-button-background)"
-                            : MISSION_SURFACE,
-                          borderColor: spot.id === selectedSpotId ? MISSION_BUTTON_BORDER : MISSION_PANEL_BORDER,
-                        }}
-                      >
-                        <span
-                          className="h-5 w-5 shrink-0 rounded-full inline-flex items-center justify-center text-[10px] font-semibold"
-                          style={{
-                            color: "#ffffff",
-                            backgroundColor: "#2563eb",
-                          }}
-                        >
-                          {index + 1}
-                        </span>
-                        <span className="truncate">{spot.label || spot.id}</span>
-                      </button>
-                    ))}
-                    {missionRouteOrderedSpots.length === 0 && (
-                      <div className="text-xs" style={{ color: MISSION_TEXT_MUTED }}>
-                        No route links yet.
-                      </div>
-                    )}
-                  </div>
-                </div>
                 <div className="grid gap-2">
                   <div
                     className="text-[10px] uppercase font-semibold"
@@ -3649,6 +3621,153 @@ export default function MissionCanvasPage() {
                       No behavior nodes placed yet.
                     </div>
                   )}
+                </div>
+              </div>
+            </Panel>
+            <Panel title="Mission Route" className="min-h-0 overflow-hidden">
+              <div className="h-full min-h-0 grid grid-rows-[auto_auto_minmax(0,1fr)] gap-2">
+                <div className="flex flex-wrap items-center gap-1">
+                  <ActionButton
+                    active={missionRouteMode}
+                    disabled={!!busy || !designMapAvailable || btNodeIsUp}
+                    onClick={handleToggleMissionRouteMode}
+                    title={btNodeIsUp ? "Deactivate BT before editing mission route" : undefined}
+                    variant="secondary"
+                  >
+                    Edit On Map
+                  </ActionButton>
+                  <ActionButton
+                    disabled={!!busy || !selectedSpotId || btNodeIsUp}
+                    onClick={handleAppendSelectedSpotToRoute}
+                    variant="secondary"
+                  >
+                    Add Selected
+                  </ActionButton>
+                  <ActionButton
+                    disabled={!!busy || missionRouteEdges.length === 0}
+                    onClick={handleClearMissionRoute}
+                    variant="secondary"
+                  >
+                    Clear Route
+                  </ActionButton>
+                </div>
+                <div className="grid grid-cols-3 gap-2">
+                  <SessionRow label="Mode" value={missionRouteMode ? "Map edit" : "Tree edit"} stacked />
+                  <SessionRow
+                    label="Selected"
+                    value={selectedSpotId
+                      ? visibleSpots.find((spot) => spot.id === selectedSpotId)?.label || selectedSpotId
+                      : "None"}
+                    stacked
+                  />
+                  <SessionRow label="Links" value={String(missionRouteEdges.length)} stacked />
+                </div>
+                <div className="min-h-0 overflow-auto pr-1">
+                  <div className="grid gap-1.5">
+                    {missionRouteTreeSpots.map((spot, index) => {
+                      const selected = spot.id === selectedSpotId;
+                      return (
+                        <div key={spot.id} className="relative pl-5">
+                          {index < missionRouteTreeSpots.length - 1 && (
+                            <div
+                              className="absolute left-2.5 top-8 bottom-[-8px] w-px"
+                              aria-hidden="true"
+                              style={{ backgroundColor: MISSION_BUTTON_BORDER }}
+                            />
+                          )}
+                          <div
+                            className="grid grid-cols-[1fr_auto] items-center gap-2 border rounded-md p-2 min-w-0"
+                            style={{
+                              color: selected ? "var(--vscode-button-foreground)" : MISSION_TEXT,
+                              backgroundColor: selected
+                                ? "var(--vscode-button-background)"
+                                : MISSION_SURFACE,
+                              borderColor: selected ? MISSION_BUTTON_BORDER : MISSION_PANEL_BORDER,
+                            }}
+                          >
+                            <button
+                              type="button"
+                              onClick={() => handleSelectSpot(spot.id)}
+                              className="min-w-0 flex items-center gap-2 text-left"
+                            >
+                              <span
+                                className="h-6 w-6 shrink-0 rounded-full inline-flex items-center justify-center text-[11px] font-semibold"
+                                style={{
+                                  color: "#ffffff",
+                                  backgroundColor: "#2563eb",
+                                }}
+                              >
+                                {index + 1}
+                              </span>
+                              <span className="min-w-0">
+                                <span className="block truncate text-xs font-semibold">
+                                  {spot.label || spot.id}
+                                </span>
+                                <span
+                                  className="block truncate text-[10px]"
+                                  style={{
+                                    color: selected
+                                      ? "var(--vscode-button-foreground)"
+                                      : MISSION_TEXT_MUTED,
+                                  }}
+                                >
+                                  {localBtPathForSpot(spot)}
+                                </span>
+                              </span>
+                            </button>
+                            <div className="flex items-center gap-1">
+                              <button
+                                type="button"
+                                aria-label={`Move ${spot.label || spot.id} up`}
+                                disabled={index === 0}
+                                onClick={() => handleMoveRouteSpot(spot.id, -1)}
+                                className="h-7 w-7 border rounded-md text-xs font-semibold disabled:opacity-40"
+                                style={{
+                                  color: MISSION_TEXT,
+                                  backgroundColor: MISSION_STAGE_EMPTY,
+                                  borderColor: MISSION_BUTTON_BORDER,
+                                }}
+                              >
+                                ↑
+                              </button>
+                              <button
+                                type="button"
+                                aria-label={`Move ${spot.label || spot.id} down`}
+                                disabled={index === missionRouteTreeSpots.length - 1}
+                                onClick={() => handleMoveRouteSpot(spot.id, 1)}
+                                className="h-7 w-7 border rounded-md text-xs font-semibold disabled:opacity-40"
+                                style={{
+                                  color: MISSION_TEXT,
+                                  backgroundColor: MISSION_STAGE_EMPTY,
+                                  borderColor: MISSION_BUTTON_BORDER,
+                                }}
+                              >
+                                ↓
+                              </button>
+                              <button
+                                type="button"
+                                aria-label={`Remove ${spot.label || spot.id} from route`}
+                                onClick={() => handleRemoveRouteSpot(spot.id)}
+                                className="h-7 w-7 border rounded-md inline-flex items-center justify-center"
+                                style={{
+                                  color: "#7f1d1d",
+                                  backgroundColor: MISSION_STAGE_EMPTY,
+                                  borderColor: MISSION_BUTTON_BORDER,
+                                }}
+                              >
+                                <MdDelete size={14} />
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                    {missionRouteTreeSpots.length === 0 && (
+                      <div className="text-xs" style={{ color: MISSION_TEXT_MUTED }}>
+                        Select a waypoint and add it to the route.
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
             </Panel>
