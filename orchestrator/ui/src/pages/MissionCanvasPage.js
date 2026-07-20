@@ -58,12 +58,6 @@ const WORKSPACE_STAGES = [
   { id: STAGE_RUN, label: "Run" },
 ];
 
-const BEHAVIOR_NODE_GROUPS = [
-  { id: "action", label: "Actions" },
-  { id: "control", label: "Controls" },
-  { id: "decorator", label: "Decorators" },
-];
-
 const LAYER_DEFINITIONS = {
   map: "Map",
   scan: "Lidar",
@@ -1133,69 +1127,125 @@ function MappingTeleopPanel({ disabled, onPublish, onMessage }) {
   );
 }
 
-function BehaviorPalette({ selectedTag = "", onNodeSelect }) {
-  const groupedNodes = useMemo(() => (
-    BEHAVIOR_NODE_GROUPS.map((group) => ({
-      ...group,
-      nodes: FALLBACK_CATALOG.filter((node) => node.category === group.id),
-    }))
-  ), []);
-
-  const handleDragStart = (event, tag) => {
-    event.dataTransfer.setData("application/bt-node-tag", tag);
-    event.dataTransfer.setData("text/plain", tag);
-    event.dataTransfer.effectAllowed = "copy";
-  };
+function MissionFlowPanel({ spots, selectedSpotId, onSpotSelect }) {
+  const orderedSpots = useMemo(() => (
+    [...spots].sort((a, b) => String(a.label || a.id).localeCompare(String(b.label || b.id)))
+  ), [spots]);
 
   return (
-    <Panel title="Behavior Palette" className="min-h-0 overflow-hidden">
-      <div className="h-full min-h-0 grid grid-cols-1 md:grid-cols-3 gap-3 overflow-auto">
-        {groupedNodes.map((group) => (
-          <div key={group.id} className="min-w-0">
+    <Panel title="Mission Flow" className="min-h-0 overflow-hidden">
+      <div className="h-full min-h-0 grid grid-cols-1 lg:grid-cols-[minmax(220px,0.34fr)_minmax(0,1fr)] gap-3 overflow-hidden">
+        <div
+          className="min-h-0 border rounded-md p-3 grid content-start gap-3 overflow-auto"
+          style={{
+            backgroundColor: MISSION_SURFACE,
+            borderColor: MISSION_PANEL_BORDER,
+          }}
+        >
+          <div className="flex items-center justify-between gap-2 min-w-0">
             <div
-              className="text-[10px] uppercase font-semibold mb-2"
+              className="text-[10px] uppercase font-semibold"
               style={{ color: MISSION_TEXT_MUTED }}
             >
-              {group.label}
+              Global BT
             </div>
-            <div className="flex flex-wrap gap-2">
-              {group.nodes.map((node) => (
-                <button
-                  key={node.tag}
-                  type="button"
-                  draggable
-                  aria-pressed={selectedTag === node.tag}
-                  onClick={() => onNodeSelect(node.tag)}
-                  onDragStart={(event) => handleDragStart(event, node.tag)}
-                  className="h-8 px-2 border rounded-md text-xs font-medium transition-all active:translate-y-px"
-                  style={{
-                    color: MISSION_TEXT,
-                    backgroundColor: selectedTag === node.tag
-                      ? MISSION_SURFACE_STRONG
-                      : MISSION_SURFACE,
-                    borderColor: MISSION_PANEL_BORDER,
-                    boxShadow: "none",
-                  }}
-                  title={node.tag}
-                >
-                  {node.tag}
-                </button>
-              ))}
-              {group.nodes.length === 0 && (
-                <div
-                  className="h-8 px-2 border rounded-md flex items-center text-xs"
-                  style={{
-                    color: MISSION_TEXT_MUTED,
-                    backgroundColor: MISSION_STAGE_EMPTY,
-                    borderColor: MISSION_PANEL_BORDER,
-                  }}
-                >
-                  No nodes
-                </div>
-              )}
-            </div>
+            <span
+              className="text-[10px] font-semibold"
+              style={{ color: MISSION_TEXT_MUTED }}
+            >
+              {orderedSpots.length} waypoints
+            </span>
           </div>
-        ))}
+          <div className="grid gap-2">
+            {[
+              "Mission Root",
+              "Navigate",
+              "Local BT",
+            ].map((label) => (
+              <div
+                key={label}
+                className="h-8 px-3 border rounded-md flex items-center text-xs font-semibold"
+                style={{
+                  color: MISSION_TEXT,
+                  backgroundColor: MISSION_STAGE_EMPTY,
+                  borderColor: MISSION_PANEL_BORDER,
+                }}
+              >
+                {label}
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="min-h-0 overflow-auto">
+          <div className="min-w-max flex items-center gap-2 pr-2">
+            <div
+              className="h-10 px-3 border rounded-md flex items-center text-xs font-semibold shrink-0"
+              style={{
+                color: MISSION_TEXT,
+                backgroundColor: MISSION_STAGE_EMPTY,
+                borderColor: MISSION_PANEL_BORDER,
+              }}
+            >
+              Start
+            </div>
+            {orderedSpots.map((spot, index) => (
+              <div key={spot.id} className="flex items-center gap-2 shrink-0">
+                <div
+                  className="w-8 h-px"
+                  aria-hidden="true"
+                  style={{ backgroundColor: MISSION_PANEL_BORDER }}
+                />
+                <button
+                  type="button"
+                  onClick={() => onSpotSelect(spot.id)}
+                  className="w-44 h-20 border rounded-md p-2 text-left grid content-start gap-1 active:translate-y-px"
+                  style={{
+                    color: spot.id === selectedSpotId
+                      ? "var(--vscode-button-foreground)"
+                      : MISSION_TEXT,
+                    backgroundColor: spot.id === selectedSpotId
+                      ? "var(--vscode-button-background)"
+                      : MISSION_STAGE_EMPTY,
+                    borderColor: MISSION_PANEL_BORDER,
+                  }}
+                >
+                  <span className="text-[10px] font-semibold" style={{
+                    color: spot.id === selectedSpotId
+                      ? "var(--vscode-button-foreground)"
+                      : MISSION_TEXT_MUTED,
+                  }}>
+                    {`Step ${index + 1}`}
+                  </span>
+                  <span className="text-xs font-semibold truncate">{spot.label}</span>
+                  <span className="text-[11px] font-mono truncate">
+                    {spot.linked_bt_tree || "Local BT: none"}
+                  </span>
+                </button>
+              </div>
+            ))}
+            <div
+              className="w-8 h-px shrink-0"
+              aria-hidden="true"
+              style={{ backgroundColor: MISSION_PANEL_BORDER }}
+            />
+            <div
+              className="h-10 px-3 border rounded-md flex items-center text-xs font-semibold shrink-0"
+              style={{
+                color: MISSION_TEXT,
+                backgroundColor: MISSION_STAGE_EMPTY,
+                borderColor: MISSION_PANEL_BORDER,
+              }}
+            >
+              End
+            </div>
+            {orderedSpots.length === 0 && (
+              <div className="h-10 px-3 flex items-center text-xs" style={{ color: MISSION_TEXT_MUTED }}>
+                No waypoints for this map yet.
+              </div>
+            )}
+          </div>
+        </div>
       </div>
     </Panel>
   );
@@ -2598,9 +2648,10 @@ export default function MissionCanvasPage() {
             onBtLayerClose={() => setBtLayerSpotId("")}
           />
           {workspaceStage === STAGE_AUTHORING && (
-            <BehaviorPalette
-              selectedTag={pendingBehaviorNodeTag}
-              onNodeSelect={handleSelectBehaviorPaletteNode}
+            <MissionFlowPanel
+              spots={spots}
+              selectedSpotId={selectedSpotId}
+              onSpotSelect={handleSelectSpot}
             />
           )}
         </section>

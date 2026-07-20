@@ -251,12 +251,13 @@ test('shows Waypoint and BT authoring panels in the authoring stage', async () =
 
   fireEvent.click(screen.getByRole('tab', { name: 'Design' }));
 
-  expect(screen.getByText('Behavior Palette')).toBeInTheDocument();
-  expect(screen.getByText('Actions')).toBeInTheDocument();
-  expect(screen.getByText('Controls')).toBeInTheDocument();
-  expect(screen.getByText('Decorators')).toBeInTheDocument();
-  expect(screen.getByRole('button', { name: 'SendCommand' })).toBeInTheDocument();
-  expect(screen.getByRole('button', { name: 'Sequence' })).toBeInTheDocument();
+  expect(screen.getByText('Mission Flow')).toBeInTheDocument();
+  expect(screen.getByText('Global BT')).toBeInTheDocument();
+  expect(screen.getByText('Mission Root')).toBeInTheDocument();
+  expect(screen.getByText('Navigate')).toBeInTheDocument();
+  expect(screen.getByText('Local BT')).toBeInTheDocument();
+  expect(screen.getByText('Start')).toBeInTheDocument();
+  expect(screen.getByText('End')).toBeInTheDocument();
   expect(screen.getByText('Properties')).toBeInTheDocument();
   expect(screen.getByText('BT Runtime')).toBeInTheDocument();
   expect(screen.getByText('BT Node Unknown')).toBeInTheDocument();
@@ -918,13 +919,24 @@ test('creates a waypoint at the current robot pose from the design toolbar', asy
   await waitFor(() => expect(screen.getByText('Created Waypoint A at robot')).toBeInTheDocument());
 });
 
-test('places behavior palette nodes on the map overlay', async () => {
+test('renders waypoint sequence in the mission flow panel', async () => {
   const latestMapViewerProps = () => (
     mockMapViewer.mock.calls[mockMapViewer.mock.calls.length - 1][0]
   );
   getPgmFiles.mockResolvedValue({
     files: [{ path: 'map.pgm', name: 'map.pgm' }],
   });
+  getNavigationSpots.mockImplementation((mapName) => Promise.resolve({
+    map_name: mapName,
+    spots: mapName === 'map' ? [{
+      id: 'spot_a',
+      map_name: 'map',
+      label: 'Waypoint A',
+      pose: { frame_id: 'map', x: 1, y: 2, yaw: 0 },
+      linked_bt_tree: 'waypoint_a.xml',
+      metadata: {},
+    }] : [],
+  }));
 
   render(<MissionCanvasPage />);
 
@@ -933,47 +945,18 @@ test('places behavior palette nodes on the map overlay', async () => {
   await screen.findByRole('combobox', { name: 'Design map file' });
   fireEvent.click(screen.getByRole('button', { name: 'Load' }));
   await waitFor(() => expect(latestMapViewerProps().map).not.toBeNull());
+  await waitFor(() => expect(latestMapViewerProps().spots).toHaveLength(1));
 
-  fireEvent.click(screen.getByRole('button', { name: 'Wait' }));
+  expect(screen.getByText('Mission Flow')).toBeInTheDocument();
+  expect(screen.getByText('1 waypoints')).toBeInTheDocument();
+  expect(screen.getByText('Step 1')).toBeInTheDocument();
+  expect(screen.getAllByText('Waypoint A').length).toBeGreaterThan(0);
+  expect(screen.getByText('waypoint_a.xml')).toBeInTheDocument();
 
-  await waitFor(() => expect(latestMapViewerProps().interactionMode).toBe('behavior'));
-  expect(screen.getByRole('button', { name: 'Wait' })).toHaveAttribute('aria-pressed', 'true');
+  fireEvent.click(screen.getByRole('button', { name: /Step 1\s+Waypoint A\s+waypoint_a\.xml/ }));
 
-  await act(async () => {
-    await latestMapViewerProps().onMapPose(1.25, -0.5, 0.75);
-  });
-
-  await waitFor(() => expect(latestMapViewerProps().behaviorNodes).toHaveLength(1));
-  expect(latestMapViewerProps().behaviorNodes[0]).toMatchObject({
-    id: 'behavior_1_wait',
-    map_name: 'map',
-    tag: 'Wait',
-    category: 'action',
-    pose: { frame_id: 'map', x: 1.25, y: -0.5, yaw: 0.75 },
-  });
-  expect(latestMapViewerProps().selectedBehaviorNodeId).toBe('behavior_1_wait');
-  expect(screen.getByText('behavior_1_wait')).toBeInTheDocument();
-  expect(screen.getByRole('button', { name: 'Delete Node' })).toBeEnabled();
-
-  act(() => {
-    latestMapViewerProps().onBehaviorNodePoseChange('behavior_1_wait', 3, 4, 0.75);
-  });
-
-  await waitFor(() => expect(latestMapViewerProps().behaviorNodes[0].pose).toMatchObject({
-    x: 3,
-    y: 4,
-    yaw: 0.75,
-  }));
-
-  fireEvent.click(screen.getByRole('button', { name: 'Save Map' }));
-
-  const savedDesigns = JSON.parse(window.localStorage.getItem('mission_canvas_designs'));
-  expect(savedDesigns.map.behaviorNodes[0]).toMatchObject({
-    id: 'behavior_1_wait',
-    map_name: 'map',
-    tag: 'Wait',
-  });
-  expect(screen.getByText('Saved design for map')).toBeInTheDocument();
+  await waitFor(() => expect(latestMapViewerProps().selectedSpotId).toBe('spot_a'));
+  expect(screen.getByRole('button', { name: 'Edit BT' })).toBeDisabled();
 });
 
 test('starts mapping mode from Mission Canvas', async () => {
