@@ -25,11 +25,14 @@ import {
 } from "../utils/navigationSpotsApi";
 import {
   getNavigationMission,
+  getNavigationMissionBtFile,
   saveNavigationMission,
+  saveNavigationMissionBtFile,
 } from "../utils/navigationMissionsApi";
 import { useNavigationRosPublisher, useNavigationRosTopic } from "../hooks/useNavigationRosTopic";
 import { MapEditorControls, useMapEditor } from "../components/navigation/MapEditor";
 import { MapViewer } from "../components/navigation/MapViewer";
+import MissionBtEditor from "../components/navigation/MissionBtEditor";
 import {
   mergeTfMessages,
   poseFromBaseLinkTf,
@@ -356,22 +359,127 @@ function pgmPathFromMapName(mapName) {
   return trimmed ? `${trimmed}.pgm` : "";
 }
 
+function xmlAttr(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/"/g, "&quot;");
+}
+
+function btXmlName(value, fallback = "Node") {
+  const cleaned = String(value || fallback)
+    .trim()
+    .replace(/[^A-Za-z0-9_]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+  return cleaned || fallback;
+}
+
+function localBtPathForSpot(spot) {
+  const existing = String(
+    spot?.linked_bt_tree
+      || spot?.metadata?.local_bt
+      || spot?.metadata?.linked_bt_tree
+      || "",
+  ).trim();
+  if (existing) return existing;
+  return `locals/${btXmlName(spot?.id, "waypoint").toLowerCase()}.xml`;
+}
+
 function missionWaypointsFromSpots(spots) {
-  return spots.map((spot) => ({
-    id: spot.id,
-    label: spot.label || spot.id,
-    pose: {
-      frame_id: spot.pose?.frame_id || "map",
-      x: Number(spot.pose?.x ?? 0),
-      y: Number(spot.pose?.y ?? 0),
-      yaw: Number(spot.pose?.yaw ?? 0),
-    },
-    local_bt: spot.linked_bt_tree || `locals/${spot.id}.xml`,
-    metadata: {
-      ...(spot.metadata ?? {}),
-      linked_bt_tree: spot.linked_bt_tree || "",
-    },
-  }));
+  return spots.map((spot) => {
+    const localBt = localBtPathForSpot(spot);
+    return {
+      id: spot.id,
+      label: spot.label || spot.id,
+      pose: {
+        frame_id: spot.pose?.frame_id || "map",
+        x: Number(spot.pose?.x ?? 0),
+        y: Number(spot.pose?.y ?? 0),
+        yaw: Number(spot.pose?.yaw ?? 0),
+      },
+      local_bt: localBt,
+      metadata: {
+        ...(spot.metadata ?? {}),
+        linked_bt_tree: localBt,
+        local_bt: localBt,
+      },
+    };
+  });
+}
+
+function orderedMissionSpots(spots) {
+  return [...spots].sort((a, b) => (
+    String(a.label || a.id).localeCompare(String(b.label || b.id))
+  ));
+}
+
+function defaultLocalBtXml(spot) {
+  const name = btXmlName(`${spot?.label || spot?.id || "Waypoint"} Local BT`, "Waypoint_Local_BT");
+  return [
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    '<root BTCPP_format="4" main_tree_to_execute="MainTree">',
+    '  <BehaviorTree ID="MainTree">',
+    `    <Sequence name="${xmlAttr(name)}">`,
+    '      <Wait name="Ready" duration="0.1"/>',
+    '    </Sequence>',
+    '  </BehaviorTree>',
+    '</root>',
+    '',
+  ].join("\n");
+}
+
+function missionStepXmlLines(spots, tagName) {
+  return orderedMissionSpots(spots).map((spot, index) => {
+    const pose = spot.pose || {};
+    const localBt = localBtPathForSpot(spot);
+    const stepName = btXmlName(`Step ${index + 1} ${spot.label || spot.id}`, `Step_${index + 1}`);
+    return [
+      `      <${tagName}`,
+      `        name="${xmlAttr(stepName)}"`,
+      `        waypoint_id="${xmlAttr(spot.id)}"`,
+      `        label="${xmlAttr(spot.label || spot.id)}"`,
+      `        local_bt="${xmlAttr(localBt)}"`,
+      `        x="${xmlAttr(Number(pose.x ?? 0).toFixed(6))}"`,
+      `        y="${xmlAttr(Number(pose.y ?? 0).toFixed(6))}"`,
+      `        yaw="${xmlAttr(Number(pose.yaw ?? 0).toFixed(6))}"/>`,
+    ].join("\n");
+  });
+}
+
+function missionSequenceXml(rootName, spots, stepTag) {
+  const stepLines = missionStepXmlLines(spots, stepTag);
+  return [
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    '<root BTCPP_format="4" main_tree_to_execute="MainTree">',
+    '  <BehaviorTree ID="MainTree">',
+    stepLines.length
+      ? `    <Sequence name="${xmlAttr(rootName)}">`
+      : `    <Sequence name="${xmlAttr(rootName)}"/>`,
+    ...stepLines,
+    ...(stepLines.length ? ['    </Sequence>'] : []),
+    '  </BehaviorTree>',
+    '</root>',
+    '',
+  ].join("\n");
+}
+
+function buildMissionFlowXml(spots) {
+  return missionSequenceXml("MissionFlow", spots, "MissionWaypoint");
+}
+
+function buildCompiledMissionXml(spots) {
+  return missionSequenceXml("CompiledMission", spots, "MissionStep");
+}
+
+function missionBtFileDefaultsForSpots(spots) {
+  const entries = {
+    "global.xml": buildMissionFlowXml(spots),
+    "compiled.xml": buildCompiledMissionXml(spots),
+  };
+  spots.forEach((spot) => {
+    entries[localBtPathForSpot(spot)] = defaultLocalBtXml(spot);
+  });
+  return entries;
 }
 
 function spotsFromMissionWaypoints(mapName, waypoints) {
@@ -1188,7 +1296,7 @@ function MappingTeleopPanel({ disabled, onPublish, onMessage }) {
 
 function MissionFlowPanel({ spots, selectedSpotId, onSpotSelect }) {
   const orderedSpots = useMemo(() => (
-    [...spots].sort((a, b) => String(a.label || a.id).localeCompare(String(b.label || b.id)))
+    orderedMissionSpots(spots)
   ), [spots]);
 
   return (
@@ -1398,6 +1506,8 @@ export default function MissionCanvasPage() {
   const [behaviorNodes, setBehaviorNodes] = useState([]);
   const [selectedBehaviorNodeId, setSelectedBehaviorNodeId] = useState("");
   const [pendingBehaviorNodeTag, setPendingBehaviorNodeTag] = useState("");
+  const [missionBtFiles, setMissionBtFiles] = useState({});
+  const [missionBtLoadingPath, setMissionBtLoadingPath] = useState("");
   const [busy, setBusy] = useState("");
   const [message, setMessage] = useState("Ready");
   const [btNodeStatus, setBtNodeStatus] = useState({
@@ -1601,12 +1711,34 @@ export default function MissionCanvasPage() {
     () => visibleSpots.find((spot) => spot.id === btLayerSpotId) || null,
     [btLayerSpotId, visibleSpots],
   );
+  const selectedBtLayerPath = selectedBtLayerSpot ? localBtPathForSpot(selectedBtLayerSpot) : "";
   const btLayerExecutionLabel = btExecutionLabel(btStatusText, btNodeIsUp);
   const btLayerActiveNodesLabel = btActiveNodesLabel(
     btActiveNodesText,
     btNodeIsUp,
     btLayerExecutionLabel,
   );
+  const btActiveNodeNames = useMemo(() => (
+    btActiveNodesText
+      .split(",")
+      .map((name) => name.trim())
+      .filter(Boolean)
+  ), [btActiveNodesText]);
+  const waypointBtEditor = selectedBtLayerSpot ? (
+    <MissionBtEditor
+      title={`${selectedBtLayerSpot.label || selectedBtLayerSpot.id} Local BT`}
+      filePath={selectedBtLayerPath}
+      xml={missionBtFiles[selectedBtLayerPath] || defaultLocalBtXml(selectedBtLayerSpot)}
+      loading={missionBtLoadingPath === selectedBtLayerPath}
+      activeNodeNames={btActiveNodeNames}
+      onXmlChange={(nextXml) => {
+        setMissionBtFiles((current) => ({
+          ...current,
+          [selectedBtLayerPath]: nextXml,
+        }));
+      }}
+    />
+  ) : null;
   const waypointBtLayer = (
     workspaceStage === STAGE_AUTHORING &&
     btNodeIsUp &&
@@ -1616,6 +1748,7 @@ export default function MissionCanvasPage() {
       nodeLabel: btNodeStateLabel(btNodeStatus.state),
       executionLabel: btLayerExecutionLabel,
       activeNodesLabel: btLayerActiveNodesLabel,
+      editor: waypointBtEditor,
     }
     : null;
   const layerToggles = useMemo(() => (
@@ -1797,6 +1930,36 @@ export default function MissionCanvasPage() {
   }, [btLayerSpotId, btNodeIsUp, visibleSpots, workspaceStage]);
 
   useEffect(() => {
+    if (!selectedBtLayerSpot || !selectedBtLayerPath) return undefined;
+    if (missionBtFiles[selectedBtLayerPath] !== undefined) return undefined;
+    let cancelled = false;
+    setMissionBtLoadingPath(selectedBtLayerPath);
+    getNavigationMissionBtFile(currentMapName, selectedBtLayerPath)
+      .then((response) => {
+        if (cancelled) return;
+        setMissionBtFiles((current) => ({
+          ...current,
+          [selectedBtLayerPath]: response?.exists && typeof response.content === "string"
+            ? response.content
+            : defaultLocalBtXml(selectedBtLayerSpot),
+        }));
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setMissionBtFiles((current) => ({
+          ...current,
+          [selectedBtLayerPath]: defaultLocalBtXml(selectedBtLayerSpot),
+        }));
+      })
+      .finally(() => {
+        if (!cancelled) setMissionBtLoadingPath("");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [currentMapName, missionBtFiles, selectedBtLayerPath, selectedBtLayerSpot]);
+
+  useEffect(() => {
     void loadSpots();
   }, [loadSpots]);
 
@@ -1934,6 +2097,37 @@ export default function MissionCanvasPage() {
     return true;
   }, []);
 
+  const loadMissionBtFileOrDefault = useCallback(async (targetMapName, path, fallback) => {
+    try {
+      const response = await getNavigationMissionBtFile(targetMapName, path);
+      if (response?.exists && typeof response.content === "string") {
+        return response.content;
+      }
+    } catch {
+      // Missing or unreadable BT XML should not block loading the mission map.
+    }
+    return fallback;
+  }, []);
+
+  const loadMissionBtFilesForSpots = useCallback(async (
+    targetMapName,
+    spotsForMission,
+    manifest = {},
+  ) => {
+    const defaults = missionBtFileDefaultsForSpots(spotsForMission);
+    const globalPath = manifest.global_bt || "global.xml";
+    const compiledPath = manifest.compiled_bt || "compiled.xml";
+    defaults[globalPath] = defaults[globalPath] || buildMissionFlowXml(spotsForMission);
+    defaults[compiledPath] = buildCompiledMissionXml(spotsForMission);
+    const loadedEntries = await Promise.all(
+      Object.entries(defaults).map(async ([path, fallback]) => [
+        path,
+        await loadMissionBtFileOrDefault(targetMapName, path, fallback),
+      ]),
+    );
+    setMissionBtFiles(Object.fromEntries(loadedEntries));
+  }, [loadMissionBtFileOrDefault]);
+
   const loadMissionForMap = useCallback(async (targetMapName, { loadLegacyDesign = false } = {}) => {
     const normalizedMapName = String(targetMapName || "").trim() || DEFAULT_MAP_NAME;
     const mission = await getNavigationMission(normalizedMapName);
@@ -1944,6 +2138,7 @@ export default function MissionCanvasPage() {
       );
       legacySpotLoadGenerationRef.current += 1;
       applySpots(missionSpots);
+      await loadMissionBtFilesForSpots(normalizedMapName, missionSpots, mission);
       return {
         exists: true,
         loadedDesign: false,
@@ -1954,12 +2149,13 @@ export default function MissionCanvasPage() {
       ? loadSavedDesignForMap(normalizedMapName)
       : false;
     const legacySpots = await loadLegacySpotsForMap(normalizedMapName);
+    setMissionBtFiles(missionBtFileDefaultsForSpots(legacySpots));
     return {
       exists: false,
       loadedDesign,
       spotCount: legacySpots.length,
     };
-  }, [applySpots, loadLegacySpotsForMap, loadSavedDesignForMap]);
+  }, [applySpots, loadLegacySpotsForMap, loadMissionBtFilesForSpots, loadSavedDesignForMap]);
 
   const handleOpenDesignMapDialog = useCallback(() => {
     setWorkspaceStage(STAGE_AUTHORING);
@@ -2032,18 +2228,53 @@ export default function MissionCanvasPage() {
     "Save mission",
     async () => {
       saveBehaviorNodesForMap(currentMapName, activeBehaviorNodes);
+      const missionSpots = visibleSpots.map((spot) => ({
+        ...spot,
+        linked_bt_tree: localBtPathForSpot(spot),
+        metadata: {
+          ...(spot.metadata ?? {}),
+          local_bt: localBtPathForSpot(spot),
+          linked_bt_tree: localBtPathForSpot(spot),
+        },
+      }));
+      const globalPath = "global.xml";
+      const compiledPath = "compiled.xml";
+      const globalXml = buildMissionFlowXml(missionSpots);
+      const compiledXml = buildCompiledMissionXml(missionSpots);
+      const nextBtFiles = {
+        ...missionBtFileDefaultsForSpots(missionSpots),
+        ...missionBtFiles,
+        [globalPath]: globalXml,
+        [compiledPath]: compiledXml,
+      };
       await saveNavigationMission(currentMapName, {
-        global_bt: "global.xml",
-        compiled_bt: "compiled.xml",
-        waypoints: missionWaypointsFromSpots(visibleSpots),
+        global_bt: globalPath,
+        compiled_bt: compiledPath,
+        waypoints: missionWaypointsFromSpots(missionSpots),
         metadata: {
           source: "mission_canvas",
           behavior_node_count: activeBehaviorNodes.length,
         },
       });
+      await Promise.all(Object.entries(nextBtFiles).map(([path, content]) => (
+        saveNavigationMissionBtFile(currentMapName, path, content)
+      )));
+      setMissionBtFiles(nextBtFiles);
+      setSpots((current) => current.map((spot) => {
+        const localBt = localBtPathForSpot(spot);
+        return {
+          ...spot,
+          linked_bt_tree: localBt,
+          metadata: {
+            ...(spot.metadata ?? {}),
+            local_bt: localBt,
+            linked_bt_tree: localBt,
+          },
+        };
+      }));
       return `Saved mission for ${currentMapName}`;
     },
-  ), [activeBehaviorNodes, currentMapName, runCommand, visibleSpots]);
+  ), [activeBehaviorNodes, currentMapName, missionBtFiles, runCommand, visibleSpots]);
 
   const handleRunMission = useCallback(() => runCommand(
     "Run mission",
@@ -2417,6 +2648,32 @@ export default function MissionCanvasPage() {
       setMessage("Activate BT before opening waypoint BT");
       return;
     }
+    const localBt = localBtPathForSpot(selectedSpot);
+    const nextSpot = {
+      ...selectedSpot,
+      linked_bt_tree: localBt,
+      metadata: {
+        ...(selectedSpot.metadata ?? {}),
+        local_bt: localBt,
+        linked_bt_tree: localBt,
+      },
+    };
+    setSpots((current) => current.map((spot) => (
+      spot.id === selectedSpot.id ? {
+        ...spot,
+        linked_bt_tree: localBt,
+        metadata: {
+          ...(spot.metadata ?? {}),
+          local_bt: localBt,
+          linked_bt_tree: localBt,
+        },
+      } : spot
+    )));
+    setMissionBtFiles((current) => (
+      current[localBt]
+        ? current
+        : { ...current, [localBt]: defaultLocalBtXml(nextSpot) }
+    ));
     setBtLayerSpotId(selectedSpot.id);
   }, [btNodeIsUp, selectedSpot]);
 

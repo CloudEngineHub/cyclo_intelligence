@@ -101,7 +101,13 @@ function isFieldDisabled(nodeType, key, params) {
   );
 }
 
-export default function BTParamPanel({ nodes, selectedNodeId, onParamChange, onNameChange }) {
+export default function BTParamPanel({
+  nodes,
+  selectedNodeId,
+  onParamChange,
+  onNameChange,
+  onClose,
+}) {
   const dispatch = useDispatch();
 
   const selectedNode = nodes.find((n) => n.id === selectedNodeId);
@@ -286,7 +292,7 @@ export default function BTParamPanel({ nodes, selectedNodeId, onParamChange, onN
           />
         </div>
         <button
-          onClick={() => dispatch(setSelectedNodeId(null))}
+          onClick={() => (typeof onClose === 'function' ? onClose() : dispatch(setSelectedNodeId(null)))}
           className="p-1 rounded hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors"
         >
           <MdClose size={20} />

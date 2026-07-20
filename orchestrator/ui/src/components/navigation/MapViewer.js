@@ -645,7 +645,10 @@ function WaypointBtFocusLayer({ layer, onClose }) {
                 Close
               </button>)}
           </header>
-          <div className="relative min-h-0 overflow-hidden">
+          <div className="relative min-h-0 overflow-hidden rounded-md border" style={{
+            borderColor: "#e2e8f0",
+        }}>
+            {layer.editor ? layer.editor : (<>
             <div className="absolute inset-0 opacity-80" style={{
             backgroundImage: "linear-gradient(rgba(148,163,184,0.18) 1px, transparent 1px), linear-gradient(90deg, rgba(148,163,184,0.18) 1px, transparent 1px)",
             backgroundSize: "28px 28px",
@@ -667,6 +670,7 @@ function WaypointBtFocusLayer({ layer, onClose }) {
             <BtCanvasNode className="left-[68%] top-[66%]" tone="default">
               Task
             </BtCanvasNode>
+            </>)}
           </div>
           <footer className="grid grid-cols-3 gap-2 text-[11px]">
             <div className="min-w-0">

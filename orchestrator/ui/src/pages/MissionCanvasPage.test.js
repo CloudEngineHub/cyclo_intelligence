@@ -19,7 +19,9 @@ import {
 } from '../utils/navigationSpotsApi';
 import {
   getNavigationMission,
+  getNavigationMissionBtFile,
   saveNavigationMission,
+  saveNavigationMissionBtFile,
 } from '../utils/navigationMissionsApi';
 
 const mockMapViewer = jest.fn(() => <div>Mission Canvas Map</div>);
@@ -114,6 +116,11 @@ jest.mock('../utils/navigationMissionsApi', () => ({
     waypoints: [],
     metadata: {},
   }),
+  getNavigationMissionBtFile: jest.fn().mockResolvedValue({
+    path: 'global.xml',
+    content: '',
+    exists: false,
+  }),
   saveNavigationMission: jest.fn().mockResolvedValue({
     exists: true,
     map_name: 'map',
@@ -121,6 +128,11 @@ jest.mock('../utils/navigationMissionsApi', () => ({
     compiled_bt: 'compiled.xml',
     waypoints: [],
     metadata: {},
+  }),
+  saveNavigationMissionBtFile: jest.fn().mockResolvedValue({
+    path: 'global.xml',
+    content: '',
+    exists: true,
   }),
 }));
 
@@ -181,6 +193,11 @@ beforeEach(() => {
     waypoints: [],
     metadata: {},
   });
+  getNavigationMissionBtFile.mockResolvedValue({
+    path: 'global.xml',
+    content: '',
+    exists: false,
+  });
   saveNavigationMission.mockResolvedValue({
     exists: true,
     map_name: 'map',
@@ -188,6 +205,11 @@ beforeEach(() => {
     compiled_bt: 'compiled.xml',
     waypoints: [],
     metadata: {},
+  });
+  saveNavigationMissionBtFile.mockResolvedValue({
+    path: 'global.xml',
+    content: '',
+    exists: true,
   });
   saveNavigationMap.mockResolvedValue({ ok: true, message: 'Saved map' });
   savePgmImage.mockResolvedValue({ path: 'map.pgm', saved: true });
@@ -497,6 +519,11 @@ test('restores mission manifest waypoints before legacy spots', async () => {
       metadata: {},
     }] : [],
   }));
+  getNavigationMissionBtFile.mockImplementation((mapName, path) => Promise.resolve({
+    path,
+    exists: true,
+    content: `<root><BehaviorTree ID="${mapName}:${path}"/></root>`,
+  }));
 
   render(<MissionCanvasPage />);
 
@@ -528,6 +555,9 @@ test('restores mission manifest waypoints before legacy spots', async () => {
   expect(screen.getByText('locals/mission_pickup.xml')).toBeInTheDocument();
   expect(screen.queryByText('legacy.xml')).not.toBeInTheDocument();
   expect(getNavigationSpots.mock.calls.some(([mapName]) => mapName === 'factory')).toBe(false);
+  expect(getNavigationMissionBtFile).toHaveBeenCalledWith('factory', 'global.xml');
+  expect(getNavigationMissionBtFile).toHaveBeenCalledWith('factory', 'compiled.xml');
+  expect(getNavigationMissionBtFile).toHaveBeenCalledWith('factory', 'locals/mission_pickup.xml');
 });
 
 test('hides loaded design waypoints after returning to mapping stage', async () => {
@@ -705,6 +735,21 @@ test('shows waypoint actions in Properties after placing a waypoint', async () =
       ],
     }),
   ));
+  await waitFor(() => expect(saveNavigationMissionBtFile).toHaveBeenCalledWith(
+    'factory',
+    'global.xml',
+    expect.stringContaining('<MissionWaypoint'),
+  ));
+  expect(saveNavigationMissionBtFile).toHaveBeenCalledWith(
+    'factory',
+    'compiled.xml',
+    expect.stringContaining('<MissionStep'),
+  );
+  expect(saveNavigationMissionBtFile).toHaveBeenCalledWith(
+    'factory',
+    'locals/spot_a.xml',
+    expect.stringContaining('<Sequence name="Waypoint_A_Local_BT">'),
+  );
   await waitFor(() => expect(screen.getByText('Saved mission for factory')).toBeInTheDocument());
 
   fireEvent.click(screen.getByRole('button', { name: 'Create Waypoint' }));
