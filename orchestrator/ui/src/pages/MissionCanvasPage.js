@@ -1912,6 +1912,16 @@ export default function MissionCanvasPage() {
     setMissionFlowEdges((current) => filterMissionFlowEdges(current, visibleSpots));
   }, [setMissionFlowEdges, setMissionFlowNodes, visibleSpots]);
 
+  useEffect(() => {
+    if (!btNodeIsUp) return;
+    if (showWaypointOptions) {
+      setShowWaypointOptions(false);
+    }
+    if (interactionMode === "spot" || interactionMode === "initial") {
+      setInteractionMode("view");
+    }
+  }, [btNodeIsUp, interactionMode, showWaypointOptions]);
+
   const layerToggles = useMemo(() => (
     STAGE_LAYER_IDS[workspaceStage].map((id) => ({
       id,
@@ -2702,11 +2712,19 @@ export default function MissionCanvasPage() {
   }, []);
 
   const handleToggleWaypointOptions = useCallback(() => {
+    if (btNodeIsUp) {
+      setMessage("Deactivate BT before editing waypoints");
+      return;
+    }
     setWorkspaceStage(STAGE_AUTHORING);
     setShowWaypointOptions((value) => !value);
-  }, []);
+  }, [btNodeIsUp]);
 
   const handleToggleSpotMode = useCallback(() => {
+    if (btNodeIsUp) {
+      setMessage("Deactivate BT before editing waypoints");
+      return;
+    }
     setWorkspaceStage(STAGE_AUTHORING);
     setPendingBehaviorNodeTag("");
     setSelectedBehaviorNodeId("");
@@ -2715,7 +2733,7 @@ export default function MissionCanvasPage() {
     setEditingSpotLabel("");
     setShowWaypointOptions(false);
     setInteractionMode((value) => (value === "spot" ? "view" : "spot"));
-  }, []);
+  }, [btNodeIsUp]);
 
   const waitForAutoLocalizedPose = useCallback(async () => {
     let latestPose = null;
@@ -2739,6 +2757,12 @@ export default function MissionCanvasPage() {
   }, []);
 
   const handleCreateSpotAtPose = useCallback(async (x, y, yaw) => {
+    if (btNodeIsUp && (interactionMode === "spot" || interactionMode === "initial")) {
+      setInteractionMode("view");
+      setShowWaypointOptions(false);
+      setMessage("Deactivate BT before editing waypoints");
+      return;
+    }
     if (interactionMode === "initial") {
       setInteractionMode("view");
       setShowWaypointOptions(false);
@@ -2824,6 +2848,7 @@ export default function MissionCanvasPage() {
     }
   }, [
     currentMapName,
+    btNodeIsUp,
     clearLocalizationPoseCache,
     designMapPath,
     interactionMode,
@@ -2834,6 +2859,10 @@ export default function MissionCanvasPage() {
   ]);
 
   const handleCreateSpotAtRobot = useCallback(() => {
+    if (btNodeIsUp) {
+      setMessage("Deactivate BT before editing waypoints");
+      return;
+    }
     if (!designMapAvailable || !designMapPath) {
       setMessage("Load a map before creating a waypoint");
       return;
@@ -2865,6 +2894,7 @@ export default function MissionCanvasPage() {
     );
   }, [
     currentMapName,
+    btNodeIsUp,
     clearLocalizationPoseCache,
     designMapAvailable,
     designMapPath,
@@ -2872,6 +2902,10 @@ export default function MissionCanvasPage() {
   ]);
 
   const handleMoveSpot = useCallback(async (spotId, x, y, yaw) => {
+    if (btNodeIsUp) {
+      setMessage("Deactivate BT before editing waypoints");
+      return;
+    }
     const spot = spots.find((item) => item.id === spotId);
     if (!spot) return;
     const nextPose = spotPoseFromMapPose(x, y, yaw ?? spot.pose?.yaw ?? 0);
@@ -2897,7 +2931,7 @@ export default function MissionCanvasPage() {
       )));
       setMessage(error instanceof Error ? error.message : "Failed to move waypoint");
     }
-  }, [spots]);
+  }, [btNodeIsUp, spots]);
 
   const handleMoveBehaviorNode = useCallback((nodeId, x, y, yaw) => {
     setBehaviorNodes((current) => current.map((node) => (
@@ -3239,8 +3273,9 @@ export default function MissionCanvasPage() {
               <div className="flex items-center gap-1">
                 <ActionButton
                   active={showWaypointOptions || interactionMode === "spot"}
-                  disabled={!designMapAvailable}
+                  disabled={!designMapAvailable || btNodeIsUp}
                   onClick={handleToggleWaypointOptions}
+                  title={btNodeIsUp ? "Deactivate BT before editing waypoints" : undefined}
                   variant="secondary"
                 >
                   Create Waypoint
@@ -3257,7 +3292,7 @@ export default function MissionCanvasPage() {
                   >
                     <ActionButton
                       active={interactionMode === "spot"}
-                      disabled={!designMapAvailable}
+                      disabled={!designMapAvailable || btNodeIsUp}
                       onClick={handleToggleSpotMode}
                       variant="secondary"
                     >
@@ -3265,7 +3300,7 @@ export default function MissionCanvasPage() {
                     </ActionButton>
                     <ActionButton
                       active={interactionMode === "initial" || busy === "At Robot"}
-                      disabled={!!busy || !designMapAvailable}
+                      disabled={!!busy || !designMapAvailable || btNodeIsUp}
                       onClick={handleCreateSpotAtRobot}
                       variant="secondary"
                     >
@@ -3362,7 +3397,7 @@ export default function MissionCanvasPage() {
                 : running ? "Waiting for /map" : "Run Mission to view /map"}
             onSpotClick={handleSelectSpot}
             onBehaviorNodeClick={handleSelectBehaviorNode}
-            onSpotPoseChange={handleMoveSpot}
+            onSpotPoseChange={btNodeIsUp ? undefined : handleMoveSpot}
             onBehaviorNodePoseChange={handleMoveBehaviorNode}
             onEditorMapPoint={mapEditor.editAtMapPoint}
             onMapClick={handleClearMapSelection}

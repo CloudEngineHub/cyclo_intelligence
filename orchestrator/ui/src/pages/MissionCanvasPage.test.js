@@ -855,6 +855,8 @@ test('opens waypoint BT map layer when selecting a waypoint with BT active', asy
 
   await waitFor(() => expect(latestMapViewerProps().spots).toHaveLength(1));
   await waitFor(() => expect(screen.getByText('BT Node Active')).toBeInTheDocument());
+  expect(latestMapViewerProps().onSpotPoseChange).toBeUndefined();
+  expect(screen.getByRole('button', { name: 'Create Waypoint' })).toBeDisabled();
 
   act(() => {
     latestMapViewerProps().onSpotClick('spot_factory');
