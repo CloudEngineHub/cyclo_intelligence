@@ -355,7 +355,6 @@ test('shows Waypoint and BT authoring panels in the authoring stage', async () =
   expect(getPgmImage).not.toHaveBeenCalled();
   expect(latestMapViewerProps().map).toBeNull();
   expect(latestMapViewerProps().waitingLabel).toBe('Load a map');
-  expect(latestMapViewerProps().missionRouteEdges).toEqual([]);
   expect(latestMapViewerProps().missionRouteOrder).toEqual([]);
 });
 
@@ -562,7 +561,7 @@ test('restores mission manifest waypoints before legacy spots', async () => {
     },
   });
   expect(screen.getByRole('button', { name: 'Mission Pickup' })).toBeInTheDocument();
-  expect(latestMapViewerProps().missionRouteEdges).toEqual([]);
+  expect(latestMapViewerProps().missionRouteOrder).toEqual([]);
   expect(screen.queryByText('legacy.xml')).not.toBeInTheDocument();
   expect(getNavigationSpots.mock.calls.some(([mapName]) => mapName === 'factory')).toBe(false);
   expect(getNavigationMissionBtFile).toHaveBeenCalledWith('factory', 'global.xml');
@@ -1217,9 +1216,6 @@ test('edits the mission route directly on the map', async () => {
 
   expect(screen.getAllByText('Waypoint A').length).toBeGreaterThan(0);
   expect(screen.getAllByText('Waypoint B').length).toBeGreaterThan(0);
-  await waitFor(() => expect(latestMapViewerProps().missionRouteEdges).toEqual([
-    expect.objectContaining({ source: 'spot_a', target: 'spot_b' }),
-  ]));
   expect(latestMapViewerProps().missionRouteOrder).toEqual([
     { id: 'spot_a', order: 1 },
     { id: 'spot_b', order: 2 },
@@ -1231,7 +1227,7 @@ test('edits the mission route directly on the map', async () => {
   expect(latestMapViewerProps().onSpotPoseChange).toBeUndefined();
 
   fireEvent.click(screen.getByRole('button', { name: 'Clear Route' }));
-  await waitFor(() => expect(latestMapViewerProps().missionRouteEdges).toEqual([]));
+  await waitFor(() => expect(latestMapViewerProps().missionRouteOrder).toEqual([]));
 
   act(() => {
     latestMapViewerProps().onMissionRouteSpotClick('spot_b');
@@ -1241,9 +1237,6 @@ test('edits the mission route directly on the map', async () => {
   act(() => {
     latestMapViewerProps().onMissionRouteSpotClick('spot_a');
   });
-  await waitFor(() => expect(latestMapViewerProps().missionRouteEdges).toEqual([
-    expect.objectContaining({ source: 'spot_b', target: 'spot_a' }),
-  ]));
   expect(latestMapViewerProps().missionRouteOrder).toEqual([
     { id: 'spot_b', order: 1 },
     { id: 'spot_a', order: 2 },

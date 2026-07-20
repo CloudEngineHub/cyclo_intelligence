@@ -2646,15 +2646,6 @@ export default function MissionCanvasPage() {
     setMissionRouteSourceId(spotId);
   }, [btNodeIsUp, missionRouteMode, missionRouteSourceId, visibleSpots]);
 
-  const handleMissionRouteEdgeClick = useCallback((edgeId, source, target) => {
-    if (!missionRouteMode || btNodeIsUp) return;
-    setMissionFlowEdges((current) => current.filter((edge) => (
-      edge.id !== edgeId && !(edge.source === source && edge.target === target)
-    )));
-    setMissionRouteSourceId(source || "");
-    setMessage("Route link removed");
-  }, [btNodeIsUp, missionRouteMode]);
-
   const handleMissionRouteMapClick = useCallback(() => {
     if (!missionRouteMode) return;
     setMissionRouteSourceId("");
@@ -3341,7 +3332,6 @@ export default function MissionCanvasPage() {
             behaviorNodes={missionOverlayActive ? activeBehaviorNodes : []}
             selectedBehaviorNodeId={missionOverlayActive ? selectedBehaviorNodeId : ""}
             behaviorPreviewNode={missionOverlayActive ? behaviorPreviewNode : null}
-            missionRouteEdges={missionOverlayActive ? missionRouteEdges : []}
             missionRouteOrder={missionOverlayActive ? missionRouteOrder : []}
             missionRouteMode={workspaceStage === STAGE_AUTHORING && missionRouteMode && !btNodeIsUp}
             selectedMissionRouteSourceId={missionRouteSourceId}
@@ -3377,7 +3367,6 @@ export default function MissionCanvasPage() {
             onSpotClick={missionRouteMode ? handleMissionRouteSpotClick : handleSelectSpot}
             onBehaviorNodeClick={handleSelectBehaviorNode}
             onMissionRouteSpotClick={handleMissionRouteSpotClick}
-            onMissionRouteEdgeClick={handleMissionRouteEdgeClick}
             onMissionRouteMapClick={handleMissionRouteMapClick}
             onSpotPoseChange={btNodeIsUp || missionRouteMode ? undefined : handleMoveSpot}
             onBehaviorNodePoseChange={handleMoveBehaviorNode}
