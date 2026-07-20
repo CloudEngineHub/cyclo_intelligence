@@ -426,16 +426,11 @@ function orderedMissionSpots(spots) {
   ));
 }
 
-function defaultLocalBtXml(spot) {
-  const name = btXmlName(`${spot?.label || spot?.id || "Waypoint"} Local BT`, "Waypoint_Local_BT");
+function defaultLocalBtXml() {
   return [
     '<?xml version="1.0" encoding="UTF-8"?>',
     '<root BTCPP_format="4" main_tree_to_execute="MainTree">',
-    '  <BehaviorTree ID="MainTree">',
-    `    <Sequence name="${xmlAttr(name)}">`,
-    '      <Wait name="Ready" duration="0.1"/>',
-    '    </Sequence>',
-    '  </BehaviorTree>',
+    '  <BehaviorTree ID="MainTree"/>',
     '</root>',
     '',
   ].join("\n");
@@ -2443,13 +2438,16 @@ export default function MissionCanvasPage() {
   }, [btNodeIsUp, workspaceStage]);
 
   const handleClearMapSelection = useCallback(() => {
+    if (btLayerSpotId) {
+      setBtLayerSpotId("");
+      return;
+    }
     setSelectedSpotId("");
     setSelectedBehaviorNodeId("");
     setPendingBehaviorNodeTag("");
     setEditingSpotId("");
     setEditingSpotLabel("");
-    setBtLayerSpotId("");
-  }, []);
+  }, [btLayerSpotId]);
 
   const handleSelectBehaviorNode = useCallback((nodeId) => {
     setSelectedBehaviorNodeId(nodeId);
@@ -2684,46 +2682,6 @@ export default function MissionCanvasPage() {
     const node = behaviorNodes.find((item) => item.id === nodeId);
     setMessage(`Moved ${node?.tag || "node"}`);
   }, [behaviorNodes]);
-
-  const handleOpenSpotBt = useCallback((spot) => {
-    if (!spot) return;
-    if (!btNodeIsUp) {
-      setMessage("Activate BT before opening waypoint BT");
-      return;
-    }
-    const localBt = localBtPathForSpot(spot);
-    const nextSpot = {
-      ...spot,
-      linked_bt_tree: localBt,
-      metadata: {
-        ...(spot.metadata ?? {}),
-        local_bt: localBt,
-        linked_bt_tree: localBt,
-      },
-    };
-    setSpots((current) => current.map((spot) => (
-      spot.id === nextSpot.id ? {
-        ...spot,
-        linked_bt_tree: localBt,
-        metadata: {
-          ...(spot.metadata ?? {}),
-          local_bt: localBt,
-          linked_bt_tree: localBt,
-        },
-      } : spot
-    )));
-    setMissionBtFiles((current) => (
-      current[localBt]
-        ? current
-        : { ...current, [localBt]: defaultLocalBtXml(nextSpot) }
-    ));
-    setSelectedSpotId(nextSpot.id);
-    setSelectedBehaviorNodeId("");
-    setPendingBehaviorNodeTag("");
-    setShowWaypointOptions(false);
-    setInteractionMode("view");
-    setBtLayerSpotId(nextSpot.id);
-  }, [btNodeIsUp]);
 
   const handleStartRenameSpot = useCallback((spot) => {
     if (!spot) return;
@@ -3261,7 +3219,7 @@ export default function MissionCanvasPage() {
                   {spots.map((spot) => {
                     const selected = spot.id === selectedSpotId;
                     const editing = editingSpotId === spot.id;
-                    const linkedBtPath = existingLocalBtPathForSpot(spot);
+                    const localBtPath = localBtPathForSpot(spot);
                     return (
                       <div
                         key={spot.id}
@@ -3336,28 +3294,12 @@ export default function MissionCanvasPage() {
                           </button>
                         </div>
                         {selected && (
-                          <div className="grid gap-1.5 min-w-0">
+                          <div className="min-w-0">
                             <div
                               className="text-[11px] font-mono truncate"
                               style={{ color: selected ? "var(--vscode-button-foreground)" : MISSION_TEXT_MUTED }}
                             >
-                              {linkedBtPath || "No local BT"}
-                            </div>
-                            <div className="flex flex-wrap gap-1.5">
-                              <ActionButton
-                                disabled={!btNodeIsUp || !!linkedBtPath}
-                                onClick={() => handleOpenSpotBt(spot)}
-                                variant="secondary"
-                              >
-                                Create BT
-                              </ActionButton>
-                              <ActionButton
-                                disabled={!btNodeIsUp || !linkedBtPath}
-                                onClick={() => handleOpenSpotBt(spot)}
-                                variant="secondary"
-                              >
-                                Edit BT
-                              </ActionButton>
+                              {localBtPath}
                             </div>
                           </div>
                         )}

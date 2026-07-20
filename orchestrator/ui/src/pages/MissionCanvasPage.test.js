@@ -702,8 +702,8 @@ test('shows waypoint actions in Design Objects after placing a waypoint', async 
   expect(screen.getByRole('button', { name: 'Waypoint A' })).toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Create Waypoint' })).toHaveAttribute('aria-pressed', 'true');
   expect(latestMapViewerProps().interactionMode).toBe('spot');
-  expect(screen.getByRole('button', { name: 'Create BT' })).toBeDisabled();
-  expect(screen.getByRole('button', { name: 'Edit BT' })).toBeDisabled();
+  expect(screen.queryByRole('button', { name: 'Create BT' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Edit BT' })).not.toBeInTheDocument();
   expect(screen.getByRole('button', { name: /Delete Waypoint Waypoint A/ })).toBeEnabled();
 
   await act(async () => {
@@ -755,7 +755,7 @@ test('shows waypoint actions in Design Objects after placing a waypoint', async 
   expect(saveNavigationMissionBtFile).toHaveBeenCalledWith(
     'factory',
     'locals/waypoint_a.xml',
-    expect.stringContaining('<Sequence name="Waypoint_A_Local_BT">'),
+    expect.stringContaining('<BehaviorTree ID="MainTree"/>'),
   );
   await waitFor(() => expect(screen.getByText('Saved mission for factory')).toBeInTheDocument());
 
@@ -764,6 +764,7 @@ test('shows waypoint actions in Design Objects after placing a waypoint', async 
   });
   await waitFor(() => expect(latestMapViewerProps().selectedSpotId).toBe(''));
   expect(screen.queryByRole('button', { name: 'Create BT' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Edit BT' })).not.toBeInTheDocument();
 
   fireEvent.click(screen.getByRole('button', { name: 'Create Waypoint' }));
   fireEvent.click(screen.getByRole('button', { name: 'On Map' }));
@@ -870,14 +871,15 @@ test('opens waypoint BT map layer when selecting a waypoint with BT active', asy
   expect(screen.queryByRole('dialog', { name: 'Waypoint BT' })).not.toBeInTheDocument();
   expect(screen.getAllByText('Waypoint Factory').length).toBeGreaterThan(0);
   expect(screen.getAllByText('factory_waypoint.xml').length).toBeGreaterThan(0);
-  expect(screen.getByRole('button', { name: 'Create BT' })).toBeDisabled();
-  expect(screen.getByRole('button', { name: 'Edit BT' })).toBeEnabled();
+  expect(screen.queryByRole('button', { name: 'Create BT' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Edit BT' })).not.toBeInTheDocument();
 
   act(() => {
-    latestMapViewerProps().onBtLayerClose();
+    latestMapViewerProps().onMapClick(0, 0);
   });
 
   await waitFor(() => expect(latestMapViewerProps().btLayer).toBeNull());
+  expect(latestMapViewerProps().selectedSpotId).toBe('spot_factory');
 });
 
 test('creates a waypoint at robot with automatic localization from the waypoint menu', async () => {
@@ -1202,7 +1204,8 @@ test('renders waypoint sequence in the mission flow panel', async () => {
   fireEvent.click(screen.getByRole('button', { name: /Step 1\s+Waypoint A\s+waypoint_a\.xml/ }));
 
   await waitFor(() => expect(latestMapViewerProps().selectedSpotId).toBe('spot_a'));
-  expect(screen.getByRole('button', { name: 'Edit BT' })).toBeDisabled();
+  expect(screen.queryByRole('button', { name: 'Create BT' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Edit BT' })).not.toBeInTheDocument();
 });
 
 test('starts mapping mode from Mission Canvas', async () => {

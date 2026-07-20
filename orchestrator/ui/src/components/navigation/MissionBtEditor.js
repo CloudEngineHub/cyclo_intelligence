@@ -173,7 +173,7 @@ export default function MissionBtEditor({
   }, [filePath, resetHistory, setEdges, setNodes, xml]);
 
   useEffect(() => {
-    if (!nodes.length || typeof onXmlChange !== "function") return undefined;
+    if (parseError || typeof onXmlChange !== "function") return undefined;
     const timer = window.setTimeout(() => {
       try {
         const serialized = serializeFromGraph(nodes, edges, nodeDataMap);
@@ -185,7 +185,7 @@ export default function MissionBtEditor({
       }
     }, 250);
     return () => window.clearTimeout(timer);
-  }, [edges, filePath, nodeDataMap, nodes, onXmlChange]);
+  }, [edges, filePath, nodeDataMap, nodes, onXmlChange, parseError]);
 
   const handleCanvasDragOver = useCallback((event) => {
     if (event.dataTransfer.types.includes(PALETTE_DRAG_MIME)) {

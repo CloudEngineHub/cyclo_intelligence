@@ -833,15 +833,12 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, 
         if (!camera || !controls || !meta)
             return;
         const spot = btLayer === null || btLayer === void 0 ? void 0 : btLayer.spot;
-        const fitKey = viewKey !== null && viewKey !== void 0 ? viewKey : "default";
         if (spot === null || spot === void 0 ? void 0 : spot.pose) {
             focusCameraToWaypoint(camera, controls, meta, spot, viewRollRef.current);
             btFocusActiveRef.current = true;
             return;
         }
         if (btFocusActiveRef.current) {
-            fitCameraToMap(camera, controls, meta, viewRollRef.current);
-            fitMapKeyRef.current = fitKey;
             btFocusActiveRef.current = false;
         }
     }, [
