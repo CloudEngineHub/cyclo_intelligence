@@ -39,7 +39,7 @@ const WAYPOINT_LABEL_SCALE_X = 24;
 const WAYPOINT_LABEL_SCALE_Y = 6;
 const BT_FOCUS_VISIBLE_HEIGHT_MIN = 5;
 const BT_FOCUS_VISIBLE_HEIGHT_MAX = 11;
-const BT_FOCUS_WAYPOINT_NDC_X = -0.52;
+const BT_FOCUS_WAYPOINT_NDC_X = -0.75;
 function gridMeta(grid) {
     var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k;
     const info = grid === null || grid === void 0 ? void 0 : grid.info;
@@ -616,12 +616,12 @@ function WaypointBtFocusLayer({ layer, onClose }) {
     const pose = (_a = spot.pose) !== null && _a !== void 0 ? _a : {};
     const poseText = `${Number((_b = pose.x) !== null && _b !== void 0 ? _b : 0).toFixed(2)}, ${Number((_c = pose.y) !== null && _c !== void 0 ? _c : 0).toFixed(2)}, yaw ${Number(pose.yaw !== null && pose.yaw !== void 0 ? pose.yaw : 0).toFixed(2)}`;
     return (<section className="absolute inset-0 z-20 pointer-events-none" role="region" aria-label="Waypoint BT focus canvas">
-      <div className="absolute inset-y-0 left-0 w-[48%] pointer-events-none" style={{
+      <div className="absolute inset-y-0 left-0 w-[25%] pointer-events-none" style={{
             background: "linear-gradient(90deg, rgba(15,23,42,0.1), rgba(15,23,42,0))",
         }}/>
-      <div className="absolute inset-y-0 right-0 w-[52%] pointer-events-auto overflow-hidden" style={{
+      <div className="absolute inset-y-0 right-0 w-[75%] pointer-events-auto overflow-hidden" style={{
             color: "#111827",
-            background: "linear-gradient(90deg, rgba(248,250,252,0.76), rgba(255,255,255,0.96))",
+            backgroundColor: "#ffffff",
             borderLeft: "1px solid rgba(148,163,184,0.82)",
         }}>
         <div className="h-full min-h-0 p-5 grid grid-rows-[auto_minmax(0,1fr)_auto] gap-4">
