@@ -37,6 +37,9 @@ const WAYPOINT_HEADING_HEAD_WIDTH = 2.84;
 const WAYPOINT_LABEL_OFFSET_Y = 7.2;
 const WAYPOINT_LABEL_SCALE_X = 24;
 const WAYPOINT_LABEL_SCALE_Y = 6;
+const BT_FOCUS_VISIBLE_HEIGHT_MIN = 5;
+const BT_FOCUS_VISIBLE_HEIGHT_MAX = 11;
+const BT_FOCUS_WAYPOINT_NDC_X = -0.52;
 function gridMeta(grid) {
     var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k;
     const info = grid === null || grid === void 0 ? void 0 : grid.info;
@@ -559,61 +562,126 @@ function applyTopViewRoll(camera, controls, roll) {
     camera.lookAt(controls.target);
     controls.update();
 }
-function WaypointBtMapLayer({ layer, onClose }) {
+function focusCameraToWaypoint(camera, controls, meta, spot, roll = 0) {
+    var _a, _b;
+    if (!meta || !(spot === null || spot === void 0 ? void 0 : spot.pose))
+        return;
+    const width = meta.width * meta.resolution;
+    const height = meta.height * meta.resolution;
+    const maxDim = Math.max(width, height, 1);
+    const visibleHeight = Math.max(BT_FOCUS_VISIBLE_HEIGHT_MIN, Math.min(maxDim * 0.68, BT_FOCUS_VISIBLE_HEIGHT_MAX));
+    const halfFov = THREE.MathUtils.degToRad(camera.fov / 2);
+    const distance = visibleHeight / (2 * Math.tan(halfFov));
+    const halfWidth = distance * Math.tan(halfFov) * Math.max(camera.aspect, 0.1);
+    const x = Number((_a = spot.pose.x) !== null && _a !== void 0 ? _a : 0);
+    const y = Number((_b = spot.pose.y) !== null && _b !== void 0 ? _b : 0);
+    const screenRight = new THREE.Vector3(Math.cos(roll), -Math.sin(roll), 0);
+    const target = new THREE.Vector3(x, y, 0).addScaledVector(screenRight, -BT_FOCUS_WAYPOINT_NDC_X * halfWidth);
+    camera.up.set(Math.sin(roll), Math.cos(roll), 0);
+    camera.position.set(target.x, target.y, Math.max(distance, CAMERA_NEAR * 10));
+    camera.lookAt(target);
+    camera.near = CAMERA_NEAR;
+    camera.far = Math.max(CAMERA_FAR, maxDim * 10);
+    camera.updateProjectionMatrix();
+    controls.target.copy(target);
+    controls.update();
+}
+function BtCanvasNode({ className = "", children, tone = "default" }) {
+    const styles = {
+        default: {
+            color: "#111827",
+            backgroundColor: "rgba(255,255,255,0.9)",
+            borderColor: "#94a3b8",
+        },
+        active: {
+            color: "#052e16",
+            backgroundColor: "rgba(220,252,231,0.94)",
+            borderColor: "#15803d",
+        },
+        muted: {
+            color: "#334155",
+            backgroundColor: "rgba(248,250,252,0.82)",
+            borderColor: "#cbd5e1",
+        },
+    };
+    return (<div className={`absolute min-w-[112px] h-10 px-3 border rounded-md flex items-center justify-center text-xs font-semibold shadow-sm ${className}`} style={styles[tone] || styles.default}>
+      {children}
+    </div>);
+}
+function WaypointBtFocusLayer({ layer, onClose }) {
     var _a, _b, _c;
     const spot = layer === null || layer === void 0 ? void 0 : layer.spot;
     if (!spot)
         return null;
     const pose = (_a = spot.pose) !== null && _a !== void 0 ? _a : {};
     const poseText = `${Number((_b = pose.x) !== null && _b !== void 0 ? _b : 0).toFixed(2)}, ${Number((_c = pose.y) !== null && _c !== void 0 ? _c : 0).toFixed(2)}, yaw ${Number(pose.yaw !== null && pose.yaw !== void 0 ? pose.yaw : 0).toFixed(2)}`;
-    return (<section className="absolute left-4 right-4 top-4 z-20 max-h-[44%] min-h-[148px] pointer-events-auto border rounded-lg shadow-xl overflow-hidden" role="region" aria-label="Waypoint BT layer" style={{
+    return (<section className="absolute inset-0 z-20 pointer-events-none" role="region" aria-label="Waypoint BT focus canvas">
+      <div className="absolute inset-y-0 left-0 w-[48%] pointer-events-none" style={{
+            background: "linear-gradient(90deg, rgba(15,23,42,0.1), rgba(15,23,42,0))",
+        }}/>
+      <div className="absolute inset-y-0 right-0 w-[52%] pointer-events-auto overflow-hidden" style={{
             color: "#111827",
-            backgroundColor: "rgba(255,255,255,0.96)",
-            borderColor: "#94a3b8",
+            background: "linear-gradient(90deg, rgba(248,250,252,0.76), rgba(255,255,255,0.96))",
+            borderLeft: "1px solid rgba(148,163,184,0.82)",
         }}>
-      <header className="min-w-0 flex items-center justify-between gap-3 border-b px-4 py-3" style={{ borderColor: "#cbd5e1" }}>
-        <div className="min-w-0">
-          <div className="text-[10px] uppercase font-semibold tracking-wide" style={{ color: "#64748b" }}>
-            Waypoint BT
+        <div className="h-full min-h-0 p-5 grid grid-rows-[auto_minmax(0,1fr)_auto] gap-4">
+          <header className="min-w-0 flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <div className="text-[10px] uppercase font-semibold tracking-wide" style={{ color: "#64748b" }}>
+                Waypoint BT
+              </div>
+              <div className="text-base font-semibold truncate">
+                {spot.label || spot.id}
+              </div>
+              <div className="mt-1 font-mono text-[11px] truncate" style={{ color: "#475569" }}>
+                {poseText}
+              </div>
+            </div>
+            {typeof onClose === "function" && (<button type="button" onClick={onClose} className="h-8 px-3 border rounded-md text-xs font-semibold active:translate-y-px" style={{
+                    color: "#111827",
+                    backgroundColor: "rgba(255,255,255,0.88)",
+                    borderColor: "#cbd5e1",
+                }}>
+                Close
+              </button>)}
+          </header>
+          <div className="relative min-h-0 overflow-hidden">
+            <div className="absolute inset-0 opacity-80" style={{
+            backgroundImage: "linear-gradient(rgba(148,163,184,0.18) 1px, transparent 1px), linear-gradient(90deg, rgba(148,163,184,0.18) 1px, transparent 1px)",
+            backgroundSize: "28px 28px",
+        }}/>
+            <svg className="absolute inset-0 h-full w-full" aria-hidden="true">
+              <line x1="20%" y1="49%" x2="42%" y2="49%" stroke="#111827" strokeWidth="2.5" strokeLinecap="round"/>
+              <line x1="56%" y1="38%" x2="76%" y2="28%" stroke="#111827" strokeWidth="2.5" strokeLinecap="round"/>
+              <line x1="56%" y1="60%" x2="76%" y2="72%" stroke="#111827" strokeWidth="2.5" strokeLinecap="round"/>
+            </svg>
+            <BtCanvasNode className="left-[8%] top-[43%]" tone={spot.linked_bt_tree ? "active" : "muted"}>
+              {spot.linked_bt_tree ? "Tree" : "New BT"}
+            </BtCanvasNode>
+            <BtCanvasNode className="left-[38%] top-[43%]">
+              Sequence
+            </BtCanvasNode>
+            <BtCanvasNode className="left-[68%] top-[22%]" tone="active">
+              Navigate
+            </BtCanvasNode>
+            <BtCanvasNode className="left-[68%] top-[66%]" tone="default">
+              Task
+            </BtCanvasNode>
           </div>
-          <div className="text-sm font-semibold truncate">
-            {spot.label || spot.id}
-          </div>
-        </div>
-        {typeof onClose === "function" && (<button type="button" onClick={onClose} className="h-8 px-3 border rounded-md text-xs font-semibold active:translate-y-px" style={{
-                color: "#111827",
-                backgroundColor: "#ffffff",
-                borderColor: "#cbd5e1",
-            }}>
-            Close
-          </button>)}
-      </header>
-      <div className="min-h-0 grid grid-cols-[220px_minmax(0,1fr)] gap-4 p-4 overflow-auto text-xs">
-        <aside className="grid content-start gap-2 min-w-0">
-          <div className="flex items-center justify-between gap-2 min-w-0">
-            <span style={{ color: "#64748b" }}>BT Node</span>
-            <span className="font-mono truncate">{layer.nodeLabel || "Unknown"}</span>
-          </div>
-          <div className="flex items-center justify-between gap-2 min-w-0">
-            <span style={{ color: "#64748b" }}>Execution</span>
-            <span className="font-mono truncate">{layer.executionLabel || "wait"}</span>
-          </div>
-          <div className="grid gap-0.5 min-w-0">
-            <span style={{ color: "#64748b" }}>Active nodes</span>
-            <span className="font-mono truncate">{layer.activeNodesLabel || "wait"}</span>
-          </div>
-          <div className="grid gap-0.5 min-w-0">
-            <span style={{ color: "#64748b" }}>Pose</span>
-            <span className="font-mono truncate">{poseText}</span>
-          </div>
-        </aside>
-        <div className="min-w-0 grid content-start gap-2 border-l pl-4" style={{ borderColor: "#cbd5e1" }}>
-          <div className="text-[10px] uppercase font-semibold tracking-wide" style={{ color: "#64748b" }}>
-            Behavior Tree
-          </div>
-          <div className="font-mono text-sm truncate">
-            {spot.linked_bt_tree || "No behavior tree linked"}
-          </div>
+          <footer className="grid grid-cols-3 gap-2 text-[11px]">
+            <div className="min-w-0">
+              <div style={{ color: "#64748b" }}>BT Node</div>
+              <div className="font-mono truncate">{layer.nodeLabel || "Unknown"}</div>
+            </div>
+            <div className="min-w-0">
+              <div style={{ color: "#64748b" }}>Execution</div>
+              <div className="font-mono truncate">{layer.executionLabel || "wait"}</div>
+            </div>
+            <div className="min-w-0">
+              <div style={{ color: "#64748b" }}>Active nodes</div>
+              <div className="font-mono truncate">{layer.activeNodesLabel || "wait"}</div>
+            </div>
+          </footer>
         </div>
       </div>
     </section>);
@@ -630,6 +698,7 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, 
     const fitMapKeyRef = useRef(null);
     const viewRollRef = useRef(0);
     const viewRotateDragRef = useRef(null);
+    const btFocusActiveRef = useRef(false);
     const latestFootprintRef = useRef(null);
     const tfSyncedFootprintRef = useRef(null);
     const [dragPreviewPose, setDragPreviewPose] = useState(null);
@@ -773,6 +842,31 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, 
             controls.enabled = !interactionDisabled && !editorActive && interactionMode === "view";
         }
     }, [editorActive, interactionDisabled, interactionMode]);
+    useEffect(() => {
+        const camera = cameraRef.current;
+        const controls = controlsRef.current;
+        const meta = gridMeta(map);
+        if (!camera || !controls || !meta)
+            return;
+        const spot = btLayer === null || btLayer === void 0 ? void 0 : btLayer.spot;
+        const fitKey = viewKey !== null && viewKey !== void 0 ? viewKey : "default";
+        if (spot === null || spot === void 0 ? void 0 : spot.pose) {
+            focusCameraToWaypoint(camera, controls, meta, spot, viewRollRef.current);
+            btFocusActiveRef.current = true;
+            return;
+        }
+        if (btFocusActiveRef.current) {
+            fitCameraToMap(camera, controls, meta, viewRollRef.current);
+            fitMapKeyRef.current = fitKey;
+            btFocusActiveRef.current = false;
+        }
+    }, [
+        btLayer?.spot?.id,
+        btLayer?.spot?.pose,
+        btLayer?.spot?.linked_bt_tree,
+        map,
+        viewKey,
+    ]);
     useEffect(() => {
         latestFootprintRef.current = footprint;
     }, [footprint]);
@@ -960,7 +1054,7 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, 
             layers.add(makePoseMarker(pose, showRobotModel && ((_4 = (_3 = tfSyncedFootprint === null || tfSyncedFootprint === void 0 ? void 0 : tfSyncedFootprint.polygon) === null || _3 === void 0 ? void 0 : _3.points) === null || _4 === void 0 ? void 0 : _4.length) ? 0x60a5fa : 0x007acc, 0.16));
         }
         const fitKey = viewKey !== null && viewKey !== void 0 ? viewKey : "default";
-        if (meta && fitMapKeyRef.current !== fitKey) {
+        if (meta && fitMapKeyRef.current !== fitKey && !(btLayer?.spot?.pose)) {
             fitCameraToMap(camera, controls, meta, viewRollRef.current);
             fitMapKeyRef.current = fitKey;
         }
@@ -977,6 +1071,7 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, 
         pose,
         scan,
         behaviorNodes,
+        btLayer?.spot?.id,
         selectedBehaviorNodeId,
         selectedSpotId,
         showGlobalCostmap,
@@ -1356,6 +1451,6 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, 
       {!viewerError && showMap && !map && (<div className="absolute inset-0 flex items-center justify-center text-sm pointer-events-none" style={{ color: "var(--vscode-descriptionForeground)" }}>
           {waitingLabel}
         </div>)}
-      <WaypointBtMapLayer layer={btLayer} onClose={onBtLayerClose}/>
+      <WaypointBtFocusLayer layer={btLayer} onClose={onBtLayerClose}/>
     </div>);
 }
