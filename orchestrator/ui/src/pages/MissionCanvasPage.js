@@ -1486,6 +1486,8 @@ const missionFlowNodeTypes = {
   missionWaypoint: MissionFlowWaypointNode,
 };
 
+const missionFlowProOptions = { hideAttribution: true };
+
 function MissionFlowPanel({
   spots,
   selectedSpotId,
@@ -1555,6 +1557,7 @@ function MissionFlowPanel({
             minZoom={0.35}
             maxZoom={1.8}
             defaultEdgeOptions={{ type: "smoothstep", animated: false }}
+            proOptions={missionFlowProOptions}
           >
             <Controls showInteractive={false} />
             <Background color="#d1d5db" gap={18} />

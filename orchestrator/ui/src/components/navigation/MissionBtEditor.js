@@ -45,6 +45,8 @@ const nodeTypes = {
   btAction: BTActionNode,
 };
 
+const reactFlowProOptions = { hideAttribution: true };
+
 function catalogEntryToParams(entry) {
   return Object.fromEntries(
     (entry?.ports || []).map((port) => [port.name, port.default]),
@@ -475,6 +477,7 @@ export default function MissionBtEditor({
               panOnScroll={false}
               zoomOnPinch
               zoomActivationKeyCode={null}
+              proOptions={reactFlowProOptions}
             >
               <Controls showInteractive={false} />
               <Background color="#e5e7eb" gap={16} />
