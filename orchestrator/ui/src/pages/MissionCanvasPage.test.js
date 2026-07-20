@@ -321,12 +321,7 @@ test('shows Waypoint and BT authoring panels in the authoring stage', async () =
   fireEvent.click(screen.getByRole('tab', { name: 'Design' }));
 
   expect(screen.getByText('Mission Flow')).toBeInTheDocument();
-  expect(screen.getByText('Global BT')).toBeInTheDocument();
-  expect(screen.getByText('Mission Root')).toBeInTheDocument();
-  expect(screen.getByText('Navigate')).toBeInTheDocument();
-  expect(screen.getByText('Local BT')).toBeInTheDocument();
-  expect(screen.getByText('Start')).toBeInTheDocument();
-  expect(screen.getByText('End')).toBeInTheDocument();
+  expect(screen.getAllByText('No waypoints for this map yet.').length).toBeGreaterThan(0);
   expect(screen.queryByText('Properties')).not.toBeInTheDocument();
   expect(screen.getByText('BT Runtime')).toBeInTheDocument();
   expect(screen.getByText('BT Node Unknown')).toBeInTheDocument();
@@ -740,6 +735,13 @@ test('shows waypoint actions in Design Objects after placing a waypoint', async 
           }),
         }),
       ],
+      metadata: expect.objectContaining({
+        source: 'mission_canvas',
+        mission_flow: expect.objectContaining({
+          nodes: [expect.objectContaining({ id: 'spot_a' })],
+          edges: [],
+        }),
+      }),
     }),
   ));
   await waitFor(() => expect(saveNavigationMissionBtFile).toHaveBeenCalledWith(
@@ -1196,12 +1198,10 @@ test('renders waypoint sequence in the mission flow panel', async () => {
   await waitFor(() => expect(latestMapViewerProps().spots).toHaveLength(1));
 
   expect(screen.getByText('Mission Flow')).toBeInTheDocument();
-  expect(screen.getByText('1 waypoints')).toBeInTheDocument();
-  expect(screen.getByText('Step 1')).toBeInTheDocument();
   expect(screen.getAllByText('Waypoint A').length).toBeGreaterThan(0);
   expect(screen.getByText('waypoint_a.xml')).toBeInTheDocument();
 
-  fireEvent.click(screen.getByRole('button', { name: /Step 1\s+Waypoint A\s+waypoint_a\.xml/ }));
+  fireEvent.click(screen.getByRole('button', { name: 'Waypoint A' }));
 
   await waitFor(() => expect(latestMapViewerProps().selectedSpotId).toBe('spot_a'));
   expect(screen.queryByRole('button', { name: 'Create BT' })).not.toBeInTheDocument();

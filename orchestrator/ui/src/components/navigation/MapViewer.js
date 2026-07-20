@@ -621,26 +621,10 @@ function WaypointBtFocusLayer({ layer, onClose }) {
             backgroundColor: "#ffffff",
             borderLeft: "1px solid rgba(148,163,184,0.82)",
         }}>
-        <div className="h-full min-h-0 p-5 grid grid-rows-[auto_minmax(0,1fr)] gap-4">
-          <header className="min-w-0 flex items-start justify-between gap-3">
-            <div className="min-w-0">
-              <div className="text-[10px] uppercase font-semibold tracking-wide" style={{ color: "#64748b" }}>
-                Waypoint BT
-              </div>
-              <div className="text-base font-semibold truncate">
-                {spot.label || spot.id}
-              </div>
-            </div>
-            {typeof onClose === "function" && (<button type="button" onClick={onClose} className="h-8 px-3 border rounded-md text-xs font-semibold active:translate-y-px" style={{
-                    color: "#111827",
-                    backgroundColor: "rgba(255,255,255,0.88)",
-                    borderColor: "#cbd5e1",
-                }}>
-                Close
-              </button>)}
-          </header>
+        <div className="h-full min-h-0 p-4">
           <div className="relative min-h-0 overflow-hidden rounded-md border" style={{
             borderColor: "#e2e8f0",
+            height: "100%",
         }}>
             {layer.editor ? layer.editor : (<>
             <div className="absolute inset-0 opacity-80" style={{
@@ -687,6 +671,7 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, 
     const tfSyncedFootprintRef = useRef(null);
     const [dragPreviewPose, setDragPreviewPose] = useState(null);
     const [nodeDragPreview, setNodeDragPreview] = useState(null);
+    const [mapDragActive, setMapDragActive] = useState(false);
     const [viewerError, setViewerError] = useState(null);
     // Freeze each LaserScan in display coordinates until the next scan or map geometry change.
     const scanProjectionRef = useRef(null);
@@ -819,13 +804,13 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, 
             : editorActive
                 ? "cursor-cell"
                 : interactionMode === "view"
-                    ? "cursor-grab"
+                    ? mapDragActive ? "cursor-grabbing" : "cursor-grab"
                     : "cursor-crosshair";
         renderer.domElement.className = `block w-full h-full ${cursor}`;
         if (controls) {
             controls.enabled = !interactionDisabled && !editorActive && interactionMode === "view";
         }
-    }, [editorActive, interactionDisabled, interactionMode]);
+    }, [editorActive, interactionDisabled, interactionMode, mapDragActive]);
     useEffect(() => {
         const camera = cameraRef.current;
         const controls = controlsRef.current;
@@ -1248,6 +1233,9 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, 
                         onMapClick(point.x, point.y);
                     }
                 }
+                if (!interactionDisabled && interactionMode === "view") {
+                    setMapDragActive(true);
+                }
                 pointerDownRef.current = null;
                 setDragPreviewPose(null);
                 return;
@@ -1325,6 +1313,7 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, 
             setDragPreviewPose(previewPoseFromDrag(pointerDown, point, event.clientX, event.clientY));
         };
         const handlePointerUp = (event) => {
+            setMapDragActive(false);
             if (editorPaintPointerRef.current === event.pointerId) {
                 event.preventDefault();
                 event.stopImmediatePropagation();
@@ -1386,11 +1375,15 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, 
             viewRotateDragRef.current = null;
             nodeDragRef.current = null;
             pointerDownRef.current = null;
+            setMapDragActive(false);
             setNodeDragPreview(null);
             setDragPreviewPose(null);
             if (renderer.domElement.hasPointerCapture(event.pointerId)) {
                 renderer.domElement.releasePointerCapture(event.pointerId);
             }
+        };
+        const handlePointerLeave = () => {
+            setMapDragActive(false);
         };
         const handleContextMenu = (event) => {
             event.preventDefault();
@@ -1399,12 +1392,14 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, 
         renderer.domElement.addEventListener("pointermove", handlePointerMove);
         renderer.domElement.addEventListener("pointerup", handlePointerUp);
         renderer.domElement.addEventListener("pointercancel", handlePointerCancel);
+        renderer.domElement.addEventListener("pointerleave", handlePointerLeave);
         renderer.domElement.addEventListener("contextmenu", handleContextMenu);
         return () => {
             renderer.domElement.removeEventListener("pointerdown", handlePointerDown, { capture: true });
             renderer.domElement.removeEventListener("pointermove", handlePointerMove);
             renderer.domElement.removeEventListener("pointerup", handlePointerUp);
             renderer.domElement.removeEventListener("pointercancel", handlePointerCancel);
+            renderer.domElement.removeEventListener("pointerleave", handlePointerLeave);
             renderer.domElement.removeEventListener("contextmenu", handleContextMenu);
         };
     }, [

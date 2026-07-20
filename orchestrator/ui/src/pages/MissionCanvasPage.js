@@ -6,6 +6,17 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  addEdge,
+  Background,
+  Controls,
+  Handle,
+  Position,
+  ReactFlow,
+  useEdgesState,
+  useNodesState,
+} from "@xyflow/react";
+import "@xyflow/react/dist/style.css";
 import { MdDelete, MdPowerSettingsNew, MdStop } from "react-icons/md";
 import {
   configureDesignLocalizationAmcl,
@@ -56,6 +67,7 @@ const AUTO_LOCALIZE_YAW_COVARIANCE_MAX = 0.5;
 const ROS2_WS_FAST_TOPIC_OPTIONS = { throttleMs: 100 };
 const BT_TOPIC_OPTIONS = { staleMs: 3000 };
 const SUPERVISOR_API_BASE = "/api";
+const MISSION_WAYPOINT_DRAG_MIME = "application/x-cyclo-mission-waypoint";
 const STAGE_MAPPING = "mapping";
 const STAGE_AUTHORING = "authoring";
 const STAGE_RUN = "run";
@@ -436,8 +448,149 @@ function defaultLocalBtXml() {
   ].join("\n");
 }
 
+function missionFlowEdgeId(source, target) {
+  return `mission_flow_${source}_${target}`;
+}
+
+function missionFlowNodeForSpot(spot, index, position) {
+  return {
+    id: spot.id,
+    type: "missionWaypoint",
+    position: position ?? { x: 80 + index * 220, y: 72 },
+    data: {
+      label: spot.label || spot.id,
+      localBt: localBtPathForSpot(spot),
+    },
+  };
+}
+
+function defaultMissionFlow(spots) {
+  const nodes = spots.map((spot, index) => missionFlowNodeForSpot(spot, index));
+  const edges = nodes.slice(0, -1).map((node, index) => ({
+    id: missionFlowEdgeId(node.id, nodes[index + 1].id),
+    source: node.id,
+    target: nodes[index + 1].id,
+    type: "smoothstep",
+    animated: false,
+  }));
+  return { nodes, edges };
+}
+
+function normalizeMissionFlow(spots, storedFlow = null) {
+  const storedNodes = Array.isArray(storedFlow?.nodes) ? storedFlow.nodes : [];
+  const storedEdges = Array.isArray(storedFlow?.edges) ? storedFlow.edges : [];
+  const validSpotIds = new Set(spots.map((spot) => spot.id));
+  const storedById = new Map(storedNodes.map((node) => [node.id, node]));
+  const nodes = spots.map((spot, index) => {
+    const storedNode = storedById.get(spot.id);
+    const storedPosition = storedNode?.position;
+    const position = storedPosition &&
+      Number.isFinite(Number(storedPosition.x)) &&
+      Number.isFinite(Number(storedPosition.y))
+      ? { x: Number(storedPosition.x), y: Number(storedPosition.y) }
+      : undefined;
+    return missionFlowNodeForSpot(spot, index, position);
+  });
+  const edges = storedEdges
+    .filter((edge) => validSpotIds.has(edge.source) && validSpotIds.has(edge.target))
+    .map((edge) => ({
+      id: edge.id || missionFlowEdgeId(edge.source, edge.target),
+      source: edge.source,
+      target: edge.target,
+      type: "smoothstep",
+      animated: false,
+    }));
+  if (edges.length || nodes.length <= 1) {
+    return { nodes, edges };
+  }
+  return defaultMissionFlow(spots);
+}
+
+function syncMissionFlowNodesWithSpots(nodes, spots) {
+  const validSpotIds = new Set(spots.map((spot) => spot.id));
+  const byId = new Map(nodes.filter((node) => validSpotIds.has(node.id)).map((node) => [node.id, node]));
+  const maxX = nodes.reduce((max, node) => Math.max(max, Number(node.position?.x ?? 0)), 80);
+  let added = 0;
+  return spots.map((spot, index) => {
+    const existing = byId.get(spot.id);
+    if (existing) {
+      return {
+        ...existing,
+        type: "missionWaypoint",
+        data: {
+          ...(existing.data ?? {}),
+          label: spot.label || spot.id,
+          localBt: localBtPathForSpot(spot),
+        },
+      };
+    }
+    const node = missionFlowNodeForSpot(spot, index, { x: maxX + 220 * (added + 1), y: 72 });
+    added += 1;
+    return node;
+  });
+}
+
+function filterMissionFlowEdges(edges, spots) {
+  const validSpotIds = new Set(spots.map((spot) => spot.id));
+  return edges.filter((edge) => validSpotIds.has(edge.source) && validSpotIds.has(edge.target));
+}
+
+function serializeMissionFlow(nodes, edges) {
+  return {
+    nodes: nodes.map((node) => ({
+      id: node.id,
+      position: {
+        x: Number(node.position?.x ?? 0),
+        y: Number(node.position?.y ?? 0),
+      },
+    })),
+    edges: edges.map((edge) => ({
+      id: edge.id,
+      source: edge.source,
+      target: edge.target,
+    })),
+  };
+}
+
+function orderedSpotsFromMissionFlow(spots, nodes, edges) {
+  const spotById = new Map(spots.map((spot) => [spot.id, spot]));
+  const flowNodes = nodes.filter((node) => spotById.has(node.id));
+  const nodeById = new Map(flowNodes.map((node) => [node.id, node]));
+  spots.forEach((spot, index) => {
+    if (nodeById.has(spot.id)) return;
+    nodeById.set(spot.id, missionFlowNodeForSpot(spot, index));
+  });
+  const ids = [...nodeById.keys()];
+  const incoming = new Map(ids.map((id) => [id, 0]));
+  const outgoing = new Map(ids.map((id) => [id, []]));
+  edges.forEach((edge) => {
+    if (!nodeById.has(edge.source) || !nodeById.has(edge.target)) return;
+    outgoing.get(edge.source).push(edge.target);
+    incoming.set(edge.target, (incoming.get(edge.target) || 0) + 1);
+  });
+  const byPosition = (a, b) => {
+    const nodeA = nodeById.get(a);
+    const nodeB = nodeById.get(b);
+    const xDiff = Number(nodeA?.position?.x ?? 0) - Number(nodeB?.position?.x ?? 0);
+    if (Math.abs(xDiff) > 0.001) return xDiff;
+    return Number(nodeA?.position?.y ?? 0) - Number(nodeB?.position?.y ?? 0);
+  };
+  outgoing.forEach((targets) => targets.sort(byPosition));
+  const visited = new Set();
+  const orderedIds = [];
+  const visit = (id) => {
+    if (visited.has(id)) return;
+    visited.add(id);
+    orderedIds.push(id);
+    (outgoing.get(id) || []).forEach(visit);
+  };
+  ids.filter((id) => (incoming.get(id) || 0) === 0).sort(byPosition).forEach(visit);
+  ids.filter((id) => !visited.has(id)).sort(byPosition).forEach(visit);
+  return orderedIds.map((id) => spotById.get(id)).filter(Boolean);
+}
+
 function missionStepXmlLines(spots, tagName) {
-  return orderedMissionSpots(spots).map((spot, index) => {
+  return spots.map((spot, index) => {
     const pose = spot.pose || {};
     const localBt = localBtPathForSpot(spot);
     const stepName = btXmlName(`Step ${index + 1} ${spot.label || spot.id}`, `Step_${index + 1}`);
@@ -1297,125 +1450,116 @@ function MappingTeleopPanel({ disabled, onPublish, onMessage }) {
   );
 }
 
-function MissionFlowPanel({ spots, selectedSpotId, onSpotSelect }) {
-  const orderedSpots = useMemo(() => (
-    orderedMissionSpots(spots)
-  ), [spots]);
+function MissionFlowWaypointNode({ data, selected }) {
+  return (
+    <div
+      className="w-44 min-h-[72px] border rounded-md p-2 text-left grid content-start gap-1 shadow-sm"
+      style={{
+        color: selected ? "var(--vscode-button-foreground)" : MISSION_TEXT,
+        backgroundColor: selected ? "var(--vscode-button-background)" : MISSION_STAGE_EMPTY,
+        borderColor: selected ? MISSION_BUTTON_BORDER : MISSION_PANEL_BORDER,
+      }}
+    >
+      <Handle
+        type="target"
+        position={Position.Left}
+        style={{ backgroundColor: MISSION_BUTTON_BORDER, width: 8, height: 8 }}
+      />
+      <span
+        className="text-[10px] font-semibold uppercase truncate"
+        style={{ color: selected ? "var(--vscode-button-foreground)" : MISSION_TEXT_MUTED }}
+      >
+        Waypoint
+      </span>
+      <span className="text-xs font-semibold truncate">{data.label}</span>
+      <span className="text-[11px] font-mono truncate">{data.localBt}</span>
+      <Handle
+        type="source"
+        position={Position.Right}
+        style={{ backgroundColor: MISSION_BUTTON_BORDER, width: 8, height: 8 }}
+      />
+    </div>
+  );
+}
+
+const missionFlowNodeTypes = {
+  missionWaypoint: MissionFlowWaypointNode,
+};
+
+function MissionFlowPanel({
+  spots,
+  selectedSpotId,
+  nodes,
+  edges,
+  onNodesChange,
+  onEdgesChange,
+  onConnect,
+  onWaypointDrop,
+  onSpotSelect,
+}) {
+  const [flowInstance, setFlowInstance] = useState(null);
+  const annotatedNodes = useMemo(() => nodes.map((node) => ({
+    ...node,
+    selected: node.id === selectedSpotId,
+  })), [nodes, selectedSpotId]);
+
+  const handleDragOver = useCallback((event) => {
+    if (event.dataTransfer.types.includes(MISSION_WAYPOINT_DRAG_MIME)) {
+      event.preventDefault();
+      event.dataTransfer.dropEffect = "move";
+    }
+  }, []);
+
+  const handleDrop = useCallback((event) => {
+    const spotId = event.dataTransfer.getData(MISSION_WAYPOINT_DRAG_MIME);
+    if (!spotId || !flowInstance) return;
+    event.preventDefault();
+    const position = flowInstance.screenToFlowPosition({
+      x: event.clientX,
+      y: event.clientY,
+    });
+    onWaypointDrop(spotId, position);
+  }, [flowInstance, onWaypointDrop]);
 
   return (
     <Panel title="Mission Flow" className="min-h-0 overflow-hidden">
-      <div className="h-full min-h-0 grid grid-cols-1 lg:grid-cols-[minmax(220px,0.34fr)_minmax(0,1fr)] gap-3 overflow-hidden">
-        <div
-          className="min-h-0 border rounded-md p-3 grid content-start gap-3 overflow-auto"
-          style={{
-            backgroundColor: MISSION_SURFACE,
-            borderColor: MISSION_PANEL_BORDER,
-          }}
-        >
-          <div className="flex items-center justify-between gap-2 min-w-0">
-            <div
-              className="text-[10px] uppercase font-semibold"
-              style={{ color: MISSION_TEXT_MUTED }}
-            >
-              Global BT
-            </div>
-            <span
-              className="text-[10px] font-semibold"
-              style={{ color: MISSION_TEXT_MUTED }}
-            >
-              {orderedSpots.length} waypoints
-            </span>
+      <div
+        className="h-full min-h-[180px] rounded-md overflow-hidden border"
+        style={{
+          backgroundColor: MISSION_SURFACE,
+          borderColor: MISSION_PANEL_BORDER,
+        }}
+        onDragOver={handleDragOver}
+        onDrop={handleDrop}
+      >
+        {spots.length === 0 ? (
+          <div className="h-full min-h-[180px] flex items-center justify-center text-xs" style={{ color: MISSION_TEXT_MUTED }}>
+            No waypoints for this map yet.
           </div>
-          <div className="grid gap-2">
-            {[
-              "Mission Root",
-              "Navigate",
-              "Local BT",
-            ].map((label) => (
-              <div
-                key={label}
-                className="h-8 px-3 border rounded-md flex items-center text-xs font-semibold"
-                style={{
-                  color: MISSION_TEXT,
-                  backgroundColor: MISSION_STAGE_EMPTY,
-                  borderColor: MISSION_PANEL_BORDER,
-                }}
-              >
-                {label}
-              </div>
-            ))}
-          </div>
-        </div>
-
-        <div className="min-h-0 overflow-auto">
-          <div className="min-w-max flex items-center gap-2 pr-2">
-            <div
-              className="h-10 px-3 border rounded-md flex items-center text-xs font-semibold shrink-0"
-              style={{
-                color: MISSION_TEXT,
-                backgroundColor: MISSION_STAGE_EMPTY,
-                borderColor: MISSION_PANEL_BORDER,
-              }}
-            >
-              Start
-            </div>
-            {orderedSpots.map((spot, index) => (
-              <div key={spot.id} className="flex items-center gap-2 shrink-0">
-                <div
-                  className="w-8 h-px"
-                  aria-hidden="true"
-                  style={{ backgroundColor: MISSION_PANEL_BORDER }}
-                />
-                <button
-                  type="button"
-                  onClick={() => onSpotSelect(spot.id)}
-                  className="w-44 h-20 border rounded-md p-2 text-left grid content-start gap-1 active:translate-y-px"
-                  style={{
-                    color: spot.id === selectedSpotId
-                      ? "var(--vscode-button-foreground)"
-                      : MISSION_TEXT,
-                    backgroundColor: spot.id === selectedSpotId
-                      ? "var(--vscode-button-background)"
-                      : MISSION_STAGE_EMPTY,
-                    borderColor: MISSION_PANEL_BORDER,
-                  }}
-                >
-                  <span className="text-[10px] font-semibold" style={{
-                    color: spot.id === selectedSpotId
-                      ? "var(--vscode-button-foreground)"
-                      : MISSION_TEXT_MUTED,
-                  }}>
-                    {`Step ${index + 1}`}
-                  </span>
-                  <span className="text-xs font-semibold truncate">{spot.label}</span>
-                  <span className="text-[11px] font-mono truncate">
-                    {spot.linked_bt_tree || "Local BT: none"}
-                  </span>
-                </button>
-              </div>
-            ))}
-            <div
-              className="w-8 h-px shrink-0"
-              aria-hidden="true"
-              style={{ backgroundColor: MISSION_PANEL_BORDER }}
-            />
-            <div
-              className="h-10 px-3 border rounded-md flex items-center text-xs font-semibold shrink-0"
-              style={{
-                color: MISSION_TEXT,
-                backgroundColor: MISSION_STAGE_EMPTY,
-                borderColor: MISSION_PANEL_BORDER,
-              }}
-            >
-              End
-            </div>
-            {orderedSpots.length === 0 && (
-              <div className="h-10 px-3 flex items-center text-xs" style={{ color: MISSION_TEXT_MUTED }}>
-                No waypoints for this map yet.
-              </div>
-            )}
-          </div>
-        </div>
+        ) : (
+          <ReactFlow
+            nodes={annotatedNodes}
+            edges={edges}
+            nodeTypes={missionFlowNodeTypes}
+            onNodesChange={onNodesChange}
+            onEdgesChange={onEdgesChange}
+            onConnect={onConnect}
+            onInit={setFlowInstance}
+            onNodeClick={(_event, node) => onSpotSelect(node.id)}
+            fitView
+            fitViewOptions={{ padding: 0.2 }}
+            nodesDraggable
+            nodesConnectable
+            elementsSelectable
+            deleteKeyCode={null}
+            minZoom={0.35}
+            maxZoom={1.8}
+            defaultEdgeOptions={{ type: "smoothstep", animated: false }}
+          >
+            <Controls showInteractive={false} />
+            <Background color="#d1d5db" gap={18} />
+          </ReactFlow>
+        )}
       </div>
     </Panel>
   );
@@ -1513,6 +1657,16 @@ export default function MissionCanvasPage() {
   const [pendingBehaviorNodeTag, setPendingBehaviorNodeTag] = useState("");
   const [missionBtFiles, setMissionBtFiles] = useState({});
   const [deletedMissionBtPaths, setDeletedMissionBtPaths] = useState([]);
+  const [
+    missionFlowNodes,
+    setMissionFlowNodes,
+    onMissionFlowNodesChange,
+  ] = useNodesState([]);
+  const [
+    missionFlowEdges,
+    setMissionFlowEdges,
+    onMissionFlowEdgesChange,
+  ] = useEdgesState([]);
   const [missionBtLoadingPath, setMissionBtLoadingPath] = useState("");
   const [busy, setBusy] = useState("");
   const [message, setMessage] = useState("Ready");
@@ -1749,6 +1903,12 @@ export default function MissionCanvasPage() {
       editor: waypointBtEditor,
     }
     : null;
+
+  useEffect(() => {
+    setMissionFlowNodes((current) => syncMissionFlowNodesWithSpots(current, visibleSpots));
+    setMissionFlowEdges((current) => filterMissionFlowEdges(current, visibleSpots));
+  }, [setMissionFlowEdges, setMissionFlowNodes, visibleSpots]);
+
   const layerToggles = useMemo(() => (
     STAGE_LAYER_IDS[workspaceStage].map((id) => ({
       id,
@@ -2135,6 +2295,9 @@ export default function MissionCanvasPage() {
       );
       legacySpotLoadGenerationRef.current += 1;
       applySpots(missionSpots);
+      const missionFlow = normalizeMissionFlow(missionSpots, mission.metadata?.mission_flow);
+      setMissionFlowNodes(missionFlow.nodes);
+      setMissionFlowEdges(missionFlow.edges);
       await loadMissionBtFilesForSpots(normalizedMapName, missionSpots, mission);
       return {
         exists: true,
@@ -2146,13 +2309,23 @@ export default function MissionCanvasPage() {
       ? loadSavedDesignForMap(normalizedMapName)
       : false;
     const legacySpots = await loadLegacySpotsForMap(normalizedMapName);
+    const missionFlow = defaultMissionFlow(orderedMissionSpots(legacySpots));
+    setMissionFlowNodes(missionFlow.nodes);
+    setMissionFlowEdges(missionFlow.edges);
     setMissionBtFiles(missionBtFileDefaultsForSpots(legacySpots));
     return {
       exists: false,
       loadedDesign,
       spotCount: legacySpots.length,
     };
-  }, [applySpots, loadLegacySpotsForMap, loadMissionBtFilesForSpots, loadSavedDesignForMap]);
+  }, [
+    applySpots,
+    loadLegacySpotsForMap,
+    loadMissionBtFilesForSpots,
+    loadSavedDesignForMap,
+    setMissionFlowEdges,
+    setMissionFlowNodes,
+  ]);
 
   const handleOpenDesignMapDialog = useCallback(() => {
     setWorkspaceStage(STAGE_AUTHORING);
@@ -2225,7 +2398,7 @@ export default function MissionCanvasPage() {
     "Save mission",
     async () => {
       saveBehaviorNodesForMap(currentMapName, activeBehaviorNodes);
-      const missionSpots = visibleSpots.map((spot) => ({
+      const canonicalMissionSpots = visibleSpots.map((spot) => ({
         ...spot,
         linked_bt_tree: canonicalLocalBtPathForSpot(spot),
         metadata: {
@@ -2234,6 +2407,19 @@ export default function MissionCanvasPage() {
           linked_bt_tree: canonicalLocalBtPathForSpot(spot),
         },
       }));
+      const syncedMissionFlowNodes = syncMissionFlowNodesWithSpots(
+        missionFlowNodes,
+        canonicalMissionSpots,
+      );
+      const syncedMissionFlowEdges = filterMissionFlowEdges(
+        missionFlowEdges,
+        canonicalMissionSpots,
+      );
+      const missionSpots = orderedSpotsFromMissionFlow(
+        canonicalMissionSpots,
+        syncedMissionFlowNodes,
+        syncedMissionFlowEdges,
+      );
       const globalPath = "global.xml";
       const globalXml = buildGlobalMissionXml(missionSpots);
       const activeLocalBtPaths = new Set(missionSpots.map((spot) => localBtPathForSpot(spot)));
@@ -2262,6 +2448,7 @@ export default function MissionCanvasPage() {
         metadata: {
           source: "mission_canvas",
           behavior_node_count: activeBehaviorNodes.length,
+          mission_flow: serializeMissionFlow(syncedMissionFlowNodes, syncedMissionFlowEdges),
         },
       });
       await Promise.all(Object.entries(nextBtFiles).map(([path, content]) => (
@@ -2292,6 +2479,8 @@ export default function MissionCanvasPage() {
     activeBehaviorNodes,
     currentMapName,
     deletedMissionBtPaths,
+    missionFlowEdges,
+    missionFlowNodes,
     missionBtFiles,
     runCommand,
     visibleSpots,
@@ -2436,6 +2625,43 @@ export default function MissionCanvasPage() {
       setBtLayerSpotId("");
     }
   }, [btNodeIsUp, workspaceStage]);
+
+  const handleMissionFlowConnect = useCallback((connection) => {
+    const { source, target } = connection;
+    if (!source || !target || source === target) return;
+    setMissionFlowEdges((current) => {
+      if (current.some((edge) => edge.source === source && edge.target === target)) {
+        return current;
+      }
+      return addEdge({
+        ...connection,
+        id: missionFlowEdgeId(source, target),
+        type: "smoothstep",
+        animated: false,
+      }, current);
+    });
+  }, [setMissionFlowEdges]);
+
+  const handleMissionFlowWaypointDrop = useCallback((spotId, position) => {
+    const spot = visibleSpots.find((item) => item.id === spotId);
+    if (!spot) return;
+    setMissionFlowNodes((current) => {
+      const nextNode = missionFlowNodeForSpot(spot, current.length, position);
+      if (current.some((node) => node.id === spotId)) {
+        return current.map((node) => (
+          node.id === spotId
+            ? {
+              ...node,
+              position,
+              data: nextNode.data,
+            }
+            : node
+        ));
+      }
+      return [...current, nextNode];
+    });
+    handleSelectSpot(spotId);
+  }, [handleSelectSpot, setMissionFlowNodes, visibleSpots]);
 
   const handleClearMapSelection = useCallback(() => {
     if (btLayerSpotId) {
@@ -3144,6 +3370,12 @@ export default function MissionCanvasPage() {
             <MissionFlowPanel
               spots={spots}
               selectedSpotId={selectedSpotId}
+              nodes={missionFlowNodes}
+              edges={missionFlowEdges}
+              onNodesChange={onMissionFlowNodesChange}
+              onEdgesChange={onMissionFlowEdgesChange}
+              onConnect={handleMissionFlowConnect}
+              onWaypointDrop={handleMissionFlowWaypointDrop}
               onSpotSelect={handleSelectSpot}
             />
           )}
@@ -3262,8 +3494,13 @@ export default function MissionCanvasPage() {
                           ) : (
                             <button
                               type="button"
+                              draggable
                               onClick={() => handleSelectSpot(spot.id)}
                               onDoubleClick={() => handleStartRenameSpot(spot)}
+                              onDragStart={(event) => {
+                                event.dataTransfer.setData(MISSION_WAYPOINT_DRAG_MIME, spot.id);
+                                event.dataTransfer.effectAllowed = "move";
+                              }}
                               className="h-8 flex-1 px-2 border rounded-md text-left text-xs min-w-0"
                               style={{
                                 color: selected ? "var(--vscode-button-foreground)" : MISSION_TEXT,

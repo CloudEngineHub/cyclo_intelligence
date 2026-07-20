@@ -388,13 +388,8 @@ export default function MissionBtEditor({
   }, [activeNodeNames, edges, handleToggleCollapse, nodes, selectedNodeId]);
 
   return (
-    <div className="h-full min-h-0 flex flex-col bg-white text-gray-900">
-      <header className="h-12 shrink-0 px-4 border-b border-gray-200 flex items-center justify-between gap-3">
-        <div className="min-w-0">
-          <div className="text-sm font-bold truncate">{title}</div>
-          <div className="text-[11px] font-mono text-gray-500 truncate">{filePath}</div>
-        </div>
-        <div className="flex items-center gap-1">
+    <div className="h-full min-h-0 relative flex bg-white text-gray-900">
+      <div className="absolute top-3 right-3 z-20 flex items-center gap-1 rounded-md border border-gray-200 bg-white/95 p-1 shadow-sm">
           <button
             type="button"
             onClick={undoHistory}
@@ -431,10 +426,8 @@ export default function MissionBtEditor({
           >
             <MdAutoFixHigh size={18} />
           </button>
-        </div>
-      </header>
+      </div>
 
-      <div className="flex-1 min-h-0 relative flex">
         <BTNodePalette canUpdateCatalog={false} />
         <div
           className="flex-1 min-w-0 relative"
@@ -497,7 +490,6 @@ export default function MissionBtEditor({
             onClose={() => setSelectedNodeId(null)}
           />
         )}
-      </div>
     </div>
   );
 }
