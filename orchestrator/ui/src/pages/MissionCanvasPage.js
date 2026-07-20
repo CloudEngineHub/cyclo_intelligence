@@ -6,7 +6,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { MdPowerSettingsNew, MdStop } from "react-icons/md";
+import { MdDelete, MdPowerSettingsNew, MdStop } from "react-icons/md";
 import {
   configureDesignLocalizationAmcl,
   getServiceStatus,
@@ -374,13 +374,17 @@ function btXmlName(value, fallback = "Node") {
   return cleaned || fallback;
 }
 
-function localBtPathForSpot(spot) {
-  const existing = String(
+function existingLocalBtPathForSpot(spot) {
+  return String(
     spot?.linked_bt_tree
       || spot?.metadata?.local_bt
       || spot?.metadata?.linked_bt_tree
       || "",
   ).trim();
+}
+
+function localBtPathForSpot(spot) {
+  const existing = existingLocalBtPathForSpot(spot);
   if (existing) return existing;
   return `locals/${btXmlName(spot?.id, "waypoint").toLowerCase()}.xml`;
 }
@@ -1503,6 +1507,8 @@ export default function MissionCanvasPage() {
   const [status, setStatus] = useState(null);
   const [spots, setSpots] = useState([]);
   const [selectedSpotId, setSelectedSpotId] = useState("");
+  const [editingSpotId, setEditingSpotId] = useState("");
+  const [editingSpotLabel, setEditingSpotLabel] = useState("");
   const [behaviorNodes, setBehaviorNodes] = useState([]);
   const [selectedBehaviorNodeId, setSelectedBehaviorNodeId] = useState("");
   const [pendingBehaviorNodeTag, setPendingBehaviorNodeTag] = useState("");
@@ -1616,10 +1622,6 @@ export default function MissionCanvasPage() {
     () => behaviorNodes.filter((node) => node.map_name === currentMapName),
     [behaviorNodes, currentMapName],
   );
-  const selectedBehaviorNode = useMemo(
-    () => activeBehaviorNodes.find((node) => node.id === selectedBehaviorNodeId) || null,
-    [activeBehaviorNodes, selectedBehaviorNodeId],
-  );
   const behaviorPreviewNode = useMemo(() => (
     pendingBehaviorNodeTag ? behaviorNodeDefinition(pendingBehaviorNodeTag) : null
   ), [pendingBehaviorNodeTag]);
@@ -1702,10 +1704,6 @@ export default function MissionCanvasPage() {
   const visibleSpots = useMemo(
     () => spots.map((spot) => spotForMapDisplay(spot, displayedMap)),
     [displayedMap, spots],
-  );
-  const selectedSpot = useMemo(
-    () => visibleSpots.find((spot) => spot.id === selectedSpotId) || null,
-    [selectedSpotId, visibleSpots],
   );
   const selectedBtLayerSpot = useMemo(
     () => visibleSpots.find((spot) => spot.id === btLayerSpotId) || null,
@@ -2405,6 +2403,8 @@ export default function MissionCanvasPage() {
     setSelectedSpotId(spotId);
     setSelectedBehaviorNodeId("");
     setPendingBehaviorNodeTag("");
+    setEditingSpotId("");
+    setEditingSpotLabel("");
     setShowWaypointOptions(false);
     setInteractionMode("view");
     if (workspaceStage === STAGE_AUTHORING && btNodeIsUp) {
@@ -2417,6 +2417,8 @@ export default function MissionCanvasPage() {
   const handleSelectBehaviorNode = useCallback((nodeId) => {
     setSelectedBehaviorNodeId(nodeId);
     setSelectedSpotId("");
+    setEditingSpotId("");
+    setEditingSpotLabel("");
     setPendingBehaviorNodeTag("");
     setShowWaypointOptions(false);
     setBtLayerSpotId("");
@@ -2427,6 +2429,8 @@ export default function MissionCanvasPage() {
     setWorkspaceStage(STAGE_AUTHORING);
     setPendingBehaviorNodeTag(tag);
     setSelectedSpotId("");
+    setEditingSpotId("");
+    setEditingSpotLabel("");
     setBtLayerSpotId("");
     setShowWaypointOptions(false);
     setInteractionMode("behavior");
@@ -2443,6 +2447,8 @@ export default function MissionCanvasPage() {
     setPendingBehaviorNodeTag("");
     setSelectedBehaviorNodeId("");
     setBtLayerSpotId("");
+    setEditingSpotId("");
+    setEditingSpotLabel("");
     setShowWaypointOptions(false);
     setInteractionMode((value) => (value === "spot" ? "view" : "spot"));
   }, []);
@@ -2642,24 +2648,24 @@ export default function MissionCanvasPage() {
     setMessage(`Moved ${node?.tag || "node"}`);
   }, [behaviorNodes]);
 
-  const handleOpenSelectedSpotBt = useCallback(() => {
-    if (!selectedSpot) return;
+  const handleOpenSpotBt = useCallback((spot) => {
+    if (!spot) return;
     if (!btNodeIsUp) {
       setMessage("Activate BT before opening waypoint BT");
       return;
     }
-    const localBt = localBtPathForSpot(selectedSpot);
+    const localBt = localBtPathForSpot(spot);
     const nextSpot = {
-      ...selectedSpot,
+      ...spot,
       linked_bt_tree: localBt,
       metadata: {
-        ...(selectedSpot.metadata ?? {}),
+        ...(spot.metadata ?? {}),
         local_bt: localBt,
         linked_bt_tree: localBt,
       },
     };
     setSpots((current) => current.map((spot) => (
-      spot.id === selectedSpot.id ? {
+      spot.id === nextSpot.id ? {
         ...spot,
         linked_bt_tree: localBt,
         metadata: {
@@ -2674,49 +2680,81 @@ export default function MissionCanvasPage() {
         ? current
         : { ...current, [localBt]: defaultLocalBtXml(nextSpot) }
     ));
-    setBtLayerSpotId(selectedSpot.id);
-  }, [btNodeIsUp, selectedSpot]);
+    setSelectedSpotId(nextSpot.id);
+    setSelectedBehaviorNodeId("");
+    setPendingBehaviorNodeTag("");
+    setShowWaypointOptions(false);
+    setInteractionMode("view");
+    setBtLayerSpotId(nextSpot.id);
+  }, [btNodeIsUp]);
 
-  const handleRenameSpot = useCallback(async (event) => {
-    if (!selectedSpot) return;
-    const label = event.currentTarget.value;
+  const handleStartRenameSpot = useCallback((spot) => {
+    if (!spot) return;
+    setSelectedSpotId(spot.id);
+    setSelectedBehaviorNodeId("");
+    setPendingBehaviorNodeTag("");
+    setShowWaypointOptions(false);
+    setInteractionMode("view");
+    setEditingSpotId(spot.id);
+    setEditingSpotLabel(spot.label || spot.id);
+  }, []);
+
+  const handleCancelSpotRename = useCallback(() => {
+    setEditingSpotId("");
+    setEditingSpotLabel("");
+  }, []);
+
+  const handleCommitSpotRename = useCallback(async (spot) => {
+    if (!spot) return;
+    const label = editingSpotLabel.trim() || spot.label || spot.id;
+    setEditingSpotId("");
+    setEditingSpotLabel("");
+    if (label === spot.label) return;
+
+    const previousSpot = spot;
     setSpots((current) => current.map((spot) => (
-      spot.id === selectedSpot.id ? { ...spot, label } : spot
+      spot.id === previousSpot.id ? { ...spot, label } : spot
     )));
     try {
-      const updated = await updateNavigationSpot(selectedSpot.id, {
-        map_name: selectedSpot.map_name,
+      const updated = await updateNavigationSpot(previousSpot.id, {
+        map_name: previousSpot.map_name,
         label,
       });
       setSpots((current) => current.map((spot) => (
         spot.id === updated.id ? updated : spot
       )));
+      setMessage(`Renamed ${updated.label || label}`);
     } catch (error) {
+      setSpots((current) => current.map((spot) => (
+        spot.id === previousSpot.id ? previousSpot : spot
+      )));
       setMessage(error instanceof Error ? error.message : "Failed to update waypoint");
     }
-  }, [selectedSpot]);
+  }, [editingSpotLabel]);
 
-  const handleDeleteSelectedSpot = useCallback(async () => {
-    if (!selectedSpot) return;
+  const handleDeleteSpot = useCallback(async (spot) => {
+    if (!spot) return;
     try {
-      await deleteNavigationSpot(selectedSpot.id, selectedSpot.map_name);
-      setSpots((current) => current.filter((spot) => spot.id !== selectedSpot.id));
-      setSelectedSpotId("");
-      setBtLayerSpotId("");
-      setMessage(`Deleted ${selectedSpot.label}`);
+      await deleteNavigationSpot(spot.id, spot.map_name);
+      setSpots((current) => current.filter((item) => item.id !== spot.id));
+      setSelectedSpotId((current) => (current === spot.id ? "" : current));
+      setBtLayerSpotId((current) => (current === spot.id ? "" : current));
+      setEditingSpotId((current) => (current === spot.id ? "" : current));
+      setEditingSpotLabel((current) => (editingSpotId === spot.id ? "" : current));
+      setMessage(`Deleted ${spot.label || spot.id}`);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Failed to delete waypoint");
     }
-  }, [selectedSpot]);
+  }, [editingSpotId]);
 
-  const handleDeleteSelectedBehaviorNode = useCallback(() => {
-    if (!selectedBehaviorNode) return;
-    setBehaviorNodes((current) => current.filter((node) => (
-      node.id !== selectedBehaviorNode.id
+  const handleDeleteBehaviorNode = useCallback((node) => {
+    if (!node) return;
+    setBehaviorNodes((current) => current.filter((item) => (
+      item.id !== node.id
     )));
-    setSelectedBehaviorNodeId("");
-    setMessage(`Deleted ${selectedBehaviorNode.tag}`);
-  }, [selectedBehaviorNode]);
+    setSelectedBehaviorNodeId((current) => (current === node.id ? "" : current));
+    setMessage(`Deleted ${node.tag}`);
+  }, []);
 
   return (
     <div className="mission-canvas-page h-full min-h-[560px] flex flex-col overflow-hidden p-4">
@@ -3060,7 +3098,7 @@ export default function MissionCanvasPage() {
         </section>
 
         {workspaceStage === STAGE_AUTHORING ? (
-          <aside className="min-h-0 grid grid-rows-[auto_auto_1fr_minmax(160px,220px)] gap-4">
+          <aside className="min-h-0 grid grid-rows-[auto_minmax(0,1fr)] gap-4">
             <BtRuntimePanel
               nodeState={btNodeStatus.state}
               btStatus={btStatusText}
@@ -3069,96 +3107,6 @@ export default function MissionCanvasPage() {
               onActivate={handleBtNodeActivate}
               onDeactivate={handleBtNodeDeactivate}
             />
-            <Panel title="Properties" className="grid gap-3">
-              {selectedBehaviorNode ? (
-                <div className="grid gap-2 text-xs">
-                  <div>
-                    Node: <span className="font-mono">{selectedBehaviorNode.tag}</span>
-                  </div>
-                  <div>
-                    Type: <span className="font-mono">{selectedBehaviorNode.category}</span>
-                  </div>
-                  <div>
-                    ID: <span className="font-mono">{selectedBehaviorNode.id}</span>
-                  </div>
-                  <div>
-                    Pose:{" "}
-                    <span className="font-mono">
-                      {selectedBehaviorNode.pose.x.toFixed(2)},{" "}
-                      {selectedBehaviorNode.pose.y.toFixed(2)}, yaw{" "}
-                      {selectedBehaviorNode.pose.yaw.toFixed(2)}
-                    </span>
-                  </div>
-                  <div className="pt-2 border-t grid justify-start" style={{ borderColor: MISSION_PANEL_BORDER }}>
-                    <ActionButton
-                      onClick={handleDeleteSelectedBehaviorNode}
-                      variant="danger"
-                    >
-                      Delete Node
-                    </ActionButton>
-                  </div>
-                </div>
-              ) : selectedSpot ? (
-                <div className="grid gap-2 text-xs">
-                  <label className="grid gap-1">
-                    <span style={{ color: MISSION_TEXT_MUTED }}>Label</span>
-                    <input
-                      value={selectedSpot.label}
-                      onChange={handleRenameSpot}
-                      className="h-8 px-2 border rounded-md text-sm"
-                      style={{
-                        color: MISSION_TEXT,
-                        backgroundColor: MISSION_SURFACE,
-                        borderColor: MISSION_BORDER,
-                      }}
-                    />
-                  </label>
-                  <div>
-                    ID: <span className="font-mono">{selectedSpot.id}</span>
-                  </div>
-                  <div>
-                    Pose:{" "}
-                    <span className="font-mono">
-                      {selectedSpot.pose.x.toFixed(2)}, {selectedSpot.pose.y.toFixed(2)}, yaw {selectedSpot.pose.yaw.toFixed(2)}
-                    </span>
-                  </div>
-                  <div>
-                    BT: <span className="font-mono">{selectedSpot.linked_bt_tree || "-"}</span>
-                  </div>
-                  <div className="pt-2 border-t grid gap-2" style={{ borderColor: MISSION_PANEL_BORDER }}>
-                    <div className="flex flex-wrap gap-2">
-                      <ActionButton
-                        disabled={!btNodeIsUp || !!selectedSpot.linked_bt_tree}
-                        onClick={handleOpenSelectedSpotBt}
-                        variant="secondary"
-                      >
-                        Create BT
-                      </ActionButton>
-                      <ActionButton
-                        disabled={!btNodeIsUp || !selectedSpot.linked_bt_tree}
-                        onClick={handleOpenSelectedSpotBt}
-                        variant="secondary"
-                      >
-                        Edit BT
-                      </ActionButton>
-                    </div>
-                    <div className="grid justify-start">
-                      <ActionButton
-                        onClick={handleDeleteSelectedSpot}
-                        variant="danger"
-                      >
-                        Delete Waypoint
-                      </ActionButton>
-                    </div>
-                  </div>
-                </div>
-              ) : (
-                <div className="text-xs leading-5" style={{ color: MISSION_TEXT_MUTED }}>
-                  Select a waypoint or behavior node on the map.
-                </div>
-              )}
-            </Panel>
-
             <Panel title="Design Objects" className="min-h-0 overflow-auto">
               <div className="grid gap-3">
                 <div className="grid gap-2">
@@ -3168,25 +3116,41 @@ export default function MissionCanvasPage() {
                   >
                     Behavior Nodes
                   </div>
-                  {activeBehaviorNodes.map((node) => (
-                    <button
-                      key={node.id}
-                      type="button"
-                      onClick={() => handleSelectBehaviorNode(node.id)}
-                      className="h-8 px-2 border rounded-md text-left text-xs min-w-0"
-                      style={{
-                        color: node.id === selectedBehaviorNodeId
-                          ? "var(--vscode-button-foreground)"
-                          : MISSION_TEXT,
-                        backgroundColor: node.id === selectedBehaviorNodeId
-                          ? "var(--vscode-button-background)"
-                          : MISSION_STAGE_EMPTY,
-                        borderColor: MISSION_PANEL_BORDER,
-                      }}
-                    >
-                      <span className="block truncate">{node.tag}</span>
-                    </button>
-                  ))}
+                  {activeBehaviorNodes.map((node) => {
+                    const selected = node.id === selectedBehaviorNodeId;
+                    return (
+                      <div key={node.id} className="flex items-center gap-1.5 min-w-0">
+                        <button
+                          type="button"
+                          onClick={() => handleSelectBehaviorNode(node.id)}
+                          className="h-8 flex-1 px-2 border rounded-md text-left text-xs min-w-0"
+                          style={{
+                            color: selected ? "var(--vscode-button-foreground)" : MISSION_TEXT,
+                            backgroundColor: selected
+                              ? "var(--vscode-button-background)"
+                              : MISSION_STAGE_EMPTY,
+                            borderColor: MISSION_PANEL_BORDER,
+                          }}
+                        >
+                          <span className="block truncate">{node.tag}</span>
+                        </button>
+                        <button
+                          type="button"
+                          aria-label={`Delete Node ${node.tag}`}
+                          title={`Delete ${node.tag}`}
+                          onClick={() => handleDeleteBehaviorNode(node)}
+                          className="h-8 w-8 shrink-0 border rounded-md inline-flex items-center justify-center transition-all active:translate-y-px"
+                          style={{
+                            color: "#7f1d1d",
+                            backgroundColor: MISSION_SURFACE,
+                            borderColor: MISSION_BUTTON_BORDER,
+                          }}
+                        >
+                          <MdDelete size={15} />
+                        </button>
+                      </div>
+                    );
+                  })}
                   {activeBehaviorNodes.length === 0 && (
                     <div className="text-xs" style={{ color: MISSION_TEXT_MUTED }}>
                       No behavior nodes placed yet.
@@ -3200,25 +3164,112 @@ export default function MissionCanvasPage() {
                   >
                     Waypoints
                   </div>
-                  {spots.map((spot) => (
-                    <button
-                      key={spot.id}
-                      type="button"
-                      onClick={() => handleSelectSpot(spot.id)}
-                      className="h-8 px-2 border rounded-md text-left text-xs min-w-0"
-                      style={{
-                        color: spot.id === selectedSpotId
-                          ? "var(--vscode-button-foreground)"
-                          : MISSION_TEXT,
-                        backgroundColor: spot.id === selectedSpotId
-                          ? "var(--vscode-button-background)"
-                          : MISSION_STAGE_EMPTY,
-                        borderColor: MISSION_PANEL_BORDER,
-                      }}
-                    >
-                      <span className="block truncate">{spot.label}</span>
-                    </button>
-                  ))}
+                  {spots.map((spot) => {
+                    const selected = spot.id === selectedSpotId;
+                    const editing = editingSpotId === spot.id;
+                    const linkedBtPath = existingLocalBtPathForSpot(spot);
+                    return (
+                      <div
+                        key={spot.id}
+                        className="grid gap-1.5 border rounded-md p-2 min-w-0"
+                        style={{
+                          color: MISSION_TEXT,
+                          backgroundColor: selected
+                            ? "var(--vscode-button-background)"
+                            : MISSION_STAGE_EMPTY,
+                          borderColor: selected ? MISSION_BUTTON_BORDER : MISSION_PANEL_BORDER,
+                        }}
+                      >
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          {editing ? (
+                            <input
+                              aria-label="Waypoint name"
+                              value={editingSpotLabel}
+                              autoFocus
+                              onChange={(event) => setEditingSpotLabel(event.currentTarget.value)}
+                              onBlur={() => {
+                                void handleCommitSpotRename(spot);
+                              }}
+                              onKeyDown={(event) => {
+                                if (event.key === "Enter") {
+                                  event.preventDefault();
+                                  void handleCommitSpotRename(spot);
+                                }
+                                if (event.key === "Escape") {
+                                  event.preventDefault();
+                                  handleCancelSpotRename();
+                                }
+                              }}
+                              className="h-8 flex-1 px-2 border rounded-md text-sm min-w-0"
+                              style={{
+                                color: "#111827",
+                                backgroundColor: "#ffffff",
+                                borderColor: MISSION_BUTTON_BORDER,
+                              }}
+                            />
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => handleSelectSpot(spot.id)}
+                              onDoubleClick={() => handleStartRenameSpot(spot)}
+                              className="h-8 flex-1 px-2 border rounded-md text-left text-xs min-w-0"
+                              style={{
+                                color: selected ? "var(--vscode-button-foreground)" : MISSION_TEXT,
+                                backgroundColor: selected
+                                  ? "var(--vscode-button-background)"
+                                  : MISSION_STAGE_EMPTY,
+                                borderColor: MISSION_PANEL_BORDER,
+                              }}
+                            >
+                              <span className="block truncate">{spot.label || spot.id}</span>
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            aria-label={`Delete Waypoint ${spot.label || spot.id}`}
+                            title={`Delete ${spot.label || spot.id}`}
+                            onClick={() => {
+                              void handleDeleteSpot(spot);
+                            }}
+                            className="h-8 w-8 shrink-0 border rounded-md inline-flex items-center justify-center transition-all active:translate-y-px"
+                            style={{
+                              color: "#7f1d1d",
+                              backgroundColor: MISSION_SURFACE,
+                              borderColor: MISSION_BUTTON_BORDER,
+                            }}
+                          >
+                            <MdDelete size={15} />
+                          </button>
+                        </div>
+                        {selected && (
+                          <div className="grid gap-1.5 min-w-0">
+                            <div
+                              className="text-[11px] font-mono truncate"
+                              style={{ color: selected ? "var(--vscode-button-foreground)" : MISSION_TEXT_MUTED }}
+                            >
+                              {linkedBtPath || "No local BT"}
+                            </div>
+                            <div className="flex flex-wrap gap-1.5">
+                              <ActionButton
+                                disabled={!btNodeIsUp || !!linkedBtPath}
+                                onClick={() => handleOpenSpotBt(spot)}
+                                variant="secondary"
+                              >
+                                Create BT
+                              </ActionButton>
+                              <ActionButton
+                                disabled={!btNodeIsUp || !linkedBtPath}
+                                onClick={() => handleOpenSpotBt(spot)}
+                                variant="secondary"
+                              >
+                                Edit BT
+                              </ActionButton>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
                   {spots.length === 0 && (
                     <div className="text-xs" style={{ color: MISSION_TEXT_MUTED }}>
                       No waypoints for this map yet.
@@ -3227,7 +3278,6 @@ export default function MissionCanvasPage() {
                 </div>
               </div>
             </Panel>
-            <TopicStatusPanel topicRows={topicRows} />
           </aside>
         ) : (
           <aside

@@ -14,6 +14,7 @@ import {
 } from '../utils/navigationApi';
 import {
   createNavigationSpot,
+  deleteNavigationSpot,
   getNavigationSpots,
   updateNavigationSpot,
 } from '../utils/navigationSpotsApi';
@@ -168,7 +169,7 @@ beforeEach(() => {
   updateNavigationSpot.mockImplementation((spotId, patch) => Promise.resolve({
     id: spotId,
     map_name: patch.map_name || 'factory',
-    label: 'Waypoint A',
+    label: patch.label || 'Waypoint A',
     pose: patch.pose || { frame_id: 'map', x: 1, y: 2, yaw: 0 },
     linked_bt_tree: '',
     metadata: {},
@@ -319,7 +320,7 @@ test('shows Waypoint and BT authoring panels in the authoring stage', async () =
   expect(screen.getByText('Local BT')).toBeInTheDocument();
   expect(screen.getByText('Start')).toBeInTheDocument();
   expect(screen.getByText('End')).toBeInTheDocument();
-  expect(screen.getByText('Properties')).toBeInTheDocument();
+  expect(screen.queryByText('Properties')).not.toBeInTheDocument();
   expect(screen.getByText('BT Runtime')).toBeInTheDocument();
   expect(screen.getByText('BT Node Unknown')).toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Activate BT' })).toBeEnabled();
@@ -332,17 +333,15 @@ test('shows Waypoint and BT authoring panels in the authoring stage', async () =
   expect(screen.getByRole('button', { name: 'Create Waypoint' })).toBeDisabled();
   expect(screen.queryByRole('menu', { name: 'Waypoint creation options' })).not.toBeInTheDocument();
   expect(screen.queryByRole('button', { name: 'At Robot' })).not.toBeInTheDocument();
-  expect(screen.getByText('Select a waypoint or behavior node on the map.')).toBeInTheDocument();
-  expect(screen.queryByRole('button', { name: 'Delete Waypoint' })).not.toBeInTheDocument();
-  expect(screen.queryByRole('button', { name: 'Delete Node' })).not.toBeInTheDocument();
+  expect(screen.queryByText('Select a waypoint or behavior node on the map.')).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: /Delete Waypoint/ })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: /Delete Node/ })).not.toBeInTheDocument();
   expect(screen.queryByRole('button', { name: 'Create BT' })).not.toBeInTheDocument();
   expect(screen.queryByRole('button', { name: 'Edit BT' })).not.toBeInTheDocument();
   expect(screen.queryByRole('button', { name: 'Start Mapping' })).not.toBeInTheDocument();
   expect(screen.queryByText('/map')).not.toBeInTheDocument();
-  expect(screen.getByText('/bt/status')).toBeInTheDocument();
-  expect(screen.getByText('/bt/active_nodes')).toBeInTheDocument();
-  expect(topicRow('/bt/status')).toHaveTextContent('wait');
-  expect(topicRow('/bt/active_nodes')).toHaveTextContent('wait');
+  expect(screen.queryByText('/bt/status')).not.toBeInTheDocument();
+  expect(screen.queryByText('/bt/active_nodes')).not.toBeInTheDocument();
   expect(screen.queryByText('/scan')).not.toBeInTheDocument();
   expect(screen.queryByText('/global_costmap/costmap')).not.toBeInTheDocument();
   await waitFor(() => expect(getServiceStatus).toHaveBeenCalled());
@@ -402,8 +401,6 @@ test('controls BT node lifecycle from the design stage', async () => {
   await waitFor(() => expect(screen.getByText('BT Node Active')).toBeInTheDocument());
   expect(screen.getAllByText('Ready').length).toBeGreaterThan(0);
   expect(screen.getByText('Waiting for run')).toBeInTheDocument();
-  expect(topicRow('/bt/status')).toHaveTextContent('live');
-  expect(topicRow('/bt/active_nodes')).toHaveTextContent('live');
   expect(screen.getByRole('button', { name: 'Activate BT' })).toBeDisabled();
   expect(screen.getByRole('button', { name: 'Deactivate BT' })).toBeEnabled();
 
@@ -414,20 +411,27 @@ test('controls BT node lifecycle from the design stage', async () => {
     expect.objectContaining({ method: 'POST' }),
   ));
   await waitFor(() => expect(screen.getByText('BT Node Inactive')).toBeInTheDocument());
-  expect(topicRow('/bt/status')).toHaveTextContent('wait');
-  expect(topicRow('/bt/active_nodes')).toHaveTextContent('wait');
+  expect(screen.getAllByText('wait').length).toBeGreaterThan(0);
 });
 
-test('marks BT topics live when BT topic messages are available', async () => {
-  mockTopicDataByName['/bt/status'] = stringTopicMessage('stopped');
-  mockTopicDataByName['/bt/active_nodes'] = stringTopicMessage('');
+test('uses BT topic messages in the design runtime summary', async () => {
+  mockTopicDataByName['/bt/status'] = stringTopicMessage('running');
+  mockTopicDataByName['/bt/active_nodes'] = stringTopicMessage('MoveBase, Wait');
+  global.fetch.mockResolvedValue(mockJsonResponse({
+    name: 'bt_node',
+    state: 'up',
+    raw: 'up',
+  }));
 
   render(<MissionCanvasPage />);
 
   fireEvent.click(screen.getByRole('tab', { name: 'Design' }));
 
-  expect(topicRow('/bt/status')).toHaveTextContent('live');
-  expect(topicRow('/bt/active_nodes')).toHaveTextContent('live');
+  expect(screen.queryByText('/bt/status')).not.toBeInTheDocument();
+  expect(screen.queryByText('/bt/active_nodes')).not.toBeInTheDocument();
+  await waitFor(() => expect(screen.getByText('BT Node Active')).toBeInTheDocument());
+  expect(screen.getByText('Running')).toBeInTheDocument();
+  expect(screen.getByText('MoveBase, Wait')).toBeInTheDocument();
   await waitFor(() => expect(getServiceStatus).toHaveBeenCalled());
 });
 
@@ -651,7 +655,7 @@ test('renders legacy pixel-coordinate waypoints in loaded map coordinates', asyn
   });
 });
 
-test('shows waypoint actions in Properties after placing a waypoint', async () => {
+test('shows waypoint actions in Design Objects after placing a waypoint', async () => {
   const latestMapViewerProps = () => (
     mockMapViewer.mock.calls[mockMapViewer.mock.calls.length - 1][0]
   );
@@ -691,12 +695,12 @@ test('shows waypoint actions in Properties after placing a waypoint', async () =
     pose: { frame_id: 'map', x: 1, y: 2, yaw: 0.25 },
     metadata: { source: 'mission_canvas', coordinate_space: 'map' },
   }));
-  expect(screen.getByDisplayValue('Waypoint A')).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Waypoint A' })).toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Create Waypoint' })).toHaveAttribute('aria-pressed', 'true');
   expect(latestMapViewerProps().interactionMode).toBe('spot');
   expect(screen.getByRole('button', { name: 'Create BT' })).toBeDisabled();
   expect(screen.getByRole('button', { name: 'Edit BT' })).toBeDisabled();
-  expect(screen.getByRole('button', { name: 'Delete Waypoint' })).toBeEnabled();
+  expect(screen.getByRole('button', { name: /Delete Waypoint Waypoint A/ })).toBeEnabled();
 
   await act(async () => {
     await latestMapViewerProps().onSpotPoseChange('spot_a', 4, 5, 0.25);
@@ -755,6 +759,22 @@ test('shows waypoint actions in Properties after placing a waypoint', async () =
   fireEvent.click(screen.getByRole('button', { name: 'Create Waypoint' }));
   fireEvent.click(screen.getByRole('button', { name: 'On Map' }));
   expect(screen.getByRole('button', { name: 'Create Waypoint' })).not.toHaveAttribute('aria-pressed');
+
+  fireEvent.doubleClick(screen.getByRole('button', { name: 'Waypoint A' }));
+  const waypointNameInput = screen.getByRole('textbox', { name: 'Waypoint name' });
+  expect(waypointNameInput).toHaveValue('Waypoint A');
+  fireEvent.change(waypointNameInput, { target: { value: 'Pickup A' } });
+  fireEvent.keyDown(waypointNameInput, { key: 'Enter' });
+
+  await waitFor(() => expect(updateNavigationSpot).toHaveBeenCalledWith('spot_a', {
+    map_name: 'factory',
+    label: 'Pickup A',
+  }));
+  expect(screen.getByRole('button', { name: 'Pickup A' })).toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole('button', { name: /Delete Waypoint Pickup A/ }));
+  await waitFor(() => expect(deleteNavigationSpot).toHaveBeenCalledWith('spot_a', 'factory'));
+  expect(screen.queryByRole('button', { name: 'Pickup A' })).not.toBeInTheDocument();
 });
 
 test('opens waypoint BT map layer when selecting a waypoint with BT active', async () => {
