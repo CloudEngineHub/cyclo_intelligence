@@ -1775,19 +1775,29 @@ export default function MissionCanvasPage() {
     () => filterMissionFlowEdges(missionFlowEdges, visibleSpots),
     [missionFlowEdges, visibleSpots],
   );
-  const missionRouteOrder = useMemo(
+  const missionRouteOrderedSpots = useMemo(
     () => {
       if (missionRouteEdges.length === 0) return [];
       return orderedSpotsFromMissionFlow(
         visibleSpots,
         missionFlowNodes,
         missionRouteEdges,
-      ).map((spot, index) => ({
-        id: spot.id,
-        order: index + 1,
-      }));
+      );
     },
     [missionFlowNodes, missionRouteEdges, visibleSpots],
+  );
+  const missionRouteOrder = useMemo(
+    () => (
+      missionRouteOrderedSpots.map((spot, index) => ({
+        id: spot.id,
+        order: index + 1,
+      }))
+    ),
+    [missionRouteOrderedSpots],
+  );
+  const missionRouteSourceSpot = useMemo(
+    () => visibleSpots.find((spot) => spot.id === missionRouteSourceId) || null,
+    [missionRouteSourceId, visibleSpots],
   );
   const selectedBtLayerSpot = useMemo(
     () => visibleSpots.find((spot) => spot.id === btLayerSpotId) || null,
@@ -3249,65 +3259,6 @@ export default function MissionCanvasPage() {
               >
                 Save Mission
               </ActionButton>
-              <ActionButton
-                active={missionRouteMode}
-                disabled={!!busy || !designMapAvailable || btNodeIsUp}
-                onClick={handleToggleMissionRouteMode}
-                title={btNodeIsUp ? "Deactivate BT before editing mission route" : undefined}
-                variant="secondary"
-              >
-                Mission Route
-              </ActionButton>
-              {missionRouteMode && (
-                <ActionButton
-                  disabled={!!busy || missionRouteEdges.length === 0}
-                  onClick={handleClearMissionRoute}
-                  variant="secondary"
-                >
-                  Clear Route
-                </ActionButton>
-              )}
-              <div className="flex items-center gap-1">
-                <ActionButton
-                  active={showWaypointOptions || interactionMode === "spot"}
-                  disabled={!designMapAvailable || btNodeIsUp || missionRouteMode}
-                  onClick={handleToggleWaypointOptions}
-                  title={btNodeIsUp
-                    ? "Deactivate BT before editing waypoints"
-                    : missionRouteMode ? "Turn off Mission Route before editing waypoints" : undefined}
-                  variant="secondary"
-                >
-                  Create Waypoint
-                </ActionButton>
-                {showWaypointOptions && (
-                  <div
-                    className="flex items-center gap-1 border rounded-md p-1"
-                    role="menu"
-                    aria-label="Waypoint creation options"
-                    style={{
-                      backgroundColor: MISSION_STAGE_EMPTY,
-                      borderColor: MISSION_BUTTON_BORDER,
-                    }}
-                  >
-                    <ActionButton
-                      active={interactionMode === "spot"}
-                      disabled={!designMapAvailable || btNodeIsUp || missionRouteMode}
-                      onClick={handleToggleSpotMode}
-                      variant="secondary"
-                    >
-                      On Map
-                    </ActionButton>
-                    <ActionButton
-                      active={interactionMode === "initial" || busy === "At Robot"}
-                      disabled={!!busy || !designMapAvailable || btNodeIsUp || missionRouteMode}
-                      onClick={handleCreateSpotAtRobot}
-                      variant="secondary"
-                    >
-                      At Robot
-                    </ActionButton>
-                  </div>
-                )}
-              </div>
             </>
           )}
 
@@ -3419,61 +3370,62 @@ export default function MissionCanvasPage() {
             />
             <Panel title="Design Objects" className="min-h-0 overflow-auto">
               <div className="grid gap-3">
-                <div className="grid gap-2">
+                <div
+                  className="grid gap-2 border rounded-md p-2"
+                  style={{
+                    backgroundColor: MISSION_STAGE_EMPTY,
+                    borderColor: MISSION_PANEL_BORDER,
+                  }}
+                >
                   <div
-                    className="text-[10px] uppercase font-semibold"
-                    style={{ color: MISSION_TEXT_MUTED }}
+                    className="flex items-center justify-between gap-2"
                   >
-                    Behavior Nodes
+                    <div
+                      className="text-[10px] uppercase font-semibold"
+                      style={{ color: MISSION_TEXT_MUTED }}
+                    >
+                      Waypoints / Local BT
+                    </div>
+                    <ActionButton
+                      active={showWaypointOptions || interactionMode === "spot"}
+                      disabled={!designMapAvailable || btNodeIsUp || missionRouteMode}
+                      onClick={handleToggleWaypointOptions}
+                      title={btNodeIsUp
+                        ? "Deactivate BT before editing waypoints"
+                        : missionRouteMode ? "Turn off Mission Route before editing waypoints" : undefined}
+                      variant="secondary"
+                    >
+                      Create Waypoint
+                    </ActionButton>
                   </div>
-                  {activeBehaviorNodes.map((node) => {
-                    const selected = node.id === selectedBehaviorNodeId;
-                    return (
-                      <div key={node.id} className="flex items-center gap-1.5 min-w-0">
-                        <button
-                          type="button"
-                          onClick={() => handleSelectBehaviorNode(node.id)}
-                          className="h-8 flex-1 px-2 border rounded-md text-left text-xs min-w-0"
-                          style={{
-                            color: selected ? "var(--vscode-button-foreground)" : MISSION_TEXT,
-                            backgroundColor: selected
-                              ? "var(--vscode-button-background)"
-                              : MISSION_STAGE_EMPTY,
-                            borderColor: MISSION_PANEL_BORDER,
-                          }}
-                        >
-                          <span className="block truncate">{node.tag}</span>
-                        </button>
-                        <button
-                          type="button"
-                          aria-label={`Delete Node ${node.tag}`}
-                          title={`Delete ${node.tag}`}
-                          onClick={() => handleDeleteBehaviorNode(node)}
-                          className="h-8 w-8 shrink-0 border rounded-md inline-flex items-center justify-center transition-all active:translate-y-px"
-                          style={{
-                            color: "#7f1d1d",
-                            backgroundColor: MISSION_SURFACE,
-                            borderColor: MISSION_BUTTON_BORDER,
-                          }}
-                        >
-                          <MdDelete size={15} />
-                        </button>
-                      </div>
-                    );
-                  })}
-                  {activeBehaviorNodes.length === 0 && (
-                    <div className="text-xs" style={{ color: MISSION_TEXT_MUTED }}>
-                      No behavior nodes placed yet.
+                  {showWaypointOptions && (
+                    <div
+                      className="flex flex-wrap items-center gap-1 border rounded-md p-1"
+                      role="menu"
+                      aria-label="Waypoint creation options"
+                      style={{
+                        backgroundColor: MISSION_SURFACE,
+                        borderColor: MISSION_BUTTON_BORDER,
+                      }}
+                    >
+                      <ActionButton
+                        active={interactionMode === "spot"}
+                        disabled={!designMapAvailable || btNodeIsUp || missionRouteMode}
+                        onClick={handleToggleSpotMode}
+                        variant="secondary"
+                      >
+                        On Map
+                      </ActionButton>
+                      <ActionButton
+                        active={interactionMode === "initial" || busy === "At Robot"}
+                        disabled={!!busy || !designMapAvailable || btNodeIsUp || missionRouteMode}
+                        onClick={handleCreateSpotAtRobot}
+                        variant="secondary"
+                      >
+                        At Robot
+                      </ActionButton>
                     </div>
                   )}
-                </div>
-                <div className="grid gap-2">
-                  <div
-                    className="text-[10px] uppercase font-semibold"
-                    style={{ color: MISSION_TEXT_MUTED }}
-                  >
-                    Waypoints
-                  </div>
                   {spots.map((spot) => {
                     const selected = spot.id === selectedSpotId;
                     const editing = editingSpotId === spot.id;
@@ -3486,7 +3438,7 @@ export default function MissionCanvasPage() {
                           color: MISSION_TEXT,
                           backgroundColor: selected
                             ? "var(--vscode-button-background)"
-                            : MISSION_STAGE_EMPTY,
+                            : MISSION_SURFACE,
                           borderColor: selected ? MISSION_BUTTON_BORDER : MISSION_PANEL_BORDER,
                         }}
                       >
@@ -3567,6 +3519,134 @@ export default function MissionCanvasPage() {
                   {spots.length === 0 && (
                     <div className="text-xs" style={{ color: MISSION_TEXT_MUTED }}>
                       No waypoints for this map yet.
+                    </div>
+                  )}
+                </div>
+                <div
+                  className="grid gap-2 border rounded-md p-2"
+                  style={{
+                    backgroundColor: MISSION_STAGE_EMPTY,
+                    borderColor: MISSION_PANEL_BORDER,
+                  }}
+                >
+                  <div
+                    className="flex items-center justify-between gap-2"
+                  >
+                    <div
+                      className="text-[10px] uppercase font-semibold"
+                      style={{ color: MISSION_TEXT_MUTED }}
+                    >
+                      Mission Route
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <ActionButton
+                        active={missionRouteMode}
+                        disabled={!!busy || !designMapAvailable || btNodeIsUp}
+                        onClick={handleToggleMissionRouteMode}
+                        title={btNodeIsUp ? "Deactivate BT before editing mission route" : undefined}
+                        variant="secondary"
+                      >
+                        Mission Route
+                      </ActionButton>
+                      <ActionButton
+                        disabled={!!busy || missionRouteEdges.length === 0}
+                        onClick={handleClearMissionRoute}
+                        variant="secondary"
+                      >
+                        Clear Route
+                      </ActionButton>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-3 gap-2">
+                    <SessionRow label="Mode" value={missionRouteMode ? "Editing" : "Idle"} stacked />
+                    <SessionRow
+                      label="Source"
+                      value={missionRouteSourceSpot
+                        ? missionRouteSourceSpot.label || missionRouteSourceSpot.id
+                        : "None"}
+                      stacked
+                    />
+                    <SessionRow label="Links" value={String(missionRouteEdges.length)} stacked />
+                  </div>
+                  <div className="grid gap-1">
+                    {missionRouteOrderedSpots.map((spot, index) => (
+                      <button
+                        key={spot.id}
+                        type="button"
+                        onClick={() => handleSelectSpot(spot.id)}
+                        className="h-8 px-2 border rounded-md flex items-center gap-2 text-left text-xs min-w-0"
+                        style={{
+                          color: spot.id === selectedSpotId ? "var(--vscode-button-foreground)" : MISSION_TEXT,
+                          backgroundColor: spot.id === selectedSpotId
+                            ? "var(--vscode-button-background)"
+                            : MISSION_SURFACE,
+                          borderColor: spot.id === selectedSpotId ? MISSION_BUTTON_BORDER : MISSION_PANEL_BORDER,
+                        }}
+                      >
+                        <span
+                          className="h-5 w-5 shrink-0 rounded-full inline-flex items-center justify-center text-[10px] font-semibold"
+                          style={{
+                            color: "#ffffff",
+                            backgroundColor: "#2563eb",
+                          }}
+                        >
+                          {index + 1}
+                        </span>
+                        <span className="truncate">{spot.label || spot.id}</span>
+                      </button>
+                    ))}
+                    {missionRouteOrderedSpots.length === 0 && (
+                      <div className="text-xs" style={{ color: MISSION_TEXT_MUTED }}>
+                        No route links yet.
+                      </div>
+                    )}
+                  </div>
+                </div>
+                <div className="grid gap-2">
+                  <div
+                    className="text-[10px] uppercase font-semibold"
+                    style={{ color: MISSION_TEXT_MUTED }}
+                  >
+                    Behavior Nodes
+                  </div>
+                  {activeBehaviorNodes.map((node) => {
+                    const selected = node.id === selectedBehaviorNodeId;
+                    return (
+                      <div key={node.id} className="flex items-center gap-1.5 min-w-0">
+                        <button
+                          type="button"
+                          onClick={() => handleSelectBehaviorNode(node.id)}
+                          className="h-8 flex-1 px-2 border rounded-md text-left text-xs min-w-0"
+                          style={{
+                            color: selected ? "var(--vscode-button-foreground)" : MISSION_TEXT,
+                            backgroundColor: selected
+                              ? "var(--vscode-button-background)"
+                              : MISSION_STAGE_EMPTY,
+                            borderColor: MISSION_PANEL_BORDER,
+                          }}
+                        >
+                          <span className="block truncate">{node.tag}</span>
+                        </button>
+                        <button
+                          type="button"
+                          aria-label={`Delete Node ${node.tag}`}
+                          title={`Delete ${node.tag}`}
+                          onClick={() => handleDeleteBehaviorNode(node)}
+                          className="h-8 w-8 shrink-0 border rounded-md inline-flex items-center justify-center transition-all active:translate-y-px"
+                          style={{
+                            color: "#7f1d1d",
+                            backgroundColor: MISSION_SURFACE,
+                            borderColor: MISSION_BUTTON_BORDER,
+                          }}
+                        >
+                          <MdDelete size={15} />
+                        </button>
+                      </div>
+                    );
+                  })}
+                  {activeBehaviorNodes.length === 0 && (
+                    <div className="text-xs" style={{ color: MISSION_TEXT_MUTED }}>
+                      No behavior nodes placed yet.
                     </div>
                   )}
                 </div>
