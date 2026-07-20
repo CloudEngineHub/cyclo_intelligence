@@ -6,17 +6,6 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import {
-  addEdge,
-  Background,
-  Controls,
-  Handle,
-  Position,
-  ReactFlow,
-  useEdgesState,
-  useNodesState,
-} from "@xyflow/react";
-import "@xyflow/react/dist/style.css";
 import { MdDelete, MdPowerSettingsNew, MdStop } from "react-icons/md";
 import {
   configureDesignLocalizationAmcl,
@@ -67,7 +56,6 @@ const AUTO_LOCALIZE_YAW_COVARIANCE_MAX = 0.5;
 const ROS2_WS_FAST_TOPIC_OPTIONS = { throttleMs: 100 };
 const BT_TOPIC_OPTIONS = { staleMs: 3000 };
 const SUPERVISOR_API_BASE = "/api";
-const MISSION_WAYPOINT_DRAG_MIME = "application/x-cyclo-mission-waypoint";
 const STAGE_MAPPING = "mapping";
 const STAGE_AUTHORING = "authoring";
 const STAGE_RUN = "run";
@@ -533,6 +521,51 @@ function syncMissionFlowNodesWithSpots(nodes, spots) {
 function filterMissionFlowEdges(edges, spots) {
   const validSpotIds = new Set(spots.map((spot) => spot.id));
   return edges.filter((edge) => validSpotIds.has(edge.source) && validSpotIds.has(edge.target));
+}
+
+function missionFlowHasPath(edges, source, target) {
+  const queue = [source];
+  const visited = new Set();
+  while (queue.length) {
+    const id = queue.shift();
+    if (id === target) return true;
+    if (visited.has(id)) continue;
+    visited.add(id);
+    edges.forEach((edge) => {
+      if (edge.source === id && !visited.has(edge.target)) {
+        queue.push(edge.target);
+      }
+    });
+  }
+  return false;
+}
+
+function connectMissionFlowEdge(edges, source, target) {
+  if (!source || !target || source === target) {
+    return { edges, changed: false, reason: "same" };
+  }
+  const nextBase = edges.filter((edge) => (
+    edge.source !== source &&
+    edge.target !== target &&
+    !(edge.source === source && edge.target === target)
+  ));
+  if (missionFlowHasPath(nextBase, target, source)) {
+    return { edges, changed: false, reason: "cycle" };
+  }
+  return {
+    edges: [
+      ...nextBase,
+      {
+        id: missionFlowEdgeId(source, target),
+        source,
+        target,
+        type: "smoothstep",
+        animated: false,
+      },
+    ],
+    changed: true,
+    reason: "",
+  };
 }
 
 function serializeMissionFlow(nodes, edges) {
@@ -1450,124 +1483,6 @@ function MappingTeleopPanel({ disabled, onPublish, onMessage }) {
   );
 }
 
-function MissionFlowWaypointNode({ data, selected }) {
-  return (
-    <div
-      className="w-44 min-h-[72px] border rounded-md p-2 text-left grid content-start gap-1 shadow-sm"
-      style={{
-        color: selected ? "var(--vscode-button-foreground)" : MISSION_TEXT,
-        backgroundColor: selected ? "var(--vscode-button-background)" : MISSION_STAGE_EMPTY,
-        borderColor: selected ? MISSION_BUTTON_BORDER : MISSION_PANEL_BORDER,
-      }}
-    >
-      <Handle
-        type="target"
-        position={Position.Left}
-        style={{ backgroundColor: MISSION_BUTTON_BORDER, width: 8, height: 8 }}
-      />
-      <span
-        className="text-[10px] font-semibold uppercase truncate"
-        style={{ color: selected ? "var(--vscode-button-foreground)" : MISSION_TEXT_MUTED }}
-      >
-        Waypoint
-      </span>
-      <span className="text-xs font-semibold truncate">{data.label}</span>
-      <span className="text-[11px] font-mono truncate">{data.localBt}</span>
-      <Handle
-        type="source"
-        position={Position.Right}
-        style={{ backgroundColor: MISSION_BUTTON_BORDER, width: 8, height: 8 }}
-      />
-    </div>
-  );
-}
-
-const missionFlowNodeTypes = {
-  missionWaypoint: MissionFlowWaypointNode,
-};
-
-const missionFlowProOptions = { hideAttribution: true };
-
-function MissionFlowPanel({
-  spots,
-  selectedSpotId,
-  nodes,
-  edges,
-  onNodesChange,
-  onEdgesChange,
-  onConnect,
-  onWaypointDrop,
-  onSpotSelect,
-}) {
-  const [flowInstance, setFlowInstance] = useState(null);
-  const annotatedNodes = useMemo(() => nodes.map((node) => ({
-    ...node,
-    selected: node.id === selectedSpotId,
-  })), [nodes, selectedSpotId]);
-
-  const handleDragOver = useCallback((event) => {
-    if (event.dataTransfer.types.includes(MISSION_WAYPOINT_DRAG_MIME)) {
-      event.preventDefault();
-      event.dataTransfer.dropEffect = "move";
-    }
-  }, []);
-
-  const handleDrop = useCallback((event) => {
-    const spotId = event.dataTransfer.getData(MISSION_WAYPOINT_DRAG_MIME);
-    if (!spotId || !flowInstance) return;
-    event.preventDefault();
-    const position = flowInstance.screenToFlowPosition({
-      x: event.clientX,
-      y: event.clientY,
-    });
-    onWaypointDrop(spotId, position);
-  }, [flowInstance, onWaypointDrop]);
-
-  return (
-    <Panel title="Mission Flow" className="min-h-0 overflow-hidden">
-      <div
-        className="h-full min-h-[180px] rounded-md overflow-hidden border"
-        style={{
-          backgroundColor: MISSION_SURFACE,
-          borderColor: MISSION_PANEL_BORDER,
-        }}
-        onDragOver={handleDragOver}
-        onDrop={handleDrop}
-      >
-        {spots.length === 0 ? (
-          <div className="h-full min-h-[180px] flex items-center justify-center text-xs" style={{ color: MISSION_TEXT_MUTED }}>
-            No waypoints for this map yet.
-          </div>
-        ) : (
-          <ReactFlow
-            nodes={annotatedNodes}
-            edges={edges}
-            nodeTypes={missionFlowNodeTypes}
-            onNodesChange={onNodesChange}
-            onEdgesChange={onEdgesChange}
-            onConnect={onConnect}
-            onInit={setFlowInstance}
-            onNodeClick={(_event, node) => onSpotSelect(node.id)}
-            fitView
-            fitViewOptions={{ padding: 0.2 }}
-            nodesDraggable
-            nodesConnectable
-            elementsSelectable
-            deleteKeyCode={null}
-            minZoom={0.35}
-            maxZoom={1.8}
-            defaultEdgeOptions={{ type: "smoothstep", animated: false }}
-            proOptions={missionFlowProOptions}
-          >
-            <Controls showInteractive={false} />
-            <Background color="#d1d5db" gap={18} />
-          </ReactFlow>
-        )}
-      </div>
-    </Panel>
-  );
-}
-
 function ActionButton({
   children,
   active = false,
@@ -1660,16 +1575,10 @@ export default function MissionCanvasPage() {
   const [pendingBehaviorNodeTag, setPendingBehaviorNodeTag] = useState("");
   const [missionBtFiles, setMissionBtFiles] = useState({});
   const [deletedMissionBtPaths, setDeletedMissionBtPaths] = useState([]);
-  const [
-    missionFlowNodes,
-    setMissionFlowNodes,
-    onMissionFlowNodesChange,
-  ] = useNodesState([]);
-  const [
-    missionFlowEdges,
-    setMissionFlowEdges,
-    onMissionFlowEdgesChange,
-  ] = useEdgesState([]);
+  const [missionFlowNodes, setMissionFlowNodes] = useState([]);
+  const [missionFlowEdges, setMissionFlowEdges] = useState([]);
+  const [missionRouteMode, setMissionRouteMode] = useState(false);
+  const [missionRouteSourceId, setMissionRouteSourceId] = useState("");
   const [missionBtLoadingPath, setMissionBtLoadingPath] = useState("");
   const [busy, setBusy] = useState("");
   const [message, setMessage] = useState("Ready");
@@ -1862,6 +1771,24 @@ export default function MissionCanvasPage() {
     () => spots.map((spot) => spotForMapDisplay(spot, displayedMap)),
     [displayedMap, spots],
   );
+  const missionRouteEdges = useMemo(
+    () => filterMissionFlowEdges(missionFlowEdges, visibleSpots),
+    [missionFlowEdges, visibleSpots],
+  );
+  const missionRouteOrder = useMemo(
+    () => {
+      if (missionRouteEdges.length === 0) return [];
+      return orderedSpotsFromMissionFlow(
+        visibleSpots,
+        missionFlowNodes,
+        missionRouteEdges,
+      ).map((spot, index) => ({
+        id: spot.id,
+        order: index + 1,
+      }));
+    },
+    [missionFlowNodes, missionRouteEdges, visibleSpots],
+  );
   const selectedBtLayerSpot = useMemo(
     () => visibleSpots.find((spot) => spot.id === btLayerSpotId) || null,
     [btLayerSpotId, visibleSpots],
@@ -1921,6 +1848,14 @@ export default function MissionCanvasPage() {
       setInteractionMode("view");
     }
   }, [btNodeIsUp, interactionMode, showWaypointOptions]);
+
+  useEffect(() => {
+    if (workspaceStage === STAGE_AUTHORING && designMapAvailable && !btNodeIsUp) {
+      return;
+    }
+    setMissionRouteMode(false);
+    setMissionRouteSourceId("");
+  }, [btNodeIsUp, designMapAvailable, workspaceStage]);
 
   const layerToggles = useMemo(() => (
     STAGE_LAYER_IDS[workspaceStage].map((id) => ({
@@ -2639,42 +2574,86 @@ export default function MissionCanvasPage() {
     }
   }, [btNodeIsUp, workspaceStage]);
 
-  const handleMissionFlowConnect = useCallback((connection) => {
-    const { source, target } = connection;
-    if (!source || !target || source === target) return;
-    setMissionFlowEdges((current) => {
-      if (current.some((edge) => edge.source === source && edge.target === target)) {
-        return current;
+  const handleToggleMissionRouteMode = useCallback(() => {
+    if (btNodeIsUp) {
+      setMessage("Deactivate BT before editing mission route");
+      return;
+    }
+    if (!designMapAvailable) {
+      setMessage("Load a mission before editing mission route");
+      return;
+    }
+    setWorkspaceStage(STAGE_AUTHORING);
+    setPendingBehaviorNodeTag("");
+    setShowWaypointOptions(false);
+    setBtLayerSpotId("");
+    setInteractionMode("view");
+    setMissionRouteMode((value) => {
+      const next = !value;
+      if (!next) {
+        setMissionRouteSourceId("");
       }
-      return addEdge({
-        ...connection,
-        id: missionFlowEdgeId(source, target),
-        type: "smoothstep",
-        animated: false,
-      }, current);
+      return next;
     });
-  }, [setMissionFlowEdges]);
+  }, [btNodeIsUp, designMapAvailable]);
 
-  const handleMissionFlowWaypointDrop = useCallback((spotId, position) => {
+  const handleMissionRouteSpotClick = useCallback((spotId) => {
     const spot = visibleSpots.find((item) => item.id === spotId);
     if (!spot) return;
-    setMissionFlowNodes((current) => {
-      const nextNode = missionFlowNodeForSpot(spot, current.length, position);
-      if (current.some((node) => node.id === spotId)) {
-        return current.map((node) => (
-          node.id === spotId
-            ? {
-              ...node,
-              position,
-              data: nextNode.data,
-            }
-            : node
-        ));
+    setSelectedSpotId(spotId);
+    setSelectedBehaviorNodeId("");
+    setPendingBehaviorNodeTag("");
+    setEditingSpotId("");
+    setEditingSpotLabel("");
+    setBtLayerSpotId("");
+    setShowWaypointOptions(false);
+    setInteractionMode("view");
+    if (!missionRouteMode || btNodeIsUp) return;
+    if (!missionRouteSourceId) {
+      setMissionRouteSourceId(spotId);
+      setMessage(`Route start: ${spot.label || spot.id}`);
+      return;
+    }
+    if (missionRouteSourceId === spotId) {
+      setMissionRouteSourceId("");
+      setMessage(`Route source cleared`);
+      return;
+    }
+    const sourceSpot = visibleSpots.find((item) => item.id === missionRouteSourceId);
+    setMissionFlowEdges((current) => {
+      const result = connectMissionFlowEdge(current, missionRouteSourceId, spotId);
+      if (!result.changed) {
+        setMessage(result.reason === "cycle"
+          ? "Route cannot loop back to an earlier waypoint"
+          : "Select a different waypoint");
+        return current;
       }
-      return [...current, nextNode];
+      setMessage(`Route: ${sourceSpot?.label || missionRouteSourceId} -> ${spot.label || spot.id}`);
+      return result.edges;
     });
-    handleSelectSpot(spotId);
-  }, [handleSelectSpot, setMissionFlowNodes, visibleSpots]);
+    setMissionRouteSourceId(spotId);
+  }, [btNodeIsUp, missionRouteMode, missionRouteSourceId, visibleSpots]);
+
+  const handleMissionRouteEdgeClick = useCallback((edgeId, source, target) => {
+    if (!missionRouteMode || btNodeIsUp) return;
+    setMissionFlowEdges((current) => current.filter((edge) => (
+      edge.id !== edgeId && !(edge.source === source && edge.target === target)
+    )));
+    setMissionRouteSourceId(source || "");
+    setMessage("Route link removed");
+  }, [btNodeIsUp, missionRouteMode]);
+
+  const handleMissionRouteMapClick = useCallback(() => {
+    if (!missionRouteMode) return;
+    setMissionRouteSourceId("");
+    setMessage("Route source cleared");
+  }, [missionRouteMode]);
+
+  const handleClearMissionRoute = useCallback(() => {
+    setMissionFlowEdges([]);
+    setMissionRouteSourceId("");
+    setMessage("Mission route cleared");
+  }, []);
 
   const handleClearMapSelection = useCallback(() => {
     if (btLayerSpotId) {
@@ -3270,12 +3249,32 @@ export default function MissionCanvasPage() {
               >
                 Save Mission
               </ActionButton>
+              <ActionButton
+                active={missionRouteMode}
+                disabled={!!busy || !designMapAvailable || btNodeIsUp}
+                onClick={handleToggleMissionRouteMode}
+                title={btNodeIsUp ? "Deactivate BT before editing mission route" : undefined}
+                variant="secondary"
+              >
+                Mission Route
+              </ActionButton>
+              {missionRouteMode && (
+                <ActionButton
+                  disabled={!!busy || missionRouteEdges.length === 0}
+                  onClick={handleClearMissionRoute}
+                  variant="secondary"
+                >
+                  Clear Route
+                </ActionButton>
+              )}
               <div className="flex items-center gap-1">
                 <ActionButton
                   active={showWaypointOptions || interactionMode === "spot"}
-                  disabled={!designMapAvailable || btNodeIsUp}
+                  disabled={!designMapAvailable || btNodeIsUp || missionRouteMode}
                   onClick={handleToggleWaypointOptions}
-                  title={btNodeIsUp ? "Deactivate BT before editing waypoints" : undefined}
+                  title={btNodeIsUp
+                    ? "Deactivate BT before editing waypoints"
+                    : missionRouteMode ? "Turn off Mission Route before editing waypoints" : undefined}
                   variant="secondary"
                 >
                   Create Waypoint
@@ -3292,7 +3291,7 @@ export default function MissionCanvasPage() {
                   >
                     <ActionButton
                       active={interactionMode === "spot"}
-                      disabled={!designMapAvailable || btNodeIsUp}
+                      disabled={!designMapAvailable || btNodeIsUp || missionRouteMode}
                       onClick={handleToggleSpotMode}
                       variant="secondary"
                     >
@@ -3300,7 +3299,7 @@ export default function MissionCanvasPage() {
                     </ActionButton>
                     <ActionButton
                       active={interactionMode === "initial" || busy === "At Robot"}
-                      disabled={!!busy || !designMapAvailable || btNodeIsUp}
+                      disabled={!!busy || !designMapAvailable || btNodeIsUp || missionRouteMode}
                       onClick={handleCreateSpotAtRobot}
                       variant="secondary"
                     >
@@ -3344,12 +3343,7 @@ export default function MissionCanvasPage() {
 
         <div className="flex-1 min-h-0 grid grid-cols-1 xl:grid-cols-[minmax(520px,1fr)_360px] gap-4">
         <section
-          className={[
-            "min-h-0 overflow-hidden grid gap-4",
-            workspaceStage === STAGE_AUTHORING
-              ? "grid-rows-[minmax(0,1fr)_180px]"
-              : "grid-rows-[minmax(0,1fr)]",
-          ].join(" ")}
+          className="min-h-0 overflow-hidden grid gap-4 grid-rows-[minmax(0,1fr)]"
         >
           <MapViewer
             map={displayedMap}
@@ -3366,6 +3360,10 @@ export default function MissionCanvasPage() {
             behaviorNodes={missionOverlayActive ? activeBehaviorNodes : []}
             selectedBehaviorNodeId={missionOverlayActive ? selectedBehaviorNodeId : ""}
             behaviorPreviewNode={missionOverlayActive ? behaviorPreviewNode : null}
+            missionRouteEdges={missionOverlayActive ? missionRouteEdges : []}
+            missionRouteOrder={missionOverlayActive ? missionRouteOrder : []}
+            missionRouteMode={workspaceStage === STAGE_AUTHORING && missionRouteMode && !btNodeIsUp}
+            selectedMissionRouteSourceId={missionRouteSourceId}
             btLayer={waypointBtLayer}
             showMap={mappingEditorActive ? true : activeLayers.map}
             showGlobalCostmap={mappingEditorActive ? false : needsGlobalCostmap}
@@ -3395,28 +3393,18 @@ export default function MissionCanvasPage() {
               : workspaceStage === STAGE_AUTHORING
                 ? designMapActive ? "Loading selected map" : "Load a map"
                 : running ? "Waiting for /map" : "Run Mission to view /map"}
-            onSpotClick={handleSelectSpot}
+            onSpotClick={missionRouteMode ? handleMissionRouteSpotClick : handleSelectSpot}
             onBehaviorNodeClick={handleSelectBehaviorNode}
-            onSpotPoseChange={btNodeIsUp ? undefined : handleMoveSpot}
+            onMissionRouteSpotClick={handleMissionRouteSpotClick}
+            onMissionRouteEdgeClick={handleMissionRouteEdgeClick}
+            onMissionRouteMapClick={handleMissionRouteMapClick}
+            onSpotPoseChange={btNodeIsUp || missionRouteMode ? undefined : handleMoveSpot}
             onBehaviorNodePoseChange={handleMoveBehaviorNode}
             onEditorMapPoint={mapEditor.editAtMapPoint}
             onMapClick={handleClearMapSelection}
             onMapPose={handleCreateSpotAtPose}
             onBtLayerClose={() => setBtLayerSpotId("")}
           />
-          {workspaceStage === STAGE_AUTHORING && (
-            <MissionFlowPanel
-              spots={spots}
-              selectedSpotId={selectedSpotId}
-              nodes={missionFlowNodes}
-              edges={missionFlowEdges}
-              onNodesChange={onMissionFlowNodesChange}
-              onEdgesChange={onMissionFlowEdgesChange}
-              onConnect={handleMissionFlowConnect}
-              onWaypointDrop={handleMissionFlowWaypointDrop}
-              onSpotSelect={handleSelectSpot}
-            />
-          )}
         </section>
 
         {workspaceStage === STAGE_AUTHORING ? (
@@ -3532,13 +3520,8 @@ export default function MissionCanvasPage() {
                           ) : (
                             <button
                               type="button"
-                              draggable
                               onClick={() => handleSelectSpot(spot.id)}
                               onDoubleClick={() => handleStartRenameSpot(spot)}
-                              onDragStart={(event) => {
-                                event.dataTransfer.setData(MISSION_WAYPOINT_DRAG_MIME, spot.id);
-                                event.dataTransfer.effectAllowed = "move";
-                              }}
                               className="h-8 flex-1 px-2 border rounded-md text-left text-xs min-w-0"
                               style={{
                                 color: selected ? "var(--vscode-button-foreground)" : MISSION_TEXT,

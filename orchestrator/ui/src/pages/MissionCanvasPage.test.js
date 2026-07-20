@@ -320,8 +320,7 @@ test('shows Waypoint and BT authoring panels in the authoring stage', async () =
 
   fireEvent.click(screen.getByRole('tab', { name: 'Design' }));
 
-  expect(screen.getByText('Mission Flow')).toBeInTheDocument();
-  expect(screen.getAllByText('No waypoints for this map yet.').length).toBeGreaterThan(0);
+  expect(screen.queryByText('Mission Flow')).not.toBeInTheDocument();
   expect(screen.queryByText('Properties')).not.toBeInTheDocument();
   expect(screen.getByText('BT Runtime')).toBeInTheDocument();
   expect(screen.getByText('BT Node Unknown')).toBeInTheDocument();
@@ -332,6 +331,7 @@ test('shows Waypoint and BT authoring panels in the authoring stage', async () =
   expect(screen.getByText('Waypoints')).toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Load Mission' })).toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Save Mission' })).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Mission Route' })).toBeDisabled();
   expect(screen.getByRole('button', { name: 'Create Waypoint' })).toBeDisabled();
   expect(screen.queryByRole('menu', { name: 'Waypoint creation options' })).not.toBeInTheDocument();
   expect(screen.queryByRole('button', { name: 'At Robot' })).not.toBeInTheDocument();
@@ -352,6 +352,8 @@ test('shows Waypoint and BT authoring panels in the authoring stage', async () =
   expect(getPgmImage).not.toHaveBeenCalled();
   expect(latestMapViewerProps().map).toBeNull();
   expect(latestMapViewerProps().waitingLabel).toBe('Load a map');
+  expect(latestMapViewerProps().missionRouteEdges).toEqual([]);
+  expect(latestMapViewerProps().missionRouteOrder).toEqual([]);
 });
 
 test('controls BT node lifecycle from the design stage', async () => {
@@ -556,7 +558,8 @@ test('restores mission manifest waypoints before legacy spots', async () => {
       local_bt: 'locals/mission_pickup.xml',
     },
   });
-  expect(screen.getByText('locals/mission_pickup.xml')).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Mission Pickup' })).toBeInTheDocument();
+  expect(latestMapViewerProps().missionRouteEdges).toEqual([]);
   expect(screen.queryByText('legacy.xml')).not.toBeInTheDocument();
   expect(getNavigationSpots.mock.calls.some(([mapName]) => mapName === 'factory')).toBe(false);
   expect(getNavigationMissionBtFile).toHaveBeenCalledWith('factory', 'global.xml');
@@ -1171,7 +1174,7 @@ test('creates a waypoint at the current robot pose from the design toolbar', asy
   await waitFor(() => expect(screen.getByText('Created Waypoint A at robot')).toBeInTheDocument());
 });
 
-test('renders waypoint sequence in the mission flow panel', async () => {
+test('edits the mission route directly on the map', async () => {
   const latestMapViewerProps = () => (
     mockMapViewer.mock.calls[mockMapViewer.mock.calls.length - 1][0]
   );
@@ -1180,14 +1183,24 @@ test('renders waypoint sequence in the mission flow panel', async () => {
   });
   getNavigationSpots.mockImplementation((mapName) => Promise.resolve({
     map_name: mapName,
-    spots: mapName === 'map' ? [{
-      id: 'spot_a',
-      map_name: 'map',
-      label: 'Waypoint A',
-      pose: { frame_id: 'map', x: 1, y: 2, yaw: 0 },
-      linked_bt_tree: 'waypoint_a.xml',
-      metadata: {},
-    }] : [],
+    spots: mapName === 'map' ? [
+      {
+        id: 'spot_a',
+        map_name: 'map',
+        label: 'Waypoint A',
+        pose: { frame_id: 'map', x: 1, y: 2, yaw: 0 },
+        linked_bt_tree: 'waypoint_a.xml',
+        metadata: {},
+      },
+      {
+        id: 'spot_b',
+        map_name: 'map',
+        label: 'Waypoint B',
+        pose: { frame_id: 'map', x: 3, y: 4, yaw: 0.5 },
+        linked_bt_tree: 'waypoint_b.xml',
+        metadata: {},
+      },
+    ] : [],
   }));
 
   render(<MissionCanvasPage />);
@@ -1197,15 +1210,58 @@ test('renders waypoint sequence in the mission flow panel', async () => {
   await screen.findByRole('combobox', { name: 'Design mission map file' });
   fireEvent.click(screen.getByRole('button', { name: 'Load' }));
   await waitFor(() => expect(latestMapViewerProps().map).not.toBeNull());
-  await waitFor(() => expect(latestMapViewerProps().spots).toHaveLength(1));
+  await waitFor(() => expect(latestMapViewerProps().spots).toHaveLength(2));
 
-  expect(screen.getByText('Mission Flow')).toBeInTheDocument();
   expect(screen.getAllByText('Waypoint A').length).toBeGreaterThan(0);
-  expect(screen.getByText('waypoint_a.xml')).toBeInTheDocument();
+  expect(screen.getAllByText('Waypoint B').length).toBeGreaterThan(0);
+  await waitFor(() => expect(latestMapViewerProps().missionRouteEdges).toEqual([
+    expect.objectContaining({ source: 'spot_a', target: 'spot_b' }),
+  ]));
+  expect(latestMapViewerProps().missionRouteOrder).toEqual([
+    { id: 'spot_a', order: 1 },
+    { id: 'spot_b', order: 2 },
+  ]);
 
-  fireEvent.click(screen.getByRole('button', { name: 'Waypoint A' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Mission Route' }));
 
-  await waitFor(() => expect(latestMapViewerProps().selectedSpotId).toBe('spot_a'));
+  await waitFor(() => expect(latestMapViewerProps().missionRouteMode).toBe(true));
+  expect(latestMapViewerProps().onSpotPoseChange).toBeUndefined();
+
+  fireEvent.click(screen.getByRole('button', { name: 'Clear Route' }));
+  await waitFor(() => expect(latestMapViewerProps().missionRouteEdges).toEqual([]));
+
+  act(() => {
+    latestMapViewerProps().onMissionRouteSpotClick('spot_b');
+  });
+  await waitFor(() => expect(latestMapViewerProps().selectedMissionRouteSourceId).toBe('spot_b'));
+
+  act(() => {
+    latestMapViewerProps().onMissionRouteSpotClick('spot_a');
+  });
+  await waitFor(() => expect(latestMapViewerProps().missionRouteEdges).toEqual([
+    expect.objectContaining({ source: 'spot_b', target: 'spot_a' }),
+  ]));
+  expect(latestMapViewerProps().missionRouteOrder).toEqual([
+    { id: 'spot_b', order: 1 },
+    { id: 'spot_a', order: 2 },
+  ]);
+
+  fireEvent.click(screen.getByRole('button', { name: 'Save Mission' }));
+
+  await waitFor(() => expect(saveNavigationMission).toHaveBeenCalledWith(
+    'map',
+    expect.objectContaining({
+      waypoints: [
+        expect.objectContaining({ id: 'spot_b' }),
+        expect.objectContaining({ id: 'spot_a' }),
+      ],
+      metadata: expect.objectContaining({
+        mission_flow: expect.objectContaining({
+          edges: [expect.objectContaining({ source: 'spot_b', target: 'spot_a' })],
+        }),
+      }),
+    }),
+  ));
   expect(screen.queryByRole('button', { name: 'Create BT' })).not.toBeInTheDocument();
   expect(screen.queryByRole('button', { name: 'Edit BT' })).not.toBeInTheDocument();
 });

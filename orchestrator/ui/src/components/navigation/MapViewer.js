@@ -37,6 +37,7 @@ const WAYPOINT_HEADING_HEAD_WIDTH = 2.84;
 const WAYPOINT_LABEL_OFFSET_Y = 7.2;
 const WAYPOINT_LABEL_SCALE_X = 24;
 const WAYPOINT_LABEL_SCALE_Y = 6;
+const MISSION_ROUTE_HIT_WIDTH = 0.42;
 const BT_FOCUS_VISIBLE_HEIGHT_MIN = 5;
 const BT_FOCUS_VISIBLE_HEIGHT_MAX = 11;
 const BT_FOCUS_WAYPOINT_NDC_X = -0.75;
@@ -402,6 +403,111 @@ function makeSpotMarker(spot, selected = false, scale = 1) {
     }
     return group;
 }
+function makeRouteBadgeSprite(text, selected = false) {
+    const canvas = document.createElement("canvas");
+    canvas.width = 128;
+    canvas.height = 128;
+    const ctx = canvas.getContext("2d");
+    if (ctx) {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.beginPath();
+        ctx.arc(64, 64, 52, 0, Math.PI * 2);
+        ctx.fillStyle = selected ? "#f59e0b" : "#2563eb";
+        ctx.fill();
+        ctx.lineWidth = 8;
+        ctx.strokeStyle = "#ffffff";
+        ctx.stroke();
+        ctx.fillStyle = "#ffffff";
+        ctx.font = "800 58px sans-serif";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText(String(text), 64, 66);
+    }
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    return new THREE.Sprite(new THREE.SpriteMaterial({ map: texture, transparent: true }));
+}
+function makeMissionRouteBadge(spot, order, selected = false, scale = 1) {
+    var _a, _b;
+    const pose = spot === null || spot === void 0 ? void 0 : spot.pose;
+    if (!pose)
+        return null;
+    const x = Number((_a = pose.x) !== null && _a !== void 0 ? _a : 0);
+    const y = Number((_b = pose.y) !== null && _b !== void 0 ? _b : 0);
+    const sprite = makeRouteBadgeSprite(order, selected);
+    const size = Math.max(0.34, WAYPOINT_RING_OUTER_RADIUS * scale * 2.2);
+    sprite.position.set(x, y, 0.62);
+    sprite.scale.set(size, size, 1);
+    sprite.userData = { spotId: spot.id, dragAction: "move" };
+    return sprite;
+}
+function makeMissionRouteEdge(sourceSpot, targetSpot, edge, scale = 1) {
+    var _a, _b, _c, _d;
+    const sourcePose = sourceSpot === null || sourceSpot === void 0 ? void 0 : sourceSpot.pose;
+    const targetPose = targetSpot === null || targetSpot === void 0 ? void 0 : targetSpot.pose;
+    if (!sourcePose || !targetPose)
+        return null;
+    const sourceX = Number((_a = sourcePose.x) !== null && _a !== void 0 ? _a : 0);
+    const sourceY = Number((_b = sourcePose.y) !== null && _b !== void 0 ? _b : 0);
+    const targetX = Number((_c = targetPose.x) !== null && _c !== void 0 ? _c : 0);
+    const targetY = Number((_d = targetPose.y) !== null && _d !== void 0 ? _d : 0);
+    const dx = targetX - sourceX;
+    const dy = targetY - sourceY;
+    const length = Math.hypot(dx, dy);
+    if (!Number.isFinite(length) || length < 0.001)
+        return null;
+    const unitX = dx / length;
+    const unitY = dy / length;
+    const markerPadding = Math.min(length * 0.35, Math.max(0.18, WAYPOINT_RING_OUTER_RADIUS * scale * 1.2));
+    const start = new THREE.Vector3(sourceX + unitX * markerPadding, sourceY + unitY * markerPadding, 0.34);
+    const end = new THREE.Vector3(targetX - unitX * markerPadding, targetY - unitY * markerPadding, 0.34);
+    const visibleLength = start.distanceTo(end);
+    if (visibleLength < 0.001)
+        return null;
+    const group = new THREE.Group();
+    group.userData = {
+        missionRouteEdgeId: edge.id,
+        source: edge.source,
+        target: edge.target,
+    };
+    const line = makeLine([start, end], 0x2563eb, 5);
+    if (line) {
+        line.userData = group.userData;
+        group.add(line);
+    }
+    const angle = Math.atan2(unitY, unitX);
+    const arrowLength = Math.max(0.3, WAYPOINT_HEADING_HEAD_LENGTH * scale * 4.8);
+    const arrowWidth = arrowLength * 0.72;
+    const arrowShape = new THREE.Shape();
+    arrowShape.moveTo(arrowLength / 2, 0);
+    arrowShape.lineTo(-arrowLength / 2, arrowWidth / 2);
+    arrowShape.lineTo(-arrowLength / 2, -arrowWidth / 2);
+    arrowShape.closePath();
+    const arrow = new THREE.Mesh(new THREE.ShapeGeometry(arrowShape), new THREE.MeshBasicMaterial({
+        color: 0x2563eb,
+        transparent: true,
+        opacity: 0.96,
+        side: THREE.DoubleSide,
+    }));
+    arrow.position.set(end.x - unitX * arrowLength * 0.5, end.y - unitY * arrowLength * 0.5, 0.36);
+    arrow.rotation.z = angle;
+    arrow.userData = group.userData;
+    group.add(arrow);
+    const hitLength = Math.max(visibleLength, MISSION_ROUTE_HIT_WIDTH);
+    const hitWidth = Math.max(MISSION_ROUTE_HIT_WIDTH, WAYPOINT_RING_OUTER_RADIUS * scale * 2.2);
+    const hitTarget = new THREE.Mesh(new THREE.PlaneGeometry(hitLength, hitWidth), new THREE.MeshBasicMaterial({
+        color: 0xffffff,
+        transparent: true,
+        opacity: 0,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+    }));
+    hitTarget.position.set((start.x + end.x) / 2, (start.y + end.y) / 2, 0.38);
+    hitTarget.rotation.z = angle;
+    hitTarget.userData = group.userData;
+    group.add(hitTarget);
+    return group;
+}
 function behaviorNodeColor(category, selected = false) {
     if (selected)
         return 0xf59e0b;
@@ -654,7 +760,7 @@ function WaypointBtFocusLayer({ layer, onClose }) {
       </div>
     </section>);
 }
-export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, goalPose, footprint, tf, showMap, showGlobalCostmap, showLocalCostmap, showScan, showGlobalPlan, showGoalPose, showTf, showRobotModel, interactionDisabled, interactionMode, editorActive, viewKey, waitingLabel = "Waiting for /map", fitContainer = false, spots = [], selectedSpotId = "", behaviorNodes = [], selectedBehaviorNodeId = "", behaviorPreviewNode = null, btLayer = null, onBtLayerClose, onSpotClick, onBehaviorNodeClick, onSpotPoseChange, onBehaviorNodePoseChange, onEditorMapPoint, onMapClick, onMapPose, }) {
+export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, goalPose, footprint, tf, showMap, showGlobalCostmap, showLocalCostmap, showScan, showGlobalPlan, showGoalPose, showTf, showRobotModel, interactionDisabled, interactionMode, editorActive, viewKey, waitingLabel = "Waiting for /map", fitContainer = false, spots = [], selectedSpotId = "", behaviorNodes = [], selectedBehaviorNodeId = "", behaviorPreviewNode = null, missionRouteEdges = [], missionRouteOrder = [], missionRouteMode = false, selectedMissionRouteSourceId = "", btLayer = null, onBtLayerClose, onSpotClick, onBehaviorNodeClick, onMissionRouteSpotClick, onMissionRouteEdgeClick, onMissionRouteMapClick, onSpotPoseChange, onBehaviorNodePoseChange, onEditorMapPoint, onMapClick, onMapPose, }) {
     const containerRef = useRef(null);
     const sceneRef = useRef(null);
     const rendererRef = useRef(null);
@@ -926,6 +1032,12 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, 
                 layers.add(makePoseMarker(dragPreviewPose, interactionMode === "initial" ? 0x22c55e : 0xf59e0b, 0.2));
             }
         }
+        const spotById = new Map(spots.map((spot) => [spot.id, spot]));
+        missionRouteEdges.forEach((edge) => {
+            const routeEdge = makeMissionRouteEdge(spotById.get(edge.source), spotById.get(edge.target), edge, waypointScale);
+            if (routeEdge)
+                layers.add(routeEdge);
+        });
         spots.forEach((spot) => {
             const preview = (nodeDragPreview === null || nodeDragPreview === void 0 ? void 0 : nodeDragPreview.type) === "spot" && nodeDragPreview.id === spot.id
                 ? nodeDragPreview
@@ -943,6 +1055,12 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, 
                 : spot, spot.id === selectedSpotId, waypointScale);
             if (marker)
                 layers.add(marker);
+        });
+        missionRouteOrder.forEach(({ id, order }) => {
+            const spot = spotById.get(id);
+            const badge = makeMissionRouteBadge(spot, order, id === selectedMissionRouteSourceId, waypointScale);
+            if (badge)
+                layers.add(badge);
         });
         behaviorNodes.forEach((node) => {
             const preview = (nodeDragPreview === null || nodeDragPreview === void 0 ? void 0 : nodeDragPreview.type) === "behaviorNode" && nodeDragPreview.id === node.id
@@ -1030,6 +1148,9 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, 
         nodeDragPreview,
         goalPose,
         interactionMode,
+        missionRouteEdges,
+        missionRouteOrder,
+        selectedMissionRouteSourceId,
         behaviorPreviewNode,
         localCostmap,
         map,
@@ -1098,6 +1219,13 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, 
             for (const hit of hits) {
                 let object = hit.object;
                 while (object) {
+                    if (missionRouteMode && object.userData && object.userData.missionRouteEdgeId && typeof onMissionRouteEdgeClick === "function")
+                        return {
+                            type: "missionRouteEdge",
+                            id: object.userData.missionRouteEdgeId,
+                            source: object.userData.source,
+                            target: object.userData.target,
+                        };
                     if (object.userData && object.userData.behaviorNodeId && typeof onBehaviorNodeClick === "function")
                         return { type: "behaviorNode", id: object.userData.behaviorNodeId, dragAction: "move" };
                     if (object.userData && object.userData.spotId && typeof onSpotClick === "function")
@@ -1194,14 +1322,20 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, 
                 if (target) {
                     event.preventDefault();
                     event.stopImmediatePropagation();
-                    if (target.type === "behaviorNode") {
+                    if (missionRouteMode && target.type === "missionRouteEdge" && typeof onMissionRouteEdgeClick === "function") {
+                        onMissionRouteEdgeClick(target.id, target.source, target.target);
+                    }
+                    else if (missionRouteMode && target.type === "spot" && typeof onMissionRouteSpotClick === "function") {
+                        onMissionRouteSpotClick(target.id);
+                    }
+                    else if (target.type === "behaviorNode") {
                         onBehaviorNodeClick(target.id);
                     }
                     else {
                         onSpotClick(target.id);
                     }
                     const point = mapPointFromEvent(event);
-                    const targetPose = point ? draggableTargetPose(target) : null;
+                    const targetPose = point && !missionRouteMode ? draggableTargetPose(target) : null;
                     if (point && targetPose) {
                         nodeDragRef.current = {
                             type: target.type,
@@ -1227,7 +1361,10 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, 
                 }
             }
             if (interactionDisabled || interactionMode === "view") {
-                if (!interactionDisabled && interactionMode === "view" && typeof onMapClick === "function") {
+                if (!interactionDisabled && interactionMode === "view" && missionRouteMode && typeof onMissionRouteMapClick === "function") {
+                    onMissionRouteMapClick();
+                }
+                else if (!interactionDisabled && interactionMode === "view" && typeof onMapClick === "function") {
                     const point = mapPointFromEvent(event);
                     if (point) {
                         onMapClick(point.x, point.y);
@@ -1408,11 +1545,15 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, 
         interactionDisabled,
         interactionMode,
         map,
+        missionRouteMode,
         onBehaviorNodeClick,
         onBehaviorNodePoseChange,
         onEditorMapPoint,
         onMapPose,
         onMapClick,
+        onMissionRouteEdgeClick,
+        onMissionRouteMapClick,
+        onMissionRouteSpotClick,
         onSpotClick,
         onSpotPoseChange,
         pose,
