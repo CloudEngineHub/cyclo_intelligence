@@ -387,8 +387,7 @@ As of the first Mission Canvas implementation slice, the repository contains:
   by default, overrideable with CYCLO_NAVIGATION_DATA_DIR.
 - Mission artifact persistence under /workspace/navigation/missions/<map_name>/:
   - mission.json
-  - global.xml
-  - compiled.xml
+  - global.xml (executable global mission BT)
   - locals/<waypoint_id>.xml
 - MapViewer Spot marker overlay with click selection.
 - MapViewer Behavior node marker overlay with click selection.
@@ -470,7 +469,6 @@ Recommended storage shape:
    └─ <map_name>/
       ├─ mission.json
       ├─ global.xml
-      ├─ compiled.xml
       └─ locals/
          └─ <waypoint_id>.xml
 ```

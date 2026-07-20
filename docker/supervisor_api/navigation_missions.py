@@ -59,7 +59,6 @@ class MissionManifest(BaseModel):
     schema_version: int = MISSION_SCHEMA_VERSION
     map_name: str = Field(min_length=1, max_length=128)
     global_bt: str = Field(default="global.xml", max_length=256)
-    compiled_bt: str = Field(default="compiled.xml", max_length=256)
     waypoints: list[MissionWaypoint] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
@@ -70,7 +69,6 @@ class MissionLoadResponse(MissionManifest):
 
 class MissionSaveRequest(BaseModel):
     global_bt: str = Field(default="global.xml", max_length=256)
-    compiled_bt: str = Field(default="compiled.xml", max_length=256)
     waypoints: list[MissionWaypoint] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
@@ -130,7 +128,6 @@ def _empty_manifest(map_name: str) -> MissionLoadResponse:
         schema_version=MISSION_SCHEMA_VERSION,
         map_name=normalized,
         global_bt="global.xml",
-        compiled_bt="compiled.xml",
         waypoints=[],
         metadata={},
     )
@@ -161,7 +158,6 @@ def _normalize_manifest(
     map_name: str,
     *,
     global_bt: str,
-    compiled_bt: str,
     waypoints: list[MissionWaypoint],
     metadata: dict[str, Any],
     exists: bool,
@@ -172,7 +168,6 @@ def _normalize_manifest(
         schema_version=MISSION_SCHEMA_VERSION,
         map_name=normalized_map,
         global_bt=_validate_relative_file(global_bt, default="global.xml"),
-        compiled_bt=_validate_relative_file(compiled_bt, default="compiled.xml"),
         waypoints=[_normalize_waypoint(waypoint) for waypoint in waypoints],
         metadata=metadata,
     )
@@ -204,7 +199,6 @@ def _read_manifest(map_name: str) -> MissionLoadResponse:
     return _normalize_manifest(
         normalized,
         global_bt=str(raw.get("global_bt") or "global.xml"),
-        compiled_bt=str(raw.get("compiled_bt") or "compiled.xml"),
         waypoints=waypoints,
         metadata=raw.get("metadata") if isinstance(raw.get("metadata"), dict) else {},
         exists=True,
@@ -250,7 +244,6 @@ def save_mission(map_name: str, request: MissionSaveRequest):
     manifest = _normalize_manifest(
         map_name,
         global_bt=request.global_bt,
-        compiled_bt=request.compiled_bt,
         waypoints=request.waypoints,
         metadata=request.metadata,
         exists=True,

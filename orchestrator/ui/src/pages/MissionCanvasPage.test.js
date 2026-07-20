@@ -113,7 +113,6 @@ jest.mock('../utils/navigationMissionsApi', () => ({
     exists: false,
     map_name: 'map',
     global_bt: 'global.xml',
-    compiled_bt: 'compiled.xml',
     waypoints: [],
     metadata: {},
   }),
@@ -126,7 +125,6 @@ jest.mock('../utils/navigationMissionsApi', () => ({
     exists: true,
     map_name: 'map',
     global_bt: 'global.xml',
-    compiled_bt: 'compiled.xml',
     waypoints: [],
     metadata: {},
   }),
@@ -190,7 +188,6 @@ beforeEach(() => {
     exists: false,
     map_name: 'map',
     global_bt: 'global.xml',
-    compiled_bt: 'compiled.xml',
     waypoints: [],
     metadata: {},
   });
@@ -203,7 +200,6 @@ beforeEach(() => {
     exists: true,
     map_name: 'map',
     global_bt: 'global.xml',
-    compiled_bt: 'compiled.xml',
     waypoints: [],
     metadata: {},
   });
@@ -493,7 +489,6 @@ test('restores mission manifest waypoints before legacy spots', async () => {
         exists: true,
         map_name: 'factory',
         global_bt: 'global.xml',
-        compiled_bt: 'compiled.xml',
         waypoints: [{
           id: 'mission_pickup',
           label: 'Mission Pickup',
@@ -507,7 +502,6 @@ test('restores mission manifest waypoints before legacy spots', async () => {
         exists: false,
         map_name: mapName,
         global_bt: 'global.xml',
-        compiled_bt: 'compiled.xml',
         waypoints: [],
         metadata: {},
       },
@@ -560,7 +554,6 @@ test('restores mission manifest waypoints before legacy spots', async () => {
   expect(screen.queryByText('legacy.xml')).not.toBeInTheDocument();
   expect(getNavigationSpots.mock.calls.some(([mapName]) => mapName === 'factory')).toBe(false);
   expect(getNavigationMissionBtFile).toHaveBeenCalledWith('factory', 'global.xml');
-  expect(getNavigationMissionBtFile).toHaveBeenCalledWith('factory', 'compiled.xml');
   expect(getNavigationMissionBtFile).toHaveBeenCalledWith('factory', 'locals/mission_pickup.xml');
 });
 
@@ -723,7 +716,6 @@ test('shows waypoint actions in Design Objects after placing a waypoint', async 
     'factory',
     expect.objectContaining({
       global_bt: 'global.xml',
-      compiled_bt: 'compiled.xml',
       waypoints: [
         expect.objectContaining({
           id: 'spot_a',
@@ -742,12 +734,12 @@ test('shows waypoint actions in Design Objects after placing a waypoint', async 
   await waitFor(() => expect(saveNavigationMissionBtFile).toHaveBeenCalledWith(
     'factory',
     'global.xml',
-    expect.stringContaining('<MissionWaypoint'),
+    expect.stringContaining('<MissionStep'),
   ));
-  expect(saveNavigationMissionBtFile).toHaveBeenCalledWith(
+  expect(saveNavigationMissionBtFile).not.toHaveBeenCalledWith(
     'factory',
     'compiled.xml',
-    expect.stringContaining('<MissionStep'),
+    expect.any(String),
   );
   expect(saveNavigationMissionBtFile).toHaveBeenCalledWith(
     'factory',
@@ -1420,7 +1412,6 @@ test('loads a saved map for the run stage', async () => {
         exists: true,
         map_name: 'factory',
         global_bt: 'global.xml',
-        compiled_bt: 'compiled.xml',
         waypoints: [{
           id: 'run_waypoint',
           label: 'Run Waypoint',
@@ -1434,7 +1425,6 @@ test('loads a saved map for the run stage', async () => {
         exists: false,
         map_name: mapName,
         global_bt: 'global.xml',
-        compiled_bt: 'compiled.xml',
         waypoints: [],
         metadata: {},
       },

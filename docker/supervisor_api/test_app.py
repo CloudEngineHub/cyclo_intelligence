@@ -532,6 +532,7 @@ def test_navigation_mission_manifest_and_bt_files(monkeypatch, tmp_path):
     empty = navigation_missions.load_mission("factory")
     assert empty.exists is False
     assert empty.global_bt == "global.xml"
+    assert not hasattr(empty, "compiled_bt")
 
     saved = navigation_missions.save_mission(
         "factory",
@@ -547,6 +548,7 @@ def test_navigation_mission_manifest_and_bt_files(monkeypatch, tmp_path):
     )
     assert saved.exists is True
     assert saved.map_name == "factory"
+    assert not hasattr(saved, "compiled_bt")
     assert saved.waypoints[0].local_bt == "locals/table_a.xml"
 
     loaded = navigation_missions.load_mission("factory")

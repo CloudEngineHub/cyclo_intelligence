@@ -467,18 +467,13 @@ function missionSequenceXml(rootName, spots, stepTag) {
   ].join("\n");
 }
 
-function buildMissionFlowXml(spots) {
-  return missionSequenceXml("MissionFlow", spots, "MissionWaypoint");
-}
-
-function buildCompiledMissionXml(spots) {
-  return missionSequenceXml("CompiledMission", spots, "MissionStep");
+function buildGlobalMissionXml(spots) {
+  return missionSequenceXml("GlobalMission", spots, "MissionStep");
 }
 
 function missionBtFileDefaultsForSpots(spots) {
   const entries = {
-    "global.xml": buildMissionFlowXml(spots),
-    "compiled.xml": buildCompiledMissionXml(spots),
+    "global.xml": buildGlobalMissionXml(spots),
   };
   spots.forEach((spot) => {
     entries[localBtPathForSpot(spot)] = defaultLocalBtXml(spot);
@@ -2114,9 +2109,7 @@ export default function MissionCanvasPage() {
   ) => {
     const defaults = missionBtFileDefaultsForSpots(spotsForMission);
     const globalPath = manifest.global_bt || "global.xml";
-    const compiledPath = manifest.compiled_bt || "compiled.xml";
-    defaults[globalPath] = defaults[globalPath] || buildMissionFlowXml(spotsForMission);
-    defaults[compiledPath] = buildCompiledMissionXml(spotsForMission);
+    defaults[globalPath] = defaults[globalPath] || buildGlobalMissionXml(spotsForMission);
     const loadedEntries = await Promise.all(
       Object.entries(defaults).map(async ([path, fallback]) => [
         path,
@@ -2236,18 +2229,14 @@ export default function MissionCanvasPage() {
         },
       }));
       const globalPath = "global.xml";
-      const compiledPath = "compiled.xml";
-      const globalXml = buildMissionFlowXml(missionSpots);
-      const compiledXml = buildCompiledMissionXml(missionSpots);
+      const globalXml = buildGlobalMissionXml(missionSpots);
       const nextBtFiles = {
         ...missionBtFileDefaultsForSpots(missionSpots),
         ...missionBtFiles,
         [globalPath]: globalXml,
-        [compiledPath]: compiledXml,
       };
       await saveNavigationMission(currentMapName, {
         global_bt: globalPath,
-        compiled_bt: compiledPath,
         waypoints: missionWaypointsFromSpots(missionSpots),
         metadata: {
           source: "mission_canvas",
