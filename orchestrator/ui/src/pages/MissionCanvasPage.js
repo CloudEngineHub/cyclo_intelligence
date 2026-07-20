@@ -374,6 +374,41 @@ function missionWaypointsFromSpots(spots) {
   }));
 }
 
+function spotsFromMissionWaypoints(mapName, waypoints) {
+  if (!Array.isArray(waypoints)) return [];
+  return waypoints.map((waypoint) => {
+    const id = String(waypoint?.id || "").trim();
+    if (!id) return null;
+    const localBt = String(
+      waypoint.local_bt
+        || waypoint.metadata?.linked_bt_tree
+        || `locals/${id}.xml`,
+    ).trim();
+    const pose = waypoint.pose || {};
+    const metadata = waypoint.metadata && typeof waypoint.metadata === "object"
+      ? waypoint.metadata
+      : {};
+    return {
+      id,
+      map_name: mapName,
+      label: String(waypoint.label || id).trim() || id,
+      pose: {
+        frame_id: pose.frame_id || "map",
+        x: Number(pose.x ?? 0),
+        y: Number(pose.y ?? 0),
+        yaw: Number(pose.yaw ?? 0),
+      },
+      linked_bt_tree: localBt,
+      metadata: {
+        ...metadata,
+        source: metadata.source || "mission_manifest",
+        coordinate_space: metadata.coordinate_space || "map",
+        local_bt: localBt,
+      },
+    };
+  }).filter(Boolean);
+}
+
 function readMissionSession() {
   if (typeof window === "undefined" || !window.sessionStorage) return {};
   try {
@@ -1350,6 +1385,8 @@ export default function MissionCanvasPage() {
   const currentPoseRef = useRef(null);
   const amclPoseRef = useRef(null);
   const behaviorNodeSerialRef = useRef(0);
+  const skipNextSpotLoadForMapRef = useRef("");
+  const legacySpotLoadGenerationRef = useRef(0);
   const [mapName, setMapName] = useState(() => (
     typeof initialSession.mapName === "string" && initialSession.mapName.trim()
       ? initialSession.mapName
@@ -1689,17 +1726,40 @@ export default function MissionCanvasPage() {
     }
   }, []);
 
+  const applySpots = useCallback((nextSpots) => {
+    setSpots(nextSpots);
+    setSelectedSpotId((current) => (
+      nextSpots.some((spot) => spot.id === current) ? current : ""
+    ));
+    setBtLayerSpotId((current) => (
+      nextSpots.some((spot) => spot.id === current) ? current : ""
+    ));
+  }, []);
+
+  const loadLegacySpotsForMap = useCallback(async (targetMapName) => {
+    const normalizedMapName = String(targetMapName || "").trim() || DEFAULT_MAP_NAME;
+    const generation = legacySpotLoadGenerationRef.current + 1;
+    legacySpotLoadGenerationRef.current = generation;
+    const result = await getNavigationSpots(normalizedMapName);
+    const nextSpots = result.spots || [];
+    if (legacySpotLoadGenerationRef.current === generation) {
+      applySpots(nextSpots);
+    }
+    return nextSpots;
+  }, [applySpots]);
+
   const loadSpots = useCallback(async () => {
+    const targetMapName = mapName.trim() || DEFAULT_MAP_NAME;
+    if (skipNextSpotLoadForMapRef.current === targetMapName) {
+      skipNextSpotLoadForMapRef.current = "";
+      return;
+    }
     try {
-      const result = await getNavigationSpots(mapName.trim() || DEFAULT_MAP_NAME);
-      setSpots(result.spots || []);
-      setSelectedSpotId((current) => (
-        result.spots?.some((spot) => spot.id === current) ? current : ""
-      ));
+      await loadLegacySpotsForMap(targetMapName);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Failed to load waypoints");
     }
-  }, [mapName]);
+  }, [loadLegacySpotsForMap, mapName]);
 
   useEffect(() => {
     void loadStatus();
@@ -1874,6 +1934,33 @@ export default function MissionCanvasPage() {
     return true;
   }, []);
 
+  const loadMissionForMap = useCallback(async (targetMapName, { loadLegacyDesign = false } = {}) => {
+    const normalizedMapName = String(targetMapName || "").trim() || DEFAULT_MAP_NAME;
+    const mission = await getNavigationMission(normalizedMapName);
+    if (mission?.exists) {
+      const missionSpots = spotsFromMissionWaypoints(
+        normalizedMapName,
+        mission.waypoints,
+      );
+      legacySpotLoadGenerationRef.current += 1;
+      applySpots(missionSpots);
+      return {
+        exists: true,
+        loadedDesign: false,
+        spotCount: missionSpots.length,
+      };
+    }
+    const loadedDesign = loadLegacyDesign
+      ? loadSavedDesignForMap(normalizedMapName)
+      : false;
+    const legacySpots = await loadLegacySpotsForMap(normalizedMapName);
+    return {
+      exists: false,
+      loadedDesign,
+      spotCount: legacySpots.length,
+    };
+  }, [applySpots, loadLegacySpotsForMap, loadSavedDesignForMap]);
+
   const handleOpenDesignMapDialog = useCallback(() => {
     setWorkspaceStage(STAGE_AUTHORING);
     setShowPgmFix(false);
@@ -1911,13 +1998,13 @@ export default function MissionCanvasPage() {
       setMessage("Map file required");
       return;
     }
+    skipNextSpotLoadForMapRef.current = selectedMapName;
     setMapName(selectedMapName);
     setDesignMapPath(pendingDesignMapPath);
     setShowDesignMapDialog(false);
     setWorkspaceStage(STAGE_AUTHORING);
     setInteractionMode("view");
     setDesignMapReloadToken((value) => value + 1);
-    const loadedDesign = loadSavedDesignForMap(selectedMapName);
     saveMissionSession({
       mapName: selectedMapName,
       workspaceStage: STAGE_AUTHORING,
@@ -1925,12 +2012,12 @@ export default function MissionCanvasPage() {
       navigationRuntimeMode,
     });
     setDesignMapBusy(true);
-    getNavigationMission(selectedMapName)
-      .then((mission) => {
-        if (mission?.exists) {
+    loadMissionForMap(selectedMapName, { loadLegacyDesign: true })
+      .then((result) => {
+        if (result.exists) {
           setMessage(`Loaded mission ${selectedMapName}`);
         } else {
-          setMessage(loadedDesign
+          setMessage(result.loadedDesign
             ? `Loaded design for ${selectedMapName}`
             : `Started new mission for ${selectedMapName}`);
         }
@@ -1939,7 +2026,7 @@ export default function MissionCanvasPage() {
         setMessage(error instanceof Error ? error.message : "Failed to load mission");
       })
       .finally(() => setDesignMapBusy(false));
-  }, [loadSavedDesignForMap, navigationRuntimeMode, pendingDesignMapPath]);
+  }, [loadMissionForMap, navigationRuntimeMode, pendingDesignMapPath]);
 
   const handleSaveDesign = useCallback(() => runCommand(
     "Save mission",
@@ -2003,20 +2090,23 @@ export default function MissionCanvasPage() {
       setMessage("Map file required");
       return;
     }
+    skipNextSpotLoadForMapRef.current = selectedMapName;
     setMapName(selectedMapName);
     setShowRunMapDialog(false);
     setWorkspaceStage(STAGE_RUN);
     setInteractionMode("view");
-    getNavigationMission(selectedMapName)
-      .then((mission) => {
-        setMessage(mission?.exists
+    setRunMapBusy(true);
+    loadMissionForMap(selectedMapName)
+      .then((result) => {
+        setMessage(result.exists
           ? `Loaded mission ${selectedMapName}`
           : `Started new mission for ${selectedMapName}`);
       })
       .catch((error) => {
         setMessage(error instanceof Error ? error.message : "Failed to load mission");
-      });
-  }, [runMapPath]);
+      })
+      .finally(() => setRunMapBusy(false));
+  }, [loadMissionForMap, runMapPath]);
 
   const handleStartMapping = useCallback(() => runCommand(
     "Mapping",

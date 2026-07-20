@@ -447,6 +447,89 @@ test('loads a saved map into the design stage', async () => {
   await waitFor(() => expect(getNavigationSpots).toHaveBeenCalledWith('factory'));
 });
 
+test('restores mission manifest waypoints before legacy spots', async () => {
+  const latestMapViewerProps = () => (
+    mockMapViewer.mock.calls[mockMapViewer.mock.calls.length - 1][0]
+  );
+  getPgmFiles.mockResolvedValue({
+    files: [{ path: 'factory.pgm', name: 'factory.pgm' }],
+  });
+  getPgmImage.mockResolvedValue({
+    path: 'factory.pgm',
+    width: 1,
+    height: 1,
+    maxval: 255,
+    pixels_base64: 'AA==',
+  });
+  getNavigationMission.mockImplementation((mapName) => Promise.resolve(
+    mapName === 'factory'
+      ? {
+        exists: true,
+        map_name: 'factory',
+        global_bt: 'global.xml',
+        compiled_bt: 'compiled.xml',
+        waypoints: [{
+          id: 'mission_pickup',
+          label: 'Mission Pickup',
+          pose: { frame_id: 'map', x: 3.5, y: -1.25, yaw: 1.57 },
+          local_bt: 'locals/mission_pickup.xml',
+          metadata: { role: 'pickup' },
+        }],
+        metadata: {},
+      }
+      : {
+        exists: false,
+        map_name: mapName,
+        global_bt: 'global.xml',
+        compiled_bt: 'compiled.xml',
+        waypoints: [],
+        metadata: {},
+      },
+  ));
+  getNavigationSpots.mockImplementation((mapName) => Promise.resolve({
+    map_name: mapName,
+    spots: mapName === 'factory' ? [{
+      id: 'legacy_spot',
+      map_name: 'factory',
+      label: 'Legacy Waypoint',
+      pose: { frame_id: 'map', x: 1, y: 2, yaw: 0 },
+      linked_bt_tree: 'legacy.xml',
+      metadata: {},
+    }] : [],
+  }));
+
+  render(<MissionCanvasPage />);
+
+  fireEvent.click(screen.getByRole('tab', { name: 'Design' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Load Mission' }));
+  await screen.findByRole('combobox', { name: 'Design mission map file' });
+  fireEvent.click(screen.getByRole('button', { name: 'Load' }));
+
+  await waitFor(() => expect(screen.getByText('Loaded mission factory')).toBeInTheDocument());
+  await waitFor(() => expect(latestMapViewerProps().spots).toHaveLength(1));
+  expect(latestMapViewerProps().spots[0]).toMatchObject({
+    id: 'mission_pickup',
+    map_name: 'factory',
+    label: 'Mission Pickup',
+    linked_bt_tree: 'locals/mission_pickup.xml',
+    pose: {
+      frame_id: 'map',
+      x: 3.5,
+      y: -1.25,
+      yaw: 1.57,
+    },
+    metadata: {
+      role: 'pickup',
+      source: 'mission_manifest',
+      coordinate_space: 'map',
+      local_bt: 'locals/mission_pickup.xml',
+    },
+  });
+  expect(screen.getByText('locals/mission_pickup.xml')).toBeInTheDocument();
+  expect(screen.queryByText('legacy.xml')).not.toBeInTheDocument();
+  expect(getNavigationSpots.mock.calls.some(([mapName]) => mapName === 'factory')).toBe(false);
+});
+
 test('hides loaded design waypoints after returning to mapping stage', async () => {
   const latestMapViewerProps = () => (
     mockMapViewer.mock.calls[mockMapViewer.mock.calls.length - 1][0]
@@ -1260,9 +1343,37 @@ test('enables navigation runtime layers in the run stage', async () => {
 });
 
 test('loads a saved map for the run stage', async () => {
+  const latestMapViewerProps = () => (
+    mockMapViewer.mock.calls[mockMapViewer.mock.calls.length - 1][0]
+  );
   getPgmFiles.mockResolvedValue({
     files: [{ path: 'factory.pgm', name: 'factory.pgm' }],
   });
+  getNavigationMission.mockImplementation((mapName) => Promise.resolve(
+    mapName === 'factory'
+      ? {
+        exists: true,
+        map_name: 'factory',
+        global_bt: 'global.xml',
+        compiled_bt: 'compiled.xml',
+        waypoints: [{
+          id: 'run_waypoint',
+          label: 'Run Waypoint',
+          pose: { frame_id: 'map', x: 1, y: 2, yaw: 0.5 },
+          local_bt: 'locals/run_waypoint.xml',
+          metadata: {},
+        }],
+        metadata: {},
+      }
+      : {
+        exists: false,
+        map_name: mapName,
+        global_bt: 'global.xml',
+        compiled_bt: 'compiled.xml',
+        waypoints: [],
+        metadata: {},
+      },
+  ));
 
   render(<MissionCanvasPage />);
 
@@ -1274,7 +1385,15 @@ test('loads a saved map for the run stage', async () => {
 
   fireEvent.click(screen.getByRole('button', { name: 'Load' }));
 
+  await waitFor(() => expect(screen.getByText('Loaded mission factory')).toBeInTheDocument());
   expect(screen.getByText('factory')).toBeInTheDocument();
+  await waitFor(() => expect(latestMapViewerProps().spots).toHaveLength(1));
+  expect(latestMapViewerProps().spots[0]).toMatchObject({
+    id: 'run_waypoint',
+    label: 'Run Waypoint',
+    linked_bt_tree: 'locals/run_waypoint.xml',
+  });
+  expect(getNavigationSpots.mock.calls.some(([mapName]) => mapName === 'factory')).toBe(false);
 
   fireEvent.click(screen.getByRole('button', { name: 'Run Mission' }));
 
