@@ -2701,12 +2701,6 @@ export default function MissionCanvasPage() {
     setMessage(`Added ${selectedSpot.label || selectedSpot.id} to route`);
   }, [handleSetMissionRouteOrder, missionRouteTreeSpots, selectedSpotId, visibleSpots]);
 
-  const handleRemoveRouteSpot = useCallback((spotId) => {
-    const currentIds = missionRouteTreeSpots.map((spot) => spot.id);
-    handleSetMissionRouteOrder(currentIds.filter((id) => id !== spotId));
-    setMessage("Removed waypoint from route");
-  }, [handleSetMissionRouteOrder, missionRouteTreeSpots]);
-
   const handleMoveRouteSpot = useCallback((spotId, direction) => {
     const currentIds = missionRouteTreeSpots.map((spot) => spot.id);
     const index = currentIds.indexOf(spotId);
@@ -3429,15 +3423,7 @@ export default function MissionCanvasPage() {
                     borderColor: MISSION_PANEL_BORDER,
                   }}
                 >
-                  <div
-                    className="flex items-center justify-between gap-2"
-                  >
-                    <div
-                      className="text-[10px] uppercase font-semibold"
-                      style={{ color: MISSION_TEXT_MUTED }}
-                    >
-                      Waypoints / Local BT
-                    </div>
+                  <div className="flex items-center justify-end">
                     <ActionButton
                       active={showWaypointOptions || interactionMode === "spot"}
                       disabled={!designMapAvailable || btNodeIsUp || missionRouteMode}
@@ -3574,13 +3560,8 @@ export default function MissionCanvasPage() {
                     </div>
                   )}
                 </div>
-                <div className="grid gap-2">
-                  <div
-                    className="text-[10px] uppercase font-semibold"
-                    style={{ color: MISSION_TEXT_MUTED }}
-                  >
-                    Behavior Nodes
-                  </div>
+                {activeBehaviorNodes.length > 0 && (
+                  <div className="grid gap-2">
                   {activeBehaviorNodes.map((node) => {
                     const selected = node.id === selectedBehaviorNodeId;
                     return (
@@ -3616,16 +3597,12 @@ export default function MissionCanvasPage() {
                       </div>
                     );
                   })}
-                  {activeBehaviorNodes.length === 0 && (
-                    <div className="text-xs" style={{ color: MISSION_TEXT_MUTED }}>
-                      No behavior nodes placed yet.
-                    </div>
-                  )}
-                </div>
+                  </div>
+                )}
               </div>
             </Panel>
             <Panel title="Mission Route" className="min-h-0 overflow-hidden">
-              <div className="h-full min-h-0 grid grid-rows-[auto_auto_minmax(0,1fr)] gap-2">
+              <div className="h-full min-h-0 grid grid-rows-[auto_minmax(0,1fr)] gap-2">
                 <div className="flex flex-wrap items-center gap-1">
                   <ActionButton
                     active={missionRouteMode}
@@ -3650,17 +3627,6 @@ export default function MissionCanvasPage() {
                   >
                     Clear Route
                   </ActionButton>
-                </div>
-                <div className="grid grid-cols-3 gap-2">
-                  <SessionRow label="Mode" value={missionRouteMode ? "Map edit" : "Tree edit"} stacked />
-                  <SessionRow
-                    label="Selected"
-                    value={selectedSpotId
-                      ? visibleSpots.find((spot) => spot.id === selectedSpotId)?.label || selectedSpotId
-                      : "None"}
-                    stacked
-                  />
-                  <SessionRow label="Links" value={String(missionRouteEdges.length)} stacked />
                 </div>
                 <div className="min-h-0 overflow-auto pr-1">
                   <div className="grid gap-1.5">
@@ -3743,19 +3709,6 @@ export default function MissionCanvasPage() {
                                 }}
                               >
                                 ↓
-                              </button>
-                              <button
-                                type="button"
-                                aria-label={`Remove ${spot.label || spot.id} from route`}
-                                onClick={() => handleRemoveRouteSpot(spot.id)}
-                                className="h-7 w-7 border rounded-md inline-flex items-center justify-center"
-                                style={{
-                                  color: "#7f1d1d",
-                                  backgroundColor: MISSION_STAGE_EMPTY,
-                                  borderColor: MISSION_BUTTON_BORDER,
-                                }}
-                              >
-                                <MdDelete size={14} />
                               </button>
                             </div>
                           </div>

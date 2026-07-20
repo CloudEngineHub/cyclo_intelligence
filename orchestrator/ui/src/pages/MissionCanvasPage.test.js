@@ -327,8 +327,9 @@ test('shows Waypoint and BT authoring panels in the authoring stage', async () =
   expect(screen.getByRole('button', { name: 'Activate BT' })).toBeEnabled();
   expect(screen.getByRole('button', { name: 'Deactivate BT' })).toBeDisabled();
   expect(screen.getByText('Design Objects')).toBeInTheDocument();
-  expect(screen.getByText('Behavior Nodes')).toBeInTheDocument();
-  expect(screen.getByText('Waypoints / Local BT')).toBeInTheDocument();
+  expect(screen.queryByText('Behavior Nodes')).not.toBeInTheDocument();
+  expect(screen.queryByText('No behavior nodes placed yet.')).not.toBeInTheDocument();
+  expect(screen.queryByText('Waypoints / Local BT')).not.toBeInTheDocument();
   expect(screen.getByText('Mission Route')).toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Load Mission' })).toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Save Mission' })).toBeInTheDocument();
