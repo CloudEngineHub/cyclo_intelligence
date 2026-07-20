@@ -19,6 +19,7 @@ import {
   updateNavigationSpot,
 } from '../utils/navigationSpotsApi';
 import {
+  deleteNavigationMissionBtFile,
   getNavigationMission,
   getNavigationMissionBtFile,
   saveNavigationMission,
@@ -109,6 +110,11 @@ jest.mock('../utils/navigationSpotsApi', () => ({
 }));
 
 jest.mock('../utils/navigationMissionsApi', () => ({
+  deleteNavigationMissionBtFile: jest.fn().mockResolvedValue({
+    path: 'locals/waypoint_a.xml',
+    content: '',
+    exists: false,
+  }),
   getNavigationMission: jest.fn().mockResolvedValue({
     exists: false,
     map_name: 'map',
@@ -207,6 +213,11 @@ beforeEach(() => {
     path: 'global.xml',
     content: '',
     exists: true,
+  });
+  deleteNavigationMissionBtFile.mockResolvedValue({
+    path: 'locals/waypoint_a.xml',
+    content: '',
+    exists: false,
   });
   saveNavigationMap.mockResolvedValue({ ok: true, message: 'Saved map' });
   savePgmImage.mockResolvedValue({ path: 'map.pgm', saved: true });
@@ -720,7 +731,7 @@ test('shows waypoint actions in Design Objects after placing a waypoint', async 
         expect.objectContaining({
           id: 'spot_a',
           label: 'Waypoint A',
-          local_bt: 'locals/spot_a.xml',
+          local_bt: 'locals/waypoint_a.xml',
           pose: expect.objectContaining({
             frame_id: 'map',
             x: 4,
@@ -743,10 +754,16 @@ test('shows waypoint actions in Design Objects after placing a waypoint', async 
   );
   expect(saveNavigationMissionBtFile).toHaveBeenCalledWith(
     'factory',
-    'locals/spot_a.xml',
+    'locals/waypoint_a.xml',
     expect.stringContaining('<Sequence name="Waypoint_A_Local_BT">'),
   );
   await waitFor(() => expect(screen.getByText('Saved mission for factory')).toBeInTheDocument());
+
+  await act(async () => {
+    latestMapViewerProps().onMapClick(0, 0);
+  });
+  await waitFor(() => expect(latestMapViewerProps().selectedSpotId).toBe(''));
+  expect(screen.queryByRole('button', { name: 'Create BT' })).not.toBeInTheDocument();
 
   fireEvent.click(screen.getByRole('button', { name: 'Create Waypoint' }));
   fireEvent.click(screen.getByRole('button', { name: 'On Map' }));
@@ -763,10 +780,36 @@ test('shows waypoint actions in Design Objects after placing a waypoint', async 
     label: 'Pickup A',
   }));
   expect(screen.getByRole('button', { name: 'Pickup A' })).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'Save Mission' }));
+  await waitFor(() => expect(saveNavigationMission).toHaveBeenLastCalledWith(
+    'factory',
+    expect.objectContaining({
+      waypoints: [
+        expect.objectContaining({
+          label: 'Pickup A',
+          local_bt: 'locals/pickup_a.xml',
+        }),
+      ],
+    }),
+  ));
+  expect(saveNavigationMissionBtFile).toHaveBeenCalledWith(
+    'factory',
+    'locals/pickup_a.xml',
+    expect.any(String),
+  );
+  await waitFor(() => expect(deleteNavigationMissionBtFile).toHaveBeenCalledWith(
+    'factory',
+    'locals/waypoint_a.xml',
+  ));
 
   fireEvent.click(screen.getByRole('button', { name: /Delete Waypoint Pickup A/ }));
   await waitFor(() => expect(deleteNavigationSpot).toHaveBeenCalledWith('spot_a', 'factory'));
-  expect(screen.queryByRole('button', { name: 'Pickup A' })).not.toBeInTheDocument();
+  await waitFor(() => expect(screen.queryByRole('button', { name: 'Pickup A' })).not.toBeInTheDocument());
+  fireEvent.click(screen.getByRole('button', { name: 'Save Mission' }));
+  await waitFor(() => expect(deleteNavigationMissionBtFile).toHaveBeenCalledWith(
+    'factory',
+    'locals/pickup_a.xml',
+  ));
 });
 
 test('opens waypoint BT map layer when selecting a waypoint with BT active', async () => {

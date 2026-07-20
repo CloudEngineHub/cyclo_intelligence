@@ -570,6 +570,13 @@ def test_navigation_mission_manifest_and_bt_files(monkeypatch, tmp_path):
     )
     assert loaded_bt.content == "<root/>"
 
+    deleted_bt = navigation_missions.delete_bt_file(
+        "factory",
+        path="locals/table_a.xml",
+    )
+    assert deleted_bt.exists is False
+    assert not (tmp_path / "missions" / "factory" / "locals" / "table_a.xml").exists()
+
 
 def test_navigation_missions_reject_path_escape(monkeypatch, tmp_path):
     import pytest

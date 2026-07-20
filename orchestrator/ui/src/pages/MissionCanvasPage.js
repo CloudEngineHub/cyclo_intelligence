@@ -24,6 +24,7 @@ import {
   updateNavigationSpot,
 } from "../utils/navigationSpotsApi";
 import {
+  deleteNavigationMissionBtFile,
   getNavigationMission,
   getNavigationMissionBtFile,
   saveNavigationMission,
@@ -374,6 +375,10 @@ function btXmlName(value, fallback = "Node") {
   return cleaned || fallback;
 }
 
+function localBtPathFromLabel(label, fallback = "waypoint") {
+  return `locals/${btXmlName(label, fallback).toLowerCase()}.xml`;
+}
+
 function existingLocalBtPathForSpot(spot) {
   return String(
     spot?.linked_bt_tree
@@ -386,7 +391,11 @@ function existingLocalBtPathForSpot(spot) {
 function localBtPathForSpot(spot) {
   const existing = existingLocalBtPathForSpot(spot);
   if (existing) return existing;
-  return `locals/${btXmlName(spot?.id, "waypoint").toLowerCase()}.xml`;
+  return localBtPathFromLabel(spot?.label || spot?.id, "waypoint");
+}
+
+function canonicalLocalBtPathForSpot(spot) {
+  return localBtPathFromLabel(spot?.label || spot?.id, "waypoint");
 }
 
 function missionWaypointsFromSpots(spots) {
@@ -1508,6 +1517,7 @@ export default function MissionCanvasPage() {
   const [selectedBehaviorNodeId, setSelectedBehaviorNodeId] = useState("");
   const [pendingBehaviorNodeTag, setPendingBehaviorNodeTag] = useState("");
   const [missionBtFiles, setMissionBtFiles] = useState({});
+  const [deletedMissionBtPaths, setDeletedMissionBtPaths] = useState([]);
   const [missionBtLoadingPath, setMissionBtLoadingPath] = useState("");
   const [busy, setBusy] = useState("");
   const [message, setMessage] = useState("Ready");
@@ -2117,6 +2127,7 @@ export default function MissionCanvasPage() {
       ]),
     );
     setMissionBtFiles(Object.fromEntries(loadedEntries));
+    setDeletedMissionBtPaths([]);
   }, [loadMissionBtFileOrDefault]);
 
   const loadMissionForMap = useCallback(async (targetMapName, { loadLegacyDesign = false } = {}) => {
@@ -2221,20 +2232,35 @@ export default function MissionCanvasPage() {
       saveBehaviorNodesForMap(currentMapName, activeBehaviorNodes);
       const missionSpots = visibleSpots.map((spot) => ({
         ...spot,
-        linked_bt_tree: localBtPathForSpot(spot),
+        linked_bt_tree: canonicalLocalBtPathForSpot(spot),
         metadata: {
           ...(spot.metadata ?? {}),
-          local_bt: localBtPathForSpot(spot),
-          linked_bt_tree: localBtPathForSpot(spot),
+          local_bt: canonicalLocalBtPathForSpot(spot),
+          linked_bt_tree: canonicalLocalBtPathForSpot(spot),
         },
       }));
       const globalPath = "global.xml";
       const globalXml = buildGlobalMissionXml(missionSpots);
+      const activeLocalBtPaths = new Set(missionSpots.map((spot) => localBtPathForSpot(spot)));
       const nextBtFiles = {
         ...missionBtFileDefaultsForSpots(missionSpots),
         ...missionBtFiles,
         [globalPath]: globalXml,
       };
+      Object.keys(nextBtFiles).forEach((path) => {
+        if (path.startsWith("locals/") && !activeLocalBtPaths.has(path)) {
+          delete nextBtFiles[path];
+        }
+      });
+      const staleLocalBtPaths = Object.keys(missionBtFiles).filter((path) => (
+        path.startsWith("locals/") && !activeLocalBtPaths.has(path)
+      ));
+      deletedMissionBtPaths.forEach((path) => {
+        if (path.startsWith("locals/") && !activeLocalBtPaths.has(path)) {
+          staleLocalBtPaths.push(path);
+        }
+      });
+      const uniqueStaleLocalBtPaths = [...new Set(staleLocalBtPaths)];
       await saveNavigationMission(currentMapName, {
         global_bt: globalPath,
         waypoints: missionWaypointsFromSpots(missionSpots),
@@ -2246,9 +2272,15 @@ export default function MissionCanvasPage() {
       await Promise.all(Object.entries(nextBtFiles).map(([path, content]) => (
         saveNavigationMissionBtFile(currentMapName, path, content)
       )));
+      await Promise.all(uniqueStaleLocalBtPaths.map((path) => (
+        deleteNavigationMissionBtFile(currentMapName, path)
+      )));
       setMissionBtFiles(nextBtFiles);
+      setDeletedMissionBtPaths((current) => current.filter((path) => (
+        !uniqueStaleLocalBtPaths.includes(path)
+      )));
       setSpots((current) => current.map((spot) => {
-        const localBt = localBtPathForSpot(spot);
+        const localBt = canonicalLocalBtPathForSpot(spot);
         return {
           ...spot,
           linked_bt_tree: localBt,
@@ -2261,7 +2293,14 @@ export default function MissionCanvasPage() {
       }));
       return `Saved mission for ${currentMapName}`;
     },
-  ), [activeBehaviorNodes, currentMapName, missionBtFiles, runCommand, visibleSpots]);
+  ), [
+    activeBehaviorNodes,
+    currentMapName,
+    deletedMissionBtPaths,
+    missionBtFiles,
+    runCommand,
+    visibleSpots,
+  ]);
 
   const handleRunMission = useCallback(() => runCommand(
     "Run mission",
@@ -2402,6 +2441,15 @@ export default function MissionCanvasPage() {
       setBtLayerSpotId("");
     }
   }, [btNodeIsUp, workspaceStage]);
+
+  const handleClearMapSelection = useCallback(() => {
+    setSelectedSpotId("");
+    setSelectedBehaviorNodeId("");
+    setPendingBehaviorNodeTag("");
+    setEditingSpotId("");
+    setEditingSpotLabel("");
+    setBtLayerSpotId("");
+  }, []);
 
   const handleSelectBehaviorNode = useCallback((nodeId) => {
     setSelectedBehaviorNodeId(nodeId);
@@ -2701,22 +2749,74 @@ export default function MissionCanvasPage() {
     if (label === spot.label) return;
 
     const previousSpot = spot;
+    const previousLocalBt = localBtPathForSpot(previousSpot);
+    const nextLocalBt = localBtPathFromLabel(label, previousSpot.id || "waypoint");
+    if (previousLocalBt !== nextLocalBt) {
+      setDeletedMissionBtPaths((current) => (
+        current.includes(previousLocalBt) ? current : [...current, previousLocalBt]
+      ));
+    }
     setSpots((current) => current.map((spot) => (
-      spot.id === previousSpot.id ? { ...spot, label } : spot
+      spot.id === previousSpot.id
+        ? {
+          ...spot,
+          label,
+          linked_bt_tree: nextLocalBt,
+          metadata: {
+            ...(spot.metadata ?? {}),
+            local_bt: nextLocalBt,
+            linked_bt_tree: nextLocalBt,
+          },
+        }
+        : spot
     )));
+    setMissionBtFiles((current) => {
+      if (previousLocalBt === nextLocalBt) return current;
+      const previousContent = current[previousLocalBt] || defaultLocalBtXml({
+        ...previousSpot,
+        label,
+      });
+      const nextFiles = {
+        ...current,
+        [nextLocalBt]: previousContent,
+      };
+      delete nextFiles[previousLocalBt];
+      return nextFiles;
+    });
     try {
       const updated = await updateNavigationSpot(previousSpot.id, {
         map_name: previousSpot.map_name,
         label,
       });
       setSpots((current) => current.map((spot) => (
-        spot.id === updated.id ? updated : spot
+        spot.id === updated.id
+          ? {
+            ...updated,
+            linked_bt_tree: nextLocalBt,
+            metadata: {
+              ...(updated.metadata ?? {}),
+              local_bt: nextLocalBt,
+              linked_bt_tree: nextLocalBt,
+            },
+          }
+          : spot
       )));
       setMessage(`Renamed ${updated.label || label}`);
     } catch (error) {
       setSpots((current) => current.map((spot) => (
         spot.id === previousSpot.id ? previousSpot : spot
       )));
+      setMissionBtFiles((current) => {
+        if (previousLocalBt === nextLocalBt) return current;
+        const nextContent = current[nextLocalBt];
+        const nextFiles = {
+          ...current,
+          [previousLocalBt]: nextContent || current[previousLocalBt] || defaultLocalBtXml(previousSpot),
+        };
+        delete nextFiles[nextLocalBt];
+        return nextFiles;
+      });
+      setDeletedMissionBtPaths((current) => current.filter((path) => path !== previousLocalBt));
       setMessage(error instanceof Error ? error.message : "Failed to update waypoint");
     }
   }, [editingSpotLabel]);
@@ -2724,8 +2824,12 @@ export default function MissionCanvasPage() {
   const handleDeleteSpot = useCallback(async (spot) => {
     if (!spot) return;
     try {
+      const localBt = localBtPathForSpot(spot);
       await deleteNavigationSpot(spot.id, spot.map_name);
       setSpots((current) => current.filter((item) => item.id !== spot.id));
+      setDeletedMissionBtPaths((current) => (
+        current.includes(localBt) ? current : [...current, localBt]
+      ));
       setSelectedSpotId((current) => (current === spot.id ? "" : current));
       setBtLayerSpotId((current) => (current === spot.id ? "" : current));
       setEditingSpotId((current) => (current === spot.id ? "" : current));
@@ -3074,6 +3178,7 @@ export default function MissionCanvasPage() {
             onSpotPoseChange={handleMoveSpot}
             onBehaviorNodePoseChange={handleMoveBehaviorNode}
             onEditorMapPoint={mapEditor.editAtMapPoint}
+            onMapClick={handleClearMapSelection}
             onMapPose={handleCreateSpotAtPose}
             onBtLayerClose={() => setBtLayerSpotId("")}
           />

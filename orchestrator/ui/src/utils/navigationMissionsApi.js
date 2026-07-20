@@ -61,3 +61,10 @@ export function saveNavigationMissionBtFile(mapName, path, content) {
     body: JSON.stringify({ path, content }),
   });
 }
+
+export function deleteNavigationMissionBtFile(mapName, path) {
+  return request(
+    `/${encodeURIComponent(mapName)}/bt?path=${encodeURIComponent(path)}`,
+    { method: 'DELETE' },
+  );
+}

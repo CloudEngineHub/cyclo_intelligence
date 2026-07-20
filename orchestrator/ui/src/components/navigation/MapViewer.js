@@ -670,7 +670,7 @@ function WaypointBtFocusLayer({ layer, onClose }) {
       </div>
     </section>);
 }
-export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, goalPose, footprint, tf, showMap, showGlobalCostmap, showLocalCostmap, showScan, showGlobalPlan, showGoalPose, showTf, showRobotModel, interactionDisabled, interactionMode, editorActive, viewKey, waitingLabel = "Waiting for /map", fitContainer = false, spots = [], selectedSpotId = "", behaviorNodes = [], selectedBehaviorNodeId = "", behaviorPreviewNode = null, btLayer = null, onBtLayerClose, onSpotClick, onBehaviorNodeClick, onSpotPoseChange, onBehaviorNodePoseChange, onEditorMapPoint, onMapPose, }) {
+export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, goalPose, footprint, tf, showMap, showGlobalCostmap, showLocalCostmap, showScan, showGlobalPlan, showGoalPose, showTf, showRobotModel, interactionDisabled, interactionMode, editorActive, viewKey, waitingLabel = "Waiting for /map", fitContainer = false, spots = [], selectedSpotId = "", behaviorNodes = [], selectedBehaviorNodeId = "", behaviorPreviewNode = null, btLayer = null, onBtLayerClose, onSpotClick, onBehaviorNodeClick, onSpotPoseChange, onBehaviorNodePoseChange, onEditorMapPoint, onMapClick, onMapPose, }) {
     const containerRef = useRef(null);
     const sceneRef = useRef(null);
     const rendererRef = useRef(null);
@@ -1245,6 +1245,12 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, 
                 }
             }
             if (interactionDisabled || interactionMode === "view") {
+                if (!interactionDisabled && interactionMode === "view" && typeof onMapClick === "function") {
+                    const point = mapPointFromEvent(event);
+                    if (point) {
+                        onMapClick(point.x, point.y);
+                    }
+                }
                 pointerDownRef.current = null;
                 setDragPreviewPose(null);
                 return;
@@ -1414,6 +1420,7 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, 
         onBehaviorNodePoseChange,
         onEditorMapPoint,
         onMapPose,
+        onMapClick,
         onSpotClick,
         onSpotPoseChange,
         pose,

@@ -278,3 +278,19 @@ def save_bt_file(map_name: str, request: MissionBtFileRequest):
     except OSError as exc:
         raise HTTPException(500, f"Failed to write BT XML: {exc}") from exc
     return MissionBtFileResponse(path=safe_path, content=request.content, exists=True)
+
+
+@router.delete("/{map_name}/bt", response_model=MissionBtFileResponse)
+def delete_bt_file(
+    map_name: str,
+    path: str = Query(min_length=1, max_length=256),
+):
+    bt_path = _resolve_bt_path(map_name, path)
+    safe_path = str(bt_path.relative_to(_mission_dir(map_name)))
+    try:
+        bt_path.unlink()
+    except FileNotFoundError:
+        return MissionBtFileResponse(path=safe_path, content="", exists=False)
+    except OSError as exc:
+        raise HTTPException(500, f"Failed to delete BT XML: {exc}") from exc
+    return MissionBtFileResponse(path=safe_path, content="", exists=False)
