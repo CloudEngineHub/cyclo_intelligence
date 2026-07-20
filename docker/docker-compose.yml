@@ -75,6 +75,9 @@ services:
       - CYCLO_VIDEO_SERVER_PORT=${CYCLO_VIDEO_SERVER_PORT:-7082}
       - CYCLO_WEB_VIDEO_SERVER_PORT=${CYCLO_WEB_VIDEO_SERVER_PORT:-7085}
       - CYCLO_SUPERVISOR_API_PORT=${CYCLO_SUPERVISOR_API_PORT:-7100}
+      # Mission Canvas runtime data is owned by cyclo_intelligence and
+      # persisted through the ./workspace bind mount, not the ai_worker source.
+      - CYCLO_NAVIGATION_DATA_DIR=${CYCLO_NAVIGATION_DATA_DIR:-/workspace/navigation}
       # LOAD may include first-time gated backbone downloads (e.g. Cosmos).
       # Keep this long enough that a real download is not surfaced as a
       # false model-load failure while the container continues downloading.

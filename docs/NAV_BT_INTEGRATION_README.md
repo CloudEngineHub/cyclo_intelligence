@@ -385,6 +385,11 @@ As of the first Mission Canvas implementation slice, the repository contains:
 - Spot CRUD API in supervisor_api under /navigation/spots.
 - JSON Spot persistence at /workspace/navigation/maps/<map_name>/spots.json
   by default, overrideable with CYCLO_NAVIGATION_DATA_DIR.
+- Mission artifact persistence under /workspace/navigation/missions/<map_name>/:
+  - mission.json
+  - global.xml
+  - compiled.xml
+  - locals/<waypoint_id>.xml
 - MapViewer Spot marker overlay with click selection.
 - MapViewer Behavior node marker overlay with click selection.
 - Mission Canvas Spot creation, selection, rename, and delete UI.
@@ -458,12 +463,22 @@ Recommended storage shape:
 
 ```text
 /workspace/navigation/
-└─ maps/
+├─ maps/
+│  └─ <map_name>/
+│     └─ spots.json
+└─ missions/
    └─ <map_name>/
-      ├─ spots.json
-      └─ bt/
-         └─ *.xml
+      ├─ mission.json
+      ├─ global.xml
+      ├─ compiled.xml
+      └─ locals/
+         └─ <waypoint_id>.xml
 ```
+
+The `/workspace/navigation` root is explicitly owned by the
+`cyclo_intelligence` container. In the default compose setup it is persisted by
+the `./workspace:/workspace` bind mount, so mission XML files stay out of both
+the `ai_worker` source tree and the `cyclo_intelligence` source tree.
 
 Potential API:
 

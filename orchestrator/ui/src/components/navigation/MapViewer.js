@@ -609,12 +609,9 @@ function BtCanvasNode({ className = "", children, tone = "default" }) {
     </div>);
 }
 function WaypointBtFocusLayer({ layer, onClose }) {
-    var _a, _b, _c;
     const spot = layer === null || layer === void 0 ? void 0 : layer.spot;
     if (!spot)
         return null;
-    const pose = (_a = spot.pose) !== null && _a !== void 0 ? _a : {};
-    const poseText = `${Number((_b = pose.x) !== null && _b !== void 0 ? _b : 0).toFixed(2)}, ${Number((_c = pose.y) !== null && _c !== void 0 ? _c : 0).toFixed(2)}, yaw ${Number(pose.yaw !== null && pose.yaw !== void 0 ? pose.yaw : 0).toFixed(2)}`;
     return (<section className="absolute inset-0 z-20 pointer-events-none" role="region" aria-label="Waypoint BT focus canvas">
       <div className="absolute inset-y-0 left-0 w-[25%] pointer-events-none" style={{
             background: "linear-gradient(90deg, rgba(15,23,42,0.1), rgba(15,23,42,0))",
@@ -624,7 +621,7 @@ function WaypointBtFocusLayer({ layer, onClose }) {
             backgroundColor: "#ffffff",
             borderLeft: "1px solid rgba(148,163,184,0.82)",
         }}>
-        <div className="h-full min-h-0 p-5 grid grid-rows-[auto_minmax(0,1fr)_auto] gap-4">
+        <div className="h-full min-h-0 p-5 grid grid-rows-[auto_minmax(0,1fr)] gap-4">
           <header className="min-w-0 flex items-start justify-between gap-3">
             <div className="min-w-0">
               <div className="text-[10px] uppercase font-semibold tracking-wide" style={{ color: "#64748b" }}>
@@ -632,9 +629,6 @@ function WaypointBtFocusLayer({ layer, onClose }) {
               </div>
               <div className="text-base font-semibold truncate">
                 {spot.label || spot.id}
-              </div>
-              <div className="mt-1 font-mono text-[11px] truncate" style={{ color: "#475569" }}>
-                {poseText}
               </div>
             </div>
             {typeof onClose === "function" && (<button type="button" onClick={onClose} className="h-8 px-3 border rounded-md text-xs font-semibold active:translate-y-px" style={{
@@ -672,20 +666,6 @@ function WaypointBtFocusLayer({ layer, onClose }) {
             </BtCanvasNode>
             </>)}
           </div>
-          <footer className="grid grid-cols-3 gap-2 text-[11px]">
-            <div className="min-w-0">
-              <div style={{ color: "#64748b" }}>BT Node</div>
-              <div className="font-mono truncate">{layer.nodeLabel || "Unknown"}</div>
-            </div>
-            <div className="min-w-0">
-              <div style={{ color: "#64748b" }}>Execution</div>
-              <div className="font-mono truncate">{layer.executionLabel || "wait"}</div>
-            </div>
-            <div className="min-w-0">
-              <div style={{ color: "#64748b" }}>Active nodes</div>
-              <div className="font-mono truncate">{layer.activeNodesLabel || "wait"}</div>
-            </div>
-          </footer>
         </div>
       </div>
     </section>);

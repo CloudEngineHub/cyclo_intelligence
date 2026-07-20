@@ -478,10 +478,10 @@ export default function MissionBtEditor({
               deleteKeyCode={null}
               minZoom={0.3}
               maxZoom={2}
-              zoomOnScroll={false}
-              panOnScroll
+              zoomOnScroll
+              panOnScroll={false}
               zoomOnPinch
-              zoomActivationKeyCode="Control"
+              zoomActivationKeyCode={null}
             >
               <Controls showInteractive={false} />
               <Background color="#e5e7eb" gap={16} />
