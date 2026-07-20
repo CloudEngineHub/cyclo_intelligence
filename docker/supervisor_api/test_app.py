@@ -62,6 +62,7 @@ _USER_SERVICES = app._USER_SERVICES
 navigation = sys.modules["supervisor_api.navigation"]
 navigation_grid_cache = sys.modules["supervisor_api.navigation_grid_cache"]
 navigation_spots = sys.modules["supervisor_api.navigation_spots"]
+navigation_missions = sys.modules["supervisor_api.navigation_missions"]
 _GROOT_REQUIRED_MOUNTS = app._REQUIRED_BACKEND_MOUNTS["groot"]
 _LEROBOT_REQUIRED_MOUNTS = app._REQUIRED_BACKEND_MOUNTS["lerobot"]
 
@@ -478,6 +479,8 @@ def test_navigation_routes_are_registered():
     assert "/navigation/maps/pgm/save" in paths
     assert "/navigation/topics/ws" in paths
     assert "/navigation/spots" in paths
+    assert "/navigation/missions/{map_name}" in paths
+    assert "/navigation/missions/{map_name}/bt" in paths
 
 
 def test_navigation_spots_crud(monkeypatch, tmp_path):
@@ -521,6 +524,67 @@ def test_navigation_spots_rejects_path_like_names(monkeypatch, tmp_path):
 
     with pytest.raises(HTTPException):
         navigation_spots.list_spots("../factory")
+
+
+def test_navigation_mission_manifest_and_bt_files(monkeypatch, tmp_path):
+    monkeypatch.setattr(navigation_missions, "NAVIGATION_DATA_ROOT", tmp_path)
+
+    empty = navigation_missions.load_mission("factory")
+    assert empty.exists is False
+    assert empty.global_bt == "global.xml"
+
+    saved = navigation_missions.save_mission(
+        "factory",
+        navigation_missions.MissionSaveRequest(
+            waypoints=[
+                navigation_missions.MissionWaypoint(
+                    id="table_a",
+                    label="Table A",
+                    pose=navigation_missions.SpotPose(x=1.0, y=2.0, yaw=0.5),
+                )
+            ],
+        ),
+    )
+    assert saved.exists is True
+    assert saved.map_name == "factory"
+    assert saved.waypoints[0].local_bt == "locals/table_a.xml"
+
+    loaded = navigation_missions.load_mission("factory")
+    assert loaded.exists is True
+    assert loaded.waypoints[0].label == "Table A"
+
+    bt_file = navigation_missions.save_bt_file(
+        "factory",
+        navigation_missions.MissionBtFileRequest(
+            path="locals/table_a.xml",
+            content="<root/>",
+        ),
+    )
+    assert bt_file.exists is True
+
+    loaded_bt = navigation_missions.load_bt_file(
+        "factory",
+        path="locals/table_a.xml",
+    )
+    assert loaded_bt.content == "<root/>"
+
+
+def test_navigation_missions_reject_path_escape(monkeypatch, tmp_path):
+    import pytest
+    from fastapi import HTTPException
+
+    monkeypatch.setattr(navigation_missions, "NAVIGATION_DATA_ROOT", tmp_path)
+
+    with pytest.raises(HTTPException):
+        navigation_missions.load_mission("../factory")
+    with pytest.raises(HTTPException):
+        navigation_missions.save_bt_file(
+            "factory",
+            navigation_missions.MissionBtFileRequest(
+                path="../global.xml",
+                content="<root/>",
+            ),
+        )
 
 
 def test_navigation_grid_data_crc32_uses_only_map_data():

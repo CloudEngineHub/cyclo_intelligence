@@ -23,6 +23,10 @@ import {
   getNavigationSpots,
   updateNavigationSpot,
 } from "../utils/navigationSpotsApi";
+import {
+  getNavigationMission,
+  saveNavigationMission,
+} from "../utils/navigationMissionsApi";
 import { useNavigationRosPublisher, useNavigationRosTopic } from "../hooks/useNavigationRosTopic";
 import { MapEditorControls, useMapEditor } from "../components/navigation/MapEditor";
 import { MapViewer } from "../components/navigation/MapViewer";
@@ -352,6 +356,24 @@ function pgmPathFromMapName(mapName) {
   return trimmed ? `${trimmed}.pgm` : "";
 }
 
+function missionWaypointsFromSpots(spots) {
+  return spots.map((spot) => ({
+    id: spot.id,
+    label: spot.label || spot.id,
+    pose: {
+      frame_id: spot.pose?.frame_id || "map",
+      x: Number(spot.pose?.x ?? 0),
+      y: Number(spot.pose?.y ?? 0),
+      yaw: Number(spot.pose?.yaw ?? 0),
+    },
+    local_bt: spot.linked_bt_tree || `locals/${spot.id}.xml`,
+    metadata: {
+      ...(spot.metadata ?? {}),
+      linked_bt_tree: spot.linked_bt_tree || "",
+    },
+  }));
+}
+
 function readMissionSession() {
   if (typeof window === "undefined" || !window.sessionStorage) return {};
   try {
@@ -513,6 +535,8 @@ function LoadMapDialog({
   files,
   selectedPath,
   busy,
+  title = "Load Map",
+  fieldLabel = "Map file",
   selectAriaLabel = "Map file",
   onChange,
   onCancel,
@@ -540,10 +564,10 @@ function LoadMapDialog({
         }}
       >
         <div id="mission-load-map-title" className="text-sm font-semibold">
-          Load Map
+          {title}
         </div>
         <label className="grid gap-1 text-xs">
-          <span style={{ color: "#4b5563" }}>Map file</span>
+          <span style={{ color: "#4b5563" }}>{fieldLabel}</span>
           <select
             aria-label={selectAriaLabel}
             value={selectedPath}
@@ -1857,7 +1881,7 @@ export default function MissionCanvasPage() {
     setShowDesignMapDialog(true);
     setPendingDesignMapPath(designMapPath);
     setDesignMapBusy(true);
-    setMessage("Loading saved maps");
+    setMessage("Loading saved missions");
     getPgmFiles()
       .then((response) => {
         const files = response.files || [];
@@ -1900,19 +1924,39 @@ export default function MissionCanvasPage() {
       designMapPath: pendingDesignMapPath,
       navigationRuntimeMode,
     });
-    setMessage(loadedDesign
-      ? `Loaded design for ${selectedMapName}`
-      : `Loaded map ${selectedMapName}`);
+    setDesignMapBusy(true);
+    getNavigationMission(selectedMapName)
+      .then((mission) => {
+        if (mission?.exists) {
+          setMessage(`Loaded mission ${selectedMapName}`);
+        } else {
+          setMessage(loadedDesign
+            ? `Loaded design for ${selectedMapName}`
+            : `Started new mission for ${selectedMapName}`);
+        }
+      })
+      .catch((error) => {
+        setMessage(error instanceof Error ? error.message : "Failed to load mission");
+      })
+      .finally(() => setDesignMapBusy(false));
   }, [loadSavedDesignForMap, navigationRuntimeMode, pendingDesignMapPath]);
 
-  const handleSaveDesign = useCallback(() => {
-    try {
+  const handleSaveDesign = useCallback(() => runCommand(
+    "Save mission",
+    async () => {
       saveBehaviorNodesForMap(currentMapName, activeBehaviorNodes);
-      setMessage(`Saved design for ${currentMapName}`);
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Failed to save design");
-    }
-  }, [activeBehaviorNodes, currentMapName]);
+      await saveNavigationMission(currentMapName, {
+        global_bt: "global.xml",
+        compiled_bt: "compiled.xml",
+        waypoints: missionWaypointsFromSpots(visibleSpots),
+        metadata: {
+          source: "mission_canvas",
+          behavior_node_count: activeBehaviorNodes.length,
+        },
+      });
+      return `Saved mission for ${currentMapName}`;
+    },
+  ), [activeBehaviorNodes, currentMapName, runCommand, visibleSpots]);
 
   const handleRunMission = useCallback(() => runCommand(
     "Run mission",
@@ -1935,7 +1979,7 @@ export default function MissionCanvasPage() {
     setShowPgmFix(false);
     setShowRunMapDialog(true);
     setRunMapBusy(true);
-    setMessage("Loading saved maps");
+    setMessage("Loading saved missions");
     getPgmFiles()
       .then((response) => {
         const files = response.files || [];
@@ -1963,7 +2007,15 @@ export default function MissionCanvasPage() {
     setShowRunMapDialog(false);
     setWorkspaceStage(STAGE_RUN);
     setInteractionMode("view");
-    setMessage(`Loaded map ${selectedMapName}`);
+    getNavigationMission(selectedMapName)
+      .then((mission) => {
+        setMessage(mission?.exists
+          ? `Loaded mission ${selectedMapName}`
+          : `Started new mission for ${selectedMapName}`);
+      })
+      .catch((error) => {
+        setMessage(error instanceof Error ? error.message : "Failed to load mission");
+      });
   }, [runMapPath]);
 
   const handleStartMapping = useCallback(() => runCommand(
@@ -2334,7 +2386,9 @@ export default function MissionCanvasPage() {
         files={designMapFiles}
         selectedPath={pendingDesignMapPath}
         busy={designMapBusy}
-        selectAriaLabel="Design map file"
+        title="Load Mission"
+        fieldLabel="Mission map"
+        selectAriaLabel="Design mission map file"
         onChange={setPendingDesignMapPath}
         onCancel={() => {
           setPendingDesignMapPath(designMapPath);
@@ -2347,7 +2401,9 @@ export default function MissionCanvasPage() {
         files={runMapFiles}
         selectedPath={runMapPath}
         busy={runMapBusy}
-        selectAriaLabel="Run map file"
+        title="Load Mission"
+        fieldLabel="Mission map"
+        selectAriaLabel="Run mission map file"
         onChange={setRunMapPath}
         onCancel={() => setShowRunMapDialog(false)}
         onSubmit={handleConfirmRunMap}
@@ -2506,14 +2562,14 @@ export default function MissionCanvasPage() {
                 onClick={handleOpenDesignMapDialog}
                 variant="secondary"
               >
-                Load Map
+                Load Mission
               </ActionButton>
               <ActionButton
                 disabled={!!busy}
                 onClick={handleSaveDesign}
                 variant="secondary"
               >
-                Save Map
+                Save Mission
               </ActionButton>
               <div className="flex items-center gap-1">
                 <ActionButton
@@ -2564,7 +2620,7 @@ export default function MissionCanvasPage() {
                 onClick={handleOpenRunMapDialog}
                 variant="secondary"
               >
-                Load Map
+                Load Mission
               </ActionButton>
               <ActionButton
                 active={busy === "Run mission" || (running && navigationRuntimeMode === "run")}

@@ -1,0 +1,63 @@
+// Copyright 2026 ROBOTIS CO., LTD.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
+// Author: Seongwoo Kim
+
+const API_BASE = '/api/navigation/missions';
+
+async function request(path = '', init) {
+  const response = await fetch(`${API_BASE}${path}`, {
+    ...init,
+    headers: {
+      'Content-Type': 'application/json',
+      ...init?.headers,
+    },
+  });
+  if (!response.ok) {
+    let message = `${response.status} ${response.statusText}`;
+    try {
+      const body = await response.json();
+      message = body.detail || body.message || message;
+    } catch {
+      // Keep the HTTP status for non-JSON errors.
+    }
+    throw new Error(message);
+  }
+  if (response.status === 204) return undefined;
+  return response.json();
+}
+
+export function getNavigationMission(mapName) {
+  return request(`/${encodeURIComponent(mapName)}`);
+}
+
+export function saveNavigationMission(mapName, mission) {
+  return request(`/${encodeURIComponent(mapName)}`, {
+    method: 'POST',
+    body: JSON.stringify(mission),
+  });
+}
+
+export function getNavigationMissionBtFile(mapName, path) {
+  return request(
+    `/${encodeURIComponent(mapName)}/bt?path=${encodeURIComponent(path)}`,
+  );
+}
+
+export function saveNavigationMissionBtFile(mapName, path, content) {
+  return request(`/${encodeURIComponent(mapName)}/bt`, {
+    method: 'PUT',
+    body: JSON.stringify({ path, content }),
+  });
+}

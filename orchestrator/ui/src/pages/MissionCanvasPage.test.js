@@ -17,6 +17,10 @@ import {
   getNavigationSpots,
   updateNavigationSpot,
 } from '../utils/navigationSpotsApi';
+import {
+  getNavigationMission,
+  saveNavigationMission,
+} from '../utils/navigationMissionsApi';
 
 const mockMapViewer = jest.fn(() => <div>Mission Canvas Map</div>);
 const mockPublishRosTopic = jest.fn();
@@ -101,6 +105,25 @@ jest.mock('../utils/navigationSpotsApi', () => ({
   }),
 }));
 
+jest.mock('../utils/navigationMissionsApi', () => ({
+  getNavigationMission: jest.fn().mockResolvedValue({
+    exists: false,
+    map_name: 'map',
+    global_bt: 'global.xml',
+    compiled_bt: 'compiled.xml',
+    waypoints: [],
+    metadata: {},
+  }),
+  saveNavigationMission: jest.fn().mockResolvedValue({
+    exists: true,
+    map_name: 'map',
+    global_bt: 'global.xml',
+    compiled_bt: 'compiled.xml',
+    waypoints: [],
+    metadata: {},
+  }),
+}));
+
 jest.mock('../hooks/useNavigationRosTopic', () => ({
   useNavigationRosTopic: (topic) => ({
     status: topic && mockTopicDataByName[topic] ? 'connected' : 'disconnected',
@@ -150,6 +173,22 @@ beforeEach(() => {
   configureDesignLocalizationAmcl.mockResolvedValue({ ok: true });
   requestNoMotionUpdate.mockResolvedValue({ ok: true });
   getNavigationSpots.mockResolvedValue({ map_name: 'map', spots: [] });
+  getNavigationMission.mockResolvedValue({
+    exists: false,
+    map_name: 'map',
+    global_bt: 'global.xml',
+    compiled_bt: 'compiled.xml',
+    waypoints: [],
+    metadata: {},
+  });
+  saveNavigationMission.mockResolvedValue({
+    exists: true,
+    map_name: 'map',
+    global_bt: 'global.xml',
+    compiled_bt: 'compiled.xml',
+    waypoints: [],
+    metadata: {},
+  });
   saveNavigationMap.mockResolvedValue({ ok: true, message: 'Saved map' });
   savePgmImage.mockResolvedValue({ path: 'map.pgm', saved: true });
   sendInitialPoseEstimate.mockResolvedValue({ ok: true });
@@ -266,8 +305,8 @@ test('shows Waypoint and BT authoring panels in the authoring stage', async () =
   expect(screen.getByText('Design Objects')).toBeInTheDocument();
   expect(screen.getByText('Behavior Nodes')).toBeInTheDocument();
   expect(screen.getByText('Waypoints')).toBeInTheDocument();
-  expect(screen.getByRole('button', { name: 'Load Map' })).toBeInTheDocument();
-  expect(screen.getByRole('button', { name: 'Save Map' })).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Load Mission' })).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Save Mission' })).toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Create Waypoint' })).toBeDisabled();
   expect(screen.queryByRole('menu', { name: 'Waypoint creation options' })).not.toBeInTheDocument();
   expect(screen.queryByRole('button', { name: 'At Robot' })).not.toBeInTheDocument();
@@ -388,9 +427,9 @@ test('loads a saved map into the design stage', async () => {
   render(<MissionCanvasPage />);
 
   fireEvent.click(screen.getByRole('tab', { name: 'Design' }));
-  fireEvent.click(screen.getByRole('button', { name: 'Load Map' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Load Mission' }));
 
-  const mapSelect = await screen.findByRole('combobox', { name: 'Design map file' });
+  const mapSelect = await screen.findByRole('combobox', { name: 'Design mission map file' });
   await waitFor(() => expect(mapSelect).toHaveValue('factory.pgm'));
 
   fireEvent.click(screen.getByRole('button', { name: 'Load' }));
@@ -437,8 +476,8 @@ test('hides loaded design waypoints after returning to mapping stage', async () 
   render(<MissionCanvasPage />);
 
   fireEvent.click(screen.getByRole('tab', { name: 'Design' }));
-  fireEvent.click(screen.getByRole('button', { name: 'Load Map' }));
-  await screen.findByRole('combobox', { name: 'Design map file' });
+  fireEvent.click(screen.getByRole('button', { name: 'Load Mission' }));
+  await screen.findByRole('combobox', { name: 'Design mission map file' });
   fireEvent.click(screen.getByRole('button', { name: 'Load' }));
 
   await waitFor(() => expect(latestMapViewerProps().spots).toHaveLength(1));
@@ -484,8 +523,8 @@ test('renders legacy pixel-coordinate waypoints in loaded map coordinates', asyn
   render(<MissionCanvasPage />);
 
   fireEvent.click(screen.getByRole('tab', { name: 'Design' }));
-  fireEvent.click(screen.getByRole('button', { name: 'Load Map' }));
-  await screen.findByRole('combobox', { name: 'Design map file' });
+  fireEvent.click(screen.getByRole('button', { name: 'Load Mission' }));
+  await screen.findByRole('combobox', { name: 'Design mission map file' });
   fireEvent.click(screen.getByRole('button', { name: 'Load' }));
 
   await waitFor(() => expect(latestMapViewerProps().map).toMatchObject({
@@ -517,8 +556,8 @@ test('shows waypoint actions in Properties after placing a waypoint', async () =
   render(<MissionCanvasPage />);
 
   fireEvent.click(screen.getByRole('tab', { name: 'Design' }));
-  fireEvent.click(screen.getByRole('button', { name: 'Load Map' }));
-  await screen.findByRole('combobox', { name: 'Design map file' });
+  fireEvent.click(screen.getByRole('button', { name: 'Load Mission' }));
+  await screen.findByRole('combobox', { name: 'Design mission map file' });
   fireEvent.click(screen.getByRole('button', { name: 'Load' }));
   await waitFor(() => expect(latestMapViewerProps().map).toMatchObject({
     info: { width: 1, height: 1 },
@@ -561,6 +600,30 @@ test('shows waypoint actions in Properties after placing a waypoint', async () =
     yaw: 0.25,
   }));
 
+  fireEvent.click(screen.getByRole('button', { name: 'Save Mission' }));
+
+  await waitFor(() => expect(saveNavigationMission).toHaveBeenCalledWith(
+    'factory',
+    expect.objectContaining({
+      global_bt: 'global.xml',
+      compiled_bt: 'compiled.xml',
+      waypoints: [
+        expect.objectContaining({
+          id: 'spot_a',
+          label: 'Waypoint A',
+          local_bt: 'locals/spot_a.xml',
+          pose: expect.objectContaining({
+            frame_id: 'map',
+            x: 4,
+            y: 5,
+            yaw: 0.25,
+          }),
+        }),
+      ],
+    }),
+  ));
+  await waitFor(() => expect(screen.getByText('Saved mission for factory')).toBeInTheDocument());
+
   fireEvent.click(screen.getByRole('button', { name: 'Create Waypoint' }));
   fireEvent.click(screen.getByRole('button', { name: 'On Map' }));
   expect(screen.getByRole('button', { name: 'Create Waypoint' })).not.toHaveAttribute('aria-pressed');
@@ -600,8 +663,8 @@ test('opens waypoint BT map layer when selecting a waypoint with BT active', asy
   render(<MissionCanvasPage />);
 
   fireEvent.click(screen.getByRole('tab', { name: 'Design' }));
-  fireEvent.click(screen.getByRole('button', { name: 'Load Map' }));
-  await screen.findByRole('combobox', { name: 'Design map file' });
+  fireEvent.click(screen.getByRole('button', { name: 'Load Mission' }));
+  await screen.findByRole('combobox', { name: 'Design mission map file' });
   fireEvent.click(screen.getByRole('button', { name: 'Load' }));
 
   await waitFor(() => expect(latestMapViewerProps().spots).toHaveLength(1));
@@ -670,8 +733,8 @@ test('creates a waypoint at robot with automatic localization from the waypoint 
   render(<MissionCanvasPage />);
 
   fireEvent.click(screen.getByRole('tab', { name: 'Design' }));
-  fireEvent.click(screen.getByRole('button', { name: 'Load Map' }));
-  await screen.findByRole('combobox', { name: 'Design map file' });
+  fireEvent.click(screen.getByRole('button', { name: 'Load Mission' }));
+  await screen.findByRole('combobox', { name: 'Design mission map file' });
   fireEvent.click(screen.getByRole('button', { name: 'Load' }));
 
   await waitFor(() => expect(screen.getByRole('button', { name: 'Create Waypoint' })).toBeEnabled());
@@ -766,8 +829,8 @@ test('clears stale robot pose before a second at-robot waypoint attempt', async 
   render(<MissionCanvasPage />);
 
   fireEvent.click(screen.getByRole('tab', { name: 'Design' }));
-  fireEvent.click(screen.getByRole('button', { name: 'Load Map' }));
-  await screen.findByRole('combobox', { name: 'Design map file' });
+  fireEvent.click(screen.getByRole('button', { name: 'Load Mission' }));
+  await screen.findByRole('combobox', { name: 'Design mission map file' });
   fireEvent.click(screen.getByRole('button', { name: 'Load' }));
 
   await waitFor(() => expect(screen.getByRole('button', { name: 'Create Waypoint' })).toBeEnabled());
@@ -882,8 +945,8 @@ test('creates a waypoint at the current robot pose from the design toolbar', asy
   render(<MissionCanvasPage />);
 
   fireEvent.click(screen.getByRole('tab', { name: 'Design' }));
-  fireEvent.click(screen.getByRole('button', { name: 'Load Map' }));
-  await screen.findByRole('combobox', { name: 'Design map file' });
+  fireEvent.click(screen.getByRole('button', { name: 'Load Mission' }));
+  await screen.findByRole('combobox', { name: 'Design mission map file' });
   fireEvent.click(screen.getByRole('button', { name: 'Load' }));
 
   await waitFor(() => expect(screen.getByRole('button', { name: 'Create Waypoint' })).toBeEnabled());
@@ -941,8 +1004,8 @@ test('renders waypoint sequence in the mission flow panel', async () => {
   render(<MissionCanvasPage />);
 
   fireEvent.click(screen.getByRole('tab', { name: 'Design' }));
-  fireEvent.click(screen.getByRole('button', { name: 'Load Map' }));
-  await screen.findByRole('combobox', { name: 'Design map file' });
+  fireEvent.click(screen.getByRole('button', { name: 'Load Mission' }));
+  await screen.findByRole('combobox', { name: 'Design mission map file' });
   fireEvent.click(screen.getByRole('button', { name: 'Load' }));
   await waitFor(() => expect(latestMapViewerProps().map).not.toBeNull());
   await waitFor(() => expect(latestMapViewerProps().spots).toHaveLength(1));
@@ -1154,7 +1217,7 @@ test('enables navigation runtime layers in the run stage', async () => {
   expect(screen.getByText('Runtime')).toBeInTheDocument();
   await waitFor(() => expect(screen.getByText('Running')).toBeInTheDocument());
   expect(screen.queryByText('PID:')).not.toBeInTheDocument();
-  expect(screen.getByRole('button', { name: 'Load Map' })).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Load Mission' })).toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Run Mission' })).toBeInTheDocument();
   expect(screen.queryByRole('button', { name: 'Navigation' })).not.toBeInTheDocument();
   expect(screen.queryByRole('button', { name: 'Run BT' })).not.toBeInTheDocument();
@@ -1204,9 +1267,9 @@ test('loads a saved map for the run stage', async () => {
   render(<MissionCanvasPage />);
 
   fireEvent.click(screen.getByRole('tab', { name: 'Run' }));
-  fireEvent.click(screen.getByRole('button', { name: 'Load Map' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Load Mission' }));
 
-  const mapSelect = await screen.findByRole('combobox', { name: 'Run map file' });
+  const mapSelect = await screen.findByRole('combobox', { name: 'Run mission map file' });
   await waitFor(() => expect(mapSelect).toHaveValue('factory.pgm'));
 
   fireEvent.click(screen.getByRole('button', { name: 'Load' }));

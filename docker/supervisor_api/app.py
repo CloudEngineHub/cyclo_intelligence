@@ -92,6 +92,10 @@ _navigation_spots_module = _load_sibling_module(
     "navigation_spots", "navigation_spots.py"
 )
 navigation_spots_router = _navigation_spots_module.router
+_navigation_missions_module = _load_sibling_module(
+    "navigation_missions", "navigation_missions.py"
+)
+navigation_missions_router = _navigation_missions_module.router
 
 
 logger = logging.getLogger("supervisor_api")
@@ -1087,6 +1091,7 @@ app = FastAPI(
 
 _include_router_with_eager_routes(app, navigation_router)
 _include_router_with_eager_routes(app, navigation_spots_router)
+_include_router_with_eager_routes(app, navigation_missions_router)
 
 
 @app.get("/health", response_model=HealthResponse)
