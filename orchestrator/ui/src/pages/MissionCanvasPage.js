@@ -2685,22 +2685,6 @@ export default function MissionCanvasPage() {
     setMissionRouteSourceId(validIds[validIds.length - 1] || "");
   }, [visibleSpots]);
 
-  const handleAppendSelectedSpotToRoute = useCallback(() => {
-    if (!selectedSpotId) {
-      setMessage("Select a waypoint before adding it to the route");
-      return;
-    }
-    const selectedSpot = visibleSpots.find((spot) => spot.id === selectedSpotId);
-    if (!selectedSpot) return;
-    const currentIds = missionRouteTreeSpots.map((spot) => spot.id);
-    if (currentIds.includes(selectedSpotId)) {
-      setMessage(`${selectedSpot.label || selectedSpot.id} is already in the route`);
-      return;
-    }
-    handleSetMissionRouteOrder([...currentIds, selectedSpotId]);
-    setMessage(`Added ${selectedSpot.label || selectedSpot.id} to route`);
-  }, [handleSetMissionRouteOrder, missionRouteTreeSpots, selectedSpotId, visibleSpots]);
-
   const handleMoveRouteSpot = useCallback((spotId, direction) => {
     const currentIds = missionRouteTreeSpots.map((spot) => spot.id);
     const index = currentIds.indexOf(spotId);
@@ -3612,13 +3596,6 @@ export default function MissionCanvasPage() {
                     variant="secondary"
                   >
                     Edit On Map
-                  </ActionButton>
-                  <ActionButton
-                    disabled={!!busy || !selectedSpotId || btNodeIsUp}
-                    onClick={handleAppendSelectedSpotToRoute}
-                    variant="secondary"
-                  >
-                    Add Selected
                   </ActionButton>
                   <ActionButton
                     disabled={!!busy || missionRouteEdges.length === 0}

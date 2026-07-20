@@ -334,7 +334,7 @@ test('shows Waypoint and BT authoring panels in the authoring stage', async () =
   expect(screen.getByRole('button', { name: 'Load Mission' })).toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Save Mission' })).toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Edit On Map' })).toBeDisabled();
-  expect(screen.getByRole('button', { name: 'Add Selected' })).toBeDisabled();
+  expect(screen.queryByRole('button', { name: 'Add Selected' })).not.toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Create Waypoint' })).toBeDisabled();
   expect(screen.queryByRole('menu', { name: 'Waypoint creation options' })).not.toBeInTheDocument();
   expect(screen.queryByRole('button', { name: 'At Robot' })).not.toBeInTheDocument();
@@ -1233,12 +1233,14 @@ test('edits the mission route directly on the map', async () => {
   fireEvent.click(screen.getByRole('button', { name: 'Clear Route' }));
   await waitFor(() => expect(latestMapViewerProps().missionRouteEdges).toEqual([]));
 
-  fireEvent.click(screen.getByRole('button', { name: 'Waypoint B' }));
-  fireEvent.click(screen.getByRole('button', { name: 'Add Selected' }));
+  act(() => {
+    latestMapViewerProps().onMissionRouteSpotClick('spot_b');
+  });
   await waitFor(() => expect(latestMapViewerProps().selectedMissionRouteSourceId).toBe('spot_b'));
 
-  fireEvent.click(screen.getByRole('button', { name: 'Waypoint A' }));
-  fireEvent.click(screen.getByRole('button', { name: 'Add Selected' }));
+  act(() => {
+    latestMapViewerProps().onMissionRouteSpotClick('spot_a');
+  });
   await waitFor(() => expect(latestMapViewerProps().missionRouteEdges).toEqual([
     expect.objectContaining({ source: 'spot_b', target: 'spot_a' }),
   ]));
