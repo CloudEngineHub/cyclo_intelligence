@@ -3320,6 +3320,14 @@ export default function MissionCanvasPage() {
               undo={mapEditor.undo}
               redo={mapEditor.redo}
               save={mapEditor.save}
+              enableAnnotations
+              annotations={mapEditor.annotations}
+              annotationLabel={mapEditor.annotationLabel}
+              setAnnotationLabel={mapEditor.setAnnotationLabel}
+              annotationColor={mapEditor.annotationColor}
+              setAnnotationColor={mapEditor.setAnnotationColor}
+              annotationColors={mapEditor.annotationColors}
+              clearAnnotations={mapEditor.clearAnnotations}
             />
           </div>
         )}
@@ -3346,6 +3354,7 @@ export default function MissionCanvasPage() {
             missionRouteOrder={missionOverlayActive ? missionRouteOrder : []}
             missionRouteMode={workspaceStage === STAGE_AUTHORING && missionRouteMode && !btNodeIsUp}
             selectedMissionRouteSourceId={missionRouteSourceId}
+            mapAnnotations={mappingEditorActive ? mapEditor.annotations : []}
             btLayer={waypointBtLayer}
             showMap={mappingEditorActive ? true : activeLayers.map}
             showGlobalCostmap={mappingEditorActive ? false : needsGlobalCostmap}
@@ -3362,6 +3371,7 @@ export default function MissionCanvasPage() {
             }
             interactionMode={mappingEditorActive ? "view" : interactionMode}
             editorActive={mappingEditorActive && !!mapEditor.map && mapEditor.tool !== "view"}
+            editorPaintOnDrag={mapEditor.tool !== "label_marker"}
             fitContainer
             viewKey={mappingEditorActive
               ? `mission-editor:${mapEditor.selectedPath || "none"}`
@@ -3381,7 +3391,7 @@ export default function MissionCanvasPage() {
             onMissionRouteMapClick={handleMissionRouteMapClick}
             onSpotPoseChange={btNodeIsUp || missionRouteMode ? undefined : handleMoveSpot}
             onBehaviorNodePoseChange={handleMoveBehaviorNode}
-            onEditorMapPoint={mapEditor.editAtMapPoint}
+            onEditorMapPoint={mapEditor.tool === "label_marker" ? mapEditor.placeAnnotationAtMapPoint : mapEditor.editAtMapPoint}
             onMapClick={handleClearMapSelection}
             onMapPose={handleCreateSpotAtPose}
             onBtLayerClose={() => setBtLayerSpotId("")}

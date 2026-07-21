@@ -75,6 +75,7 @@ DESIGN_LOCALIZATION_AMCL_PARAMETERS = {
 AMCL_PARAMETER_SET_TIMEOUT_SECONDS = 8.0
 AMCL_PARAMETER_SET_RETRY_INTERVAL_SECONDS = 0.4
 _SAFE_MAP_NAME = re.compile(r"^[A-Za-z0-9_.-]+$")
+_SAFE_MAP_ANNOTATION_COLOR = re.compile(r"^#[0-9A-Fa-f]{6}$")
 _ANSI_ESCAPE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
 @router.websocket("/topics/ws")
 async def navigation_grid_websocket(websocket: WebSocket, topic: str):
@@ -157,6 +158,25 @@ class PgmSaveRequest(BaseModel):
     height: int = Field(gt=0)
     maxval: int = Field(gt=0, le=255)
     pixels_base64: str
+
+
+class MapAnnotationPose(BaseModel):
+    frame_id: str = Field(default="map", min_length=1, max_length=64)
+    x: float
+    y: float
+    yaw: float = 0.0
+
+
+class MapAnnotation(BaseModel):
+    id: str = Field(min_length=1, max_length=96)
+    label: str = Field(min_length=1, max_length=80)
+    color: str = Field(min_length=4, max_length=9)
+    pose: MapAnnotationPose
+
+
+class MapAnnotationsSaveRequest(BaseModel):
+    path: str
+    annotations: list[MapAnnotation] = Field(default_factory=list)
 
 
 def _docker_client():
@@ -552,8 +572,56 @@ def _resolve_pgm_path(value: str) -> PurePosixPath:
     return resolved
 
 
+def _resolve_map_annotations_path(pgm_path: PurePosixPath) -> PurePosixPath:
+    return pgm_path.with_suffix(".annotations.json")
+
+
 def _relative_map_path(path: PurePosixPath) -> str:
     return str(path).removeprefix(str(MAPS_DIR) + "/")
+
+
+def _annotation_payload(annotation: MapAnnotation) -> dict[str, object]:
+    annotation_id = annotation.id.strip()
+    if not annotation_id:
+        raise HTTPException(400, "Annotation id must not be empty")
+    label = annotation.label.strip() or "Label"
+    color = annotation.color.strip()
+    if not _SAFE_MAP_ANNOTATION_COLOR.fullmatch(color):
+        raise HTTPException(400, "Annotation color must be a #RRGGBB value")
+    return {
+        "id": annotation_id,
+        "label": label[:80],
+        "color": color,
+        "pose": {
+            "frame_id": annotation.pose.frame_id.strip() or "map",
+            "x": float(annotation.pose.x),
+            "y": float(annotation.pose.y),
+            "yaw": float(annotation.pose.yaw),
+        },
+    }
+
+
+def _annotation_from_raw(raw: object) -> Optional[dict[str, object]]:
+    if not isinstance(raw, dict):
+        return None
+    pose = raw.get("pose")
+    if not isinstance(pose, dict):
+        return None
+    try:
+        annotation = MapAnnotation(
+            id=str(raw.get("id") or ""),
+            label=str(raw.get("label") or "Label"),
+            color=str(raw.get("color") or "#C96442"),
+            pose=MapAnnotationPose(
+                frame_id=str(pose.get("frame_id") or "map"),
+                x=float(pose.get("x")),
+                y=float(pose.get("y")),
+                yaw=float(pose.get("yaw") or 0.0),
+            ),
+        )
+    except Exception:
+        return None
+    return _annotation_payload(annotation)
 
 
 def _skip_pgm_space(data: bytes, index: int) -> int:
@@ -1197,6 +1265,31 @@ def get_pgm(path: str):
     }
 
 
+@router.get("/maps/annotations")
+def get_map_annotations(path: str):
+    resolved = _resolve_pgm_path(path)
+    annotations_path = _resolve_map_annotations_path(resolved)
+    try:
+        raw = json.loads(
+            _read_container_file(annotations_path).decode("utf-8")
+        )
+    except FileNotFoundError:
+        raw = {"annotations": []}
+    except json.JSONDecodeError as exc:
+        raise HTTPException(422, f"Invalid map annotations JSON: {exc}") from exc
+    raw_annotations = raw.get("annotations", []) if isinstance(raw, dict) else raw
+    annotations = [
+        item
+        for item in (_annotation_from_raw(raw_item) for raw_item in raw_annotations)
+        if item is not None
+    ]
+    return {
+        "path": _relative_map_path(resolved),
+        "annotations_path": _relative_map_path(annotations_path),
+        "annotations": annotations,
+    }
+
+
 @router.post("/maps/pgm/save")
 def save_pgm(request: PgmSaveRequest):
     resolved = _resolve_pgm_path(request.path)
@@ -1214,5 +1307,29 @@ def save_pgm(request: PgmSaveRequest):
         "path": _relative_map_path(resolved),
         "width": request.width,
         "height": request.height,
+        "saved": True,
+    }
+
+
+@router.post("/maps/annotations/save")
+def save_map_annotations(request: MapAnnotationsSaveRequest):
+    resolved = _resolve_pgm_path(request.path)
+    annotations_path = _resolve_map_annotations_path(resolved)
+    annotations = [_annotation_payload(annotation) for annotation in request.annotations]
+    _write_container_file(
+        annotations_path,
+        json.dumps(
+            {
+                "path": _relative_map_path(resolved),
+                "annotations": annotations,
+            },
+            indent=2,
+            sort_keys=True,
+        ).encode("utf-8"),
+    )
+    return {
+        "path": _relative_map_path(resolved),
+        "annotations_path": _relative_map_path(annotations_path),
+        "annotations": annotations,
         "saved": True,
     }

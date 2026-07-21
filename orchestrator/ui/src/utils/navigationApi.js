@@ -90,6 +90,20 @@ export function savePgmImage(
   });
 }
 
+export function getMapAnnotations(path) {
+  return request(`/maps/annotations?path=${encodeURIComponent(path)}`);
+}
+
+export function saveMapAnnotations(path, annotations) {
+  return request('/maps/annotations/save', {
+    method: 'POST',
+    body: JSON.stringify({
+      path,
+      annotations,
+    }),
+  });
+}
+
 export function sendNavigateToPoseGoal(goal) {
   return request('/goal', {
     method: 'POST',

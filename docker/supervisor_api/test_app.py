@@ -104,6 +104,47 @@ def test_navigation_get_pgm_includes_yaml_metadata(monkeypatch):
     assert result["height"] == 2
 
 
+def test_navigation_map_annotations_sidecar(monkeypatch):
+    files = {}
+
+    def fake_read(path):
+        if path not in files:
+            raise FileNotFoundError(str(path))
+        return files[path]
+
+    def fake_write(path, content):
+        files[path] = content
+
+    monkeypatch.setattr(navigation, "_read_container_file", fake_read)
+    monkeypatch.setattr(navigation, "_write_container_file", fake_write)
+
+    empty = navigation.get_map_annotations("factory.pgm")
+
+    assert empty["annotations"] == []
+
+    saved = navigation.save_map_annotations(
+        navigation.MapAnnotationsSaveRequest(
+            path="factory.pgm",
+            annotations=[
+                navigation.MapAnnotation(
+                    id="dock",
+                    label="Dock",
+                    color="#5B8266",
+                    pose=navigation.MapAnnotationPose(x=1.2, y=-0.4, yaw=0.0),
+                )
+            ],
+        )
+    )
+
+    assert saved["annotations_path"] == "factory.annotations.json"
+    assert navigation.MAPS_DIR / "factory.annotations.json" in files
+
+    loaded = navigation.get_map_annotations("factory.pgm")
+
+    assert loaded["annotations"][0]["label"] == "Dock"
+    assert loaded["annotations"][0]["pose"]["x"] == 1.2
+
+
 def test_navigation_rejects_map_path_escape():
     import pytest
     from fastapi import HTTPException
@@ -477,6 +518,8 @@ def test_navigation_routes_are_registered():
     assert "/navigation/global-localization" in paths
     assert "/navigation/amcl/design-localization-params" in paths
     assert "/navigation/maps/pgm/save" in paths
+    assert "/navigation/maps/annotations" in paths
+    assert "/navigation/maps/annotations/save" in paths
     assert "/navigation/topics/ws" in paths
     assert "/navigation/spots" in paths
     assert "/navigation/missions/{map_name}" in paths

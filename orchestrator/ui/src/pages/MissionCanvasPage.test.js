@@ -2,11 +2,13 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import MissionCanvasPage from './MissionCanvasPage';
 import {
   configureDesignLocalizationAmcl,
+  getMapAnnotations,
   getPgmFiles,
   getPgmImage,
   getServiceStatus,
   requestNoMotionUpdate,
   saveNavigationMap,
+  saveMapAnnotations,
   savePgmImage,
   sendInitialPoseEstimate,
   startNavigation,
@@ -71,6 +73,7 @@ jest.mock('../components/navigation/MapViewer', () => ({
 
 jest.mock('../utils/navigationApi', () => ({
   configureDesignLocalizationAmcl: jest.fn().mockResolvedValue({ ok: true }),
+  getMapAnnotations: jest.fn().mockResolvedValue({ path: 'map.pgm', annotations: [] }),
   getPgmFiles: jest.fn().mockResolvedValue({ files: [] }),
   getPgmImage: jest.fn().mockResolvedValue({
     path: 'map.pgm',
@@ -82,6 +85,7 @@ jest.mock('../utils/navigationApi', () => ({
   getServiceStatus: jest.fn().mockResolvedValue({ is_up: false }),
   requestNoMotionUpdate: jest.fn().mockResolvedValue({ ok: true }),
   saveNavigationMap: jest.fn().mockResolvedValue({ ok: true }),
+  saveMapAnnotations: jest.fn().mockImplementation((path, annotations) => Promise.resolve({ path, annotations, saved: true })),
   savePgmImage: jest.fn().mockResolvedValue({ path: 'map.pgm', saved: true }),
   sendInitialPoseEstimate: jest.fn().mockResolvedValue({ ok: true }),
   startNavigation: jest.fn().mockResolvedValue({ ok: true }),
@@ -186,6 +190,7 @@ beforeEach(() => {
     maxval: 255,
     pixels_base64: 'AA==',
   });
+  getMapAnnotations.mockResolvedValue({ path: 'map.pgm', annotations: [] });
   getServiceStatus.mockResolvedValue({ is_up: false });
   configureDesignLocalizationAmcl.mockResolvedValue({ ok: true });
   requestNoMotionUpdate.mockResolvedValue({ ok: true });
@@ -220,6 +225,7 @@ beforeEach(() => {
     exists: false,
   });
   saveNavigationMap.mockResolvedValue({ ok: true, message: 'Saved map' });
+  saveMapAnnotations.mockImplementation((path, annotations) => Promise.resolve({ path, annotations, saved: true }));
   savePgmImage.mockResolvedValue({ path: 'map.pgm', saved: true });
   sendInitialPoseEstimate.mockResolvedValue({ ok: true });
   startNavigation.mockResolvedValue({ ok: true });
@@ -1478,6 +1484,62 @@ test('edits and saves loaded map pixels from the fix editor', async () => {
     255,
     'AA==',
   ));
+});
+
+test('places named color labels on the map editor overlay', async () => {
+  const latestMapViewerProps = () => (
+    mockMapViewer.mock.calls[mockMapViewer.mock.calls.length - 1][0]
+  );
+  getPgmFiles.mockResolvedValue({
+    files: [{ path: 'factory.pgm', name: 'factory.pgm' }],
+  });
+  getPgmImage.mockResolvedValue({
+    path: 'factory.pgm',
+    width: 1,
+    height: 1,
+    maxval: 255,
+    pixels_base64: '/g==',
+  });
+  getMapAnnotations.mockResolvedValue({
+    path: 'factory.pgm',
+    annotations: [],
+  });
+
+  render(<MissionCanvasPage />);
+
+  fireEvent.click(screen.getByRole('button', { name: 'Map Editor' }));
+
+  await waitFor(() => expect(getPgmImage).toHaveBeenCalledWith('factory.pgm'));
+  await waitFor(() => expect(getMapAnnotations).toHaveBeenCalledWith('factory.pgm'));
+
+  fireEvent.click(screen.getByRole('button', { name: 'Label' }));
+  fireEvent.change(screen.getByLabelText('Label name'), {
+    target: { value: 'Dock' },
+  });
+  fireEvent.click(screen.getByRole('button', { name: 'Sage label' }));
+  await waitFor(() => expect(latestMapViewerProps().editorActive).toBe(true));
+
+  await act(async () => {
+    latestMapViewerProps().onEditorMapPoint(1.2, -0.4);
+  });
+
+  await waitFor(() => expect(saveMapAnnotations).toHaveBeenCalledWith(
+    'factory.pgm',
+    [expect.objectContaining({
+      label: 'Dock',
+      color: '#5B8266',
+      pose: expect.objectContaining({ frame_id: 'map', x: 1.2, y: -0.4 }),
+    })],
+  ));
+  await waitFor(() => expect(latestMapViewerProps().mapAnnotations).toEqual([
+    expect.objectContaining({
+      label: 'Dock',
+      color: '#5B8266',
+      pose: expect.objectContaining({ x: 1.2, y: -0.4 }),
+    }),
+  ]));
+  expect(latestMapViewerProps().editorPaintOnDrag).toBe(false);
+  expect(savePgmImage).not.toHaveBeenCalled();
 });
 
 test('enables live robot and lidar layers while navigation runtime is active', async () => {

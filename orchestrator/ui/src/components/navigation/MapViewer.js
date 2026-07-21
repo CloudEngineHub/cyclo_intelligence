@@ -435,6 +435,55 @@ function makeTextSprite(text, { width = 256, height = 64, fontSize = 22, backgro
     return new THREE.Sprite(new THREE.SpriteMaterial({ map: texture, transparent: true }));
 }
 
+function hexColorValue(color, fallback = 0xc96442) {
+    const match = String(color || "").trim().match(/^#?([0-9A-Fa-f]{6})$/);
+    return match ? Number.parseInt(match[1], 16) : fallback;
+}
+function hexColorString(color, fallback = "#C96442") {
+    const match = String(color || "").trim().match(/^#?([0-9A-Fa-f]{6})$/);
+    return match ? `#${match[1].toUpperCase()}` : fallback;
+}
+function makeAnnotationLabelSprite(text, color, isDark = false) {
+    const pal = markerPalette(isDark);
+    const label = String(text || "Label");
+    const fontSize = 42;
+    const font = `700 ${fontSize}px "Hanken Grotesk", "Pretendard Variable", sans-serif`;
+    const measure = document.createElement("canvas").getContext("2d");
+    measure.font = font;
+    const textW = Math.ceil(measure.measureText(label).width);
+    const height = 88;
+    const dot = 24;
+    const padX = 26;
+    const width = Math.max(150, textW + padX * 2 + dot + 18);
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext("2d");
+    if (ctx) {
+        ctx.clearRect(0, 0, width, height);
+        ctx.beginPath();
+        ctx.roundRect(4, 8, width - 8, height - 16, 24);
+        ctx.fillStyle = pal.labelBg;
+        ctx.fill();
+        ctx.lineWidth = 4;
+        ctx.strokeStyle = color;
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.arc(padX + dot / 2, height / 2, dot / 2, 0, Math.PI * 2);
+        ctx.fillStyle = color;
+        ctx.fill();
+        ctx.fillStyle = pal.labelText;
+        ctx.font = font;
+        ctx.textAlign = "left";
+        ctx.textBaseline = "middle";
+        ctx.fillText(label, padX + dot + 18, height / 2 + 2);
+    }
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: texture, transparent: true }));
+    return { sprite, aspect: width / height };
+}
+
 // Auto-width glass pill + downward tail; clay tint when selected. Returns
 // { sprite, aspect } so the caller scales without squishing long names.
 function makeWaypointLabelSprite(text, { fontSize = 56, selected = false } = {}, isDark = false) {
@@ -633,6 +682,41 @@ function makeMissionRouteBadge(spot, order, selected = false, scale = 1, isDark 
     sprite.scale.set(size, size, 1);
     sprite.userData = { spotId: spot.id, dragAction: "move" };
     return sprite;
+}
+function makeMapAnnotationMarker(annotation, scale = 1, isDark = false) {
+    var _a, _b, _c, _d;
+    const pose = (_a = annotation === null || annotation === void 0 ? void 0 : annotation.pose) !== null && _a !== void 0 ? _a : {};
+    const x = Number((_b = pose.x) !== null && _b !== void 0 ? _b : 0);
+    const y = Number((_c = pose.y) !== null && _c !== void 0 ? _c : 0);
+    if (!Number.isFinite(x) || !Number.isFinite(y))
+        return null;
+    const colorString = hexColorString(annotation === null || annotation === void 0 ? void 0 : annotation.color, isDark ? "#D5794F" : "#C96442");
+    const colorValue = hexColorValue(colorString);
+    const group = new THREE.Group();
+    group.position.set(x, y, 0.68);
+    const ring = new THREE.Mesh(new THREE.RingGeometry(0.27 * scale, 0.36 * scale, 32), new THREE.MeshBasicMaterial({
+        color: isDark ? 0xf3f1ea : 0x1c1a17,
+        transparent: true,
+        opacity: 0.82,
+        side: THREE.DoubleSide,
+    }));
+    group.add(ring);
+    const dot = new THREE.Mesh(new THREE.CircleGeometry(0.24 * scale, 32), new THREE.MeshBasicMaterial({
+        color: colorValue,
+        transparent: true,
+        opacity: 0.94,
+    }));
+    dot.position.z = 0.02;
+    group.add(dot);
+    const label = String((_d = annotation === null || annotation === void 0 ? void 0 : annotation.label) !== null && _d !== void 0 ? _d : "Label").trim();
+    if (label) {
+        const { sprite, aspect } = makeAnnotationLabelSprite(label, colorString, isDark);
+        const labelHeight = Math.max(0.36, 0.68 * scale);
+        sprite.position.set(0.58 * scale, 0.46 * scale, 0.08);
+        sprite.scale.set(labelHeight * aspect, labelHeight, 1);
+        group.add(sprite);
+    }
+    return group;
 }
 function behaviorNodeColor(category, selected = false, isDark = false) {
     const pal = markerPalette(isDark);
@@ -880,7 +964,7 @@ function WaypointBtFocusLayer({ layer, onClose }) {
 // as a clean floor-plan without retuning makeOccupancyTexture.
 const SCENE_BG = { light: 0xefece3, dark: 0x1b1916 };
 
-export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, goalPose, footprint, tf, showMap, showGlobalCostmap, showLocalCostmap, showScan, showGlobalPlan, showGoalPose, showTf, showRobotModel, interactionDisabled, interactionMode, editorActive, viewKey, isDark = false, waitingLabel = "Waiting for /map", fitContainer = false, spots = [], selectedSpotId = "", behaviorNodes = [], selectedBehaviorNodeId = "", behaviorPreviewNode = null, missionRouteOrder = [], missionRouteMode = false, selectedMissionRouteSourceId = "", btLayer = null, onBtLayerClose, onSpotClick, onBehaviorNodeClick, onMissionRouteSpotClick, onMissionRouteMapClick, onSpotPoseChange, onBehaviorNodePoseChange, onEditorMapPoint, onMapClick, onMapPose, }) {
+export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, goalPose, footprint, tf, showMap, showGlobalCostmap, showLocalCostmap, showScan, showGlobalPlan, showGoalPose, showTf, showRobotModel, interactionDisabled, interactionMode, editorActive, editorPaintOnDrag = true, viewKey, isDark = false, waitingLabel = "Waiting for /map", fitContainer = false, spots = [], selectedSpotId = "", behaviorNodes = [], selectedBehaviorNodeId = "", behaviorPreviewNode = null, missionRouteOrder = [], missionRouteMode = false, selectedMissionRouteSourceId = "", mapAnnotations = [], btLayer = null, onBtLayerClose, onSpotClick, onBehaviorNodeClick, onMissionRouteSpotClick, onMissionRouteMapClick, onSpotPoseChange, onBehaviorNodePoseChange, onEditorMapPoint, onMapClick, onMapPose, }) {
     const containerRef = useRef(null);
     const sceneRef = useRef(null);
     const rendererRef = useRef(null);
@@ -1167,6 +1251,12 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, 
             }
         }
         const spotById = new Map(spots.map((spot) => [spot.id, spot]));
+        const annotationScale = Math.max(0.34, Math.min(1.35, waypointScale * 8));
+        mapAnnotations.forEach((annotation) => {
+            const marker = makeMapAnnotationMarker(annotation, annotationScale, isDark);
+            if (marker)
+                layers.add(marker);
+        });
         spots.forEach((spot) => {
             const preview = (nodeDragPreview === null || nodeDragPreview === void 0 ? void 0 : nodeDragPreview.type) === "spot" && nodeDragPreview.id === spot.id
                 ? nodeDragPreview
@@ -1278,6 +1368,7 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, 
         goalPose,
         interactionMode,
         missionRouteOrder,
+        mapAnnotations,
         selectedMissionRouteSourceId,
         behaviorPreviewNode,
         localCostmap,
@@ -1433,7 +1524,7 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, 
                     setDragPreviewPose(null);
                     return;
                 }
-                if (paintEditorPoint(event)) {
+                if (paintEditorPoint(event) && editorPaintOnDrag) {
                     editorPaintPointerRef.current = event.pointerId;
                     renderer.domElement.setPointerCapture(event.pointerId);
                 }
@@ -1661,6 +1752,7 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, 
     }, [
         behaviorNodes,
         editorActive,
+        editorPaintOnDrag,
         interactionDisabled,
         interactionMode,
         map,

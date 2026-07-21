@@ -17,7 +17,7 @@
 "use client";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { MdRedo, MdUndo } from "react-icons/md";
-import { getPgmFiles, getPgmImage, savePgmImage } from "../../utils/navigationApi";
+import { getMapAnnotations, getPgmFiles, getPgmImage, saveMapAnnotations, savePgmImage } from "../../utils/navigationApi";
 import { yawFromPose } from "../../utils/navigationTf";
 const FREE_VALUE = 254;
 const OCCUPIED_VALUE = 0;
@@ -34,6 +34,13 @@ const BRUSH_SIZE_OPTIONS = [
 const EDIT_TOOLS = [
     { id: "erase_black", label: "Clear Space" },
     { id: "draw_black", label: "Add Obstacle" },
+];
+const ANNOTATION_TOOL = { id: "label_marker", label: "Label" };
+const ANNOTATION_COLORS = [
+    { id: "clay", label: "Clay", value: "#C96442" },
+    { id: "sage", label: "Sage", value: "#5B8266" },
+    { id: "amber", label: "Amber", value: "#B4762F" },
+    { id: "ink", label: "Ink", value: "#1C1A17" },
 ];
 function decodePgmPixels(image) {
     const binary = window.atob(image.pixels_base64);
@@ -127,16 +134,43 @@ function normalizeBrushSize(value) {
 function mapNameFromPgmPath(path) {
     return path.split("/").pop().replace(/\.pgm$/i, "");
 }
+function makeAnnotationId() {
+    return `mark_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+}
+function normalizeAnnotationColor(value) {
+    const color = String(value || "").trim();
+    return /^#[0-9A-Fa-f]{6}$/.test(color) ? color.toUpperCase() : ANNOTATION_COLORS[0].value;
+}
+function normalizeAnnotation(annotation) {
+    var _a, _b, _c, _d, _e, _f;
+    const pose = (_a = annotation === null || annotation === void 0 ? void 0 : annotation.pose) !== null && _a !== void 0 ? _a : {};
+    const label = String((_b = annotation === null || annotation === void 0 ? void 0 : annotation.label) !== null && _b !== void 0 ? _b : "Label").trim() || "Label";
+    return {
+        id: String((_c = annotation === null || annotation === void 0 ? void 0 : annotation.id) !== null && _c !== void 0 ? _c : makeAnnotationId()),
+        label: label.slice(0, 80),
+        color: normalizeAnnotationColor(annotation === null || annotation === void 0 ? void 0 : annotation.color),
+        pose: {
+            frame_id: String((_d = pose.frame_id) !== null && _d !== void 0 ? _d : "map"),
+            x: Number((_e = pose.x) !== null && _e !== void 0 ? _e : 0),
+            y: Number((_f = pose.y) !== null && _f !== void 0 ? _f : 0),
+            yaw: Number(pose.yaw !== null && pose.yaw !== void 0 ? pose.yaw : 0),
+        },
+    };
+}
 function preferredPgmFile(files, mapName) {
     const exact = files.find((file) => mapNameFromPgmPath(file.path) === mapName);
     return exact || files.find((file) => file.path.includes(mapName));
 }
 export function useMapEditor({ open, mapName, onMessage, reloadToken = 0 }) {
     const pixelsRef = useRef(null);
+    const annotationsRef = useRef([]);
     const [files, setFiles] = useState([]);
     const [selectedPath, setSelectedPath] = useState("");
     const [image, setImage] = useState(null);
     const [pixels, setPixels] = useState(null);
+    const [annotations, setAnnotations] = useState([]);
+    const [annotationLabel, setAnnotationLabel] = useState("Label");
+    const [annotationColor, setAnnotationColor] = useState(ANNOTATION_COLORS[0].value);
     const [undoStack, setUndoStack] = useState([]);
     const [redoStack, setRedoStack] = useState([]);
     const [dirty, setDirty] = useState(false);
@@ -213,13 +247,44 @@ export function useMapEditor({ open, mapName, onMessage, reloadToken = 0 }) {
             cancelled = true;
         };
     }, [onMessage, open, selectedPath]);
+    useEffect(() => {
+        annotationsRef.current = annotations;
+    }, [annotations]);
+    useEffect(() => {
+        if (!open || !selectedPath) {
+            annotationsRef.current = [];
+            setAnnotations([]);
+            return;
+        }
+        let cancelled = false;
+        getMapAnnotations(selectedPath)
+            .then((response) => {
+            if (cancelled)
+                return;
+            const next = Array.isArray(response === null || response === void 0 ? void 0 : response.annotations)
+                ? response.annotations.map(normalizeAnnotation)
+                : [];
+            annotationsRef.current = next;
+            setAnnotations(next);
+        })
+            .catch((error) => {
+            if (cancelled)
+                return;
+            annotationsRef.current = [];
+            setAnnotations([]);
+            onMessage(error instanceof Error ? error.message : "Failed to load map labels");
+        });
+        return () => {
+            cancelled = true;
+        };
+    }, [onMessage, open, selectedPath]);
     const map = useMemo(() => {
         if (!image || !pixels)
             return null;
         return pgmPixelsToGrid(image, pixels);
     }, [image, pixels]);
     const editAtMapPoint = useCallback((x, y) => {
-        if (!open || !image || busy || tool === "view")
+        if (!open || !image || busy || (tool !== "erase_black" && tool !== "draw_black"))
             return;
         const pixel = mapPointToPgmPixel(image, x, y);
         if (!pixel)
@@ -246,6 +311,44 @@ export function useMapEditor({ open, mapName, onMessage, reloadToken = 0 }) {
         const action = tool === "erase_black" ? "Removed" : "Added";
         onMessage(`${action} ${editedPixels} pixels locally`);
     }, [brushSize, busy, image, onMessage, open, tool]);
+    const persistAnnotations = useCallback((nextAnnotations, successMessage) => {
+        if (!selectedPath || busy)
+            return;
+        const normalized = nextAnnotations.map(normalizeAnnotation);
+        annotationsRef.current = normalized;
+        setAnnotations(normalized);
+        setBusy(true);
+        saveMapAnnotations(selectedPath, normalized)
+            .then((response) => {
+            const saved = Array.isArray(response === null || response === void 0 ? void 0 : response.annotations)
+                ? response.annotations.map(normalizeAnnotation)
+                : normalized;
+            annotationsRef.current = saved;
+            setAnnotations(saved);
+            onMessage(successMessage);
+        })
+            .catch((error) => {
+            onMessage(error instanceof Error ? error.message : "Failed to save map labels");
+        })
+            .finally(() => setBusy(false));
+    }, [busy, onMessage, selectedPath]);
+    const placeAnnotationAtMapPoint = useCallback((x, y) => {
+        if (!open || !image || busy || tool !== ANNOTATION_TOOL.id)
+            return;
+        const label = annotationLabel.trim() || "Label";
+        const nextAnnotation = normalizeAnnotation({
+            id: makeAnnotationId(),
+            label,
+            color: annotationColor,
+            pose: { frame_id: "map", x, y, yaw: 0 },
+        });
+        persistAnnotations([...annotationsRef.current, nextAnnotation], `Placed label ${nextAnnotation.label}`);
+    }, [annotationColor, annotationLabel, busy, image, open, persistAnnotations, tool]);
+    const clearAnnotations = useCallback(() => {
+        if (!annotationsRef.current.length)
+            return;
+        persistAnnotations([], "Cleared map labels");
+    }, [persistAnnotations]);
     const undo = useCallback(() => {
         const currentPixels = pixelsRef.current;
         setUndoStack((stack) => {
@@ -296,6 +399,12 @@ export function useMapEditor({ open, mapName, onMessage, reloadToken = 0 }) {
         setSelectedPath,
         image,
         map,
+        annotations,
+        annotationLabel,
+        setAnnotationLabel,
+        annotationColor,
+        setAnnotationColor: (value) => setAnnotationColor(normalizeAnnotationColor(value)),
+        annotationColors: ANNOTATION_COLORS,
         tool,
         setTool,
         brushSize,
@@ -308,6 +417,8 @@ export function useMapEditor({ open, mapName, onMessage, reloadToken = 0 }) {
         redo,
         save,
         editAtMapPoint,
+        placeAnnotationAtMapPoint,
+        clearAnnotations,
     };
 }
 // Warm segmented map-editor controls (see design handoff, turn 8).
@@ -325,6 +436,12 @@ const TOOL_ICONS = {
     draw_black: (
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
             <path d="M12 19c-4 1.5-8-1-8-5 0-6 8-11 8-11s8 5 8 11c0 4-4 6.5-8 5z" />
+        </svg>
+    ),
+    label_marker: (
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M20.6 13.2 13.2 20.6a2 2 0 0 1-2.8 0l-7-7A2 2 0 0 1 2.8 12V4.4A1.6 1.6 0 0 1 4.4 2.8H12a2 2 0 0 1 1.4.6l7.2 7a2 2 0 0 1 0 2.8z" />
+            <circle cx="7.5" cy="7.5" r="1.2" />
         </svg>
     ),
 };
@@ -364,13 +481,16 @@ function SegButton({ selected, disabled, onClick, title, ariaLabel, children, na
     );
 }
 
-export function MapEditorControls({ files, selectedPath, setSelectedPath, tool, setTool, brushSize, setBrushSize, busy, image, dirty, canUndo, canRedo, undo, redo, save, }) {
+export function MapEditorControls({ files, selectedPath, setSelectedPath, tool, setTool, brushSize, setBrushSize, busy, image, dirty, canUndo = false, canRedo = false, undo, redo, save, enableAnnotations = false, annotations = [], annotationLabel = "Label", setAnnotationLabel = () => { }, annotationColor = ANNOTATION_COLORS[0].value, setAnnotationColor = () => { }, annotationColors = ANNOTATION_COLORS, clearAnnotations = () => { }, }) {
     const iconButtonStyle = (enabled) => ({
         borderRadius: 9,
         border: "1px solid var(--mc-border-strong)",
         backgroundColor: "var(--mc-surface)",
         color: enabled ? "var(--mc-text)" : "var(--mc-text-subtle)",
     });
+    const tools = enableAnnotations ? [...EDIT_TOOLS, ANNOTATION_TOOL] : EDIT_TOOLS;
+    const labelActive = enableAnnotations && tool === ANNOTATION_TOOL.id;
+    const brushActive = !labelActive;
 
     return (
         <div className="flex flex-wrap items-center gap-3">
@@ -394,7 +514,7 @@ export function MapEditorControls({ files, selectedPath, setSelectedPath, tool, 
                 <SegButton selected={tool === "view"} disabled={busy} onClick={() => setTool("view")} title="View" ariaLabel="View">
                     {TOOL_ICONS.view}View
                 </SegButton>
-                {EDIT_TOOLS.map((editTool) => (
+                {tools.map((editTool) => (
                     <SegButton
                         key={editTool.id}
                         selected={tool === editTool.id}
@@ -409,7 +529,7 @@ export function MapEditorControls({ files, selectedPath, setSelectedPath, tool, 
             </SegGroup>
 
             {/* brush size — segmented S/M/L/XL (replaces the <select>) */}
-            <div className="flex items-center gap-2">
+            {brushActive && <div className="flex items-center gap-2">
                 <span className="text-[9.5px] font-mono tracking-[0.1em]" style={{ color: "var(--mc-text-subtle)" }}>BRUSH</span>
                 <SegGroup ariaLabel="Brush size">
                     {BRUSH_SIZE_OPTIONS.map((option) => (
@@ -426,7 +546,53 @@ export function MapEditorControls({ files, selectedPath, setSelectedPath, tool, 
                         </SegButton>
                     ))}
                 </SegGroup>
-            </div>
+            </div>}
+
+            {labelActive && (
+                <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-[9.5px] font-mono tracking-[0.1em]" style={{ color: "var(--mc-text-subtle)" }}>LABEL</span>
+                    <input
+                        aria-label="Label name"
+                        value={annotationLabel}
+                        disabled={busy}
+                        onChange={(event) => setAnnotationLabel(event.currentTarget.value)}
+                        className="h-9 w-32 px-3 text-[12px] font-semibold"
+                        style={{ borderRadius: 10, color: "var(--mc-text)", backgroundColor: "var(--mc-surface)", border: "1px solid var(--mc-border-strong)" }}
+                    />
+                    <div role="group" aria-label="Label color" className="flex items-center gap-1.5">
+                        {annotationColors.map((color) => {
+                            const selected = normalizeAnnotationColor(annotationColor) === normalizeAnnotationColor(color.value);
+                            return (
+                                <button
+                                    key={color.id}
+                                    type="button"
+                                    disabled={busy}
+                                    title={`${color.label} label`}
+                                    aria-label={`${color.label} label`}
+                                    aria-pressed={selected}
+                                    onClick={() => setAnnotationColor(color.value)}
+                                    className="h-8 w-8 transition-all disabled:opacity-50"
+                                    style={{
+                                        borderRadius: 999,
+                                        border: selected ? "2px solid var(--mc-text)" : "1px solid var(--mc-border-strong)",
+                                        backgroundColor: color.value,
+                                        boxShadow: selected ? "0 0 0 3px color-mix(in srgb, var(--mc-text) 12%, transparent)" : "none",
+                                    }}
+                                />
+                            );
+                        })}
+                    </div>
+                    <button
+                        type="button"
+                        disabled={busy || annotations.length === 0}
+                        onClick={clearAnnotations}
+                        className="h-9 px-3 text-[12px] font-semibold transition-all active:translate-y-px disabled:opacity-50 disabled:active:translate-y-0"
+                        style={{ borderRadius: 9, border: "1px solid var(--mc-border-strong)", backgroundColor: "var(--mc-surface)", color: "var(--mc-text)" }}
+                    >
+                        Clear Labels
+                    </button>
+                </div>
+            )}
 
             <div className="h-6 w-px" aria-hidden="true" style={{ backgroundColor: "var(--mc-border)" }} />
 

@@ -1,9 +1,11 @@
 import {
   cancelNavigateToPoseGoal,
   configureDesignLocalizationAmcl,
+  getMapAnnotations,
   getPgmImage,
   getServiceStatus,
   requestGlobalLocalization,
+  saveMapAnnotations,
   saveNavigationMap,
   sendInitialPoseEstimate,
   requestNoMotionUpdate,
@@ -75,6 +77,29 @@ test('uses self-hosted endpoints for map files and action cancellation', async (
     '/api/navigation/maps/pgm?path=warehouse%2Fmap.pgm'
   );
   expect(global.fetch.mock.calls[1][0]).toBe('/api/navigation/cancel');
+});
+
+test('uses sidecar endpoints for map annotations', async () => {
+  const annotations = [{
+    id: 'mark_1',
+    label: 'Dock',
+    color: '#C96442',
+    pose: { frame_id: 'map', x: 1, y: 2, yaw: 0 },
+  }];
+
+  await getMapAnnotations('warehouse/map.pgm');
+  await saveMapAnnotations('warehouse/map.pgm', annotations);
+
+  expect(global.fetch.mock.calls[0][0]).toBe(
+    '/api/navigation/maps/annotations?path=warehouse%2Fmap.pgm'
+  );
+  expect(global.fetch.mock.calls[1]).toEqual([
+    '/api/navigation/maps/annotations/save',
+    expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({ path: 'warehouse/map.pgm', annotations }),
+    }),
+  ]);
 });
 
 test('sends initial pose estimates through the supervisor API', async () => {
