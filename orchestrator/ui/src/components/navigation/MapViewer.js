@@ -35,7 +35,6 @@ const WAYPOINT_HEADING_SHAFT_WIDTH = 1.12;
 const WAYPOINT_HEADING_HEAD_LENGTH = 1.05;
 const WAYPOINT_HEADING_HEAD_WIDTH = 2.84;
 const WAYPOINT_LABEL_OFFSET_Y = 7.2;
-const WAYPOINT_LABEL_SCALE_X = 24;
 const WAYPOINT_LABEL_SCALE_Y = 6;
 const BT_FOCUS_VISIBLE_HEIGHT_MIN = 5;
 const BT_FOCUS_VISIBLE_HEIGHT_MAX = 11;
@@ -370,27 +369,121 @@ function makeLine(points, color, lineWidth = 2) {
     const material = new THREE.LineBasicMaterial({ color, linewidth: lineWidth });
     return new THREE.Line(geometry, material);
 }
-function makeTextSprite(text, { width = 256, height = 64, fontSize = 22, backgroundAlpha = 0.58 } = {}) {
+// Warm, theme-aware marker palette (turn 9 shapes + 11b colors + 12 labels).
+const MARKER_COLORS = {
+    light: {
+        idle: 0x5b8266,          // sage — waypoints/behavior actions (walls stay ink)
+        selected: 0xc96442,      // clay
+        control: 0x1c1a17,       // ink — behavior control chips
+        action: 0x5b8266,        // sage
+        decorator: 0xb4762f,     // amber
+        badgeTextIdle: "#ffffff",
+        badgeTextSelected: "#ffffff",
+        badgeStroke: "rgba(250,248,243,0.95)",
+        labelBg: "rgba(243,241,234,0.92)",
+        labelBorder: "rgba(226,221,209,1)",
+        labelText: "#1c1a17",
+        labelSelBg: "rgba(244,229,220,0.96)",
+        labelSelBorder: "#c96442",
+        labelSelText: "#b5563a",
+        poseArrow: "#f3f1ea",
+    },
+    dark: {
+        idle: 0x6f9a74,
+        selected: 0xd5794f,
+        control: 0xece7dd,       // cream — behavior control chips
+        action: 0x6f9a74,
+        decorator: 0xd9a05a,
+        badgeTextIdle: "#1b1916",
+        badgeTextSelected: "#1b1916",
+        badgeStroke: "rgba(27,25,22,0.9)",
+        labelBg: "rgba(43,40,35,0.92)",
+        labelBorder: "rgba(61,57,49,1)",
+        labelText: "#ece7dd",
+        labelSelBg: "rgba(61,42,32,0.96)",
+        labelSelBorder: "#d5794f",
+        labelSelText: "#e0a488",
+        poseArrow: "#1b1916",
+    },
+};
+const markerPalette = (isDark) => (isDark ? MARKER_COLORS.dark : MARKER_COLORS.light);
+
+function makeTextSprite(text, { width = 256, height = 64, fontSize = 22, backgroundAlpha = 0.92 } = {}, isDark = false) {
+    const pal = markerPalette(isDark);
     const canvas = document.createElement("canvas");
     canvas.width = width;
     canvas.height = height;
     const ctx = canvas.getContext("2d");
     if (ctx) {
-        ctx.fillStyle = `rgba(0, 0, 0, ${backgroundAlpha})`;
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-        ctx.fillStyle = "#ffffff";
-        ctx.shadowColor = "rgba(0, 0, 0, 0.82)";
-        ctx.shadowBlur = Math.max(4, Math.round(fontSize * 0.15));
-        ctx.shadowOffsetX = 1;
-        ctx.shadowOffsetY = 1;
-        ctx.font = `700 ${fontSize}px sans-serif`;
+        const r = height / 2; // pill radius
+        ctx.clearRect(0, 0, width, height);
+        ctx.beginPath();
+        ctx.roundRect(2, 2, width - 4, height - 4, r);
+        ctx.fillStyle = pal.labelBg.replace("0.92", String(backgroundAlpha));
+        ctx.fill();
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = pal.labelBorder;
+        ctx.stroke();
+        ctx.fillStyle = pal.labelText;
+        ctx.font = `600 ${fontSize}px "Hanken Grotesk", "Pretendard Variable", sans-serif`;
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
-        ctx.fillText(text, canvas.width / 2, canvas.height / 2);
+        ctx.fillText(text, width / 2, height / 2 + 1);
     }
     const texture = new THREE.CanvasTexture(canvas);
     texture.colorSpace = THREE.SRGBColorSpace;
     return new THREE.Sprite(new THREE.SpriteMaterial({ map: texture, transparent: true }));
+}
+
+// Auto-width glass pill + downward tail; clay tint when selected. Returns
+// { sprite, aspect } so the caller scales without squishing long names.
+function makeWaypointLabelSprite(text, { fontSize = 56, selected = false } = {}, isDark = false) {
+    const pal = markerPalette(isDark);
+    const font = `${selected ? 700 : 600} ${fontSize}px "Hanken Grotesk", "Pretendard Variable", sans-serif`;
+    const measure = document.createElement("canvas").getContext("2d");
+    measure.font = font;
+    const textW = Math.ceil(measure.measureText(String(text)).width);
+    const pad = Math.round(fontSize * 0.7);
+    const pillH = Math.round(fontSize * 1.9);
+    const tailH = Math.round(fontSize * 0.38);
+    const width = Math.max(textW + pad * 2, pillH);
+    const height = pillH + tailH;
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext("2d");
+    if (ctx) {
+        const bg = selected ? pal.labelSelBg : pal.labelBg;
+        const border = selected ? pal.labelSelBorder : pal.labelBorder;
+        ctx.clearRect(0, 0, width, height);
+        ctx.beginPath();
+        ctx.roundRect(3, 3, width - 6, pillH - 6, pillH / 2);
+        ctx.fillStyle = bg;
+        ctx.fill();
+        ctx.lineWidth = 3;
+        ctx.strokeStyle = border;
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(width / 2 - tailH, pillH - 4);
+        ctx.lineTo(width / 2, pillH + tailH - 4);
+        ctx.lineTo(width / 2 + tailH, pillH - 4);
+        ctx.closePath();
+        ctx.fillStyle = bg;
+        ctx.fill();
+        ctx.strokeStyle = border;
+        ctx.stroke();
+        ctx.fillStyle = bg;
+        ctx.fillRect(width / 2 - tailH + 2, pillH - 7, tailH * 2 - 4, 6);
+        ctx.fillStyle = selected ? pal.labelSelText : pal.labelText;
+        ctx.font = font;
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText(String(text), width / 2, pillH / 2 + 2);
+    }
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: texture, transparent: true }));
+    return { sprite, aspect: width / height };
 }
 function waypointHeadingShape(shaftWidth, headWidth, headLength) {
     const start = WAYPOINT_CENTER_RADIUS * 0.32;
@@ -419,7 +512,7 @@ function makeWaypointHeadingArrow() {
     arrow.position.z = 0.04;
     return arrow;
 }
-function makePoseMarker(pose, color, z) {
+function makePoseMarker(pose, color, z, isDark = false) {
     var _a, _b, _c, _d;
     const group = new THREE.Group();
     const x = Number((_b = (_a = pose.position) === null || _a === void 0 ? void 0 : _a.x) !== null && _b !== void 0 ? _b : 0);
@@ -435,12 +528,12 @@ function makePoseMarker(pose, color, z) {
     arrowShape.lineTo(-0.04, 0);
     arrowShape.lineTo(-0.1, -0.13);
     arrowShape.closePath();
-    const arrow = new THREE.Mesh(new THREE.ShapeGeometry(arrowShape), new THREE.MeshBasicMaterial({ color: 0xffffff }));
+    const arrow = new THREE.Mesh(new THREE.ShapeGeometry(arrowShape), new THREE.MeshBasicMaterial({ color: markerPalette(isDark).poseArrow }));
     arrow.position.z = 0.01;
     group.add(arrow);
     return group;
 }
-function makeSpotMarker(spot, selected = false, scale = 1) {
+function makeSpotMarker(spot, selected = false, scale = 1, isDark = false) {
     var _a, _b, _c, _d;
     const pose = spot === null || spot === void 0 ? void 0 : spot.pose;
     if (!pose)
@@ -448,7 +541,8 @@ function makeSpotMarker(spot, selected = false, scale = 1) {
     const x = Number((_a = pose.x) !== null && _a !== void 0 ? _a : 0);
     const y = Number((_b = pose.y) !== null && _b !== void 0 ? _b : 0);
     const yaw = Number((_c = pose.yaw) !== null && _c !== void 0 ? _c : 0);
-    const color = selected ? 0xf59e0b : 0x22c55e;
+    const pal = markerPalette(isDark);
+    const color = selected ? pal.selected : pal.idle;
     const group = new THREE.Group();
     group.position.set(x, y, 0.24);
     group.scale.setScalar(scale);
@@ -490,20 +584,16 @@ function makeSpotMarker(spot, selected = false, scale = 1) {
     group.add(marker);
     const label = String((_d = spot.label) !== null && _d !== void 0 ? _d : spot.id);
     if (label) {
-        const sprite = makeTextSprite(label, {
-            width: 512,
-            height: 128,
-            fontSize: 64,
-            backgroundAlpha: 0.68,
-        });
+        const { sprite, aspect } = makeWaypointLabelSprite(label, { selected }, isDark);
         sprite.position.set(0, WAYPOINT_LABEL_OFFSET_Y, 0.04);
-        sprite.scale.set(WAYPOINT_LABEL_SCALE_X, WAYPOINT_LABEL_SCALE_Y, 1);
+        sprite.scale.set(WAYPOINT_LABEL_SCALE_Y * aspect, WAYPOINT_LABEL_SCALE_Y, 1); // auto width, no squish
         sprite.userData = { spotId: spot.id, dragAction: "move" };
         group.add(sprite);
     }
     return group;
 }
-function makeRouteBadgeSprite(text, selected = false) {
+function makeRouteBadgeSprite(text, selected = false, isDark = false) {
+    const pal = markerPalette(isDark);
     const canvas = document.createElement("canvas");
     canvas.width = 128;
     canvas.height = 128;
@@ -512,49 +602,52 @@ function makeRouteBadgeSprite(text, selected = false) {
         ctx.clearRect(0, 0, canvas.width, canvas.height);
         ctx.beginPath();
         ctx.arc(64, 64, 52, 0, Math.PI * 2);
-        ctx.fillStyle = selected ? "#f59e0b" : "#2563eb";
+        ctx.fillStyle = selected
+            ? `#${pal.selected.toString(16).padStart(6, "0")}`
+            : `#${pal.idle.toString(16).padStart(6, "0")}`;
         ctx.fill();
-        ctx.lineWidth = 8;
-        ctx.strokeStyle = "#ffffff";
+        ctx.lineWidth = 6;
+        ctx.strokeStyle = pal.badgeStroke;
         ctx.stroke();
-        ctx.fillStyle = "#ffffff";
-        ctx.font = "800 58px sans-serif";
+        ctx.fillStyle = selected ? pal.badgeTextSelected : pal.badgeTextIdle;
+        ctx.font = '700 56px "IBM Plex Mono", ui-monospace, monospace';
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
-        ctx.fillText(String(text), 64, 66);
+        ctx.fillText(String(text), 64, 68);
     }
     const texture = new THREE.CanvasTexture(canvas);
     texture.colorSpace = THREE.SRGBColorSpace;
     return new THREE.Sprite(new THREE.SpriteMaterial({ map: texture, transparent: true }));
 }
-function makeMissionRouteBadge(spot, order, selected = false, scale = 1) {
+function makeMissionRouteBadge(spot, order, selected = false, scale = 1, isDark = false) {
     var _a, _b;
     const pose = spot === null || spot === void 0 ? void 0 : spot.pose;
     if (!pose)
         return null;
     const x = Number((_a = pose.x) !== null && _a !== void 0 ? _a : 0);
     const y = Number((_b = pose.y) !== null && _b !== void 0 ? _b : 0);
-    const sprite = makeRouteBadgeSprite(order, selected);
+    const sprite = makeRouteBadgeSprite(order, selected, isDark);
     const size = Math.max(0.34, WAYPOINT_RING_OUTER_RADIUS * scale * 2.2);
     sprite.position.set(x, y, 0.62);
     sprite.scale.set(size, size, 1);
     sprite.userData = { spotId: spot.id, dragAction: "move" };
     return sprite;
 }
-function behaviorNodeColor(category, selected = false) {
+function behaviorNodeColor(category, selected = false, isDark = false) {
+    const pal = markerPalette(isDark);
     if (selected)
-        return 0xf59e0b;
+        return pal.selected;
     switch (category) {
         case "control":
-            return 0x38bdf8;
+            return pal.control;
         case "decorator":
-            return 0xa78bfa;
+            return pal.decorator;
         case "action":
         default:
-            return 0x22c55e;
+            return pal.action;
     }
 }
-function makeBehaviorNodeMarker(node, selected = false) {
+function makeBehaviorNodeMarker(node, selected = false, isDark = false) {
     var _a, _b, _c, _d, _e;
     const pose = node === null || node === void 0 ? void 0 : node.pose;
     if (!pose)
@@ -562,7 +655,7 @@ function makeBehaviorNodeMarker(node, selected = false) {
     const x = Number((_a = pose.x) !== null && _a !== void 0 ? _a : 0);
     const y = Number((_b = pose.y) !== null && _b !== void 0 ? _b : 0);
     const yaw = Number((_c = pose.yaw) !== null && _c !== void 0 ? _c : 0);
-    const color = behaviorNodeColor(node.category, selected);
+    const color = behaviorNodeColor(node.category, selected, isDark);
     const group = new THREE.Group();
     group.position.set(x, y, 0.28);
     group.rotation.z = yaw;
@@ -581,13 +674,13 @@ function makeBehaviorNodeMarker(node, selected = false) {
         new THREE.Vector3(0.26, 0.16, 0.02),
         new THREE.Vector3(-0.26, 0.16, 0.02),
         new THREE.Vector3(-0.26, -0.16, 0.02),
-    ], selected ? 0xffffff : 0xe5e7eb, 2);
+    ], isDark ? 0x1b1916 : 0xf3f1ea, 2);
     if (outline) {
         outline.userData.behaviorNodeId = node.id;
         group.add(outline);
     }
     const port = new THREE.Mesh(new THREE.CircleGeometry(0.045, 16), new THREE.MeshBasicMaterial({
-        color: 0xffffff,
+        color: isDark ? 0x1b1916 : 0xffffff,
         transparent: true,
         opacity: 0.92,
     }));
@@ -596,7 +689,7 @@ function makeBehaviorNodeMarker(node, selected = false) {
     group.add(port);
     const label = String((_e = (_d = node.label) !== null && _d !== void 0 ? _d : node.tag) !== null && _e !== void 0 ? _e : node.id);
     if (label) {
-        const sprite = makeTfLabelSprite(label);
+        const sprite = makeTfLabelSprite(label, isDark);
         sprite.position.set(0, 0.38, 0.06);
         sprite.scale.set(0.56, 0.14, 1);
         sprite.userData.behaviorNodeId = node.id;
@@ -604,7 +697,7 @@ function makeBehaviorNodeMarker(node, selected = false) {
     }
     return group;
 }
-function makeTfAxes(pose, label) {
+function makeTfAxes(pose, label, isDark = false) {
     var _a, _b, _c, _d, _e, _f;
     const group = new THREE.Group();
     group.position.set(Number((_b = (_a = pose.position) === null || _a === void 0 ? void 0 : _a.x) !== null && _b !== void 0 ? _b : 0), Number((_d = (_c = pose.position) === null || _c === void 0 ? void 0 : _c.y) !== null && _d !== void 0 ? _d : 0), Number((_f = (_e = pose.position) === null || _e === void 0 ? void 0 : _e.z) !== null && _f !== void 0 ? _f : 0) + 0.08);
@@ -618,7 +711,7 @@ function makeTfAxes(pose, label) {
         group.add(yAxis);
     if (zAxis)
         group.add(zAxis);
-    const sprite = makeTfLabelSprite(label);
+    const sprite = makeTfLabelSprite(label, isDark);
     sprite.position.set(0, -TF_AXIS_LENGTH * 0.85, 0.012);
     group.add(sprite);
     return group;
@@ -671,8 +764,8 @@ function makeFootprintMarker(footprint, framePose) {
     group.add(fill);
     return group;
 }
-function makeTfLabelSprite(text) {
-    const sprite = makeTextSprite(text);
+function makeTfLabelSprite(text, isDark = false) {
+    const sprite = makeTextSprite(text, undefined, isDark);
     sprite.scale.set(TF_AXIS_LENGTH * 1.8, TF_AXIS_LENGTH * 0.45, 1);
     return sprite;
 }
@@ -1046,7 +1139,7 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, 
                 layers.add(planLine);
         }
         if (showGoalPose && ((_f = goalPose === null || goalPose === void 0 ? void 0 : goalPose.pose) === null || _f === void 0 ? void 0 : _f.position)) {
-            layers.add(makePoseMarker(goalPose.pose, 0xf59e0b, 0.14));
+            layers.add(makePoseMarker(goalPose.pose, isDark ? 0xd5794f : 0xc96442, 0.14, isDark));
         }
         if (dragPreviewPose === null || dragPreviewPose === void 0 ? void 0 : dragPreviewPose.position) {
             const previewX = Number((_g = dragPreviewPose.position.x) !== null && _g !== void 0 ? _g : 0);
@@ -1057,7 +1150,7 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, 
                     id: "__waypoint_preview__",
                     label: "Waypoint",
                     pose: { x: previewX, y: previewY, yaw: previewYaw },
-                }, true, waypointScale));
+                }, true, waypointScale, isDark));
             }
             else if (interactionMode === "behavior" && behaviorPreviewNode) {
                 layers.add(makeBehaviorNodeMarker({
@@ -1066,10 +1159,10 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, 
                     label: behaviorPreviewNode.label || behaviorPreviewNode.tag,
                     category: behaviorPreviewNode.category || "action",
                     pose: { x: previewX, y: previewY, yaw: previewYaw },
-                }, true));
+                }, true, isDark));
             }
             else {
-                layers.add(makePoseMarker(dragPreviewPose, interactionMode === "initial" ? 0x22c55e : 0xf59e0b, 0.2));
+                layers.add(makePoseMarker(dragPreviewPose, interactionMode === "initial" ? (isDark ? 0x6f9a74 : 0x5b8266) : (isDark ? 0xd5794f : 0xc96442), 0.2, isDark));
             }
         }
         const spotById = new Map(spots.map((spot) => [spot.id, spot]));
@@ -1087,13 +1180,13 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, 
                         yaw: preview.yaw,
                     },
                 }
-                : spot, spot.id === selectedSpotId, waypointScale);
+                : spot, spot.id === selectedSpotId, waypointScale, isDark);
             if (marker)
                 layers.add(marker);
         });
         missionRouteOrder.forEach(({ id, order }) => {
             const spot = spotById.get(id);
-            const badge = makeMissionRouteBadge(spot, order, id === selectedMissionRouteSourceId, waypointScale);
+            const badge = makeMissionRouteBadge(spot, order, id === selectedMissionRouteSourceId, waypointScale, isDark);
             if (badge)
                 layers.add(badge);
         });
@@ -1111,7 +1204,7 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, 
                         yaw: preview.yaw,
                     },
                 }
-                : node, node.id === selectedBehaviorNodeId);
+                : node, node.id === selectedBehaviorNodeId, isDark);
             if (marker)
                 layers.add(marker);
         });
@@ -1150,14 +1243,14 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, 
             const framePoses = tfFramePoses.slice(0, 80);
             if (framePoses.length > 0) {
                 framePoses.forEach(({ frame, pose: framePose }) => {
-                    layers.add(makeTfAxes(framePose, frame));
+                    layers.add(makeTfAxes(framePose, frame, isDark));
                 });
             }
             else {
                 layers.add(makeTfAxes({
                     position: { x: robotX, y: robotY, z: 0 },
                     orientation: pose === null || pose === void 0 ? void 0 : pose.orientation,
-                }, "base_link"));
+                }, "base_link", isDark));
             }
         }
         if (showRobotModel && ((_0 = (_z = tfSyncedFootprint === null || tfSyncedFootprint === void 0 ? void 0 : tfSyncedFootprint.polygon) === null || _z === void 0 ? void 0 : _z.points) === null || _0 === void 0 ? void 0 : _0.length)) {
@@ -1170,7 +1263,7 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, 
                 layers.add(footprintMarker);
         }
         if (pose === null || pose === void 0 ? void 0 : pose.position) {
-            layers.add(makePoseMarker(pose, showRobotModel && ((_4 = (_3 = tfSyncedFootprint === null || tfSyncedFootprint === void 0 ? void 0 : tfSyncedFootprint.polygon) === null || _3 === void 0 ? void 0 : _3.points) === null || _4 === void 0 ? void 0 : _4.length) ? 0x60a5fa : 0x007acc, 0.16));
+            layers.add(makePoseMarker(pose, showRobotModel && ((_4 = (_3 = tfSyncedFootprint === null || tfSyncedFootprint === void 0 ? void 0 : tfSyncedFootprint.polygon) === null || _3 === void 0 ? void 0 : _3.points) === null || _4 === void 0 ? void 0 : _4.length) ? 0x60a5fa : 0x007acc, 0.16, isDark));
         }
         const fitKey = viewKey !== null && viewKey !== void 0 ? viewKey : "default";
         if (meta && fitMapKeyRef.current !== fitKey && !(btLayer?.spot?.pose)) {
