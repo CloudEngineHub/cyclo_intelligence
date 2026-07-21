@@ -700,8 +700,8 @@ test('shows waypoint actions in Design Objects after placing a waypoint', async 
     metadata: { source: 'mission_canvas', coordinate_space: 'map' },
   }));
   expect(screen.getByRole('button', { name: 'Waypoint A' })).toBeInTheDocument();
-  expect(screen.getByRole('button', { name: 'Create Waypoint' })).toHaveAttribute('aria-pressed', 'true');
-  expect(latestMapViewerProps().interactionMode).toBe('spot');
+  expect(screen.getByRole('button', { name: 'Create Waypoint' })).not.toHaveAttribute('aria-pressed', 'true');
+  expect(latestMapViewerProps().interactionMode).toBe('view');
   expect(screen.queryByRole('button', { name: 'Create BT' })).not.toBeInTheDocument();
   expect(screen.queryByRole('button', { name: 'Edit BT' })).not.toBeInTheDocument();
   expect(screen.getByRole('button', { name: /Delete Waypoint Waypoint A/ })).toBeEnabled();
@@ -775,7 +775,7 @@ test('shows waypoint actions in Design Objects after placing a waypoint', async 
 
   fireEvent.click(screen.getByRole('button', { name: 'Create Waypoint' }));
   fireEvent.click(screen.getByRole('button', { name: 'On Map' }));
-  expect(screen.getByRole('button', { name: 'Create Waypoint' })).not.toHaveAttribute('aria-pressed');
+  expect(screen.getByRole('button', { name: 'Create Waypoint' })).toHaveAttribute('aria-pressed', 'true');
 
   fireEvent.doubleClick(screen.getByRole('button', { name: 'Waypoint A' }));
   const waypointNameInput = screen.getByRole('textbox', { name: 'Waypoint name' });
@@ -879,7 +879,7 @@ test('opens waypoint BT map layer when selecting a waypoint with BT active', asy
   }));
   expect(screen.queryByRole('dialog', { name: 'Waypoint BT' })).not.toBeInTheDocument();
   expect(screen.getAllByText('Waypoint Factory').length).toBeGreaterThan(0);
-  expect(screen.getAllByText('factory_waypoint.xml').length).toBeGreaterThan(0);
+  expect(screen.queryByText('factory_waypoint.xml')).not.toBeInTheDocument();
   expect(screen.queryByRole('button', { name: 'Create BT' })).not.toBeInTheDocument();
   expect(screen.queryByRole('button', { name: 'Edit BT' })).not.toBeInTheDocument();
 

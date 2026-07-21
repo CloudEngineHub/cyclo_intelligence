@@ -1061,11 +1061,11 @@ function BtRuntimePanel({
         <span className="font-medium truncate ml-3 text-right">{activeNodesLabel}</span>
       </div>
       <div className="flex gap-2 mt-3.5">
-        <ActionButton disabled={busy || isActive} onClick={onActivate} title="Start BT node" variant="secondary">
-          <span className="inline-flex items-center gap-1.5"><MdPowerSettingsNew size={16} />Activate BT</span>
+        <ActionButton className="flex-1" disabled={busy || isActive} onClick={onActivate} title="Start BT node" variant="secondary">
+          <span className="w-full inline-flex items-center justify-center gap-1.5"><MdPowerSettingsNew size={16} />Activate BT</span>
         </ActionButton>
-        <ActionButton disabled={busy || !isActive} onClick={onDeactivate} title="Stop BT node" variant="danger">
-          <span className="inline-flex items-center gap-1.5"><MdStop size={16} />Deactivate BT</span>
+        <ActionButton className="flex-1" disabled={busy || !isActive} onClick={onDeactivate} title="Stop BT node" variant="danger">
+          <span className="w-full inline-flex items-center justify-center gap-1.5"><MdStop size={16} />Deactivate BT</span>
         </ActionButton>
       </div>
     </div>
@@ -1445,6 +1445,7 @@ function ActionButton({
   children,
   active = false,
   disabled = false,
+  className = "",
   onClick,
   title,
   type = "button",
@@ -1472,11 +1473,33 @@ function ActionButton({
       title={title}
       aria-pressed={active ? true : undefined}
       className={[
-        "h-9 px-4 border rounded-md text-[13px] font-semibold transition-all active:translate-y-px",
+        "h-9 px-4 border rounded-md inline-flex items-center justify-center text-center whitespace-nowrap text-[13px] font-semibold transition-all active:translate-y-px",
         active ? "disabled:opacity-90" : "disabled:opacity-50",
         "disabled:active:translate-y-0",
+        className,
       ].join(" ")}
       style={{ borderRadius: 10, ...styles[variant], ...activeStyles }}
+    >
+      {children}
+    </button>
+  );
+}
+
+function WaypointOptionButton({ active = false, disabled = false, onClick, children }) {
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      aria-pressed={active ? true : undefined}
+      onClick={onClick}
+      className="h-10 min-w-[92px] px-4 inline-flex items-center justify-center text-center whitespace-nowrap text-[13px] font-semibold transition-all active:translate-y-px disabled:opacity-50 disabled:active:translate-y-0"
+      style={{
+        borderRadius: 10,
+        border: `1px solid ${active ? "var(--mc-border-strong)" : MISSION_BUTTON_BORDER}`,
+        backgroundColor: active ? MISSION_SURFACE_STRONG : MISSION_STAGE_EMPTY,
+        color: MISSION_TEXT,
+        boxShadow: active ? "none" : "var(--mc-shadow)",
+      }}
     >
       {children}
     </button>
@@ -2815,6 +2838,8 @@ export default function MissionCanvasPage() {
       setSpots((current) => [...current, created]);
       setSelectedSpotId(created.id);
       setSelectedBehaviorNodeId("");
+      setShowWaypointOptions(false);
+      setInteractionMode("view");
       setMessage(`Created ${created.label}`);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Failed to create waypoint");
@@ -3333,9 +3358,9 @@ export default function MissionCanvasPage() {
                     Waypoint
                   </button>
                   {showWaypointOptions && (
-                    <div className="absolute left-0 top-[calc(100%+6px)] flex items-center gap-1.5 p-1.5" role="menu" aria-label="Waypoint creation options" style={{ borderRadius: 10, backgroundColor: "var(--mc-surface)", border: "1px solid var(--mc-border-strong)", boxShadow: "var(--mc-shadow)" }}>
-                      <ActionButton active={interactionMode === "spot"} disabled={!designMapAvailable || btNodeIsUp || missionRouteMode} onClick={handleToggleSpotMode} variant="secondary">On Map</ActionButton>
-                      <ActionButton active={interactionMode === "initial" || busy === "At Robot"} disabled={!!busy || !designMapAvailable || btNodeIsUp || missionRouteMode} onClick={handleCreateSpotAtRobot} variant="secondary">At Robot</ActionButton>
+                    <div className="absolute left-0 top-[calc(100%+6px)] flex items-center gap-2 p-2" role="menu" aria-label="Waypoint creation options" style={{ borderRadius: 12, backgroundColor: "var(--mc-surface)", border: "1px solid var(--mc-border-strong)", boxShadow: "var(--mc-shadow)" }}>
+                      <WaypointOptionButton active={interactionMode === "spot"} disabled={!designMapAvailable || btNodeIsUp || missionRouteMode} onClick={handleToggleSpotMode}>On Map</WaypointOptionButton>
+                      <WaypointOptionButton active={interactionMode === "initial" || busy === "At Robot"} disabled={!!busy || !designMapAvailable || btNodeIsUp || missionRouteMode} onClick={handleCreateSpotAtRobot}>At Robot</WaypointOptionButton>
                     </div>
                   )}
                 </div>
@@ -3390,7 +3415,6 @@ export default function MissionCanvasPage() {
                 {spots.map((spot) => {
                   const selected = spot.id === selectedSpotId;
                   const editing = editingSpotId === spot.id;
-                  const localBtPath = localBtPathForSpot(spot);
                   return (
                     <div key={spot.id} className="grid gap-1.5 min-w-0" style={{ padding: 8, borderRadius: 12, border: `1px solid ${selected ? "var(--mc-accent)" : "var(--mc-border)"}`, backgroundColor: selected ? "var(--mc-accent-soft)" : "var(--mc-surface-2)" }}>
                       <div className="flex items-center gap-1.5 min-w-0">
@@ -3413,7 +3437,6 @@ export default function MissionCanvasPage() {
                           <MdDelete size={15} />
                         </button>
                       </div>
-                      {selected && <div className="text-[10.5px] font-mono truncate px-1" style={{ color: "var(--mc-text-subtle)" }}>{localBtPath}</div>}
                     </div>
                   );
                 })}
