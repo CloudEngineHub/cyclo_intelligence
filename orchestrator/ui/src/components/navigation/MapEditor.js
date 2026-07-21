@@ -35,12 +35,18 @@ const EDIT_TOOLS = [
     { id: "erase_black", label: "Clear Space" },
     { id: "draw_black", label: "Add Obstacle" },
 ];
-const ANNOTATION_TOOL = { id: "label_marker", label: "Label" };
+const ANNOTATION_TOOL = { id: "label_marker", label: "Area" };
 const ANNOTATION_COLORS = [
-    { id: "clay", label: "Clay", value: "#C96442" },
-    { id: "sage", label: "Sage", value: "#5B8266" },
-    { id: "amber", label: "Amber", value: "#B4762F" },
-    { id: "ink", label: "Ink", value: "#1C1A17" },
+    { id: "dark_brown", label: "Dark brown", value: "#3B241F" },
+    { id: "red_wine", label: "Red wine", value: "#6D1F2A" },
+    { id: "navy", label: "Navy", value: "#203A63" },
+    { id: "dark_yellow", label: "Dark yellow", value: "#A77912" },
+    { id: "gray", label: "Gray", value: "#5C6670" },
+    { id: "forest", label: "Forest", value: "#2F5D46" },
+    { id: "plum", label: "Plum", value: "#57406F" },
+    { id: "teal", label: "Teal", value: "#1F6B73" },
+    { id: "rust", label: "Rust", value: "#8A3F28" },
+    { id: "olive", label: "Olive", value: "#58652D" },
 ];
 function decodePgmPixels(image) {
     const binary = window.atob(image.pixels_base64);
@@ -75,6 +81,44 @@ function paintPgmPixels(pixels, width, height, pixelX, pixelY, operation, brushS
         }
     }
     return next;
+}
+function floodFillFreePgmRegion(pixels, width, height, seedX, seedY) {
+    if (!pixels || seedX < 0 || seedX >= width || seedY < 0 || seedY >= height)
+        return null;
+    const seedIndex = seedX + seedY * width;
+    if (pixels[seedIndex] < FREE_THRESHOLD)
+        return null;
+    const visited = new Uint8Array(width * height);
+    const stack = [seedIndex];
+    visited[seedIndex] = 1;
+    let count = 0;
+    let sumX = 0;
+    let sumY = 0;
+    while (stack.length) {
+        const index = stack.pop();
+        const x = index % width;
+        const y = Math.floor(index / width);
+        count += 1;
+        sumX += x;
+        sumY += y;
+        const neighbors = [
+            x > 0 ? index - 1 : -1,
+            x < width - 1 ? index + 1 : -1,
+            y > 0 ? index - width : -1,
+            y < height - 1 ? index + width : -1,
+        ];
+        neighbors.forEach((nextIndex) => {
+            if (nextIndex < 0 || visited[nextIndex] || pixels[nextIndex] < FREE_THRESHOLD)
+                return;
+            visited[nextIndex] = 1;
+            stack.push(nextIndex);
+        });
+    }
+    return {
+        count,
+        centroidPixelX: count ? sumX / count : seedX,
+        centroidPixelY: count ? sumY / count : seedY,
+    };
 }
 function pgmPixelsToGrid(image, pixels) {
     const resolution = Number(image.resolution ?? 1) || 1;
@@ -126,6 +170,22 @@ function mapPointToPgmPixel(image, x, y) {
     }
     return { pixelX, pixelY };
 }
+function pgmPixelToMapPoint(image, pixelX, pixelY) {
+    const resolution = Number(image.resolution ?? 1) || 1;
+    const origin = image.origin ?? {
+        position: { x: 0, y: 0, z: 0 },
+        orientation: { x: 0, y: 0, z: 0, w: 1 },
+    };
+    const originX = Number(origin.position?.x ?? 0);
+    const originY = Number(origin.position?.y ?? 0);
+    const originYaw = yawFromPose(origin);
+    const localX = (pixelX + 0.5) * resolution;
+    const localY = (image.height - 1 - pixelY + 0.5) * resolution;
+    return {
+        x: originX + Math.cos(originYaw) * localX - Math.sin(originYaw) * localY,
+        y: originY + Math.sin(originYaw) * localX + Math.cos(originYaw) * localY,
+    };
+}
 function normalizeBrushSize(value) {
     if (!Number.isFinite(value))
         return DEFAULT_BRUSH_SIZE_CELLS;
@@ -141,11 +201,53 @@ function normalizeAnnotationColor(value) {
     const color = String(value || "").trim();
     return /^#[0-9A-Fa-f]{6}$/.test(color) ? color.toUpperCase() : ANNOTATION_COLORS[0].value;
 }
+function hslToHex(h, s, l) {
+    const c = (1 - Math.abs(2 * l - 1)) * s;
+    const hp = h / 60;
+    const x = c * (1 - Math.abs((hp % 2) - 1));
+    const [r1, g1, b1] = hp < 1 ? [c, x, 0]
+        : hp < 2 ? [x, c, 0]
+            : hp < 3 ? [0, c, x]
+                : hp < 4 ? [0, x, c]
+                    : hp < 5 ? [x, 0, c]
+                        : [c, 0, x];
+    const m = l - c / 2;
+    const toHex = (value) => Math.round((value + m) * 255).toString(16).padStart(2, "0").toUpperCase();
+    return `#${toHex(r1)}${toHex(g1)}${toHex(b1)}`;
+}
+function chooseAnnotationColor(existingAnnotations) {
+    const used = new Set((existingAnnotations || []).map((annotation) => normalizeAnnotationColor(annotation.color)));
+    const available = ANNOTATION_COLORS.filter((color) => !used.has(color.value));
+    if (available.length) {
+        return available[Math.floor(Math.random() * available.length)].value;
+    }
+    for (let attempt = 0; attempt < 48; attempt += 1) {
+        const hue = (Math.random() * 360 + used.size * 137.508 + attempt * 29) % 360;
+        const generated = hslToHex(hue, 0.52, 0.32);
+        if (!used.has(generated))
+            return generated;
+    }
+    return hslToHex((used.size * 137.508) % 360, 0.52, 0.32);
+}
+function normalizeAnnotationRegion(region) {
+    var _a, _b, _c, _d, _e;
+    const seed = (_a = region === null || region === void 0 ? void 0 : region.seed_cell) !== null && _a !== void 0 ? _a : {};
+    const x = Number((_b = seed.x) !== null && _b !== void 0 ? _b : NaN);
+    const y = Number((_c = seed.y) !== null && _c !== void 0 ? _c : NaN);
+    if (!Number.isFinite(x) || !Number.isFinite(y) || x < 0 || y < 0)
+        return null;
+    return {
+        seed_cell: { x: Math.floor(x), y: Math.floor(y) },
+        cell_count: Number.isFinite(Number(region === null || region === void 0 ? void 0 : region.cell_count)) ? Math.max(0, Math.floor(Number(region.cell_count))) : null,
+        width: Number.isFinite(Number((_d = region === null || region === void 0 ? void 0 : region.width) !== null && _d !== void 0 ? _d : NaN)) ? Math.max(0, Math.floor(Number(region.width))) : null,
+        height: Number.isFinite(Number((_e = region === null || region === void 0 ? void 0 : region.height) !== null && _e !== void 0 ? _e : NaN)) ? Math.max(0, Math.floor(Number(region.height))) : null,
+    };
+}
 function normalizeAnnotation(annotation) {
     var _a, _b, _c, _d, _e, _f;
     const pose = (_a = annotation === null || annotation === void 0 ? void 0 : annotation.pose) !== null && _a !== void 0 ? _a : {};
-    const label = String((_b = annotation === null || annotation === void 0 ? void 0 : annotation.label) !== null && _b !== void 0 ? _b : "Label").trim() || "Label";
-    return {
+    const label = String((_b = annotation === null || annotation === void 0 ? void 0 : annotation.label) !== null && _b !== void 0 ? _b : "Area").trim() || "Area";
+    const normalized = {
         id: String((_c = annotation === null || annotation === void 0 ? void 0 : annotation.id) !== null && _c !== void 0 ? _c : makeAnnotationId()),
         label: label.slice(0, 80),
         color: normalizeAnnotationColor(annotation === null || annotation === void 0 ? void 0 : annotation.color),
@@ -156,6 +258,10 @@ function normalizeAnnotation(annotation) {
             yaw: Number(pose.yaw !== null && pose.yaw !== void 0 ? pose.yaw : 0),
         },
     };
+    const region = normalizeAnnotationRegion(annotation === null || annotation === void 0 ? void 0 : annotation.region);
+    if (region)
+        normalized.region = region;
+    return normalized;
 }
 function preferredPgmFile(files, mapName) {
     const exact = files.find((file) => mapNameFromPgmPath(file.path) === mapName);
@@ -169,8 +275,7 @@ export function useMapEditor({ open, mapName, onMessage, reloadToken = 0 }) {
     const [image, setImage] = useState(null);
     const [pixels, setPixels] = useState(null);
     const [annotations, setAnnotations] = useState([]);
-    const [annotationLabel, setAnnotationLabel] = useState("Label");
-    const [annotationColor, setAnnotationColor] = useState(ANNOTATION_COLORS[0].value);
+    const [annotationLabel, setAnnotationLabel] = useState("Area");
     const [undoStack, setUndoStack] = useState([]);
     const [redoStack, setRedoStack] = useState([]);
     const [dirty, setDirty] = useState(false);
@@ -272,7 +377,7 @@ export function useMapEditor({ open, mapName, onMessage, reloadToken = 0 }) {
                 return;
             annotationsRef.current = [];
             setAnnotations([]);
-            onMessage(error instanceof Error ? error.message : "Failed to load map labels");
+            onMessage(error instanceof Error ? error.message : "Failed to load map areas");
         });
         return () => {
             cancelled = true;
@@ -304,14 +409,14 @@ export function useMapEditor({ open, mapName, onMessage, reloadToken = 0 }) {
             return;
         }
         pixelsRef.current = nextPixels;
-        setUndoStack((stack) => [...stack, currentPixels]);
+        setUndoStack((stack) => [...stack, { type: "pixels", pixels: currentPixels }]);
         setRedoStack([]);
         setPixels(nextPixels);
         setDirty(true);
         const action = tool === "erase_black" ? "Removed" : "Added";
         onMessage(`${action} ${editedPixels} pixels locally`);
     }, [brushSize, busy, image, onMessage, open, tool]);
-    const persistAnnotations = useCallback((nextAnnotations, successMessage) => {
+    const saveAnnotationsSnapshot = useCallback((nextAnnotations, successMessage) => {
         if (!selectedPath || busy)
             return;
         const normalized = nextAnnotations.map(normalizeAnnotation);
@@ -328,55 +433,104 @@ export function useMapEditor({ open, mapName, onMessage, reloadToken = 0 }) {
             onMessage(successMessage);
         })
             .catch((error) => {
-            onMessage(error instanceof Error ? error.message : "Failed to save map labels");
-        })
+            onMessage(error instanceof Error ? error.message : "Failed to save map areas");
+            })
             .finally(() => setBusy(false));
     }, [busy, onMessage, selectedPath]);
+    const persistAnnotations = useCallback((nextAnnotations, successMessage) => {
+        if (!selectedPath || busy)
+            return;
+        const currentAnnotations = annotationsRef.current;
+        setUndoStack((stack) => [...stack, { type: "annotations", annotations: currentAnnotations }]);
+        setRedoStack([]);
+        saveAnnotationsSnapshot(nextAnnotations, successMessage);
+    }, [busy, saveAnnotationsSnapshot, selectedPath]);
     const placeAnnotationAtMapPoint = useCallback((x, y) => {
         if (!open || !image || busy || tool !== ANNOTATION_TOOL.id)
             return;
-        const label = annotationLabel.trim() || "Label";
+        const pixel = mapPointToPgmPixel(image, x, y);
+        if (!pixel) {
+            onMessage("Select an area inside the map");
+            return;
+        }
+        const currentPixels = pixelsRef.current;
+        if (!currentPixels)
+            return;
+        const region = floodFillFreePgmRegion(currentPixels, image.width, image.height, pixel.pixelX, pixel.pixelY);
+        if (!region || region.count === 0) {
+            onMessage("Select a white free-space area");
+            return;
+        }
+        const label = annotationLabel.trim() || "Area";
+        const centroid = pgmPixelToMapPoint(image, region.centroidPixelX, region.centroidPixelY);
         const nextAnnotation = normalizeAnnotation({
             id: makeAnnotationId(),
             label,
-            color: annotationColor,
-            pose: { frame_id: "map", x, y, yaw: 0 },
+            color: chooseAnnotationColor(annotationsRef.current),
+            pose: { frame_id: "map", x: centroid.x, y: centroid.y, yaw: 0 },
+            region: {
+                seed_cell: {
+                    x: pixel.pixelX,
+                    y: image.height - 1 - pixel.pixelY,
+                },
+                cell_count: region.count,
+                width: image.width,
+                height: image.height,
+            },
         });
-        persistAnnotations([...annotationsRef.current, nextAnnotation], `Placed label ${nextAnnotation.label}`);
-    }, [annotationColor, annotationLabel, busy, image, open, persistAnnotations, tool]);
+        persistAnnotations([...annotationsRef.current, nextAnnotation], `Marked area ${nextAnnotation.label}`);
+    }, [annotationLabel, busy, image, onMessage, open, persistAnnotations, tool]);
     const clearAnnotations = useCallback(() => {
         if (!annotationsRef.current.length)
             return;
-        persistAnnotations([], "Cleared map labels");
+        persistAnnotations([], "Cleared map areas");
     }, [persistAnnotations]);
     const undo = useCallback(() => {
         const currentPixels = pixelsRef.current;
         setUndoStack((stack) => {
             const previous = stack[stack.length - 1];
-            if (!previous || !currentPixels)
+            if (!previous)
                 return stack;
-            setRedoStack((redo) => [...redo, currentPixels]);
-            pixelsRef.current = previous;
-            setPixels(previous);
-            setDirty(stack.length > 1);
-            onMessage("Undid last edit");
+            if (previous.type === "pixels") {
+                if (!currentPixels)
+                    return stack;
+                setRedoStack((redo) => [...redo, { type: "pixels", pixels: currentPixels }]);
+                pixelsRef.current = previous.pixels;
+                setPixels(previous.pixels);
+                setDirty(stack.slice(0, -1).some((item) => item.type === "pixels"));
+                onMessage("Undid last map edit");
+            }
+            else if (previous.type === "annotations") {
+                const currentAnnotations = annotationsRef.current;
+                setRedoStack((redo) => [...redo, { type: "annotations", annotations: currentAnnotations }]);
+                saveAnnotationsSnapshot(previous.annotations, "Undid last area edit");
+            }
             return stack.slice(0, -1);
         });
-    }, [onMessage]);
+    }, [onMessage, saveAnnotationsSnapshot]);
     const redo = useCallback(() => {
         const currentPixels = pixelsRef.current;
         setRedoStack((stack) => {
             const next = stack[stack.length - 1];
-            if (!next || !currentPixels)
+            if (!next)
                 return stack;
-            setUndoStack((undoHistory) => [...undoHistory, currentPixels]);
-            pixelsRef.current = next;
-            setPixels(next);
-            setDirty(true);
-            onMessage("Redid last edit");
+            if (next.type === "pixels") {
+                if (!currentPixels)
+                    return stack;
+                setUndoStack((undoHistory) => [...undoHistory, { type: "pixels", pixels: currentPixels }]);
+                pixelsRef.current = next.pixels;
+                setPixels(next.pixels);
+                setDirty(true);
+                onMessage("Redid last map edit");
+            }
+            else if (next.type === "annotations") {
+                const currentAnnotations = annotationsRef.current;
+                setUndoStack((undoHistory) => [...undoHistory, { type: "annotations", annotations: currentAnnotations }]);
+                saveAnnotationsSnapshot(next.annotations, "Redid last area edit");
+            }
             return stack.slice(0, -1);
         });
-    }, [onMessage]);
+    }, [onMessage, saveAnnotationsSnapshot]);
     const save = useCallback(() => {
         if (!image || !pixels || !dirty || busy)
             return;
@@ -402,9 +556,6 @@ export function useMapEditor({ open, mapName, onMessage, reloadToken = 0 }) {
         annotations,
         annotationLabel,
         setAnnotationLabel,
-        annotationColor,
-        setAnnotationColor: (value) => setAnnotationColor(normalizeAnnotationColor(value)),
-        annotationColors: ANNOTATION_COLORS,
         tool,
         setTool,
         brushSize,
@@ -481,7 +632,7 @@ function SegButton({ selected, disabled, onClick, title, ariaLabel, children, na
     );
 }
 
-export function MapEditorControls({ files, selectedPath, setSelectedPath, tool, setTool, brushSize, setBrushSize, busy, image, dirty, canUndo = false, canRedo = false, undo, redo, save, enableAnnotations = false, annotations = [], annotationLabel = "Label", setAnnotationLabel = () => { }, annotationColor = ANNOTATION_COLORS[0].value, setAnnotationColor = () => { }, annotationColors = ANNOTATION_COLORS, clearAnnotations = () => { }, }) {
+export function MapEditorControls({ files, selectedPath, setSelectedPath, tool, setTool, brushSize, setBrushSize, busy, image, dirty, canUndo = false, canRedo = false, undo, redo, save, enableAnnotations = false, annotations = [], annotationLabel = "Area", setAnnotationLabel = () => { }, clearAnnotations = () => { }, }) {
     const iconButtonStyle = (enabled) => ({
         borderRadius: 9,
         border: "1px solid var(--mc-border-strong)",
@@ -550,38 +701,15 @@ export function MapEditorControls({ files, selectedPath, setSelectedPath, tool, 
 
             {labelActive && (
                 <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-[9.5px] font-mono tracking-[0.1em]" style={{ color: "var(--mc-text-subtle)" }}>LABEL</span>
+                    <span className="text-[9.5px] font-mono tracking-[0.1em]" style={{ color: "var(--mc-text-subtle)" }}>AREA</span>
                     <input
-                        aria-label="Label name"
+                        aria-label="Area name"
                         value={annotationLabel}
                         disabled={busy}
                         onChange={(event) => setAnnotationLabel(event.currentTarget.value)}
                         className="h-9 w-32 px-3 text-[12px] font-semibold"
                         style={{ borderRadius: 10, color: "var(--mc-text)", backgroundColor: "var(--mc-surface)", border: "1px solid var(--mc-border-strong)" }}
                     />
-                    <div role="group" aria-label="Label color" className="flex items-center gap-1.5">
-                        {annotationColors.map((color) => {
-                            const selected = normalizeAnnotationColor(annotationColor) === normalizeAnnotationColor(color.value);
-                            return (
-                                <button
-                                    key={color.id}
-                                    type="button"
-                                    disabled={busy}
-                                    title={`${color.label} label`}
-                                    aria-label={`${color.label} label`}
-                                    aria-pressed={selected}
-                                    onClick={() => setAnnotationColor(color.value)}
-                                    className="h-8 w-8 transition-all disabled:opacity-50"
-                                    style={{
-                                        borderRadius: 999,
-                                        border: selected ? "2px solid var(--mc-text)" : "1px solid var(--mc-border-strong)",
-                                        backgroundColor: color.value,
-                                        boxShadow: selected ? "0 0 0 3px color-mix(in srgb, var(--mc-text) 12%, transparent)" : "none",
-                                    }}
-                                />
-                            );
-                        })}
-                    </div>
                     <button
                         type="button"
                         disabled={busy || annotations.length === 0}
@@ -589,7 +717,7 @@ export function MapEditorControls({ files, selectedPath, setSelectedPath, tool, 
                         className="h-9 px-3 text-[12px] font-semibold transition-all active:translate-y-px disabled:opacity-50 disabled:active:translate-y-0"
                         style={{ borderRadius: 9, border: "1px solid var(--mc-border-strong)", backgroundColor: "var(--mc-surface)", color: "var(--mc-text)" }}
                     >
-                        Clear Labels
+                        Clear Areas
                     </button>
                 </div>
             )}

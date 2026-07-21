@@ -362,6 +362,140 @@ function makeGridPlane(grid, mode, z, framePose = null, highlightedCells = null,
     mesh.userData.mapTexture = texture;
     return mesh;
 }
+function makeGridTexturePlane(grid, texture, z) {
+    const meta = gridMeta(grid);
+    if (!meta || !texture)
+        return null;
+    const width = meta.width * meta.resolution;
+    const height = meta.height * meta.resolution;
+    const geometry = new THREE.PlaneGeometry(width, height);
+    const material = new THREE.MeshBasicMaterial({
+        map: texture,
+        transparent: true,
+        opacity: 1,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+    });
+    const mesh = new THREE.Mesh(geometry, material);
+    const originYaw = meta.originYaw;
+    const originCos = Math.cos(originYaw);
+    const originSin = Math.sin(originYaw);
+    const gridCenterX = meta.originX + originCos * (width / 2) - originSin * (height / 2);
+    const gridCenterY = meta.originY + originSin * (width / 2) + originCos * (height / 2);
+    mesh.position.set(gridCenterX, gridCenterY, z);
+    mesh.rotation.z = originYaw + MAP_DISPLAY_ROTATION;
+    mesh.userData.mapTexture = texture;
+    mesh.userData.annotation = true;
+    return mesh;
+}
+function mapPointToGridCell(meta, x, y) {
+    if (!meta || !Number.isFinite(x) || !Number.isFinite(y))
+        return null;
+    const dx = x - meta.originX;
+    const dy = y - meta.originY;
+    const localX = Math.cos(meta.originYaw) * dx + Math.sin(meta.originYaw) * dy;
+    const localY = -Math.sin(meta.originYaw) * dx + Math.cos(meta.originYaw) * dy;
+    const cellX = Math.floor(localX / meta.resolution);
+    const cellY = Math.floor(localY / meta.resolution);
+    if (cellX < 0 || cellX >= meta.width || cellY < 0 || cellY >= meta.height)
+        return null;
+    return { x: cellX, y: cellY };
+}
+function gridCellToMapPoint(meta, cellX, cellY) {
+    const localX = (cellX + 0.5) * meta.resolution;
+    const localY = (cellY + 0.5) * meta.resolution;
+    return {
+        x: meta.originX + Math.cos(meta.originYaw) * localX - Math.sin(meta.originYaw) * localY,
+        y: meta.originY + Math.sin(meta.originYaw) * localX + Math.cos(meta.originYaw) * localY,
+    };
+}
+function connectedFreeRegion(grid, seed) {
+    var _a;
+    const meta = gridMeta(grid);
+    if (!meta || !grid.data || !seed)
+        return null;
+    const seedX = Math.floor(Number(seed.x));
+    const seedY = Math.floor(Number(seed.y));
+    if (seedX < 0 || seedX >= meta.width || seedY < 0 || seedY >= meta.height)
+        return null;
+    const seedIndex = seedX + seedY * meta.width;
+    if (((_a = grid.data[seedIndex]) !== null && _a !== void 0 ? _a : -1) !== 0)
+        return null;
+    const visited = new Uint8Array(meta.width * meta.height);
+    const stack = [seedIndex];
+    const cells = [];
+    visited[seedIndex] = 1;
+    let sumX = 0;
+    let sumY = 0;
+    while (stack.length) {
+        const index = stack.pop();
+        const x = index % meta.width;
+        const y = Math.floor(index / meta.width);
+        cells.push(index);
+        sumX += x;
+        sumY += y;
+        const neighbors = [
+            x > 0 ? index - 1 : -1,
+            x < meta.width - 1 ? index + 1 : -1,
+            y > 0 ? index - meta.width : -1,
+            y < meta.height - 1 ? index + meta.width : -1,
+        ];
+        neighbors.forEach((nextIndex) => {
+            var _a;
+            if (nextIndex < 0 || visited[nextIndex] || ((_a = grid.data[nextIndex]) !== null && _a !== void 0 ? _a : -1) !== 0)
+                return;
+            visited[nextIndex] = 1;
+            stack.push(nextIndex);
+        });
+    }
+    if (!cells.length)
+        return null;
+    return {
+        cells,
+        centroid: {
+            x: sumX / cells.length,
+            y: sumY / cells.length,
+        },
+    };
+}
+function rgbaArrayFromHex(color, alpha = 150) {
+    const value = hexColorString(color, "#6D1F2A");
+    return [
+        Number.parseInt(value.slice(1, 3), 16),
+        Number.parseInt(value.slice(3, 5), 16),
+        Number.parseInt(value.slice(5, 7), 16),
+        alpha,
+    ];
+}
+function makeAnnotationRegionTexture(grid, region, colorString) {
+    const meta = gridMeta(grid);
+    if (!meta || !region)
+        return null;
+    const scale = Math.max(1, Math.min(OCC_ROUNDED.scale, Math.floor(OCC_ROUNDED.maxDim / Math.max(meta.width, meta.height)) || 1));
+    const mask = new Uint8Array(meta.width * meta.height);
+    region.cells.forEach((index) => {
+        const gridX = index % meta.width;
+        const gridY = Math.floor(index / meta.width);
+        const canvasX = meta.width - 1 - gridX;
+        const canvasY = meta.height - 1 - gridY;
+        mask[canvasX + canvasY * meta.width] = 1;
+    });
+    const canvas = document.createElement("canvas");
+    canvas.width = meta.width * scale;
+    canvas.height = meta.height * scale;
+    const ctx = canvas.getContext("2d");
+    if (!ctx)
+        return null;
+    drawRoundedOccupancyLayer(ctx, mask, meta.width, meta.height, scale, 1, rgbaArrayFromHex(colorString, 164));
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.magFilter = THREE.LinearFilter;
+    texture.minFilter = THREE.LinearFilter;
+    texture.generateMipmaps = false;
+    texture.flipY = false;
+    texture.needsUpdate = true;
+    return texture;
+}
 function makeLine(points, color, lineWidth = 2) {
     if (points.length < 2)
         return null;
@@ -435,17 +569,13 @@ function makeTextSprite(text, { width = 256, height = 64, fontSize = 22, backgro
     return new THREE.Sprite(new THREE.SpriteMaterial({ map: texture, transparent: true }));
 }
 
-function hexColorValue(color, fallback = 0xc96442) {
-    const match = String(color || "").trim().match(/^#?([0-9A-Fa-f]{6})$/);
-    return match ? Number.parseInt(match[1], 16) : fallback;
-}
 function hexColorString(color, fallback = "#C96442") {
     const match = String(color || "").trim().match(/^#?([0-9A-Fa-f]{6})$/);
     return match ? `#${match[1].toUpperCase()}` : fallback;
 }
 function makeAnnotationLabelSprite(text, color, isDark = false) {
     const pal = markerPalette(isDark);
-    const label = String(text || "Label");
+    const label = String(text || "Area");
     const fontSize = 42;
     const font = `700 ${fontSize}px "Hanken Grotesk", "Pretendard Variable", sans-serif`;
     const measure = document.createElement("canvas").getContext("2d");
@@ -683,36 +813,29 @@ function makeMissionRouteBadge(spot, order, selected = false, scale = 1, isDark 
     sprite.userData = { spotId: spot.id, dragAction: "move" };
     return sprite;
 }
-function makeMapAnnotationMarker(annotation, scale = 1, isDark = false) {
-    var _a, _b, _c, _d;
-    const pose = (_a = annotation === null || annotation === void 0 ? void 0 : annotation.pose) !== null && _a !== void 0 ? _a : {};
-    const x = Number((_b = pose.x) !== null && _b !== void 0 ? _b : 0);
-    const y = Number((_c = pose.y) !== null && _c !== void 0 ? _c : 0);
-    if (!Number.isFinite(x) || !Number.isFinite(y))
+function makeMapAnnotationRegion(annotation, grid, isDark = false) {
+    var _a, _b, _c, _d, _e, _f;
+    const meta = gridMeta(grid);
+    if (!meta)
         return null;
-    const colorString = hexColorString(annotation === null || annotation === void 0 ? void 0 : annotation.color, isDark ? "#D5794F" : "#C96442");
-    const colorValue = hexColorValue(colorString);
+    const pose = (_a = annotation === null || annotation === void 0 ? void 0 : annotation.pose) !== null && _a !== void 0 ? _a : {};
+    const regionSeed = (_d = (_c = (_b = annotation === null || annotation === void 0 ? void 0 : annotation.region) === null || _b === void 0 ? void 0 : _b.seed_cell) !== null && _c !== void 0 ? _c : mapPointToGridCell(meta, Number((_e = pose.x) !== null && _e !== void 0 ? _e : NaN), Number((_f = pose.y) !== null && _f !== void 0 ? _f : NaN))) !== null && _d !== void 0 ? _d : null;
+    const region = connectedFreeRegion(grid, regionSeed);
+    if (!region)
+        return null;
+    const colorString = hexColorString(annotation === null || annotation === void 0 ? void 0 : annotation.color, isDark ? "#6D1F2A" : "#6D1F2A");
+    const texture = makeAnnotationRegionTexture(grid, region, colorString);
+    const plane = makeGridTexturePlane(grid, texture, 0.065);
+    if (!plane)
+        return null;
     const group = new THREE.Group();
-    group.position.set(x, y, 0.68);
-    const ring = new THREE.Mesh(new THREE.RingGeometry(0.27 * scale, 0.36 * scale, 32), new THREE.MeshBasicMaterial({
-        color: isDark ? 0xf3f1ea : 0x1c1a17,
-        transparent: true,
-        opacity: 0.82,
-        side: THREE.DoubleSide,
-    }));
-    group.add(ring);
-    const dot = new THREE.Mesh(new THREE.CircleGeometry(0.24 * scale, 32), new THREE.MeshBasicMaterial({
-        color: colorValue,
-        transparent: true,
-        opacity: 0.94,
-    }));
-    dot.position.z = 0.02;
-    group.add(dot);
-    const label = String((_d = annotation === null || annotation === void 0 ? void 0 : annotation.label) !== null && _d !== void 0 ? _d : "Label").trim();
+    group.add(plane);
+    const label = String((annotation === null || annotation === void 0 ? void 0 : annotation.label) || "Area").trim();
     if (label) {
         const { sprite, aspect } = makeAnnotationLabelSprite(label, colorString, isDark);
-        const labelHeight = Math.max(0.36, 0.68 * scale);
-        sprite.position.set(0.58 * scale, 0.46 * scale, 0.08);
+        const center = gridCellToMapPoint(meta, region.centroid.x, region.centroid.y);
+        const labelHeight = Math.max(0.48, Math.min(1.45, meta.resolution * 22));
+        sprite.position.set(center.x, center.y, 0.78);
         sprite.scale.set(labelHeight * aspect, labelHeight, 1);
         group.add(sprite);
     }
@@ -1251,9 +1374,8 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, 
             }
         }
         const spotById = new Map(spots.map((spot) => [spot.id, spot]));
-        const annotationScale = Math.max(0.34, Math.min(1.35, waypointScale * 8));
         mapAnnotations.forEach((annotation) => {
-            const marker = makeMapAnnotationMarker(annotation, annotationScale, isDark);
+            const marker = makeMapAnnotationRegion(annotation, map, isDark);
             if (marker)
                 layers.add(marker);
         });

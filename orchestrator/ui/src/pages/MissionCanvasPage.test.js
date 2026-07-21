@@ -1486,10 +1486,11 @@ test('edits and saves loaded map pixels from the fix editor', async () => {
   ));
 });
 
-test('places named color labels on the map editor overlay', async () => {
+test('marks free-space areas with automatic color and undo/redo support', async () => {
   const latestMapViewerProps = () => (
     mockMapViewer.mock.calls[mockMapViewer.mock.calls.length - 1][0]
   );
+  jest.spyOn(Math, 'random').mockReturnValue(0);
   getPgmFiles.mockResolvedValue({
     files: [{ path: 'factory.pgm', name: 'factory.pgm' }],
   });
@@ -1512,33 +1513,47 @@ test('places named color labels on the map editor overlay', async () => {
   await waitFor(() => expect(getPgmImage).toHaveBeenCalledWith('factory.pgm'));
   await waitFor(() => expect(getMapAnnotations).toHaveBeenCalledWith('factory.pgm'));
 
-  fireEvent.click(screen.getByRole('button', { name: 'Label' }));
-  fireEvent.change(screen.getByLabelText('Label name'), {
+  fireEvent.click(screen.getByRole('button', { name: 'Area' }));
+  fireEvent.change(screen.getByLabelText('Area name'), {
     target: { value: 'Dock' },
   });
-  fireEvent.click(screen.getByRole('button', { name: 'Sage label' }));
   await waitFor(() => expect(latestMapViewerProps().editorActive).toBe(true));
 
   await act(async () => {
-    latestMapViewerProps().onEditorMapPoint(1.2, -0.4);
+    latestMapViewerProps().onEditorMapPoint(0, 0);
   });
 
   await waitFor(() => expect(saveMapAnnotations).toHaveBeenCalledWith(
     'factory.pgm',
     [expect.objectContaining({
       label: 'Dock',
-      color: '#5B8266',
-      pose: expect.objectContaining({ frame_id: 'map', x: 1.2, y: -0.4 }),
+      color: '#3B241F',
+      pose: expect.objectContaining({ frame_id: 'map', x: 0.5, y: 0.5 }),
+      region: expect.objectContaining({
+        seed_cell: { x: 0, y: 0 },
+        cell_count: 1,
+      }),
     })],
   ));
   await waitFor(() => expect(latestMapViewerProps().mapAnnotations).toEqual([
     expect.objectContaining({
       label: 'Dock',
-      color: '#5B8266',
-      pose: expect.objectContaining({ x: 1.2, y: -0.4 }),
+      color: '#3B241F',
+      pose: expect.objectContaining({ x: 0.5, y: 0.5 }),
+      region: expect.objectContaining({ seed_cell: { x: 0, y: 0 } }),
     }),
   ]));
   expect(latestMapViewerProps().editorPaintOnDrag).toBe(false);
+
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Undo' })).toBeEnabled());
+  fireEvent.click(screen.getByRole('button', { name: 'Undo' }));
+  await waitFor(() => expect(saveMapAnnotations).toHaveBeenLastCalledWith('factory.pgm', []));
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Redo' })).toBeEnabled());
+  fireEvent.click(screen.getByRole('button', { name: 'Redo' }));
+  await waitFor(() => expect(saveMapAnnotations).toHaveBeenLastCalledWith(
+    'factory.pgm',
+    [expect.objectContaining({ label: 'Dock', color: '#3B241F' })],
+  ));
   expect(savePgmImage).not.toHaveBeenCalled();
 });
 

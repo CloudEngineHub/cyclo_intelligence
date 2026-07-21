@@ -3324,9 +3324,6 @@ export default function MissionCanvasPage() {
               annotations={mapEditor.annotations}
               annotationLabel={mapEditor.annotationLabel}
               setAnnotationLabel={mapEditor.setAnnotationLabel}
-              annotationColor={mapEditor.annotationColor}
-              setAnnotationColor={mapEditor.setAnnotationColor}
-              annotationColors={mapEditor.annotationColors}
               clearAnnotations={mapEditor.clearAnnotations}
             />
           </div>
