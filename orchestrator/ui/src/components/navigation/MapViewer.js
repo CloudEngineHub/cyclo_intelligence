@@ -122,66 +122,132 @@ const OCC_COLORS = {
         inflate: [224, 154, 69, 235],  // #E09A45
     },
 };
+// Soft (rounded) warm map rendering: free/wall are rasterised as masks, then
+// upscaled + gaussian-blurred + re-thresholded so contours come out rounded.
+// Costmaps stay crisp per-cell (safety data must not be visually rounded).
+const OCC_SOFT = {
+    scale: 4,          // supersampling factor
+    maxDim: 2048,      // cap output texture size (large maps drop to lower scale)
+    radiusCells: 1.4,  // rounding radius in map cells — raise for rounder, lower for crisper
+    wallThreshold: 96, // alpha cut for walls (lower = thin 1-cell walls survive the blur)
+    freeThreshold: 128,
+};
+function occRgba([r, g, b, a]) {
+    return `rgba(${r},${g},${b},${a / 255})`;
+}
+// Rasterise a 0/1 cell mask, upscale + blur + threshold → rounded silhouette canvas.
+function occSoftMask(cells, w, h, scale, radiusPx, threshold) {
+    const src = document.createElement("canvas");
+    src.width = w; src.height = h;
+    const sctx = src.getContext("2d");
+    const img = sctx.createImageData(w, h);
+    for (let i = 0; i < w * h; i += 1) {
+        if (cells[i]) img.data[i * 4 + 3] = 255;
+    }
+    sctx.putImageData(img, 0, 0);
+
+    const big = document.createElement("canvas");
+    big.width = w * scale; big.height = h * scale;
+    const bctx = big.getContext("2d");
+    bctx.imageSmoothingEnabled = true;
+    bctx.filter = `blur(${radiusPx}px)`;
+    bctx.drawImage(src, 0, 0, big.width, big.height);
+    bctx.filter = "none";
+
+    const data = bctx.getImageData(0, 0, big.width, big.height);
+    const d = data.data;
+    for (let i = 3; i < d.length; i += 4) d[i] = d[i] >= threshold ? 255 : 0;
+    bctx.putImageData(data, 0, 0);
+    return big;
+}
+// Tint a mask canvas with a solid color (keeps the rounded alpha).
+function occTintMask(mask, color) {
+    const out = document.createElement("canvas");
+    out.width = mask.width; out.height = mask.height;
+    const ctx = out.getContext("2d");
+    ctx.drawImage(mask, 0, 0);
+    ctx.globalCompositeOperation = "source-in";
+    ctx.fillStyle = occRgba(color);
+    ctx.fillRect(0, 0, out.width, out.height);
+    return out;
+}
 function makeOccupancyTexture(grid, alpha, mode, highlightedCells = null, isDark = false) {
     var _a;
     const meta = gridMeta(grid);
     if (!meta || !grid.data || grid.data.length < meta.width * meta.height)
         return null;
-    const canvas = document.createElement("canvas");
-    canvas.width = meta.width;
-    canvas.height = meta.height;
-    const ctx = canvas.getContext("2d");
-    if (!ctx)
-        return null;
     const palette = isDark ? OCC_COLORS.dark : OCC_COLORS.light;
-    const image = ctx.createImageData(meta.width, meta.height);
-    for (let y = 0; y < meta.height; y += 1) {
-        for (let x = 0; x < meta.width; x += 1) {
-            const srcIndex = (meta.width - 1 - x) + (meta.height - 1 - y) * meta.width;
-            const dstIndex = (x + y * meta.width) * 4;
-            const value = (_a = grid.data[srcIndex]) !== null && _a !== void 0 ? _a : -1;
-            let r = 118;
-            let g = 118;
-            let b = 118;
-            let a = alpha;
-            if (mode === "map") {
-                const px = value < 0 ? palette.unknown : value === 0 ? palette.free : palette.wall;
-                r = px[0]; g = px[1]; b = px[2]; a = px[3];
+    const w = meta.width;
+    const h = meta.height;
+
+    // ---- SOFT rendering for the base map ----
+    if (mode === "map") {
+        const scale = Math.max(1, Math.min(OCC_SOFT.scale, Math.floor(OCC_SOFT.maxDim / Math.max(w, h)) || 1));
+        const radiusPx = OCC_SOFT.radiusCells * scale * 0.6;
+
+        const freeCells = new Uint8Array(w * h);
+        const wallCells = new Uint8Array(w * h);
+        for (let y = 0; y < h; y += 1) {
+            for (let x = 0; x < w; x += 1) {
+                const srcIndex = (w - 1 - x) + (h - 1 - y) * w; // same flip as before
+                const value = (_a = grid.data[srcIndex]) !== null && _a !== void 0 ? _a : -1;
+                const i = x + y * w;
+                if (value === 0) freeCells[i] = 1;
+                else if (value > 0) wallCells[i] = 1;
             }
-            else if (mode === "globalCostmap") {
-                if (value < 0) {
-                    // fully transparent over the warm scene — unknown costmap cells add noise
-                    r = 0; g = 0; b = 0; a = 0;
-                }
-                else if (value === 0) {
-                    r = 0; g = 0; b = 0; a = 0;
-                }
+        }
+
+        const out = document.createElement("canvas");
+        out.width = w * scale; out.height = h * scale;
+        const ctx = out.getContext("2d");
+        // 1) unknown base wash
+        ctx.fillStyle = occRgba(palette.unknown);
+        ctx.fillRect(0, 0, out.width, out.height);
+        // 2) rounded free-space blob
+        const freeMask = occSoftMask(freeCells, w, h, scale, radiusPx, OCC_SOFT.freeThreshold);
+        ctx.drawImage(occTintMask(freeMask, palette.free), 0, 0);
+        // 3) rounded walls on top (lower threshold keeps thin walls alive)
+        const wallMask = occSoftMask(wallCells, w, h, scale, radiusPx, OCC_SOFT.wallThreshold);
+        ctx.drawImage(occTintMask(wallMask, palette.wall), 0, 0);
+
+        const texture = new THREE.CanvasTexture(out);
+        texture.colorSpace = THREE.SRGBColorSpace;
+        texture.magFilter = THREE.LinearFilter; // soft edges (was Nearest)
+        texture.minFilter = THREE.LinearMipmapLinearFilter;
+        texture.generateMipmaps = true;
+        texture.flipY = false;
+        texture.needsUpdate = true;
+        return texture;
+    }
+
+    // ---- costmaps: crisp per-cell (safety-accurate), warm colors ----
+    const canvas = document.createElement("canvas");
+    canvas.width = w; canvas.height = h;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return null;
+    const image = ctx.createImageData(w, h);
+    for (let y = 0; y < h; y += 1) {
+        for (let x = 0; x < w; x += 1) {
+            const srcIndex = (w - 1 - x) + (h - 1 - y) * w;
+            const dstIndex = (x + y * w) * 4;
+            const value = (_a = grid.data[srcIndex]) !== null && _a !== void 0 ? _a : -1;
+            let r = 118, g = 118, b = 118, a = alpha;
+            if (mode === "globalCostmap") {
+                if (value <= 0) { r = 0; g = 0; b = 0; a = 0; }
                 else {
-                    // warm-tinted gray ramp (same intensity curve as before)
                     const normalized = Math.min(Math.max(value, 0), 100) / 100;
                     const gray = Math.round(220 - normalized * 205);
-                    r = gray;
-                    g = Math.round(gray * 0.97);
-                    b = Math.round(gray * 0.90);
+                    r = gray; g = Math.round(gray * 0.97); b = Math.round(gray * 0.90);
                     a = Math.round(95 + normalized * 150);
                 }
             }
             else if (mode === "localCostmap") {
                 if (highlightedCells === null || highlightedCells === void 0 ? void 0 : highlightedCells.has(srcIndex)) {
-                    const px = palette.lethal;
-                    r = px[0]; g = px[1]; b = px[2]; a = px[3];
+                    [r, g, b, a] = palette.lethal;
                 }
-                else if (value <= 20) {
-                    a = 0;
-                }
-                else if (value < 70) {
-                    const px = palette.lethal;
-                    r = px[0]; g = px[1]; b = px[2]; a = px[3];
-                }
-                else {
-                    const px = palette.inflate;
-                    r = px[0]; g = px[1]; b = px[2]; a = px[3];
-                }
+                else if (value <= 20) { a = 0; }
+                else if (value < 70) { [r, g, b, a] = palette.lethal; }
+                else { [r, g, b, a] = palette.inflate; }
             }
             image.data[dstIndex] = r;
             image.data[dstIndex + 1] = g;
