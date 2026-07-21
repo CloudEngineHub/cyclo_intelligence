@@ -1697,6 +1697,78 @@ test('removes selected map areas with the erase area tool', async () => {
   expect(savePgmImage).not.toHaveBeenCalled();
 });
 
+test('freezes visible area cells when deleting an overlapping area', async () => {
+  const latestMapViewerProps = () => (
+    mockMapViewer.mock.calls[mockMapViewer.mock.calls.length - 1][0]
+  );
+  getPgmFiles.mockResolvedValue({
+    files: [{ path: 'factory.pgm', name: 'factory.pgm' }],
+  });
+  getPgmImage.mockResolvedValue({
+    path: 'factory.pgm',
+    width: 3,
+    height: 1,
+    maxval: 255,
+    pixels_base64: '/v7+',
+  });
+  getMapAnnotations.mockResolvedValue({
+    path: 'factory.pgm',
+    annotations: [
+      {
+        id: 'area_front',
+        label: 'Front',
+        color: '#3B241F',
+        pose: { frame_id: 'map', x: 0.5, y: 0.5, yaw: 0 },
+        region: {
+          seed_cell: { x: 0, y: 0 },
+          bounds: { x_min: 0, y_min: 0, x_max: 0, y_max: 0 },
+          cell_count: 1,
+          width: 3,
+          height: 1,
+        },
+      },
+      {
+        id: 'area_back',
+        label: 'Back',
+        color: '#6D1F2A',
+        pose: { frame_id: 'map', x: 1.5, y: 0.5, yaw: 0 },
+        region: {
+          seed_cell: { x: 1, y: 0 },
+          bounds: { x_min: 0, y_min: 0, x_max: 2, y_max: 0 },
+          cell_count: 3,
+          width: 3,
+          height: 1,
+        },
+      },
+    ],
+  });
+
+  render(<MissionCanvasPage />);
+
+  fireEvent.click(screen.getByRole('button', { name: 'Map Editor' }));
+  await waitFor(() => expect(latestMapViewerProps().mapAnnotations).toEqual([
+    expect.objectContaining({ label: 'Front' }),
+    expect.objectContaining({ label: 'Back' }),
+  ]));
+
+  fireEvent.click(screen.getByRole('button', { name: 'Erase Area' }));
+  await act(async () => {
+    latestMapViewerProps().onEditorMapPoint(0.5, 0.5, 'start');
+    latestMapViewerProps().onEditorMapPoint(0, 0, 'end');
+  });
+
+  await waitFor(() => expect(latestMapViewerProps().mapAnnotations).toEqual([
+    expect.objectContaining({
+      label: 'Back',
+      region: expect.objectContaining({
+        cells: [{ x: 1, y: 0 }, { x: 2, y: 0 }],
+        cell_count: 2,
+      }),
+    }),
+  ]));
+  expect(screen.getByText('Removed area Front')).toBeInTheDocument();
+});
+
 test('erases map area pixels with brush drag', async () => {
   const latestMapViewerProps = () => (
     mockMapViewer.mock.calls[mockMapViewer.mock.calls.length - 1][0]

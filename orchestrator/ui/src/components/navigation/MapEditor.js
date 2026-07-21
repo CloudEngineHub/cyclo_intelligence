@@ -286,6 +286,27 @@ function coveredAnnotationCellSet(annotations, image, pixels, excludeId = "") {
     });
     return covered;
 }
+function visibleAnnotationCellSnapshots(annotations, image, pixels) {
+    const covered = new Set();
+    return annotations
+        .map((annotation) => {
+        const visibleCells = annotationCells(annotation, image, pixels)
+            .filter((cell) => !covered.has(cellKey(cell)));
+        visibleCells.forEach((cell) => covered.add(cellKey(cell)));
+        return { annotation, cells: visibleCells };
+    })
+        .filter((snapshot) => snapshot.cells.length > 0);
+}
+function annotationWithCells(annotation, cells, image) {
+    const geometry = cellsToRegion(cells, image);
+    if (!geometry)
+        return null;
+    return normalizeAnnotation({
+        ...annotation,
+        pose: geometry.pose,
+        region: geometry.region,
+    });
+}
 function brushCellsForSegment(pixels, image, startPixel, endPixel, brushSizeCells, coveredCells = new Set()) {
     const cells = new Map();
     const addBrush = (pixelX, pixelY) => {
@@ -330,9 +351,6 @@ function brushCellsForSegment(pixels, image, startPixel, endPixel, brushSizeCell
         }
     }
     return Array.from(cells.values());
-}
-function annotationAtPixel(annotations, image, pixel) {
-    return annotations.find((annotation) => annotationCoversPgmPixel(annotation, image, pixel.pixelX, pixel.pixelY)) || null;
 }
 function selectedFreePgmRegion(pixels, image, startPixel, endPixel, existingAnnotations = []) {
     if (!pixels || !image || !startPixel || !endPixel)
@@ -799,22 +817,18 @@ export function useMapEditor({ open, mapName, onMessage, reloadToken = 0 }) {
         const eraseKeys = new Set(eraseCells.map(cellKey));
         let changed = false;
         const nextAnnotations = [];
-        annotationsRef.current.forEach((annotation) => {
-            const originalCells = annotationCells(annotation, image, currentPixels);
+        visibleAnnotationCellSnapshots(annotationsRef.current, image, currentPixels).forEach(({ annotation, cells }) => {
+            const originalCells = cells;
             const remainingCells = originalCells
                 .filter((cell) => !eraseKeys.has(cellKey(cell)));
             if (remainingCells.length !== originalCells.length)
                 changed = true;
             if (!remainingCells.length)
                 return;
-            const geometry = cellsToRegion(remainingCells, image);
-            if (!geometry)
+            const nextAnnotation = annotationWithCells(annotation, remainingCells, image);
+            if (!nextAnnotation)
                 return;
-            nextAnnotations.push(normalizeAnnotation({
-                ...annotation,
-                pose: geometry.pose,
-                region: geometry.region,
-            }));
+            nextAnnotations.push(nextAnnotation);
         });
         if (!changed)
             return false;
@@ -825,14 +839,24 @@ export function useMapEditor({ open, mapName, onMessage, reloadToken = 0 }) {
     const deleteAnnotationAtPixel = useCallback((pixel, session) => {
         if (!open || !image || busy)
             return;
-        const target = annotationAtPixel(annotationsRef.current, image, pixel);
-        if (!target) {
+        const currentPixels = pixelsRef.current;
+        if (!currentPixels)
+            return;
+        const targetKey = cellKey(pgmPixelToGridCell(image, pixel));
+        const snapshots = visibleAnnotationCellSnapshots(annotationsRef.current, image, currentPixels);
+        const targetSnapshot = snapshots.find((snapshot) => snapshot.cells.some((cell) => cellKey(cell) === targetKey));
+        if (!targetSnapshot) {
             onMessage("No map area selected");
             return;
         }
+        const target = targetSnapshot.annotation;
+        const nextAnnotations = snapshots
+            .filter((snapshot) => snapshot.annotation.id !== target.id)
+            .map((snapshot) => annotationWithCells(snapshot.annotation, snapshot.cells, image))
+            .filter(Boolean);
         recordAnnotationUndo(session);
         applyAnnotationsSnapshot(
-            annotationsRef.current.filter((annotation) => annotation.id !== target.id),
+            nextAnnotations,
             `Removed area ${target.label || "Area"}`,
         );
     }, [applyAnnotationsSnapshot, busy, image, onMessage, open, recordAnnotationUndo]);
