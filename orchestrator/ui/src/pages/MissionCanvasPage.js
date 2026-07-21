@@ -3514,6 +3514,11 @@ export default function MissionCanvasPage() {
                             <div className="flex items-center gap-1">
                               <button type="button" aria-label={`Move ${spot.label || spot.id} up`} disabled={index === 0} onClick={() => handleMoveRouteSpot(spot.id, -1)} className="h-7 w-7 text-[12px] font-semibold disabled:opacity-40" style={{ borderRadius: 7, border: "1px solid var(--mc-border-strong)", backgroundColor: "var(--mc-surface)", color: "var(--mc-text-muted)" }}>↑</button>
                               <button type="button" aria-label={`Move ${spot.label || spot.id} down`} disabled={last} onClick={() => handleMoveRouteSpot(spot.id, 1)} className="h-7 w-7 text-[12px] font-semibold disabled:opacity-40" style={{ borderRadius: 7, border: "1px solid var(--mc-border-strong)", backgroundColor: "var(--mc-surface)", color: "var(--mc-text-muted)" }}>↓</button>
+                              <button type="button" aria-label={`Delete Waypoint ${spot.label || spot.id}`} title={`Delete ${spot.label || spot.id}`} onClick={() => { void handleDeleteSpot(spot); }}
+                                className="h-7 w-7 shrink-0 inline-flex items-center justify-center active:translate-y-px"
+                                style={{ borderRadius: 7, border: "1px solid var(--mc-border-strong)", backgroundColor: "var(--mc-surface)", color: "var(--mc-danger)" }}>
+                                <MdDelete size={14} />
+                              </button>
                             </div>
                           </div>
                         </div>

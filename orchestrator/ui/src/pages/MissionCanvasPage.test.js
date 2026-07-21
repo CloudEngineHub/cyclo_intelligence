@@ -1277,6 +1277,18 @@ test('edits the mission route directly on the map', async () => {
   ));
   expect(screen.queryByRole('button', { name: 'Create BT' })).not.toBeInTheDocument();
   expect(screen.queryByRole('button', { name: 'Edit BT' })).not.toBeInTheDocument();
+
+  const deleteWaypointAButtons = screen.getAllByRole('button', { name: 'Delete Waypoint Waypoint A' });
+  expect(deleteWaypointAButtons).toHaveLength(2);
+  fireEvent.click(deleteWaypointAButtons[1]);
+
+  await waitFor(() => expect(deleteNavigationSpot).toHaveBeenCalledWith('spot_a', 'map'));
+  await waitFor(() => expect(latestMapViewerProps().spots.map((spot) => spot.id)).toEqual([
+    'spot_b',
+    'spot_c',
+    'spot_d',
+  ]));
+  expect(latestMapViewerProps().missionRouteOrder).toEqual([]);
 });
 
 test('starts mapping mode from Mission Canvas', async () => {
