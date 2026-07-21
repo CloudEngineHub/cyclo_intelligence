@@ -326,7 +326,7 @@ test('shows Waypoint and BT authoring panels in the authoring stage', async () =
   expect(screen.getByText('BT Node Unknown')).toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Activate BT' })).toBeEnabled();
   expect(screen.getByRole('button', { name: 'Deactivate BT' })).toBeDisabled();
-  expect(screen.getByText('Design Objects')).toBeInTheDocument();
+  expect(screen.getByText('Waypoints')).toBeInTheDocument();
   expect(screen.queryByText('Behavior Nodes')).not.toBeInTheDocument();
   expect(screen.queryByText('No behavior nodes placed yet.')).not.toBeInTheDocument();
   expect(screen.queryByText('Waypoints / Local BT')).not.toBeInTheDocument();
@@ -659,7 +659,7 @@ test('renders legacy pixel-coordinate waypoints in loaded map coordinates', asyn
   });
 });
 
-test('shows waypoint actions in Design Objects after placing a waypoint', async () => {
+test('shows waypoint actions in Waypoints after placing a waypoint', async () => {
   const latestMapViewerProps = () => (
     mockMapViewer.mock.calls[mockMapViewer.mock.calls.length - 1][0]
   );

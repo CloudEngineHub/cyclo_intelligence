@@ -3465,7 +3465,7 @@ export default function MissionCanvasPage() {
             {/* Waypoints — LIST ONLY (Create moved to the map HUD) */}
             <div className="min-h-0 overflow-auto" style={{ backgroundColor: "var(--mc-surface)", border: "1px solid var(--mc-border)", borderRadius: 16, boxShadow: "var(--mc-shadow)", padding: 18 }}>
               <div className="flex items-center justify-between mb-3.5">
-                <span className="text-[13.5px] font-bold">Design Objects</span>
+                <span className="text-[13.5px] font-bold">Waypoints</span>
                 <span className="text-[11px] font-mono" style={{ color: "var(--mc-text-subtle)" }}>{spots.length}</span>
               </div>
               <div className="grid gap-2">
