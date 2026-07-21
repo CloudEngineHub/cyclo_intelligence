@@ -36,6 +36,7 @@ const EDIT_TOOLS = [
     { id: "draw_black", label: "Add Obstacle" },
 ];
 const ANNOTATION_TOOL = { id: "label_marker", label: "Area" };
+const ANNOTATION_EXTEND_TOOL = { id: "extend_area", label: "Extend" };
 const ANNOTATION_ERASE_TOOL = { id: "erase_area", label: "Erase Area" };
 const ANNOTATION_COLORS = [
     { id: "dark_brown", label: "Dark brown", value: "#3B241F" },
@@ -135,20 +136,6 @@ function annotationCoversPgmPixel(annotation, image, pixelX, pixelY) {
         gridY >= bounds.y_min &&
         gridY <= bounds.y_max);
 }
-function pgmSelectionGridBounds(image, startPixel, endPixel) {
-    if (!image || !startPixel || !endPixel)
-        return null;
-    const xMin = Math.max(0, Math.min(startPixel.pixelX, endPixel.pixelX));
-    const xMax = Math.min(image.width - 1, Math.max(startPixel.pixelX, endPixel.pixelX));
-    const yMin = Math.max(0, Math.min(startPixel.pixelY, endPixel.pixelY));
-    const yMax = Math.min(image.height - 1, Math.max(startPixel.pixelY, endPixel.pixelY));
-    return {
-        x_min: xMin,
-        y_min: image.height - 1 - yMax,
-        x_max: xMax,
-        y_max: image.height - 1 - yMin,
-    };
-}
 function annotationGridBounds(annotation, image) {
     const region = normalizeAnnotationRegion(annotation === null || annotation === void 0 ? void 0 : annotation.region);
     if (!region)
@@ -167,15 +154,6 @@ function annotationGridBounds(annotation, image) {
         x_max: Math.min(image.width - 1, Math.max(bounds.x_min, bounds.x_max)),
         y_max: Math.min(image.height - 1, Math.max(bounds.y_min, bounds.y_max)),
     };
-}
-function annotationIntersectsGridBounds(annotation, image, selectionBounds) {
-    const bounds = annotationGridBounds(annotation, image);
-    if (!bounds || !selectionBounds)
-        return false;
-    return !(bounds.x_max < selectionBounds.x_min ||
-        bounds.x_min > selectionBounds.x_max ||
-        bounds.y_max < selectionBounds.y_min ||
-        bounds.y_min > selectionBounds.y_max);
 }
 function cellKey(cell) {
     return `${cell.x}:${cell.y}`;
@@ -465,8 +443,10 @@ function normalizeBrushSize(value) {
 function mapNameFromPgmPath(path) {
     return path.split("/").pop().replace(/\.pgm$/i, "");
 }
+let annotationIdCounter = 0;
 function makeAnnotationId() {
-    return `mark_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+    annotationIdCounter += 1;
+    return `mark_${Date.now().toString(36)}_${annotationIdCounter.toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
 }
 function normalizeAnnotationColor(value) {
     const color = String(value || "").trim();
@@ -499,6 +479,15 @@ function chooseAnnotationColor(existingAnnotations) {
             return generated;
     }
     return hslToHex((used.size * 137.508) % 360, 0.52, 0.32);
+}
+function nextAutoAreaLabel(annotations) {
+    let max = 0;
+    (annotations || []).forEach((annotation) => {
+        const match = /^Area (\d+)$/.exec(String((annotation === null || annotation === void 0 ? void 0 : annotation.label) || "").trim());
+        if (match)
+            max = Math.max(max, Number(match[1]));
+    });
+    return `Area ${max + 1}`;
 }
 function normalizeAnnotationRegion(region) {
     var _a, _b, _c, _d, _e;
@@ -570,7 +559,7 @@ export function useMapEditor({ open, mapName, onMessage, reloadToken = 0 }) {
     const [image, setImage] = useState(null);
     const [pixels, setPixels] = useState(null);
     const [annotations, setAnnotations] = useState([]);
-    const [annotationLabel, setAnnotationLabel] = useState("Area");
+    const [annotationLabel, setAnnotationLabel] = useState("");
     const [undoStack, setUndoStack] = useState([]);
     const [redoStack, setRedoStack] = useState([]);
     const [dirty, setDirty] = useState(false);
@@ -578,6 +567,12 @@ export function useMapEditor({ open, mapName, onMessage, reloadToken = 0 }) {
     const [tool, setTool] = useState("view");
     const [brushSize, setBrushSize] = useState(DEFAULT_BRUSH_SIZE_CELLS);
     const [busy, setBusy] = useState(false);
+    const [selectedAnnotationId, setSelectedAnnotationId] = useState("");
+    useEffect(() => {
+        if (selectedAnnotationId && !annotations.some((annotation) => annotation.id === selectedAnnotationId)) {
+            setSelectedAnnotationId("");
+        }
+    }, [annotations, selectedAnnotationId]);
     useEffect(() => {
         if (!open)
             return;
@@ -762,51 +757,45 @@ export function useMapEditor({ open, mapName, onMessage, reloadToken = 0 }) {
         setRedoStack([]);
         session.undoPushed = true;
     }, []);
-    const updatePaintedArea = useCallback((pixel, phase) => {
+    const extendSelectedArea = useCallback((pixel, phase) => {
         const currentPixels = pixelsRef.current;
         if (!open || !image || busy || !currentPixels)
             return;
+        const target = annotationsRef.current.find((annotation) => annotation.id === selectedAnnotationId);
+        if (!target) {
+            onMessage("Select an area to extend");
+            return;
+        }
         let session = areaPaintRef.current;
-        if (phase === "start" || !session) {
-            session = {
-                id: makeAnnotationId(),
-                label: annotationLabel.trim() || "Area",
-                color: chooseAnnotationColor(annotationsRef.current),
-                lastPixel: pixel,
-                undoPushed: false,
-            };
+        if (phase === "start" || !session || session.id !== target.id) {
+            session = { id: target.id, lastPixel: pixel, undoPushed: false };
             areaPaintRef.current = session;
         }
         const startPixel = phase === "move" && session.lastPixel ? session.lastPixel : pixel;
-        const coveredCells = coveredAnnotationCellSet(annotationsRef.current, image, currentPixels, session.id);
+        const coveredCells = coveredAnnotationCellSet(annotationsRef.current, image, currentPixels, target.id);
         const newCells = brushCellsForSegment(currentPixels, image, startPixel, pixel, brushSize, coveredCells);
         session.lastPixel = pixel;
         if (!newCells.length) {
             onMessage("Paint over unmarked white free-space");
             return;
         }
-        const currentAnnotations = annotationsRef.current;
-        const annotationIndex = currentAnnotations.findIndex((annotation) => annotation.id === session.id);
-        const existingAnnotation = annotationIndex >= 0 ? currentAnnotations[annotationIndex] : null;
-        const mergedCells = new Map(annotationCells(existingAnnotation, image, currentPixels).map((cell) => [cellKey(cell), cell]));
+        // Merge into the target's VISIBLE cells (not its raw bounds) so extending a
+        // rect-created area can never resurrect cells hidden under earlier areas.
+        const targetSnapshot = visibleAnnotationCellSnapshots(annotationsRef.current, image, currentPixels)
+            .find((snapshot) => snapshot.annotation.id === target.id);
+        const mergedCells = new Map(((targetSnapshot === null || targetSnapshot === void 0 ? void 0 : targetSnapshot.cells) || []).map((cell) => [cellKey(cell), cell]));
         newCells.forEach((cell) => mergedCells.set(cellKey(cell), cell));
         const geometry = cellsToRegion(Array.from(mergedCells.values()), image);
         if (!geometry)
             return;
         recordAnnotationUndo(session);
         const nextAnnotation = normalizeAnnotation({
-            ...(existingAnnotation || {}),
-            id: session.id,
-            label: session.label,
-            color: session.color,
+            ...target,
             pose: geometry.pose,
             region: geometry.region,
         });
-        const nextAnnotations = annotationIndex >= 0
-            ? currentAnnotations.map((annotation, index) => index === annotationIndex ? nextAnnotation : annotation)
-            : [...currentAnnotations, nextAnnotation];
-        applyAnnotationsSnapshot(nextAnnotations, `Painted area ${nextAnnotation.label}`);
-    }, [annotationLabel, applyAnnotationsSnapshot, brushSize, busy, image, onMessage, open, recordAnnotationUndo]);
+        applyAnnotationsSnapshot(annotationsRef.current.map((annotation) => (annotation.id === target.id ? nextAnnotation : annotation)), `Extended area ${nextAnnotation.label}`);
+    }, [applyAnnotationsSnapshot, brushSize, busy, image, onMessage, open, recordAnnotationUndo, selectedAnnotationId]);
     const applyAreaCellErase = useCallback((startPixel, endPixel, session) => {
         const currentPixels = pixelsRef.current;
         if (!open || !image || busy || !currentPixels)
@@ -836,40 +825,10 @@ export function useMapEditor({ open, mapName, onMessage, reloadToken = 0 }) {
         applyAnnotationsSnapshot(nextAnnotations, "Erased area pixels");
         return true;
     }, [applyAnnotationsSnapshot, brushSize, busy, image, open, recordAnnotationUndo]);
-    const deleteAnnotationAtPixel = useCallback((pixel, session) => {
-        if (!open || !image || busy)
-            return;
-        const currentPixels = pixelsRef.current;
-        if (!currentPixels)
-            return;
-        const targetKey = cellKey(pgmPixelToGridCell(image, pixel));
-        const snapshots = visibleAnnotationCellSnapshots(annotationsRef.current, image, currentPixels);
-        const targetSnapshot = snapshots.find((snapshot) => snapshot.cells.some((cell) => cellKey(cell) === targetKey));
-        if (!targetSnapshot) {
-            onMessage("No map area selected");
-            return;
-        }
-        const target = targetSnapshot.annotation;
-        const nextAnnotations = snapshots
-            .filter((snapshot) => snapshot.annotation.id !== target.id)
-            .map((snapshot) => annotationWithCells(snapshot.annotation, snapshot.cells, image))
-            .filter(Boolean);
-        recordAnnotationUndo(session);
-        applyAnnotationsSnapshot(
-            nextAnnotations,
-            `Removed area ${target.label || "Area"}`,
-        );
-    }, [applyAnnotationsSnapshot, busy, image, onMessage, open, recordAnnotationUndo]);
     const editAreaAtMapPoint = useCallback((x, y, phase = "paint") => {
-        if (!open || !image || busy || (tool !== ANNOTATION_TOOL.id && tool !== ANNOTATION_ERASE_TOOL.id))
+        if (!open || !image || busy || (tool !== ANNOTATION_EXTEND_TOOL.id && tool !== ANNOTATION_ERASE_TOOL.id))
             return;
         if (phase === "end") {
-            if (tool === ANNOTATION_ERASE_TOOL.id) {
-                const session = areaEraseRef.current;
-                if (session && !session.moved && session.startPixel) {
-                    deleteAnnotationAtPixel(session.startPixel, session);
-                }
-            }
             areaPaintRef.current = null;
             areaEraseRef.current = null;
             return;
@@ -877,27 +836,22 @@ export function useMapEditor({ open, mapName, onMessage, reloadToken = 0 }) {
         const pixel = mapPointToPgmPixel(image, x, y);
         if (!pixel)
             return;
-        if (tool === ANNOTATION_TOOL.id) {
-            updatePaintedArea(pixel, phase);
+        if (tool === ANNOTATION_EXTEND_TOOL.id) {
+            extendSelectedArea(pixel, phase);
             return;
         }
         let session = areaEraseRef.current;
         if (phase === "start" || !session) {
-            session = {
-                startPixel: pixel,
-                lastPixel: pixel,
-                moved: false,
-                undoPushed: false,
-            };
+            session = { lastPixel: pixel, undoPushed: false };
             areaEraseRef.current = session;
+            // Erase under the cursor immediately so a plain press has an effect.
+            applyAreaCellErase(pixel, pixel, session);
             return;
         }
-        const startPixel = session.lastPixel || pixel;
-        session.moved = true;
-        if (applyAreaCellErase(startPixel, pixel, session)) {
+        if (applyAreaCellErase(session.lastPixel || pixel, pixel, session)) {
             session.lastPixel = pixel;
         }
-    }, [applyAreaCellErase, busy, deleteAnnotationAtPixel, image, open, tool, updatePaintedArea]);
+    }, [applyAreaCellErase, busy, extendSelectedArea, image, open, tool]);
     const placeAnnotationAtMapArea = useCallback((startX, startY, endX = startX, endY = startY) => {
         if (!open || !image || busy || tool !== ANNOTATION_TOOL.id)
             return;
@@ -915,7 +869,7 @@ export function useMapEditor({ open, mapName, onMessage, reloadToken = 0 }) {
             onMessage("Drag over an unmarked white free-space area");
             return;
         }
-        const label = annotationLabel.trim() || "Area";
+        const label = annotationLabel.trim() || nextAutoAreaLabel(annotationsRef.current);
         const centroid = pgmPixelToMapPoint(image, region.centroidPixelX, region.centroidPixelY);
         const nextAnnotation = normalizeAnnotation({
             id: makeAnnotationId(),
@@ -934,29 +888,32 @@ export function useMapEditor({ open, mapName, onMessage, reloadToken = 0 }) {
             },
         });
         persistAnnotations([...annotationsRef.current, nextAnnotation], `Marked area ${nextAnnotation.label}`);
+        setSelectedAnnotationId(nextAnnotation.id);
     }, [annotationLabel, busy, image, onMessage, open, persistAnnotations, tool]);
-    const placeAnnotationAtMapPoint = useCallback((x, y) => {
-        placeAnnotationAtMapArea(x, y, x, y);
-    }, [placeAnnotationAtMapArea]);
-    const eraseAnnotationsAtMapArea = useCallback((startX, startY, endX = startX, endY = startY) => {
-        if (!open || !image || busy || tool !== ANNOTATION_ERASE_TOOL.id)
+    const deleteAnnotationById = useCallback((id) => {
+        if (!open || !image || busy)
             return;
-        const startPixel = mapPointToPgmPixel(image, startX, startY);
-        const endPixel = mapPointToPgmPixel(image, endX, endY);
-        const selectionBounds = pgmSelectionGridBounds(image, startPixel, endPixel);
-        if (!selectionBounds) {
-            onMessage("Select an area inside the map");
+        const currentPixels = pixelsRef.current;
+        if (!currentPixels)
             return;
-        }
-        const currentAnnotations = annotationsRef.current;
-        const nextAnnotations = currentAnnotations.filter((annotation) => !annotationIntersectsGridBounds(annotation, image, selectionBounds));
-        const removedCount = currentAnnotations.length - nextAnnotations.length;
-        if (removedCount === 0) {
-            onMessage("No map areas selected");
+        const target = annotationsRef.current.find((annotation) => annotation.id === id);
+        if (!target)
             return;
-        }
-        persistAnnotations(nextAnnotations, `Removed ${removedCount} map area${removedCount === 1 ? "" : "s"}`);
-    }, [busy, image, onMessage, open, persistAnnotations, tool]);
+        const nextAnnotations = visibleAnnotationCellSnapshots(annotationsRef.current, image, currentPixels)
+            .filter((snapshot) => snapshot.annotation.id !== id)
+            .map((snapshot) => annotationWithCells(snapshot.annotation, snapshot.cells, image))
+            .filter(Boolean);
+        persistAnnotations(nextAnnotations, `Removed area ${target.label || "Area"}`);
+    }, [busy, image, open, persistAnnotations]);
+    const renameAnnotation = useCallback((id, label) => {
+        const trimmed = String(label || "").trim().slice(0, 80);
+        if (!trimmed)
+            return;
+        const target = annotationsRef.current.find((annotation) => annotation.id === id);
+        if (!target || target.label === trimmed)
+            return;
+        persistAnnotations(annotationsRef.current.map((annotation) => (annotation.id === id ? { ...annotation, label: trimmed } : annotation)), `Renamed area ${trimmed}`);
+    }, [persistAnnotations]);
     const clearAnnotations = useCallback(() => {
         if (!annotationsRef.current.length)
             return;
@@ -1066,10 +1023,12 @@ export function useMapEditor({ open, mapName, onMessage, reloadToken = 0 }) {
         save,
         editAtMapPoint,
         editAreaAtMapPoint,
-        placeAnnotationAtMapPoint,
         placeAnnotationAtMapArea,
-        eraseAnnotationsAtMapArea,
         clearAnnotations,
+        selectedAnnotationId,
+        setSelectedAnnotationId,
+        deleteAnnotationById,
+        renameAnnotation,
     };
 }
 // Warm segmented map-editor controls (see design handoff, turn 8).
@@ -1093,6 +1052,12 @@ const TOOL_ICONS = {
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
             <path d="M20.6 13.2 13.2 20.6a2 2 0 0 1-2.8 0l-7-7A2 2 0 0 1 2.8 12V4.4A1.6 1.6 0 0 1 4.4 2.8H12a2 2 0 0 1 1.4.6l7.2 7a2 2 0 0 1 0 2.8z" />
             <circle cx="7.5" cy="7.5" r="1.2" />
+        </svg>
+    ),
+    extend_area: (
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M12 19c-4 1.5-8-1-8-5 0-4.5 5-8.5 7-10" />
+            <path d="M17 3v8" /><path d="M13 7h8" />
         </svg>
     ),
     erase_area: (
@@ -1151,73 +1116,60 @@ function EditorSection({ label, children }) {
     );
 }
 
-export function MapEditorControls({ files, selectedPath, setSelectedPath, tool, setTool, brushSize, setBrushSize, busy, image, dirty, canUndo = false, canRedo = false, undo, redo, save, enableAnnotations = false, annotations = [], annotationLabel = "Area", setAnnotationLabel = () => { }, clearAnnotations = () => { }, }) {
+export function MapEditorControls({ files, selectedPath, setSelectedPath, tool, setTool, brushSize, setBrushSize, busy, image, dirty, canUndo = false, canRedo = false, undo, redo, save, enableAnnotations = false, annotations = [], annotationLabel = "Area", setAnnotationLabel = () => { }, clearAnnotations = () => { }, selectedAnnotationId = "", setSelectedAnnotationId = () => { }, deleteAnnotationById = () => { }, renameAnnotation = () => { }, }) {
+    const [renamingId, setRenamingId] = useState("");
+    const [renameDraft, setRenameDraft] = useState("");
+    const [confirmDeleteId, setConfirmDeleteId] = useState("");
+    const [confirmClear, setConfirmClear] = useState(false);
+    const confirmTimerRef = useRef(null);
+    const disarmConfirms = useCallback(() => {
+        setConfirmDeleteId("");
+        setConfirmClear(false);
+    }, []);
+    const armConfirmTimer = useCallback(() => {
+        if (confirmTimerRef.current)
+            clearTimeout(confirmTimerRef.current);
+        confirmTimerRef.current = setTimeout(disarmConfirms, 4000);
+    }, [disarmConfirms]);
+    useEffect(() => () => {
+        if (confirmTimerRef.current)
+            clearTimeout(confirmTimerRef.current);
+    }, []);
     const iconButtonStyle = (enabled) => ({
         borderRadius: 9,
         border: "1px solid var(--mc-border-strong)",
         backgroundColor: "var(--mc-surface)",
         color: enabled ? "var(--mc-text)" : "var(--mc-text-subtle)",
     });
-    const areaTools = [ANNOTATION_TOOL, ANNOTATION_ERASE_TOOL];
-    const labelActive = enableAnnotations && tool === ANNOTATION_TOOL.id;
+    const areaTools = [ANNOTATION_TOOL, ANNOTATION_EXTEND_TOOL, ANNOTATION_ERASE_TOOL];
+    const commitRename = (annotation) => {
+        renameAnnotation(annotation.id, renameDraft);
+        setRenamingId("");
+        setRenameDraft("");
+    };
 
     return (
-        <div className="flex flex-wrap items-center gap-2">
-            <select
-                value={selectedPath}
-                disabled={busy || files.length === 0}
-                onChange={(event) => setSelectedPath(event.currentTarget.value)}
-                className="h-9 min-w-[220px] px-3 text-[12px] font-mono"
-                style={{ borderRadius: 10, color: "var(--mc-text)", backgroundColor: "var(--mc-surface)", border: "1px solid var(--mc-border-strong)" }}
-            >
-                {files.map((file) => (
-                    <option key={file.path} value={file.path}>{file.path}</option>
-                ))}
-            </select>
-
-            <SegButton selected={tool === "view"} disabled={busy} onClick={() => setTool("view")} title="View" ariaLabel="View">
-                {TOOL_ICONS.view}View
-            </SegButton>
-
-            <EditorSection label="BRUSH">
-                <SegGroup ariaLabel="Brush size">
-                    {BRUSH_SIZE_OPTIONS.map((option) => (
-                        <SegButton
-                            key={option.value}
-                            narrow
-                            selected={brushSize === option.value}
-                            disabled={busy}
-                            onClick={() => setBrushSize(option.value)}
-                            title={`Brush ${option.label}: ${option.value}px`}
-                            ariaLabel={`Brush size ${option.label}`}
-                        >
-                            {option.label === "Small" ? "S" : option.label === "Medium" ? "M" : option.label === "Large" ? "L" : "XL"}
-                        </SegButton>
+        <div className="flex w-full flex-col gap-2">
+            <div className="flex flex-wrap items-center gap-2">
+                <select
+                    value={selectedPath}
+                    disabled={busy || files.length === 0}
+                    onChange={(event) => setSelectedPath(event.currentTarget.value)}
+                    className="h-9 min-w-[220px] px-3 text-[12px] font-mono"
+                    style={{ borderRadius: 10, color: "var(--mc-text)", backgroundColor: "var(--mc-surface)", border: "1px solid var(--mc-border-strong)" }}
+                >
+                    {files.map((file) => (
+                        <option key={file.path} value={file.path}>{file.path}</option>
                     ))}
-                </SegGroup>
-            </EditorSection>
+                </select>
 
-            <EditorSection label="MAP EDIT">
-                <SegGroup ariaLabel="Map edit tools">
-                    {EDIT_TOOLS.map((editTool) => (
-                        <SegButton
-                            key={editTool.id}
-                            selected={tool === editTool.id}
-                            disabled={busy}
-                            onClick={() => setTool(editTool.id)}
-                            title={editTool.label}
-                            ariaLabel={editTool.label}
-                        >
-                            {TOOL_ICONS[editTool.id]}{editTool.label}
-                        </SegButton>
-                    ))}
-                </SegGroup>
-            </EditorSection>
+                <SegButton selected={tool === "view"} disabled={busy} onClick={() => setTool("view")} title="View" ariaLabel="View">
+                    {TOOL_ICONS.view}View
+                </SegButton>
 
-            {enableAnnotations && (
-                <EditorSection label="AREA EDIT">
-                    <SegGroup ariaLabel="Area edit tools">
-                        {areaTools.map((editTool) => (
+                <EditorSection label="MAP EDIT">
+                    <SegGroup ariaLabel="Map edit tools">
+                        {EDIT_TOOLS.map((editTool) => (
                             <SegButton
                                 key={editTool.id}
                                 selected={tool === editTool.id}
@@ -1230,52 +1182,192 @@ export function MapEditorControls({ files, selectedPath, setSelectedPath, tool, 
                             </SegButton>
                         ))}
                     </SegGroup>
-                    {labelActive && (
+                </EditorSection>
+
+                {enableAnnotations && (
+                    <EditorSection label="AREA EDIT">
+                        <SegGroup ariaLabel="Area edit tools">
+                            {areaTools.map((editTool) => (
+                                <SegButton
+                                    key={editTool.id}
+                                    selected={tool === editTool.id}
+                                    disabled={busy}
+                                    onClick={() => setTool(editTool.id)}
+                                    title={editTool.label}
+                                    ariaLabel={editTool.label}
+                                >
+                                    {TOOL_ICONS[editTool.id]}{editTool.label}
+                                </SegButton>
+                            ))}
+                        </SegGroup>
                         <input
                             aria-label="Area name"
                             value={annotationLabel}
+                            placeholder={nextAutoAreaLabel(annotations)}
                             disabled={busy}
                             onChange={(event) => setAnnotationLabel(event.currentTarget.value)}
                             className="h-8 w-28 px-3 text-[12px] font-semibold"
                             style={{ borderRadius: 9, color: "var(--mc-text)", backgroundColor: "var(--mc-surface)", border: "1px solid var(--mc-border-strong)" }}
                         />
-                    )}
+                    </EditorSection>
+                )}
+
+                <EditorSection label="BRUSH">
+                    <SegGroup ariaLabel="Brush size">
+                        {BRUSH_SIZE_OPTIONS.map((option) => (
+                            <SegButton
+                                key={option.value}
+                                narrow
+                                selected={brushSize === option.value}
+                                disabled={busy}
+                                onClick={() => setBrushSize(option.value)}
+                                title={`Brush ${option.label}: ${option.value}px`}
+                                ariaLabel={`Brush size ${option.label}`}
+                            >
+                                {option.label === "Small" ? "S" : option.label === "Medium" ? "M" : option.label === "Large" ? "L" : "XL"}
+                            </SegButton>
+                        ))}
+                    </SegGroup>
+                </EditorSection>
+
+                <button type="button" disabled={busy || !canUndo} onClick={undo} title="Undo" aria-label="Undo"
+                    className="h-9 w-9 inline-flex items-center justify-center transition-all active:translate-y-px disabled:opacity-50 disabled:active:translate-y-0"
+                    style={iconButtonStyle(canUndo)}>
+                    <MdUndo size={17} />
+                </button>
+                <button type="button" disabled={busy || !canRedo} onClick={redo} title="Redo" aria-label="Redo"
+                    className="h-9 w-9 inline-flex items-center justify-center transition-all active:translate-y-px disabled:opacity-50 disabled:active:translate-y-0"
+                    style={iconButtonStyle(canRedo)}>
+                    <MdRedo size={17} />
+                </button>
+                {enableAnnotations && (
                     <button
                         type="button"
                         disabled={busy || annotations.length === 0}
-                        onClick={clearAnnotations}
-                        className="h-8 px-3 text-[12px] font-semibold transition-all active:translate-y-px disabled:opacity-50 disabled:active:translate-y-0"
-                        style={{ borderRadius: 9, border: "1px solid var(--mc-border-strong)", backgroundColor: "var(--mc-surface)", color: "var(--mc-text)" }}
+                        aria-label={confirmClear ? "Confirm clear areas" : "Clear Areas"}
+                        onClick={() => {
+                            if (confirmClear) {
+                                clearAnnotations();
+                                disarmConfirms();
+                                return;
+                            }
+                            setConfirmDeleteId("");
+                            setConfirmClear(true);
+                            armConfirmTimer();
+                        }}
+                        className="h-9 px-3 text-[12px] font-semibold transition-all active:translate-y-px disabled:opacity-50 disabled:active:translate-y-0"
+                        style={{
+                            borderRadius: 9,
+                            border: "1px solid var(--mc-danger-border)",
+                            backgroundColor: confirmClear ? "var(--mc-danger)" : "var(--mc-surface)",
+                            color: confirmClear ? "var(--mc-accent-fg)" : "var(--mc-danger)",
+                        }}
                     >
-                        Clear Areas
+                        {confirmClear ? "Confirm clear?" : "Clear Areas"}
                     </button>
-                </EditorSection>
+                )}
+                <button type="button" disabled={busy || !dirty} onClick={save}
+                    className="h-9 px-4 text-[12.5px] font-semibold transition-all active:translate-y-px disabled:opacity-50 disabled:active:translate-y-0"
+                    style={{ borderRadius: 9, border: "none", backgroundColor: "var(--mc-accent)", color: "var(--mc-accent-fg)", boxShadow: dirty ? "var(--mc-shadow)" : "none" }}>
+                    Save
+                </button>
+
+                <span className="text-[11px] font-mono" style={{ color: "var(--mc-text-subtle)" }}>
+                    {image ? (
+                        <>
+                            {image.width} × {image.height}
+                            {dirty && <span style={{ color: "var(--mc-accent)" }}> · unsaved</span>}
+                        </>
+                    ) : "Select a PGM"}
+                </span>
+            </div>
+
+            {enableAnnotations && annotations.length > 0 && (
+                <div role="group" aria-label="Map areas" className="flex max-h-24 w-full flex-wrap items-center gap-1.5 overflow-y-auto">
+                    {annotations.map((annotation) => {
+                        const selected = annotation.id === selectedAnnotationId;
+                        const confirming = confirmDeleteId === annotation.id;
+                        if (renamingId === annotation.id) {
+                            return (
+                                <input
+                                    key={annotation.id}
+                                    autoFocus
+                                    aria-label={`Rename area ${annotation.label}`}
+                                    value={renameDraft}
+                                    disabled={busy}
+                                    onChange={(event) => setRenameDraft(event.currentTarget.value)}
+                                    onBlur={() => commitRename(annotation)}
+                                    onKeyDown={(event) => {
+                                        if (event.key === "Enter") {
+                                            event.preventDefault();
+                                            commitRename(annotation);
+                                        }
+                                        if (event.key === "Escape") {
+                                            event.preventDefault();
+                                            setRenamingId("");
+                                            setRenameDraft("");
+                                        }
+                                    }}
+                                    className="h-8 w-32 px-3 text-[12px] font-semibold"
+                                    style={{ borderRadius: 9, color: "var(--mc-text)", backgroundColor: "var(--mc-surface)", border: "1px solid var(--mc-border-strong)" }}
+                                />
+                            );
+                        }
+                        return (
+                            <span
+                                key={annotation.id}
+                                className="inline-flex h-8 items-center gap-1 pl-2.5 pr-1"
+                                style={{
+                                    borderRadius: 999,
+                                    border: `1px solid ${selected ? "var(--mc-text)" : "var(--mc-border-strong)"}`,
+                                    backgroundColor: selected ? "var(--mc-surface-hover)" : "var(--mc-surface)",
+                                }}
+                            >
+                                <button
+                                    type="button"
+                                    aria-pressed={selected}
+                                    disabled={busy}
+                                    onClick={() => setSelectedAnnotationId(annotation.id)}
+                                    onDoubleClick={() => {
+                                        setRenamingId(annotation.id);
+                                        setRenameDraft(annotation.label);
+                                    }}
+                                    title={`${annotation.label} — double-click to rename`}
+                                    className="inline-flex items-center gap-1.5 text-[12px] font-semibold disabled:opacity-50"
+                                    style={{ border: "none", backgroundColor: "transparent", color: "var(--mc-text)" }}
+                                >
+                                    <span aria-hidden="true" className="shrink-0" style={{ width: 8, height: 8, borderRadius: 999, backgroundColor: annotation.color }} />
+                                    {annotation.label}
+                                </button>
+                                <button
+                                    type="button"
+                                    disabled={busy}
+                                    aria-label={confirming ? `Confirm delete area ${annotation.label}` : `Delete area ${annotation.label}`}
+                                    onClick={() => {
+                                        if (confirming) {
+                                            deleteAnnotationById(annotation.id);
+                                            disarmConfirms();
+                                            return;
+                                        }
+                                        setConfirmClear(false);
+                                        setConfirmDeleteId(annotation.id);
+                                        armConfirmTimer();
+                                    }}
+                                    className="inline-flex h-6 w-6 items-center justify-center text-[13px] leading-none disabled:opacity-50"
+                                    style={{
+                                        borderRadius: 999,
+                                        border: "none",
+                                        backgroundColor: confirming ? "var(--mc-danger)" : "transparent",
+                                        color: confirming ? "var(--mc-accent-fg)" : "var(--mc-danger)",
+                                    }}
+                                >
+                                    ×
+                                </button>
+                            </span>
+                        );
+                    })}
+                </div>
             )}
-
-            <button type="button" disabled={busy || !canUndo} onClick={undo} title="Undo" aria-label="Undo"
-                className="h-9 w-9 inline-flex items-center justify-center transition-all active:translate-y-px disabled:opacity-50 disabled:active:translate-y-0"
-                style={iconButtonStyle(canUndo)}>
-                <MdUndo size={17} />
-            </button>
-            <button type="button" disabled={busy || !canRedo} onClick={redo} title="Redo" aria-label="Redo"
-                className="h-9 w-9 inline-flex items-center justify-center transition-all active:translate-y-px disabled:opacity-50 disabled:active:translate-y-0"
-                style={iconButtonStyle(canRedo)}>
-                <MdRedo size={17} />
-            </button>
-            <button type="button" disabled={busy || !dirty} onClick={save}
-                className="h-9 px-4 text-[12.5px] font-semibold transition-all active:translate-y-px disabled:opacity-50 disabled:active:translate-y-0"
-                style={{ borderRadius: 9, border: "none", backgroundColor: "var(--mc-accent)", color: "var(--mc-accent-fg)", boxShadow: dirty ? "var(--mc-shadow)" : "none" }}>
-                Save
-            </button>
-
-            <span className="text-[11px] font-mono" style={{ color: "var(--mc-text-subtle)" }}>
-                {image ? (
-                    <>
-                        {image.width} × {image.height}
-                        {dirty && <span style={{ color: "var(--mc-accent)" }}> · unsaved</span>}
-                    </>
-                ) : "Select a PGM"}
-            </span>
         </div>
     );
 }

@@ -179,6 +179,12 @@ const MISSION_SWITCH_OFF = "#dcd7ca";
 const MISSION_RAIL_BG = "var(--mc-surface-hover)";
 const MISSION_CARD_RADIUS = 16;
 const MISSION_GLASS = "color-mix(in srgb, var(--mc-surface) 88%, transparent)";
+// Editor brush-ring colors per tool (matches the warm OCC/MARKER palettes):
+// ink/cream for obstacles, paper for clearing, sage for extend, danger for erase.
+const EDITOR_BRUSH_RING_COLORS = {
+  light: { draw_black: "#2A2620", erase_black: "#FAF8F3", extend_area: "#5B8266", erase_area: "#C14E34" },
+  dark: { draw_black: "#D8D2C4", erase_black: "#2B2823", extend_area: "#6F9A74", erase_area: "#D15A3E" },
+};
 const MISSION_DESIGN_STORAGE_KEY = "mission_canvas_designs";
 const MISSION_SESSION_STORAGE_KEY = "mission_canvas_session";
 const TELEOP_TOPIC = "/cmd_vel";
@@ -3325,6 +3331,10 @@ export default function MissionCanvasPage() {
               annotationLabel={mapEditor.annotationLabel}
               setAnnotationLabel={mapEditor.setAnnotationLabel}
               clearAnnotations={mapEditor.clearAnnotations}
+              selectedAnnotationId={mapEditor.selectedAnnotationId}
+              setSelectedAnnotationId={mapEditor.setSelectedAnnotationId}
+              deleteAnnotationById={mapEditor.deleteAnnotationById}
+              renameAnnotation={mapEditor.renameAnnotation}
             />
           </div>
         )}
@@ -3358,6 +3368,15 @@ export default function MissionCanvasPage() {
                   ? designMapEditor.annotations
                   : []
             }
+            selectedMapAnnotationId={mappingEditorActive ? mapEditor.selectedAnnotationId : ""}
+            editorBrush={
+              mappingEditorActive && mapEditor.map && EDITOR_BRUSH_RING_COLORS.light[mapEditor.tool]
+                ? {
+                  sizeCells: mapEditor.brushSize,
+                  color: (isDark ? EDITOR_BRUSH_RING_COLORS.dark : EDITOR_BRUSH_RING_COLORS.light)[mapEditor.tool],
+                }
+                : null
+            }
             btLayer={waypointBtLayer}
             showMap={mappingEditorActive ? true : activeLayers.map}
             showGlobalCostmap={mappingEditorActive ? false : needsGlobalCostmap}
@@ -3375,7 +3394,7 @@ export default function MissionCanvasPage() {
             interactionMode={mappingEditorActive ? "view" : interactionMode}
             editorActive={mappingEditorActive && !!mapEditor.map && mapEditor.tool !== "view"}
             editorPaintOnDrag
-            editorAreaSelection={false}
+            editorAreaSelection={mappingEditorActive && mapEditor.tool === "label_marker"}
             fitContainer
             viewKey={mappingEditorActive
               ? `mission-editor:${mapEditor.selectedPath || "none"}`
@@ -3396,11 +3415,11 @@ export default function MissionCanvasPage() {
             onSpotPoseChange={btNodeIsUp || missionRouteMode ? undefined : handleMoveSpot}
             onBehaviorNodePoseChange={handleMoveBehaviorNode}
             onEditorMapPoint={
-              mapEditor.tool === "label_marker" || mapEditor.tool === "erase_area"
+              mapEditor.tool === "extend_area" || mapEditor.tool === "erase_area"
                 ? mapEditor.editAreaAtMapPoint
                 : mapEditor.editAtMapPoint
             }
-            onEditorMapArea={mapEditor.tool === "erase_area" ? mapEditor.eraseAnnotationsAtMapArea : mapEditor.placeAnnotationAtMapArea}
+            onEditorMapArea={mapEditor.tool === "label_marker" ? mapEditor.placeAnnotationAtMapArea : undefined}
             onMapClick={handleClearMapSelection}
             onMapPose={handleCreateSpotAtPose}
             onBtLayerClose={() => setBtLayerSpotId("")}

@@ -233,6 +233,12 @@ beforeEach(() => {
   mockMapViewer.mockImplementation(() => <div>Mission Canvas Map</div>);
 });
 
+afterEach(() => {
+  // Restore spies (e.g. the Math.random spy in the area-color test) so they
+  // cannot leak into later tests. Module mocks (jest.fn) are unaffected.
+  jest.restoreAllMocks();
+});
+
 test('renders Mission Canvas foundation', async () => {
   render(<MissionCanvasPage />);
 
@@ -1585,10 +1591,11 @@ test('marks free-space areas with automatic color and undo/redo support', async 
     target: { value: 'Dock' },
   });
   await waitFor(() => expect(latestMapViewerProps().editorActive).toBe(true));
+  // The Area tool now creates areas from a rectangle drag selection.
+  await waitFor(() => expect(latestMapViewerProps().editorAreaSelection).toBe(true));
 
   await act(async () => {
-    latestMapViewerProps().onEditorMapPoint(0, 0, 'start');
-    latestMapViewerProps().onEditorMapPoint(0, 0, 'end');
+    latestMapViewerProps().onEditorMapArea(0, 0, 0, 0);
   });
 
   await waitFor(() => expect(latestMapViewerProps().mapAnnotations).toEqual([
@@ -1599,22 +1606,22 @@ test('marks free-space areas with automatic color and undo/redo support', async 
       region: expect.objectContaining({
         seed_cell: { x: 0, y: 0 },
         bounds: { x_min: 0, y_min: 0, x_max: 0, y_max: 0 },
-        cells: [{ x: 0, y: 0 }],
+        cell_count: 1,
       }),
     }),
   ]));
   expect(latestMapViewerProps().editorPaintOnDrag).toBe(true);
-  expect(latestMapViewerProps().editorAreaSelection).toBe(false);
+  // New areas are auto-selected in the chip list.
+  expect(screen.getByRole('button', { name: 'Dock' })).toHaveAttribute('aria-pressed', 'true');
   expect(screen.getByText('Unsaved changes')).toBeInTheDocument();
   expect(saveMapAnnotations).not.toHaveBeenCalled();
 
   const areaSaveCalls = saveMapAnnotations.mock.calls.length;
   await act(async () => {
-    latestMapViewerProps().onEditorMapPoint(0, 0, 'start');
-    latestMapViewerProps().onEditorMapPoint(0, 0, 'end');
+    latestMapViewerProps().onEditorMapArea(0, 0, 0, 0);
   });
   expect(saveMapAnnotations).toHaveBeenCalledTimes(areaSaveCalls);
-  expect(screen.getByText('Paint over unmarked white free-space')).toBeInTheDocument();
+  expect(screen.getByText('Drag over an unmarked white free-space area')).toBeInTheDocument();
 
   await waitFor(() => expect(screen.getByRole('button', { name: 'Undo' })).toBeEnabled());
   fireEvent.click(screen.getByRole('button', { name: 'Undo' }));
@@ -1631,13 +1638,53 @@ test('marks free-space areas with automatic color and undo/redo support', async 
     [expect.objectContaining({
       label: 'Dock',
       color: '#3B241F',
-      region: expect.objectContaining({ cells: [{ x: 0, y: 0 }] }),
+      region: expect.objectContaining({ cell_count: 1 }),
     })],
   ));
   expect(savePgmImage).not.toHaveBeenCalled();
 });
 
-test('removes selected map areas with the erase area tool', async () => {
+test('auto-numbers and auto-selects areas created by rectangle drag', async () => {
+  const latestMapViewerProps = () => (
+    mockMapViewer.mock.calls[mockMapViewer.mock.calls.length - 1][0]
+  );
+  getPgmFiles.mockResolvedValue({
+    files: [{ path: 'factory.pgm', name: 'factory.pgm' }],
+  });
+  // 3x1 free map: three white pixels.
+  getPgmImage.mockResolvedValue({
+    path: 'factory.pgm',
+    width: 3,
+    height: 1,
+    maxval: 255,
+    pixels_base64: '/v7+',
+  });
+  getMapAnnotations.mockResolvedValue({ path: 'factory.pgm', annotations: [] });
+
+  render(<MissionCanvasPage />);
+
+  fireEvent.click(screen.getByRole('button', { name: 'Map Editor' }));
+  await waitFor(() => expect(getMapAnnotations).toHaveBeenCalledWith('factory.pgm'));
+
+  fireEvent.click(screen.getByRole('button', { name: 'Area' }));
+  expect(screen.getByLabelText('Area name')).toHaveAttribute('placeholder', 'Area 1');
+  await waitFor(() => expect(latestMapViewerProps().editorAreaSelection).toBe(true));
+
+  await act(async () => {
+    latestMapViewerProps().onEditorMapArea(0.5, 0.5, 0.5, 0.5);
+  });
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Area 1' })).toHaveAttribute('aria-pressed', 'true'));
+  expect(screen.getByLabelText('Area name')).toHaveAttribute('placeholder', 'Area 2');
+
+  await act(async () => {
+    latestMapViewerProps().onEditorMapArea(1.5, 0.5, 2.5, 0.5);
+  });
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Area 2' })).toHaveAttribute('aria-pressed', 'true'));
+  expect(screen.getByRole('button', { name: 'Area 1' })).toHaveAttribute('aria-pressed', 'false');
+  expect(latestMapViewerProps().mapAnnotations).toHaveLength(2);
+});
+
+test('removes an area from the chip list', async () => {
   const latestMapViewerProps = () => (
     mockMapViewer.mock.calls[mockMapViewer.mock.calls.length - 1][0]
   );
@@ -1677,13 +1724,9 @@ test('removes selected map areas with the erase area tool', async () => {
     expect.objectContaining({ label: 'Dock', color: '#3B241F' }),
   ]));
 
-  fireEvent.click(screen.getByRole('button', { name: 'Erase Area' }));
-  await waitFor(() => expect(latestMapViewerProps().editorAreaSelection).toBe(false));
-
-  await act(async () => {
-    latestMapViewerProps().onEditorMapPoint(0, 0, 'start');
-    latestMapViewerProps().onEditorMapPoint(0, 0, 'end');
-  });
+  // Whole-area delete now lives on the area chip (two-click confirm).
+  fireEvent.click(screen.getByRole('button', { name: 'Delete area Dock' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Confirm delete area Dock' }));
 
   await waitFor(() => expect(latestMapViewerProps().mapAnnotations).toEqual([]));
   expect(screen.getByText('Removed area Dock')).toBeInTheDocument();
@@ -1694,6 +1737,67 @@ test('removes selected map areas with the erase area tool', async () => {
   fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
   await waitFor(() => expect(saveMapAnnotations).toHaveBeenCalledWith('factory.pgm', []));
+  expect(savePgmImage).not.toHaveBeenCalled();
+});
+
+test('renames a map area from the chip list', async () => {
+  getPgmFiles.mockResolvedValue({
+    files: [{ path: 'factory.pgm', name: 'factory.pgm' }],
+  });
+  getPgmImage.mockResolvedValue({
+    path: 'factory.pgm',
+    width: 1,
+    height: 1,
+    maxval: 255,
+    pixels_base64: '/g==',
+  });
+  getMapAnnotations.mockResolvedValue({
+    path: 'factory.pgm',
+    annotations: [{
+      id: 'area_dock',
+      label: 'Dock',
+      color: '#3B241F',
+      pose: { frame_id: 'map', x: 0.5, y: 0.5, yaw: 0 },
+      region: {
+        seed_cell: { x: 0, y: 0 },
+        bounds: { x_min: 0, y_min: 0, x_max: 0, y_max: 0 },
+        cell_count: 1,
+        width: 1,
+        height: 1,
+      },
+    }],
+  });
+
+  render(<MissionCanvasPage />);
+
+  fireEvent.click(screen.getByRole('button', { name: 'Map Editor' }));
+
+  await waitFor(() => expect(getMapAnnotations).toHaveBeenCalledWith('factory.pgm'));
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Dock' })).toBeInTheDocument());
+
+  fireEvent.click(screen.getByRole('button', { name: 'Dock' }));
+  expect(screen.getByRole('button', { name: 'Dock' })).toHaveAttribute('aria-pressed', 'true');
+
+  fireEvent.doubleClick(screen.getByRole('button', { name: 'Dock' }));
+  const renameInput = screen.getByLabelText('Rename area Dock');
+  fireEvent.change(renameInput, { target: { value: 'Dock Bay' } });
+  fireEvent.keyDown(renameInput, { key: 'Enter' });
+
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Dock Bay' })).toBeInTheDocument());
+  expect(screen.getByText('Renamed area Dock Bay')).toBeInTheDocument();
+  expect(screen.getByText('Unsaved changes')).toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole('button', { name: 'Undo' }));
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Dock' })).toBeInTheDocument());
+  fireEvent.click(screen.getByRole('button', { name: 'Redo' }));
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Dock Bay' })).toBeInTheDocument());
+
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Save' })).toBeEnabled());
+  fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+  await waitFor(() => expect(saveMapAnnotations).toHaveBeenCalledWith('factory.pgm', [
+    expect.objectContaining({ label: 'Dock Bay' }),
+  ]));
   expect(savePgmImage).not.toHaveBeenCalled();
 });
 
@@ -1751,11 +1855,9 @@ test('freezes visible area cells when deleting an overlapping area', async () =>
     expect.objectContaining({ label: 'Back' }),
   ]));
 
-  fireEvent.click(screen.getByRole('button', { name: 'Erase Area' }));
-  await act(async () => {
-    latestMapViewerProps().onEditorMapPoint(0.5, 0.5, 'start');
-    latestMapViewerProps().onEditorMapPoint(0, 0, 'end');
-  });
+  // Whole-area delete now lives on the area chip (two-click confirm).
+  fireEvent.click(screen.getByRole('button', { name: 'Delete area Front' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Confirm delete area Front' }));
 
   await waitFor(() => expect(latestMapViewerProps().mapAnnotations).toEqual([
     expect.objectContaining({
@@ -1767,6 +1869,91 @@ test('freezes visible area cells when deleting an overlapping area', async () =>
     }),
   ]));
   expect(screen.getByText('Removed area Front')).toBeInTheDocument();
+});
+
+test('extends the selected area with the extend brush', async () => {
+  const latestMapViewerProps = () => (
+    mockMapViewer.mock.calls[mockMapViewer.mock.calls.length - 1][0]
+  );
+  getPgmFiles.mockResolvedValue({
+    files: [{ path: 'factory.pgm', name: 'factory.pgm' }],
+  });
+  getPgmImage.mockResolvedValue({
+    path: 'factory.pgm',
+    width: 3,
+    height: 1,
+    maxval: 255,
+    pixels_base64: '/v7+',
+  });
+  getMapAnnotations.mockResolvedValue({
+    path: 'factory.pgm',
+    annotations: [{
+      id: 'area_dock',
+      label: 'Dock',
+      color: '#3B241F',
+      pose: { frame_id: 'map', x: 0.5, y: 0.5, yaw: 0 },
+      region: {
+        seed_cell: { x: 0, y: 0 },
+        bounds: { x_min: 0, y_min: 0, x_max: 0, y_max: 0 },
+        cells: [{ x: 0, y: 0 }],
+        cell_count: 1,
+        width: 3,
+        height: 1,
+      },
+    }],
+  });
+
+  render(<MissionCanvasPage />);
+
+  fireEvent.click(screen.getByRole('button', { name: 'Map Editor' }));
+  await waitFor(() => expect(getMapAnnotations).toHaveBeenCalledWith('factory.pgm'));
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Dock' })).toBeInTheDocument());
+
+  fireEvent.click(screen.getByRole('button', { name: 'Extend' }));
+  await waitFor(() => expect(latestMapViewerProps().editorActive).toBe(true));
+  expect(latestMapViewerProps().editorAreaSelection).toBe(false);
+  // Brush tools surface a pointer-following ring spec to the viewer.
+  expect(latestMapViewerProps().editorBrush).toEqual(
+    expect.objectContaining({ sizeCells: 1, color: '#5B8266' }),
+  );
+
+  // Without a selected area the extend brush is a guided no-op.
+  await act(async () => {
+    latestMapViewerProps().onEditorMapPoint(1.5, 0.5, 'start');
+    latestMapViewerProps().onEditorMapPoint(0, 0, 'end');
+  });
+  expect(screen.getByText('Select an area to extend')).toBeInTheDocument();
+  await waitFor(() => expect(latestMapViewerProps().mapAnnotations).toEqual([
+    expect.objectContaining({ region: expect.objectContaining({ cell_count: 1 }) }),
+  ]));
+
+  fireEvent.click(screen.getByRole('button', { name: 'Dock' }));
+  expect(screen.getByRole('button', { name: 'Dock' })).toHaveAttribute('aria-pressed', 'true');
+  await waitFor(() => expect(latestMapViewerProps().selectedMapAnnotationId).toBe('area_dock'));
+
+  await act(async () => {
+    latestMapViewerProps().onEditorMapPoint(0.5, 0.5, 'start');
+    latestMapViewerProps().onEditorMapPoint(1.5, 0.5, 'move');
+    latestMapViewerProps().onEditorMapPoint(0, 0, 'end');
+  });
+
+  await waitFor(() => expect(latestMapViewerProps().mapAnnotations).toEqual([
+    expect.objectContaining({
+      label: 'Dock',
+      region: expect.objectContaining({
+        cells: [{ x: 0, y: 0 }, { x: 1, y: 0 }],
+        cell_count: 2,
+      }),
+    }),
+  ]));
+  expect(screen.getByText('Extended area Dock')).toBeInTheDocument();
+  expect(screen.getByText('Unsaved changes')).toBeInTheDocument();
+
+  // The whole stroke is a single undo entry.
+  fireEvent.click(screen.getByRole('button', { name: 'Undo' }));
+  await waitFor(() => expect(latestMapViewerProps().mapAnnotations).toEqual([
+    expect.objectContaining({ region: expect.objectContaining({ cell_count: 1 }) }),
+  ]));
 });
 
 test('erases map area pixels with brush drag', async () => {

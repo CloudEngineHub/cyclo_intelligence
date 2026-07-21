@@ -496,7 +496,7 @@ function rgbaArrayFromHex(color, alpha = 150) {
         alpha,
     ];
 }
-function makeAnnotationRegionTexture(grid, region, colorString) {
+function makeAnnotationRegionTexture(grid, region, colorString, alpha = 164) {
     const meta = gridMeta(grid);
     if (!meta || !region)
         return null;
@@ -515,7 +515,7 @@ function makeAnnotationRegionTexture(grid, region, colorString) {
     const ctx = canvas.getContext("2d");
     if (!ctx)
         return null;
-    drawRoundedOccupancyLayer(ctx, mask, meta.width, meta.height, scale, 1, rgbaArrayFromHex(colorString, 164));
+    drawRoundedOccupancyLayer(ctx, mask, meta.width, meta.height, scale, 1, rgbaArrayFromHex(colorString, alpha));
     const texture = new THREE.CanvasTexture(canvas);
     texture.colorSpace = THREE.SRGBColorSpace;
     texture.magFilter = THREE.LinearFilter;
@@ -861,7 +861,7 @@ function makeMissionRouteBadge(spot, order, selected = false, scale = 1, isDark 
     sprite.userData = { spotId: spot.id, dragAction: "move" };
     return sprite;
 }
-function makeMapAnnotationRegion(annotation, grid, isDark = false, coveredCells = null) {
+function makeMapAnnotationRegion(annotation, grid, isDark = false, coveredCells = null, selected = false) {
     var _a, _b, _c, _d, _e, _f;
     const meta = gridMeta(grid);
     if (!meta)
@@ -873,12 +873,41 @@ function makeMapAnnotationRegion(annotation, grid, isDark = false, coveredCells 
     if (!region)
         return null;
     const colorString = hexColorString(annotation === null || annotation === void 0 ? void 0 : annotation.color, isDark ? "#6D1F2A" : "#6D1F2A");
-    const texture = makeAnnotationRegionTexture(grid, region, colorString);
+    const texture = makeAnnotationRegionTexture(grid, region, colorString, selected ? 210 : 164);
     const plane = makeGridTexturePlane(grid, texture, 0.065);
     if (!plane)
         return null;
     const group = new THREE.Group();
     group.add(plane);
+    if (selected) {
+        // Ink bounds outline marks the area that Extend / chip actions target.
+        let xMin = Infinity;
+        let yMin = Infinity;
+        let xMax = -Infinity;
+        let yMax = -Infinity;
+        region.cells.forEach((index) => {
+            const gridX = index % meta.width;
+            const gridY = Math.floor(index / meta.width);
+            xMin = Math.min(xMin, gridX);
+            yMin = Math.min(yMin, gridY);
+            xMax = Math.max(xMax, gridX);
+            yMax = Math.max(yMax, gridY);
+        });
+        if (Number.isFinite(xMin)) {
+            // ±0.5 lands gridCellToMapPoint (cell centers) exactly on cell edges.
+            const a = gridCellToMapPoint(meta, xMin - 0.5, yMin - 0.5);
+            const b = gridCellToMapPoint(meta, xMax + 0.5, yMax + 0.5);
+            const outline = makeLine([
+                new THREE.Vector3(a.x, a.y, 0.09),
+                new THREE.Vector3(b.x, a.y, 0.09),
+                new THREE.Vector3(b.x, b.y, 0.09),
+                new THREE.Vector3(a.x, b.y, 0.09),
+                new THREE.Vector3(a.x, a.y, 0.09),
+            ], isDark ? 0xf3f1ea : 0x1c1a17, 2);
+            if (outline)
+                group.add(outline);
+        }
+    }
     if (coveredCells) {
         region.cells.forEach((index) => coveredCells.add(index));
     }
@@ -1139,7 +1168,7 @@ function WaypointBtFocusLayer({ layer, onClose }) {
 // as a clean floor-plan without retuning makeOccupancyTexture.
 const SCENE_BG = { light: 0xefece3, dark: 0x1b1916 };
 
-export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, goalPose, footprint, tf, showMap, showGlobalCostmap, showLocalCostmap, showScan, showGlobalPlan, showGoalPose, showTf, showRobotModel, interactionDisabled, interactionMode, editorActive, editorPaintOnDrag = true, editorAreaSelection = false, viewKey, isDark = false, waitingLabel = "Waiting for /map", fitContainer = false, spots = [], selectedSpotId = "", behaviorNodes = [], selectedBehaviorNodeId = "", behaviorPreviewNode = null, missionRouteOrder = [], missionRouteMode = false, selectedMissionRouteSourceId = "", mapAnnotations = [], btLayer = null, onBtLayerClose, onSpotClick, onBehaviorNodeClick, onMissionRouteSpotClick, onMissionRouteMapClick, onSpotPoseChange, onBehaviorNodePoseChange, onEditorMapPoint, onEditorMapArea, onMapClick, onMapPose, }) {
+export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, goalPose, footprint, tf, showMap, showGlobalCostmap, showLocalCostmap, showScan, showGlobalPlan, showGoalPose, showTf, showRobotModel, interactionDisabled, interactionMode, editorActive, editorPaintOnDrag = true, editorAreaSelection = false, editorBrush = null, viewKey, isDark = false, waitingLabel = "Waiting for /map", fitContainer = false, spots = [], selectedSpotId = "", behaviorNodes = [], selectedBehaviorNodeId = "", behaviorPreviewNode = null, missionRouteOrder = [], missionRouteMode = false, selectedMissionRouteSourceId = "", mapAnnotations = [], selectedMapAnnotationId = "", btLayer = null, onBtLayerClose, onSpotClick, onBehaviorNodeClick, onMissionRouteSpotClick, onMissionRouteMapClick, onSpotPoseChange, onBehaviorNodePoseChange, onEditorMapPoint, onEditorMapArea, onMapClick, onMapPose, }) {
     const containerRef = useRef(null);
     const sceneRef = useRef(null);
     const rendererRef = useRef(null);
@@ -1166,6 +1195,7 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, 
     const pointerDownRef = useRef(null);
     const editorPaintPointerRef = useRef(null);
     const editorAreaDragRef = useRef(null);
+    const editorBrushLayerRef = useRef(null);
     const nodeDragRef = useRef(null);
     useEffect(() => {
         const containerEl = containerRef.current;
@@ -1199,6 +1229,11 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, 
             layers = new THREE.Group();
             scene.add(layers);
             layersRef.current = layers;
+            // Dedicated group for the pointer-following editor brush ring — kept
+            // outside `layers` so hover tracking never rebuilds the heavy layers.
+            const brushLayer = new THREE.Group();
+            scene.add(brushLayer);
+            editorBrushLayerRef.current = brushLayer;
             controls = new OrbitControls(camera, renderer.domElement);
             controls.enableDamping = true;
             controls.dampingFactor = 0.08;
@@ -1251,6 +1286,7 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, 
             controlsRef.current = null;
             mapLayerRef.current = null;
             layersRef.current = null;
+            editorBrushLayerRef.current = null;
             return undefined;
         }
         return () => {
@@ -1269,6 +1305,8 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, 
                 disposeObject(mapLayer);
             if (layers)
                 disposeObject(layers);
+            if (editorBrushLayerRef.current)
+                disposeObject(editorBrushLayerRef.current);
             renderer === null || renderer === void 0 ? void 0 : renderer.dispose();
             if ((renderer === null || renderer === void 0 ? void 0 : renderer.domElement.parentNode) === containerEl) {
                 containerEl.removeChild(renderer.domElement);
@@ -1279,6 +1317,7 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, 
             controlsRef.current = null;
             mapLayerRef.current = null;
             layersRef.current = null;
+            editorBrushLayerRef.current = null;
         };
     }, []);
     useEffect(() => {
@@ -1295,6 +1334,99 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, 
         }
         renderer.setClearColor(bg, 1);
     }, [isDark]);
+    // Editor brush ring — geometry rebuilt only when the brush spec changes.
+    useEffect(() => {
+        const brushLayer = editorBrushLayerRef.current;
+        if (!brushLayer)
+            return;
+        disposeObject(brushLayer);
+        brushLayer.clear();
+        const meta = gridMeta(map);
+        if (!editorBrush || !meta)
+            return;
+        const radius = (Math.max(1, Number(editorBrush.sizeCells) || 1) * meta.resolution) / 2;
+        const color = new THREE.Color(editorBrush.color || "#5B8266");
+        const group = new THREE.Group();
+        // Ink/cream contrast underlay so a paper-colored ring stays visible on the map.
+        const underlay = new THREE.Mesh(new THREE.RingGeometry(radius * 0.78, radius * 1.08, 40), new THREE.MeshBasicMaterial({
+            color: isDark ? 0xf3f1ea : 0x1c1a17,
+            transparent: true,
+            opacity: 0.32,
+            depthWrite: false,
+            side: THREE.DoubleSide,
+        }));
+        group.add(underlay);
+        const ring = new THREE.Mesh(new THREE.RingGeometry(radius * 0.84, radius, 40), new THREE.MeshBasicMaterial({
+            color,
+            transparent: true,
+            opacity: 0.9,
+            depthWrite: false,
+            side: THREE.DoubleSide,
+        }));
+        group.add(ring);
+        const fill = new THREE.Mesh(new THREE.CircleGeometry(radius * 0.84, 40), new THREE.MeshBasicMaterial({
+            color,
+            transparent: true,
+            opacity: 0.12,
+            depthWrite: false,
+        }));
+        group.add(fill);
+        group.position.set(0, 0, 0.9);
+        group.visible = false;
+        brushLayer.add(group);
+    }, [editorBrush, map, isDark]);
+    // Follow the pointer via ref mutation — zero React renders per move.
+    useEffect(() => {
+        const renderer = rendererRef.current;
+        const camera = cameraRef.current;
+        if (!renderer || !camera || !editorBrush)
+            return undefined;
+        const meta = gridMeta(map);
+        if (!meta)
+            return undefined;
+        const brushGroup = () => {
+            var _a;
+            return ((_a = editorBrushLayerRef.current) === null || _a === void 0 ? void 0 : _a.children[0]) || null;
+        };
+        const handleMove = (event) => {
+            const group = brushGroup();
+            if (!group)
+                return;
+            const rect = renderer.domElement.getBoundingClientRect();
+            if (rect.width <= 0 || rect.height <= 0)
+                return;
+            pointerRef.current.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+            pointerRef.current.y = -(((event.clientY - rect.top) / rect.height) * 2 - 1);
+            raycasterRef.current.setFromCamera(pointerRef.current, camera);
+            const point = new THREE.Vector3();
+            const plane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0);
+            if (!raycasterRef.current.ray.intersectPlane(plane, point)) {
+                group.visible = false;
+                return;
+            }
+            const width = meta.width * meta.resolution;
+            const height = meta.height * meta.resolution;
+            const inside = point.x >= meta.originX &&
+                point.x <= meta.originX + width &&
+                point.y >= meta.originY &&
+                point.y <= meta.originY + height;
+            group.visible = inside;
+            if (inside)
+                group.position.set(point.x, point.y, 0.9);
+        };
+        const handleLeave = () => {
+            const group = brushGroup();
+            if (group)
+                group.visible = false;
+        };
+        renderer.domElement.addEventListener("pointermove", handleMove);
+        renderer.domElement.addEventListener("pointerleave", handleLeave);
+        return () => {
+            renderer.domElement.removeEventListener("pointermove", handleMove);
+            renderer.domElement.removeEventListener("pointerleave", handleLeave);
+            handleLeave();
+        };
+    }, [editorBrush, map]);
     useEffect(() => {
         const renderer = rendererRef.current;
         const controls = controlsRef.current;
@@ -1303,7 +1435,7 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, 
         const cursor = interactionDisabled
             ? "cursor-wait"
             : editorActive
-                ? "cursor-cell"
+                ? (editorAreaSelection ? "cursor-crosshair" : "cursor-cell")
                 : interactionMode === "view"
                     ? mapDragActive ? "cursor-grabbing" : "cursor-grab"
                     : "cursor-crosshair";
@@ -1311,7 +1443,7 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, 
         if (controls) {
             controls.enabled = !interactionDisabled && !editorActive && interactionMode === "view";
         }
-    }, [editorActive, interactionDisabled, interactionMode, mapDragActive]);
+    }, [editorActive, editorAreaSelection, interactionDisabled, interactionMode, mapDragActive]);
     useEffect(() => {
         const camera = cameraRef.current;
         const controls = controlsRef.current;
@@ -1435,7 +1567,7 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, 
         const spotById = new Map(spots.map((spot) => [spot.id, spot]));
         const coveredAnnotationCells = new Set();
         mapAnnotations.forEach((annotation) => {
-            const marker = makeMapAnnotationRegion(annotation, map, isDark, coveredAnnotationCells);
+            const marker = makeMapAnnotationRegion(annotation, map, isDark, coveredAnnotationCells, annotation.id === selectedMapAnnotationId);
             if (marker)
                 layers.add(marker);
         });
@@ -1552,6 +1684,7 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, 
         interactionMode,
         missionRouteOrder,
         mapAnnotations,
+        selectedMapAnnotationId,
         selectedMissionRouteSourceId,
         behaviorPreviewNode,
         localCostmap,
