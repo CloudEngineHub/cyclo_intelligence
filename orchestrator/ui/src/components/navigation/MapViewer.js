@@ -122,54 +122,105 @@ const OCC_COLORS = {
         inflate: [224, 154, 69, 235],  // #E09A45
     },
 };
-// Soft (rounded) warm map rendering: free/wall are rasterised as masks, then
-// upscaled + gaussian-blurred + re-thresholded so contours come out rounded.
-// Costmaps stay crisp per-cell (safety data must not be visually rounded).
-const OCC_SOFT = {
-    scale: 4,          // supersampling factor
-    maxDim: 2048,      // cap output texture size (large maps drop to lower scale)
-    radiusCells: 1.4,  // rounding radius in map cells — raise for rounder, lower for crisper
-    wallThreshold: 96, // alpha cut for walls (lower = thin 1-cell walls survive the blur)
-    freeThreshold: 128,
+// Rounded occupancy rendering keeps the exact cells, then only shaves exposed
+// outer corners. This avoids the old blur/threshold path where 1-cell edits
+// could disappear visually.
+const OCC_ROUNDED = {
+    scale: 4,
+    maxDim: 2048,
+    radiusCells: 0.38,
 };
 function occRgba([r, g, b, a]) {
     return `rgba(${r},${g},${b},${a / 255})`;
 }
-// Rasterise a 0/1 cell mask, upscale + blur + threshold → rounded silhouette canvas.
-function occSoftMask(cells, w, h, scale, radiusPx, threshold) {
-    const src = document.createElement("canvas");
-    src.width = w; src.height = h;
-    const sctx = src.getContext("2d");
-    const img = sctx.createImageData(w, h);
-    for (let i = 0; i < w * h; i += 1) {
-        if (cells[i]) img.data[i * 4 + 3] = 255;
-    }
-    sctx.putImageData(img, 0, 0);
-
-    const big = document.createElement("canvas");
-    big.width = w * scale; big.height = h * scale;
-    const bctx = big.getContext("2d");
-    bctx.imageSmoothingEnabled = true;
-    bctx.filter = `blur(${radiusPx}px)`;
-    bctx.drawImage(src, 0, 0, big.width, big.height);
-    bctx.filter = "none";
-
-    const data = bctx.getImageData(0, 0, big.width, big.height);
-    const d = data.data;
-    for (let i = 3; i < d.length; i += 4) d[i] = d[i] >= threshold ? 255 : 0;
-    bctx.putImageData(data, 0, 0);
-    return big;
+const OCC_CELL_UNKNOWN = 0;
+const OCC_CELL_FREE = 1;
+const OCC_CELL_WALL = 2;
+function occupancyCellType(value) {
+    if (value === 0)
+        return OCC_CELL_FREE;
+    if (value > 0)
+        return OCC_CELL_WALL;
+    return OCC_CELL_UNKNOWN;
 }
-// Tint a mask canvas with a solid color (keeps the rounded alpha).
-function occTintMask(mask, color) {
-    const out = document.createElement("canvas");
-    out.width = mask.width; out.height = mask.height;
-    const ctx = out.getContext("2d");
-    ctx.drawImage(mask, 0, 0);
-    ctx.globalCompositeOperation = "source-in";
+function sameOccupancyCell(cells, w, h, type, x, y) {
+    return x >= 0 && x < w && y >= 0 && y < h && cells[x + y * w] === type;
+}
+function addCornerCut(ctx, x0, y0, x1, y1, r, corner) {
+    if (corner === "tl") {
+        ctx.moveTo(x0, y0);
+        ctx.lineTo(x0 + r, y0);
+        ctx.quadraticCurveTo(x0, y0, x0, y0 + r);
+    }
+    else if (corner === "tr") {
+        ctx.moveTo(x1, y0);
+        ctx.lineTo(x1, y0 + r);
+        ctx.quadraticCurveTo(x1, y0, x1 - r, y0);
+    }
+    else if (corner === "br") {
+        ctx.moveTo(x1, y1);
+        ctx.lineTo(x1 - r, y1);
+        ctx.quadraticCurveTo(x1, y1, x1, y1 - r);
+    }
+    else {
+        ctx.moveTo(x0, y1);
+        ctx.lineTo(x0, y1 - r);
+        ctx.quadraticCurveTo(x0, y1, x0 + r, y1);
+    }
+    ctx.closePath();
+}
+function drawRoundedOccupancyLayer(targetCtx, cells, w, h, scale, type, color) {
+    const layer = document.createElement("canvas");
+    layer.width = w * scale;
+    layer.height = h * scale;
+    const ctx = layer.getContext("2d");
+    if (!ctx)
+        return;
     ctx.fillStyle = occRgba(color);
-    ctx.fillRect(0, 0, out.width, out.height);
-    return out;
+    for (let y = 0; y < h; y += 1) {
+        let runStart = -1;
+        for (let x = 0; x <= w; x += 1) {
+            const matches = x < w && cells[x + y * w] === type;
+            if (matches && runStart < 0) {
+                runStart = x;
+            }
+            else if (!matches && runStart >= 0) {
+                ctx.fillRect(runStart * scale, y * scale, (x - runStart) * scale, scale);
+                runStart = -1;
+            }
+        }
+    }
+    const r = Math.min(scale * OCC_ROUNDED.radiusCells, scale / 2);
+    if (r > 0.1) {
+        ctx.globalCompositeOperation = "destination-out";
+        ctx.fillStyle = "#000";
+        ctx.beginPath();
+        for (let y = 0; y < h; y += 1) {
+            for (let x = 0; x < w; x += 1) {
+                if (cells[x + y * w] !== type)
+                    continue;
+                const left = sameOccupancyCell(cells, w, h, type, x - 1, y);
+                const right = sameOccupancyCell(cells, w, h, type, x + 1, y);
+                const top = sameOccupancyCell(cells, w, h, type, x, y - 1);
+                const bottom = sameOccupancyCell(cells, w, h, type, x, y + 1);
+                const x0 = x * scale;
+                const y0 = y * scale;
+                const x1 = x0 + scale;
+                const y1 = y0 + scale;
+                if (!left && !top)
+                    addCornerCut(ctx, x0, y0, x1, y1, r, "tl");
+                if (!right && !top)
+                    addCornerCut(ctx, x0, y0, x1, y1, r, "tr");
+                if (!right && !bottom)
+                    addCornerCut(ctx, x0, y0, x1, y1, r, "br");
+                if (!left && !bottom)
+                    addCornerCut(ctx, x0, y0, x1, y1, r, "bl");
+            }
+        }
+        ctx.fill();
+        ctx.globalCompositeOperation = "source-over";
+    }
+    targetCtx.drawImage(layer, 0, 0);
 }
 function makeOccupancyTexture(grid, alpha, mode, highlightedCells = null, isDark = false) {
     var _a;
@@ -180,41 +231,33 @@ function makeOccupancyTexture(grid, alpha, mode, highlightedCells = null, isDark
     const w = meta.width;
     const h = meta.height;
 
-    // ---- SOFT rendering for the base map ----
+    // ---- Rounded exact-cell rendering for the base map ----
     if (mode === "map") {
-        const scale = Math.max(1, Math.min(OCC_SOFT.scale, Math.floor(OCC_SOFT.maxDim / Math.max(w, h)) || 1));
-        const radiusPx = OCC_SOFT.radiusCells * scale * 0.6;
-
-        const freeCells = new Uint8Array(w * h);
-        const wallCells = new Uint8Array(w * h);
+        const scale = Math.max(1, Math.min(OCC_ROUNDED.scale, Math.floor(OCC_ROUNDED.maxDim / Math.max(w, h)) || 1));
+        const cells = new Uint8Array(w * h);
         for (let y = 0; y < h; y += 1) {
             for (let x = 0; x < w; x += 1) {
                 const srcIndex = (w - 1 - x) + (h - 1 - y) * w; // same flip as before
                 const value = (_a = grid.data[srcIndex]) !== null && _a !== void 0 ? _a : -1;
-                const i = x + y * w;
-                if (value === 0) freeCells[i] = 1;
-                else if (value > 0) wallCells[i] = 1;
+                cells[x + y * w] = occupancyCellType(value);
             }
         }
 
         const out = document.createElement("canvas");
         out.width = w * scale; out.height = h * scale;
         const ctx = out.getContext("2d");
-        // 1) unknown base wash
+        if (!ctx)
+            return null;
         ctx.fillStyle = occRgba(palette.unknown);
         ctx.fillRect(0, 0, out.width, out.height);
-        // 2) rounded free-space blob
-        const freeMask = occSoftMask(freeCells, w, h, scale, radiusPx, OCC_SOFT.freeThreshold);
-        ctx.drawImage(occTintMask(freeMask, palette.free), 0, 0);
-        // 3) rounded walls on top (lower threshold keeps thin walls alive)
-        const wallMask = occSoftMask(wallCells, w, h, scale, radiusPx, OCC_SOFT.wallThreshold);
-        ctx.drawImage(occTintMask(wallMask, palette.wall), 0, 0);
+        drawRoundedOccupancyLayer(ctx, cells, w, h, scale, OCC_CELL_FREE, palette.free);
+        drawRoundedOccupancyLayer(ctx, cells, w, h, scale, OCC_CELL_WALL, palette.wall);
 
         const texture = new THREE.CanvasTexture(out);
         texture.colorSpace = THREE.SRGBColorSpace;
-        texture.magFilter = THREE.LinearFilter; // soft edges (was Nearest)
-        texture.minFilter = THREE.LinearMipmapLinearFilter;
-        texture.generateMipmaps = true;
+        texture.magFilter = THREE.LinearFilter;
+        texture.minFilter = THREE.LinearFilter;
+        texture.generateMipmaps = false;
         texture.flipY = false;
         texture.needsUpdate = true;
         return texture;
