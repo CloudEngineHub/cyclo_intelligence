@@ -2695,12 +2695,6 @@ export default function MissionCanvasPage() {
     setMessage("Route source cleared");
   }, [missionRouteMode]);
 
-  const handleClearMissionRoute = useCallback(() => {
-    setMissionFlowEdges([]);
-    setMissionRouteSourceId("");
-    setMessage("Mission route cleared");
-  }, []);
-
   const handleSetMissionRouteOrder = useCallback((orderedIds) => {
     const validIds = orderedIds.filter((id, index) => (
       visibleSpots.some((spot) => spot.id === id) && orderedIds.indexOf(id) === index
@@ -3395,7 +3389,7 @@ export default function MissionCanvasPage() {
 
           {workspaceStage === STAGE_AUTHORING && !waypointBtLayer && (
             <>
-              {/* HUD toolbar — top-left (glass): Create Waypoint + Edit/Clear Route */}
+              {/* HUD toolbar — top-left (glass): Create Waypoint + Edit Route */}
               <div
                 className="absolute top-5 left-5 z-10 flex items-center gap-2 p-2"
                 style={{ borderRadius: 14, backgroundColor: "color-mix(in srgb, var(--mc-surface) 88%, transparent)", border: "1px solid var(--mc-border)", boxShadow: "var(--mc-shadow)", backdropFilter: "blur(8px)" }}
@@ -3432,16 +3426,6 @@ export default function MissionCanvasPage() {
                   style={{ borderRadius: 9, border: `1px solid ${missionRouteMode ? "var(--mc-accent)" : "var(--mc-border-strong)"}`, backgroundColor: missionRouteMode ? "var(--mc-accent-soft)" : "var(--mc-surface)", color: "var(--mc-text)" }}
                 >
                   Edit Route
-                </button>
-                <button
-                  type="button"
-                  onClick={handleClearMissionRoute}
-                  disabled={!!busy || missionRouteEdges.length === 0}
-                  title="Clear the mission route"
-                  className="h-8 px-3 text-[12.5px] font-semibold disabled:opacity-45"
-                  style={{ borderRadius: 9, border: "1px solid var(--mc-border-strong)", backgroundColor: "var(--mc-surface)", color: "var(--mc-text-muted)" }}
-                >
-                  Clear Route
                 </button>
               </div>
             </>

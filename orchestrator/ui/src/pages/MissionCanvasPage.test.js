@@ -1240,9 +1240,7 @@ test('edits the mission route directly on the map', async () => {
 
   await waitFor(() => expect(latestMapViewerProps().missionRouteMode).toBe(true));
   expect(latestMapViewerProps().onSpotPoseChange).toBeUndefined();
-
-  fireEvent.click(screen.getByRole('button', { name: 'Clear Route' }));
-  await waitFor(() => expect(latestMapViewerProps().missionRouteOrder).toEqual([]));
+  expect(screen.queryByRole('button', { name: 'Clear Route' })).not.toBeInTheDocument();
 
   act(() => {
     latestMapViewerProps().onMissionRouteSpotClick('spot_b');
