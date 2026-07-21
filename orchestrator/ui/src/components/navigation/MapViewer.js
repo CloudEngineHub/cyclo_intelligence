@@ -594,6 +594,9 @@ function makeSpotMarker(spot, selected = false, scale = 1, isDark = false) {
 }
 function makeRouteBadgeSprite(text, selected = false, isDark = false) {
     const pal = markerPalette(isDark);
+    const idleFill = isDark ? "#322e28" : "#f4e5dc";
+    const idleStroke = isDark ? "rgba(236,231,221,0.28)" : "#c96442";
+    const idleText = isDark ? "#ece7dd" : "#b5563a";
     const canvas = document.createElement("canvas");
     canvas.width = 128;
     canvas.height = 128;
@@ -604,12 +607,12 @@ function makeRouteBadgeSprite(text, selected = false, isDark = false) {
         ctx.arc(64, 64, 52, 0, Math.PI * 2);
         ctx.fillStyle = selected
             ? `#${pal.selected.toString(16).padStart(6, "0")}`
-            : `#${pal.idle.toString(16).padStart(6, "0")}`;
+            : idleFill;
         ctx.fill();
         ctx.lineWidth = 6;
-        ctx.strokeStyle = pal.badgeStroke;
+        ctx.strokeStyle = selected ? pal.badgeStroke : idleStroke;
         ctx.stroke();
-        ctx.fillStyle = selected ? pal.badgeTextSelected : pal.badgeTextIdle;
+        ctx.fillStyle = selected ? pal.badgeTextSelected : idleText;
         ctx.font = '700 56px "IBM Plex Mono", ui-monospace, monospace';
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
@@ -627,8 +630,9 @@ function makeMissionRouteBadge(spot, order, selected = false, scale = 1, isDark 
     const x = Number((_a = pose.x) !== null && _a !== void 0 ? _a : 0);
     const y = Number((_b = pose.y) !== null && _b !== void 0 ? _b : 0);
     const sprite = makeRouteBadgeSprite(order, selected, isDark);
-    const size = Math.max(0.34, WAYPOINT_RING_OUTER_RADIUS * scale * 2.2);
-    sprite.position.set(x, y, 0.62);
+    const size = Math.max(0.42, WAYPOINT_RING_OUTER_RADIUS * scale * 0.92);
+    const offset = WAYPOINT_RING_OUTER_RADIUS * scale * 0.9;
+    sprite.position.set(x - offset, y + offset, 0.62);
     sprite.scale.set(size, size, 1);
     sprite.userData = { spotId: spot.id, dragAction: "move" };
     return sprite;

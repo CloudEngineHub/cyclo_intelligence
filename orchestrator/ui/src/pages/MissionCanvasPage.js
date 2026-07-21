@@ -497,10 +497,7 @@ function normalizeMissionFlow(spots, storedFlow = null) {
       type: "smoothstep",
       animated: false,
     }));
-  if (edges.length || nodes.length <= 1) {
-    return { nodes, edges };
-  }
-  return defaultMissionFlow(spots);
+  return { nodes, edges };
 }
 
 function syncMissionFlowNodesWithSpots(nodes, spots) {
@@ -549,15 +546,31 @@ function missionFlowHasPath(edges, source, target) {
   return false;
 }
 
+function missionFlowPrefixEdges(edges, source) {
+  const incomingByTarget = new Map();
+  edges.forEach((edge) => {
+    if (!incomingByTarget.has(edge.target)) {
+      incomingByTarget.set(edge.target, edge);
+    }
+  });
+  const prefix = [];
+  const visited = new Set([source]);
+  let current = source;
+  while (incomingByTarget.has(current)) {
+    const edge = incomingByTarget.get(current);
+    if (visited.has(edge.source)) break;
+    prefix.unshift(edge);
+    visited.add(edge.source);
+    current = edge.source;
+  }
+  return prefix;
+}
+
 function connectMissionFlowEdge(edges, source, target) {
   if (!source || !target || source === target) {
     return { edges, changed: false, reason: "same" };
   }
-  const nextBase = edges.filter((edge) => (
-    edge.source !== source &&
-    edge.target !== target &&
-    !(edge.source === source && edge.target === target)
-  ));
+  const nextBase = missionFlowPrefixEdges(edges, source);
   if (missionFlowHasPath(nextBase, target, source)) {
     return { edges, changed: false, reason: "cycle" };
   }
@@ -596,16 +609,25 @@ function serializeMissionFlow(nodes, edges) {
 
 function orderedSpotsFromMissionFlow(spots, nodes, edges) {
   const spotById = new Map(spots.map((spot) => [spot.id, spot]));
-  const flowNodes = nodes.filter((node) => spotById.has(node.id));
+  const validEdges = edges.filter((edge) => (
+    spotById.has(edge.source) && spotById.has(edge.target)
+  ));
+  if (validEdges.length === 0) return [];
+  const connectedIds = new Set();
+  validEdges.forEach((edge) => {
+    connectedIds.add(edge.source);
+    connectedIds.add(edge.target);
+  });
+  const flowNodes = nodes.filter((node) => connectedIds.has(node.id));
   const nodeById = new Map(flowNodes.map((node) => [node.id, node]));
   spots.forEach((spot, index) => {
-    if (nodeById.has(spot.id)) return;
+    if (!connectedIds.has(spot.id) || nodeById.has(spot.id)) return;
     nodeById.set(spot.id, missionFlowNodeForSpot(spot, index));
   });
   const ids = [...nodeById.keys()];
   const incoming = new Map(ids.map((id) => [id, 0]));
   const outgoing = new Map(ids.map((id) => [id, []]));
-  edges.forEach((edge) => {
+  validEdges.forEach((edge) => {
     if (!nodeById.has(edge.source) || !nodeById.has(edge.target)) return;
     outgoing.get(edge.source).push(edge.target);
     incoming.set(edge.target, (incoming.get(edge.target) || 0) + 1);
@@ -2217,10 +2239,11 @@ export default function MissionCanvasPage() {
     targetMapName,
     spotsForMission,
     manifest = {},
+    routeSpots = spotsForMission,
   ) => {
     const defaults = missionBtFileDefaultsForSpots(spotsForMission);
     const globalPath = manifest.global_bt || "global.xml";
-    defaults[globalPath] = defaults[globalPath] || buildGlobalMissionXml(spotsForMission);
+    defaults[globalPath] = buildGlobalMissionXml(routeSpots);
     const loadedEntries = await Promise.all(
       Object.entries(defaults).map(async ([path, fallback]) => [
         path,
@@ -2244,7 +2267,12 @@ export default function MissionCanvasPage() {
       const missionFlow = normalizeMissionFlow(missionSpots, mission.metadata?.mission_flow);
       setMissionFlowNodes(missionFlow.nodes);
       setMissionFlowEdges(missionFlow.edges);
-      await loadMissionBtFilesForSpots(normalizedMapName, missionSpots, mission);
+      await loadMissionBtFilesForSpots(
+        normalizedMapName,
+        missionSpots,
+        mission,
+        orderedSpotsFromMissionFlow(missionSpots, missionFlow.nodes, missionFlow.edges),
+      );
       return {
         exists: true,
         loadedDesign: false,
@@ -2255,7 +2283,7 @@ export default function MissionCanvasPage() {
       ? loadSavedDesignForMap(normalizedMapName)
       : false;
     const legacySpots = await loadLegacySpotsForMap(normalizedMapName);
-    const missionFlow = defaultMissionFlow(orderedMissionSpots(legacySpots));
+    const missionFlow = normalizeMissionFlow(orderedMissionSpots(legacySpots));
     setMissionFlowNodes(missionFlow.nodes);
     setMissionFlowEdges(missionFlow.edges);
     setMissionBtFiles(missionBtFileDefaultsForSpots(legacySpots));
@@ -2361,16 +2389,16 @@ export default function MissionCanvasPage() {
         missionFlowEdges,
         canonicalMissionSpots,
       );
-      const missionSpots = orderedSpotsFromMissionFlow(
+      const routeMissionSpots = orderedSpotsFromMissionFlow(
         canonicalMissionSpots,
         syncedMissionFlowNodes,
         syncedMissionFlowEdges,
       );
       const globalPath = "global.xml";
-      const globalXml = buildGlobalMissionXml(missionSpots);
-      const activeLocalBtPaths = new Set(missionSpots.map((spot) => localBtPathForSpot(spot)));
+      const globalXml = buildGlobalMissionXml(routeMissionSpots);
+      const activeLocalBtPaths = new Set(canonicalMissionSpots.map((spot) => localBtPathForSpot(spot)));
       const nextBtFiles = {
-        ...missionBtFileDefaultsForSpots(missionSpots),
+        ...missionBtFileDefaultsForSpots(canonicalMissionSpots),
         ...missionBtFiles,
         [globalPath]: globalXml,
       };
@@ -2390,7 +2418,7 @@ export default function MissionCanvasPage() {
       const uniqueStaleLocalBtPaths = [...new Set(staleLocalBtPaths)];
       await saveNavigationMission(currentMapName, {
         global_bt: globalPath,
-        waypoints: missionWaypointsFromSpots(missionSpots),
+        waypoints: missionWaypointsFromSpots(canonicalMissionSpots),
         metadata: {
           source: "mission_canvas",
           behavior_node_count: activeBehaviorNodes.length,

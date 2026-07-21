@@ -752,7 +752,7 @@ test('shows waypoint actions in Design Objects after placing a waypoint', async 
   await waitFor(() => expect(saveNavigationMissionBtFile).toHaveBeenCalledWith(
     'factory',
     'global.xml',
-    expect.stringContaining('<MissionStep'),
+    expect.stringContaining('<Sequence name="GlobalMission"/>'),
   ));
   expect(saveNavigationMissionBtFile).not.toHaveBeenCalledWith(
     'factory',
@@ -1202,6 +1202,22 @@ test('edits the mission route directly on the map', async () => {
         linked_bt_tree: 'waypoint_b.xml',
         metadata: {},
       },
+      {
+        id: 'spot_c',
+        map_name: 'map',
+        label: 'Waypoint C',
+        pose: { frame_id: 'map', x: 5, y: 6, yaw: 0.75 },
+        linked_bt_tree: 'waypoint_c.xml',
+        metadata: {},
+      },
+      {
+        id: 'spot_d',
+        map_name: 'map',
+        label: 'Waypoint D',
+        pose: { frame_id: 'map', x: 7, y: 8, yaw: 1 },
+        linked_bt_tree: 'waypoint_d.xml',
+        metadata: {},
+      },
     ] : [],
   }));
 
@@ -1212,14 +1228,13 @@ test('edits the mission route directly on the map', async () => {
   await screen.findByRole('combobox', { name: 'Design mission map file' });
   fireEvent.click(screen.getByRole('button', { name: 'Load' }));
   await waitFor(() => expect(latestMapViewerProps().map).not.toBeNull());
-  await waitFor(() => expect(latestMapViewerProps().spots).toHaveLength(2));
+  await waitFor(() => expect(latestMapViewerProps().spots).toHaveLength(4));
 
   expect(screen.getAllByText('Waypoint A').length).toBeGreaterThan(0);
   expect(screen.getAllByText('Waypoint B').length).toBeGreaterThan(0);
-  expect(latestMapViewerProps().missionRouteOrder).toEqual([
-    { id: 'spot_a', order: 1 },
-    { id: 'spot_b', order: 2 },
-  ]);
+  expect(screen.getAllByText('Waypoint C').length).toBeGreaterThan(0);
+  expect(screen.getAllByText('Waypoint D').length).toBeGreaterThan(0);
+  expect(latestMapViewerProps().missionRouteOrder).toEqual([]);
 
   fireEvent.click(screen.getByRole('button', { name: 'Edit On Map' }));
 
@@ -1247,10 +1262,12 @@ test('edits the mission route directly on the map', async () => {
   await waitFor(() => expect(saveNavigationMission).toHaveBeenCalledWith(
     'map',
     expect.objectContaining({
-      waypoints: [
-        expect.objectContaining({ id: 'spot_b' }),
+      waypoints: expect.arrayContaining([
         expect.objectContaining({ id: 'spot_a' }),
-      ],
+        expect.objectContaining({ id: 'spot_b' }),
+        expect.objectContaining({ id: 'spot_c' }),
+        expect.objectContaining({ id: 'spot_d' }),
+      ]),
       metadata: expect.objectContaining({
         mission_flow: expect.objectContaining({
           edges: [expect.objectContaining({ source: 'spot_b', target: 'spot_a' })],
