@@ -133,6 +133,12 @@ def test_navigation_map_annotations_sidecar(monkeypatch):
                     pose=navigation.MapAnnotationPose(x=1.2, y=-0.4, yaw=0.0),
                     region=navigation.MapAnnotationRegion(
                         seed_cell=navigation.MapAnnotationSeedCell(x=3, y=4),
+                        bounds=navigation.MapAnnotationBounds(
+                            x_min=2,
+                            y_min=3,
+                            x_max=6,
+                            y_max=8,
+                        ),
                         cell_count=12,
                         width=20,
                         height=10,
@@ -150,6 +156,12 @@ def test_navigation_map_annotations_sidecar(monkeypatch):
     assert loaded["annotations"][0]["label"] == "Dock"
     assert loaded["annotations"][0]["pose"]["x"] == 1.2
     assert loaded["annotations"][0]["region"]["seed_cell"] == {"x": 3, "y": 4}
+    assert loaded["annotations"][0]["region"]["bounds"] == {
+        "x_min": 2,
+        "y_min": 3,
+        "x_max": 6,
+        "y_max": 8,
+    }
 
 
 def test_navigation_rejects_map_path_escape():

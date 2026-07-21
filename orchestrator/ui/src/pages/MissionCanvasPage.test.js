@@ -1520,7 +1520,7 @@ test('marks free-space areas with automatic color and undo/redo support', async 
   await waitFor(() => expect(latestMapViewerProps().editorActive).toBe(true));
 
   await act(async () => {
-    latestMapViewerProps().onEditorMapPoint(0, 0);
+    latestMapViewerProps().onEditorMapArea(0, 0, 0, 0);
   });
 
   await waitFor(() => expect(saveMapAnnotations).toHaveBeenCalledWith(
@@ -1531,6 +1531,7 @@ test('marks free-space areas with automatic color and undo/redo support', async 
       pose: expect.objectContaining({ frame_id: 'map', x: 0.5, y: 0.5 }),
       region: expect.objectContaining({
         seed_cell: { x: 0, y: 0 },
+        bounds: { x_min: 0, y_min: 0, x_max: 0, y_max: 0 },
         cell_count: 1,
       }),
     })],
@@ -1540,10 +1541,14 @@ test('marks free-space areas with automatic color and undo/redo support', async 
       label: 'Dock',
       color: '#3B241F',
       pose: expect.objectContaining({ x: 0.5, y: 0.5 }),
-      region: expect.objectContaining({ seed_cell: { x: 0, y: 0 } }),
+      region: expect.objectContaining({
+        seed_cell: { x: 0, y: 0 },
+        bounds: { x_min: 0, y_min: 0, x_max: 0, y_max: 0 },
+      }),
     }),
   ]));
   expect(latestMapViewerProps().editorPaintOnDrag).toBe(false);
+  expect(latestMapViewerProps().editorAreaSelection).toBe(true);
 
   await waitFor(() => expect(screen.getByRole('button', { name: 'Undo' })).toBeEnabled());
   fireEvent.click(screen.getByRole('button', { name: 'Undo' }));

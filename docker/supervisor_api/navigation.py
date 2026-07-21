@@ -172,8 +172,16 @@ class MapAnnotationSeedCell(BaseModel):
     y: int = Field(ge=0)
 
 
+class MapAnnotationBounds(BaseModel):
+    x_min: int = Field(ge=0)
+    y_min: int = Field(ge=0)
+    x_max: int = Field(ge=0)
+    y_max: int = Field(ge=0)
+
+
 class MapAnnotationRegion(BaseModel):
     seed_cell: MapAnnotationSeedCell
+    bounds: Optional[MapAnnotationBounds] = None
     cell_count: Optional[int] = Field(default=None, ge=0)
     width: Optional[int] = Field(default=None, ge=0)
     height: Optional[int] = Field(default=None, ge=0)
@@ -597,7 +605,7 @@ def _annotation_payload(annotation: MapAnnotation) -> dict[str, object]:
     annotation_id = annotation.id.strip()
     if not annotation_id:
         raise HTTPException(400, "Annotation id must not be empty")
-    label = annotation.label.strip() or "Label"
+    label = annotation.label.strip() or "Area"
     color = annotation.color.strip()
     if not _SAFE_MAP_ANNOTATION_COLOR.fullmatch(color):
         raise HTTPException(400, "Annotation color must be a #RRGGBB value")
@@ -613,11 +621,18 @@ def _annotation_payload(annotation: MapAnnotation) -> dict[str, object]:
         },
     }
     if annotation.region is not None:
+        bounds = annotation.region.bounds
         payload["region"] = {
             "seed_cell": {
                 "x": int(annotation.region.seed_cell.x),
                 "y": int(annotation.region.seed_cell.y),
             },
+            "bounds": {
+                "x_min": int(bounds.x_min),
+                "y_min": int(bounds.y_min),
+                "x_max": int(bounds.x_max),
+                "y_max": int(bounds.y_max),
+            } if bounds is not None else None,
             "cell_count": annotation.region.cell_count,
             "width": annotation.region.width,
             "height": annotation.region.height,
@@ -633,10 +648,11 @@ def _annotation_from_raw(raw: object) -> Optional[dict[str, object]]:
         return None
     region = raw.get("region")
     seed_cell = region.get("seed_cell") if isinstance(region, dict) else None
+    bounds = region.get("bounds") if isinstance(region, dict) else None
     try:
         annotation = MapAnnotation(
             id=str(raw.get("id") or ""),
-            label=str(raw.get("label") or "Label"),
+            label=str(raw.get("label") or "Area"),
             color=str(raw.get("color") or "#C96442"),
             pose=MapAnnotationPose(
                 frame_id=str(pose.get("frame_id") or "map"),
@@ -649,6 +665,12 @@ def _annotation_from_raw(raw: object) -> Optional[dict[str, object]]:
                     x=int(seed_cell.get("x")),
                     y=int(seed_cell.get("y")),
                 ),
+                bounds=MapAnnotationBounds(
+                    x_min=int(bounds.get("x_min")),
+                    y_min=int(bounds.get("y_min")),
+                    x_max=int(bounds.get("x_max")),
+                    y_max=int(bounds.get("y_max")),
+                ) if isinstance(bounds, dict) else None,
                 cell_count=(
                     int(region.get("cell_count"))
                     if region.get("cell_count") is not None

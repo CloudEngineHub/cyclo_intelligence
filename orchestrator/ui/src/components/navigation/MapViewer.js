@@ -409,44 +409,41 @@ function gridCellToMapPoint(meta, cellX, cellY) {
         y: meta.originY + Math.sin(meta.originYaw) * localX + Math.cos(meta.originYaw) * localY,
     };
 }
-function connectedFreeRegion(grid, seed) {
-    var _a;
+function boundedFreeRegion(grid, regionSpec) {
     const meta = gridMeta(grid);
-    if (!meta || !grid.data || !seed)
+    if (!meta || !grid.data || !regionSpec)
         return null;
-    const seedX = Math.floor(Number(seed.x));
-    const seedY = Math.floor(Number(seed.y));
-    if (seedX < 0 || seedX >= meta.width || seedY < 0 || seedY >= meta.height)
+    const seed = regionSpec.seed_cell;
+    const bounds = regionSpec.bounds || (seed ? {
+        x_min: seed.x,
+        y_min: seed.y,
+        x_max: seed.x,
+        y_max: seed.y,
+    } : null);
+    if (!bounds)
         return null;
-    const seedIndex = seedX + seedY * meta.width;
-    if (((_a = grid.data[seedIndex]) !== null && _a !== void 0 ? _a : -1) !== 0)
+    const rawXMin = Math.floor(Number(bounds.x_min));
+    const rawXMax = Math.floor(Number(bounds.x_max));
+    const rawYMin = Math.floor(Number(bounds.y_min));
+    const rawYMax = Math.floor(Number(bounds.y_max));
+    if (![rawXMin, rawXMax, rawYMin, rawYMax].every(Number.isFinite))
         return null;
-    const visited = new Uint8Array(meta.width * meta.height);
-    const stack = [seedIndex];
+    const xMin = Math.max(0, Math.min(rawXMin, rawXMax));
+    const xMax = Math.min(meta.width - 1, Math.max(rawXMin, rawXMax));
+    const yMin = Math.max(0, Math.min(rawYMin, rawYMax));
+    const yMax = Math.min(meta.height - 1, Math.max(rawYMin, rawYMax));
     const cells = [];
-    visited[seedIndex] = 1;
     let sumX = 0;
     let sumY = 0;
-    while (stack.length) {
-        const index = stack.pop();
-        const x = index % meta.width;
-        const y = Math.floor(index / meta.width);
-        cells.push(index);
-        sumX += x;
-        sumY += y;
-        const neighbors = [
-            x > 0 ? index - 1 : -1,
-            x < meta.width - 1 ? index + 1 : -1,
-            y > 0 ? index - meta.width : -1,
-            y < meta.height - 1 ? index + meta.width : -1,
-        ];
-        neighbors.forEach((nextIndex) => {
-            var _a;
-            if (nextIndex < 0 || visited[nextIndex] || ((_a = grid.data[nextIndex]) !== null && _a !== void 0 ? _a : -1) !== 0)
-                return;
-            visited[nextIndex] = 1;
-            stack.push(nextIndex);
-        });
+    for (let y = yMin; y <= yMax; y += 1) {
+        for (let x = xMin; x <= xMax; x += 1) {
+            const index = x + y * meta.width;
+            if (grid.data[index] !== 0)
+                continue;
+            cells.push(index);
+            sumX += x;
+            sumY += y;
+        }
     }
     if (!cells.length)
         return null;
@@ -495,6 +492,38 @@ function makeAnnotationRegionTexture(grid, region, colorString) {
     texture.flipY = false;
     texture.needsUpdate = true;
     return texture;
+}
+function makeEditorAreaPreview(selection, isDark = false) {
+    if (!selection)
+        return null;
+    const minX = Math.min(selection.startX, selection.endX);
+    const maxX = Math.max(selection.startX, selection.endX);
+    const minY = Math.min(selection.startY, selection.endY);
+    const maxY = Math.max(selection.startY, selection.endY);
+    const width = maxX - minX;
+    const height = maxY - minY;
+    if (width <= 0 || height <= 0)
+        return null;
+    const group = new THREE.Group();
+    const fill = new THREE.Mesh(new THREE.PlaneGeometry(width, height), new THREE.MeshBasicMaterial({
+        color: isDark ? 0xd5794f : 0x6d1f2a,
+        transparent: true,
+        opacity: 0.18,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+    }));
+    fill.position.set((minX + maxX) / 2, (minY + maxY) / 2, 0.82);
+    group.add(fill);
+    const outline = makeLine([
+        new THREE.Vector3(minX, minY, 0.84),
+        new THREE.Vector3(maxX, minY, 0.84),
+        new THREE.Vector3(maxX, maxY, 0.84),
+        new THREE.Vector3(minX, maxY, 0.84),
+        new THREE.Vector3(minX, minY, 0.84),
+    ], isDark ? 0xf3f1ea : 0x1c1a17, 2);
+    if (outline)
+        group.add(outline);
+    return group;
 }
 function makeLine(points, color, lineWidth = 2) {
     if (points.length < 2)
@@ -574,39 +603,26 @@ function hexColorString(color, fallback = "#C96442") {
     return match ? `#${match[1].toUpperCase()}` : fallback;
 }
 function makeAnnotationLabelSprite(text, color, isDark = false) {
-    const pal = markerPalette(isDark);
     const label = String(text || "Area");
-    const fontSize = 42;
+    const fontSize = 21;
     const font = `700 ${fontSize}px "Hanken Grotesk", "Pretendard Variable", sans-serif`;
     const measure = document.createElement("canvas").getContext("2d");
     measure.font = font;
     const textW = Math.ceil(measure.measureText(label).width);
-    const height = 88;
-    const dot = 24;
-    const padX = 26;
-    const width = Math.max(150, textW + padX * 2 + dot + 18);
+    const height = 44;
+    const padX = 10;
+    const width = Math.max(72, textW + padX * 2);
     const canvas = document.createElement("canvas");
     canvas.width = width;
     canvas.height = height;
     const ctx = canvas.getContext("2d");
     if (ctx) {
         ctx.clearRect(0, 0, width, height);
-        ctx.beginPath();
-        ctx.roundRect(4, 8, width - 8, height - 16, 24);
-        ctx.fillStyle = pal.labelBg;
-        ctx.fill();
-        ctx.lineWidth = 4;
-        ctx.strokeStyle = color;
-        ctx.stroke();
-        ctx.beginPath();
-        ctx.arc(padX + dot / 2, height / 2, dot / 2, 0, Math.PI * 2);
-        ctx.fillStyle = color;
-        ctx.fill();
-        ctx.fillStyle = pal.labelText;
+        ctx.fillStyle = "#000000";
         ctx.font = font;
-        ctx.textAlign = "left";
+        ctx.textAlign = "center";
         ctx.textBaseline = "middle";
-        ctx.fillText(label, padX + dot + 18, height / 2 + 2);
+        ctx.fillText(label, width / 2, height / 2 + 1);
     }
     const texture = new THREE.CanvasTexture(canvas);
     texture.colorSpace = THREE.SRGBColorSpace;
@@ -819,8 +835,9 @@ function makeMapAnnotationRegion(annotation, grid, isDark = false) {
     if (!meta)
         return null;
     const pose = (_a = annotation === null || annotation === void 0 ? void 0 : annotation.pose) !== null && _a !== void 0 ? _a : {};
-    const regionSeed = (_d = (_c = (_b = annotation === null || annotation === void 0 ? void 0 : annotation.region) === null || _b === void 0 ? void 0 : _b.seed_cell) !== null && _c !== void 0 ? _c : mapPointToGridCell(meta, Number((_e = pose.x) !== null && _e !== void 0 ? _e : NaN), Number((_f = pose.y) !== null && _f !== void 0 ? _f : NaN))) !== null && _d !== void 0 ? _d : null;
-    const region = connectedFreeRegion(grid, regionSeed);
+    const fallbackCell = mapPointToGridCell(meta, Number((_b = pose.x) !== null && _b !== void 0 ? _b : NaN), Number((_c = pose.y) !== null && _c !== void 0 ? _c : NaN));
+    const regionSpec = (_d = annotation === null || annotation === void 0 ? void 0 : annotation.region) !== null && _d !== void 0 ? _d : (fallbackCell ? { seed_cell: fallbackCell } : null);
+    const region = boundedFreeRegion(grid, regionSpec);
     if (!region)
         return null;
     const colorString = hexColorString(annotation === null || annotation === void 0 ? void 0 : annotation.color, isDark ? "#6D1F2A" : "#6D1F2A");
@@ -834,7 +851,7 @@ function makeMapAnnotationRegion(annotation, grid, isDark = false) {
     if (label) {
         const { sprite, aspect } = makeAnnotationLabelSprite(label, colorString, isDark);
         const center = gridCellToMapPoint(meta, region.centroid.x, region.centroid.y);
-        const labelHeight = Math.max(0.48, Math.min(1.45, meta.resolution * 22));
+        const labelHeight = Math.max(0.24, Math.min(0.72, meta.resolution * 11));
         sprite.position.set(center.x, center.y, 0.78);
         sprite.scale.set(labelHeight * aspect, labelHeight, 1);
         group.add(sprite);
@@ -1087,7 +1104,7 @@ function WaypointBtFocusLayer({ layer, onClose }) {
 // as a clean floor-plan without retuning makeOccupancyTexture.
 const SCENE_BG = { light: 0xefece3, dark: 0x1b1916 };
 
-export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, goalPose, footprint, tf, showMap, showGlobalCostmap, showLocalCostmap, showScan, showGlobalPlan, showGoalPose, showTf, showRobotModel, interactionDisabled, interactionMode, editorActive, editorPaintOnDrag = true, viewKey, isDark = false, waitingLabel = "Waiting for /map", fitContainer = false, spots = [], selectedSpotId = "", behaviorNodes = [], selectedBehaviorNodeId = "", behaviorPreviewNode = null, missionRouteOrder = [], missionRouteMode = false, selectedMissionRouteSourceId = "", mapAnnotations = [], btLayer = null, onBtLayerClose, onSpotClick, onBehaviorNodeClick, onMissionRouteSpotClick, onMissionRouteMapClick, onSpotPoseChange, onBehaviorNodePoseChange, onEditorMapPoint, onMapClick, onMapPose, }) {
+export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, goalPose, footprint, tf, showMap, showGlobalCostmap, showLocalCostmap, showScan, showGlobalPlan, showGoalPose, showTf, showRobotModel, interactionDisabled, interactionMode, editorActive, editorPaintOnDrag = true, editorAreaSelection = false, viewKey, isDark = false, waitingLabel = "Waiting for /map", fitContainer = false, spots = [], selectedSpotId = "", behaviorNodes = [], selectedBehaviorNodeId = "", behaviorPreviewNode = null, missionRouteOrder = [], missionRouteMode = false, selectedMissionRouteSourceId = "", mapAnnotations = [], btLayer = null, onBtLayerClose, onSpotClick, onBehaviorNodeClick, onMissionRouteSpotClick, onMissionRouteMapClick, onSpotPoseChange, onBehaviorNodePoseChange, onEditorMapPoint, onEditorMapArea, onMapClick, onMapPose, }) {
     const containerRef = useRef(null);
     const sceneRef = useRef(null);
     const rendererRef = useRef(null);
@@ -1104,6 +1121,7 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, 
     const tfSyncedFootprintRef = useRef(null);
     const [dragPreviewPose, setDragPreviewPose] = useState(null);
     const [nodeDragPreview, setNodeDragPreview] = useState(null);
+    const [editorAreaPreview, setEditorAreaPreview] = useState(null);
     const [mapDragActive, setMapDragActive] = useState(false);
     const [viewerError, setViewerError] = useState(null);
     // Freeze each LaserScan in display coordinates until the next scan or map geometry change.
@@ -1112,6 +1130,7 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, 
     const pointerRef = useRef(new THREE.Vector2());
     const pointerDownRef = useRef(null);
     const editorPaintPointerRef = useRef(null);
+    const editorAreaDragRef = useRef(null);
     const nodeDragRef = useRef(null);
     useEffect(() => {
         const containerEl = containerRef.current;
@@ -1373,6 +1392,11 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, 
                 layers.add(makePoseMarker(dragPreviewPose, interactionMode === "initial" ? (isDark ? 0x6f9a74 : 0x5b8266) : (isDark ? 0xd5794f : 0xc96442), 0.2, isDark));
             }
         }
+        if (editorAreaPreview) {
+            const preview = makeEditorAreaPreview(editorAreaPreview, isDark);
+            if (preview)
+                layers.add(preview);
+        }
         const spotById = new Map(spots.map((spot) => [spot.id, spot]));
         mapAnnotations.forEach((annotation) => {
             const marker = makeMapAnnotationRegion(annotation, map, isDark);
@@ -1486,6 +1510,7 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, 
     }, [
         globalCostmap,
         dragPreviewPose,
+        editorAreaPreview,
         nodeDragPreview,
         goalPose,
         interactionMode,
@@ -1646,6 +1671,25 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, 
                     setDragPreviewPose(null);
                     return;
                 }
+                if (editorAreaSelection && typeof onEditorMapArea === "function") {
+                    const point = mapPointFromEvent(event);
+                    if (!point)
+                        return;
+                    event.preventDefault();
+                    event.stopImmediatePropagation();
+                    editorAreaDragRef.current = {
+                        pointerId: event.pointerId,
+                        clientX: event.clientX,
+                        clientY: event.clientY,
+                        startX: point.x,
+                        startY: point.y,
+                        endX: point.x,
+                        endY: point.y,
+                    };
+                    setEditorAreaPreview(null);
+                    renderer.domElement.setPointerCapture(event.pointerId);
+                    return;
+                }
                 if (paintEditorPoint(event) && editorPaintOnDrag) {
                     editorPaintPointerRef.current = event.pointerId;
                     renderer.domElement.setPointerCapture(event.pointerId);
@@ -1726,6 +1770,23 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, 
             renderer.domElement.setPointerCapture(event.pointerId);
         };
         const handlePointerMove = (event) => {
+            const editorAreaDrag = editorAreaDragRef.current;
+            if (editorAreaDrag && editorAreaDrag.pointerId === event.pointerId) {
+                const point = mapPointFromEvent(event);
+                if (!point)
+                    return;
+                event.preventDefault();
+                event.stopImmediatePropagation();
+                editorAreaDrag.endX = point.x;
+                editorAreaDrag.endY = point.y;
+                setEditorAreaPreview({
+                    startX: editorAreaDrag.startX,
+                    startY: editorAreaDrag.startY,
+                    endX: point.x,
+                    endY: point.y,
+                });
+                return;
+            }
             if (editorPaintPointerRef.current === event.pointerId) {
                 paintEditorPoint(event);
                 return;
@@ -1783,6 +1844,21 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, 
         };
         const handlePointerUp = (event) => {
             setMapDragActive(false);
+            const editorAreaDrag = editorAreaDragRef.current;
+            if (editorAreaDrag && editorAreaDrag.pointerId === event.pointerId) {
+                event.preventDefault();
+                event.stopImmediatePropagation();
+                const point = mapPointFromEvent(event);
+                const endX = point ? point.x : editorAreaDrag.endX;
+                const endY = point ? point.y : editorAreaDrag.endY;
+                editorAreaDragRef.current = null;
+                setEditorAreaPreview(null);
+                if (renderer.domElement.hasPointerCapture(event.pointerId)) {
+                    renderer.domElement.releasePointerCapture(event.pointerId);
+                }
+                onEditorMapArea(editorAreaDrag.startX, editorAreaDrag.startY, endX, endY);
+                return;
+            }
             if (editorPaintPointerRef.current === event.pointerId) {
                 event.preventDefault();
                 event.stopImmediatePropagation();
@@ -1841,10 +1917,12 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, 
         };
         const handlePointerCancel = (event) => {
             editorPaintPointerRef.current = null;
+            editorAreaDragRef.current = null;
             viewRotateDragRef.current = null;
             nodeDragRef.current = null;
             pointerDownRef.current = null;
             setMapDragActive(false);
+            setEditorAreaPreview(null);
             setNodeDragPreview(null);
             setDragPreviewPose(null);
             if (renderer.domElement.hasPointerCapture(event.pointerId)) {
@@ -1874,6 +1952,7 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, 
     }, [
         behaviorNodes,
         editorActive,
+        editorAreaSelection,
         editorPaintOnDrag,
         interactionDisabled,
         interactionMode,
@@ -1881,6 +1960,7 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, 
         missionRouteMode,
         onBehaviorNodeClick,
         onBehaviorNodePoseChange,
+        onEditorMapArea,
         onEditorMapPoint,
         onMapPose,
         onMapClick,

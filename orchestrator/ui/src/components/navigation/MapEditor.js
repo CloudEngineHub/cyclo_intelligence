@@ -82,42 +82,41 @@ function paintPgmPixels(pixels, width, height, pixelX, pixelY, operation, brushS
     }
     return next;
 }
-function floodFillFreePgmRegion(pixels, width, height, seedX, seedY) {
-    if (!pixels || seedX < 0 || seedX >= width || seedY < 0 || seedY >= height)
+function selectedFreePgmRegion(pixels, image, startPixel, endPixel) {
+    if (!pixels || !image || !startPixel || !endPixel)
         return null;
-    const seedIndex = seedX + seedY * width;
-    if (pixels[seedIndex] < FREE_THRESHOLD)
-        return null;
-    const visited = new Uint8Array(width * height);
-    const stack = [seedIndex];
-    visited[seedIndex] = 1;
+    const xMin = Math.max(0, Math.min(startPixel.pixelX, endPixel.pixelX));
+    const xMax = Math.min(image.width - 1, Math.max(startPixel.pixelX, endPixel.pixelX));
+    const yMin = Math.max(0, Math.min(startPixel.pixelY, endPixel.pixelY));
+    const yMax = Math.min(image.height - 1, Math.max(startPixel.pixelY, endPixel.pixelY));
     let count = 0;
     let sumX = 0;
     let sumY = 0;
-    while (stack.length) {
-        const index = stack.pop();
-        const x = index % width;
-        const y = Math.floor(index / width);
-        count += 1;
-        sumX += x;
-        sumY += y;
-        const neighbors = [
-            x > 0 ? index - 1 : -1,
-            x < width - 1 ? index + 1 : -1,
-            y > 0 ? index - width : -1,
-            y < height - 1 ? index + width : -1,
-        ];
-        neighbors.forEach((nextIndex) => {
-            if (nextIndex < 0 || visited[nextIndex] || pixels[nextIndex] < FREE_THRESHOLD)
-                return;
-            visited[nextIndex] = 1;
-            stack.push(nextIndex);
-        });
+    for (let y = yMin; y <= yMax; y += 1) {
+        for (let x = xMin; x <= xMax; x += 1) {
+            if (pixels[x + y * image.width] < FREE_THRESHOLD)
+                continue;
+            count += 1;
+            sumX += x;
+            sumY += y;
+        }
     }
+    const gridYMin = image.height - 1 - yMax;
+    const gridYMax = image.height - 1 - yMin;
     return {
         count,
-        centroidPixelX: count ? sumX / count : seedX,
-        centroidPixelY: count ? sumY / count : seedY,
+        centroidPixelX: count ? sumX / count : (xMin + xMax) / 2,
+        centroidPixelY: count ? sumY / count : (yMin + yMax) / 2,
+        bounds: {
+            x_min: xMin,
+            y_min: gridYMin,
+            x_max: xMax,
+            y_max: gridYMax,
+        },
+        seedCell: {
+            x: Math.floor((xMin + xMax) / 2),
+            y: Math.floor((gridYMin + gridYMax) / 2),
+        },
     };
 }
 function pgmPixelsToGrid(image, pixels) {
@@ -236,12 +235,28 @@ function normalizeAnnotationRegion(region) {
     const y = Number((_c = seed.y) !== null && _c !== void 0 ? _c : NaN);
     if (!Number.isFinite(x) || !Number.isFinite(y) || x < 0 || y < 0)
         return null;
-    return {
+    const normalized = {
         seed_cell: { x: Math.floor(x), y: Math.floor(y) },
         cell_count: Number.isFinite(Number(region === null || region === void 0 ? void 0 : region.cell_count)) ? Math.max(0, Math.floor(Number(region.cell_count))) : null,
         width: Number.isFinite(Number((_d = region === null || region === void 0 ? void 0 : region.width) !== null && _d !== void 0 ? _d : NaN)) ? Math.max(0, Math.floor(Number(region.width))) : null,
         height: Number.isFinite(Number((_e = region === null || region === void 0 ? void 0 : region.height) !== null && _e !== void 0 ? _e : NaN)) ? Math.max(0, Math.floor(Number(region.height))) : null,
     };
+    const bounds = region === null || region === void 0 ? void 0 : region.bounds;
+    if (bounds) {
+        const xMin = Math.floor(Number(bounds.x_min));
+        const yMin = Math.floor(Number(bounds.y_min));
+        const xMax = Math.floor(Number(bounds.x_max));
+        const yMax = Math.floor(Number(bounds.y_max));
+        if ([xMin, yMin, xMax, yMax].every(Number.isFinite)) {
+            normalized.bounds = {
+                x_min: Math.max(0, Math.min(xMin, xMax)),
+                y_min: Math.max(0, Math.min(yMin, yMax)),
+                x_max: Math.max(0, Math.max(xMin, xMax)),
+                y_max: Math.max(0, Math.max(yMin, yMax)),
+            };
+        }
+    }
+    return normalized;
 }
 function normalizeAnnotation(annotation) {
     var _a, _b, _c, _d, _e, _f;
@@ -445,20 +460,21 @@ export function useMapEditor({ open, mapName, onMessage, reloadToken = 0 }) {
         setRedoStack([]);
         saveAnnotationsSnapshot(nextAnnotations, successMessage);
     }, [busy, saveAnnotationsSnapshot, selectedPath]);
-    const placeAnnotationAtMapPoint = useCallback((x, y) => {
+    const placeAnnotationAtMapArea = useCallback((startX, startY, endX = startX, endY = startY) => {
         if (!open || !image || busy || tool !== ANNOTATION_TOOL.id)
             return;
-        const pixel = mapPointToPgmPixel(image, x, y);
-        if (!pixel) {
+        const startPixel = mapPointToPgmPixel(image, startX, startY);
+        const endPixel = mapPointToPgmPixel(image, endX, endY);
+        if (!startPixel || !endPixel) {
             onMessage("Select an area inside the map");
             return;
         }
         const currentPixels = pixelsRef.current;
         if (!currentPixels)
             return;
-        const region = floodFillFreePgmRegion(currentPixels, image.width, image.height, pixel.pixelX, pixel.pixelY);
+        const region = selectedFreePgmRegion(currentPixels, image, startPixel, endPixel);
         if (!region || region.count === 0) {
-            onMessage("Select a white free-space area");
+            onMessage("Drag over a white free-space area");
             return;
         }
         const label = annotationLabel.trim() || "Area";
@@ -470,9 +486,10 @@ export function useMapEditor({ open, mapName, onMessage, reloadToken = 0 }) {
             pose: { frame_id: "map", x: centroid.x, y: centroid.y, yaw: 0 },
             region: {
                 seed_cell: {
-                    x: pixel.pixelX,
-                    y: image.height - 1 - pixel.pixelY,
+                    x: region.seedCell.x,
+                    y: region.seedCell.y,
                 },
+                bounds: region.bounds,
                 cell_count: region.count,
                 width: image.width,
                 height: image.height,
@@ -480,6 +497,9 @@ export function useMapEditor({ open, mapName, onMessage, reloadToken = 0 }) {
         });
         persistAnnotations([...annotationsRef.current, nextAnnotation], `Marked area ${nextAnnotation.label}`);
     }, [annotationLabel, busy, image, onMessage, open, persistAnnotations, tool]);
+    const placeAnnotationAtMapPoint = useCallback((x, y) => {
+        placeAnnotationAtMapArea(x, y, x, y);
+    }, [placeAnnotationAtMapArea]);
     const clearAnnotations = useCallback(() => {
         if (!annotationsRef.current.length)
             return;
@@ -569,6 +589,7 @@ export function useMapEditor({ open, mapName, onMessage, reloadToken = 0 }) {
         save,
         editAtMapPoint,
         placeAnnotationAtMapPoint,
+        placeAnnotationAtMapArea,
         clearAnnotations,
     };
 }
