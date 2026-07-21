@@ -1512,6 +1512,47 @@ test('edits and saves loaded map pixels from the fix editor', async () => {
   ));
 });
 
+test('paints continuous map pixel segments while dragging', async () => {
+  const latestMapViewerProps = () => (
+    mockMapViewer.mock.calls[mockMapViewer.mock.calls.length - 1][0]
+  );
+  getPgmFiles.mockResolvedValue({
+    files: [{ path: 'factory.pgm', name: 'factory.pgm' }],
+  });
+  getPgmImage.mockResolvedValue({
+    path: 'factory.pgm',
+    width: 3,
+    height: 1,
+    maxval: 255,
+    pixels_base64: '/v7+',
+  });
+
+  render(<MissionCanvasPage />);
+
+  fireEvent.click(screen.getByRole('button', { name: 'Map Editor' }));
+
+  await waitFor(() => expect(getPgmImage).toHaveBeenCalledWith('factory.pgm'));
+  fireEvent.click(screen.getByRole('button', { name: 'Add Obstacle' }));
+  await waitFor(() => expect(latestMapViewerProps().editorActive).toBe(true));
+
+  await act(async () => {
+    latestMapViewerProps().onEditorMapPoint(0.5, 0.5, 'start');
+    latestMapViewerProps().onEditorMapPoint(2.5, 0.5, 'move');
+    latestMapViewerProps().onEditorMapPoint(0, 0, 'end');
+  });
+
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Save' })).toBeEnabled());
+  fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+  await waitFor(() => expect(savePgmImage).toHaveBeenCalledWith(
+    'factory.pgm',
+    3,
+    1,
+    255,
+    'AAAA',
+  ));
+});
+
 test('marks free-space areas with automatic color and undo/redo support', async () => {
   const latestMapViewerProps = () => (
     mockMapViewer.mock.calls[mockMapViewer.mock.calls.length - 1][0]

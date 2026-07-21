@@ -66,8 +66,7 @@ function encodePgmPixels(pixels) {
     }
     return window.btoa(binary);
 }
-function paintPgmPixels(pixels, width, height, pixelX, pixelY, operation, brushSizeCells) {
-    const next = new Uint8Array(pixels);
+function applyPgmBrush(pixels, width, height, pixelX, pixelY, operation, brushSizeCells) {
     const value = operation === "erase_black" ? FREE_VALUE : OCCUPIED_VALUE;
     const offset = Math.floor(brushSizeCells / 2);
     const startX = pixelX - offset;
@@ -78,7 +77,38 @@ function paintPgmPixels(pixels, width, height, pixelX, pixelY, operation, brushS
         for (let x = startX; x < startX + brushSizeCells; x += 1) {
             if (x < 0 || x >= width)
                 continue;
-            next[x + y * width] = value;
+            pixels[x + y * width] = value;
+        }
+    }
+}
+function paintPgmPixels(pixels, width, height, pixelX, pixelY, operation, brushSizeCells) {
+    const next = new Uint8Array(pixels);
+    applyPgmBrush(next, width, height, pixelX, pixelY, operation, brushSizeCells);
+    return next;
+}
+function paintPgmPixelSegment(pixels, width, height, startPixel, endPixel, operation, brushSizeCells) {
+    const next = new Uint8Array(pixels);
+    let x0 = startPixel.pixelX;
+    let y0 = startPixel.pixelY;
+    const x1 = endPixel.pixelX;
+    const y1 = endPixel.pixelY;
+    const dx = Math.abs(x1 - x0);
+    const sx = x0 < x1 ? 1 : -1;
+    const dy = -Math.abs(y1 - y0);
+    const sy = y0 < y1 ? 1 : -1;
+    let err = dx + dy;
+    while (true) {
+        applyPgmBrush(next, width, height, x0, y0, operation, brushSizeCells);
+        if (x0 === x1 && y0 === y1)
+            break;
+        const e2 = 2 * err;
+        if (e2 >= dy) {
+            err += dy;
+            x0 += sx;
+        }
+        if (e2 <= dx) {
+            err += dx;
+            y0 += sy;
         }
     }
     return next;
@@ -348,6 +378,7 @@ function preferredPgmFile(files, mapName) {
 export function useMapEditor({ open, mapName, onMessage, reloadToken = 0 }) {
     const pixelsRef = useRef(null);
     const annotationsRef = useRef([]);
+    const lastPaintPixelRef = useRef(null);
     const [files, setFiles] = useState([]);
     const [selectedPath, setSelectedPath] = useState("");
     const [image, setImage] = useState(null);
@@ -399,6 +430,7 @@ export function useMapEditor({ open, mapName, onMessage, reloadToken = 0 }) {
             setImage(null);
             setPixels(null);
             pixelsRef.current = null;
+            lastPaintPixelRef.current = null;
             setUndoStack([]);
             setRedoStack([]);
             setDirty(false);
@@ -414,6 +446,7 @@ export function useMapEditor({ open, mapName, onMessage, reloadToken = 0 }) {
             setImage(response);
             const decodedPixels = decodePgmPixels(response);
             pixelsRef.current = decodedPixels;
+            lastPaintPixelRef.current = null;
             setPixels(decodedPixels);
             setUndoStack([]);
             setRedoStack([]);
@@ -472,26 +505,40 @@ export function useMapEditor({ open, mapName, onMessage, reloadToken = 0 }) {
             return null;
         return pgmPixelsToGrid(image, pixels);
     }, [image, pixels]);
-    const editAtMapPoint = useCallback((x, y) => {
+    useEffect(() => {
+        lastPaintPixelRef.current = null;
+    }, [brushSize, open, selectedPath, tool]);
+    const editAtMapPoint = useCallback((x, y, phase = "paint") => {
+        if (phase === "end") {
+            lastPaintPixelRef.current = null;
+            return;
+        }
         if (!open || !image || busy || (tool !== "erase_black" && tool !== "draw_black"))
             return;
         const pixel = mapPointToPgmPixel(image, x, y);
-        if (!pixel)
+        if (!pixel) {
+            lastPaintPixelRef.current = null;
             return;
+        }
         const { pixelX, pixelY } = pixel;
         const currentPixels = pixelsRef.current;
         if (!currentPixels)
             return;
-        const nextPixels = paintPgmPixels(currentPixels, image.width, image.height, pixelX, pixelY, tool, brushSize);
+        const previousPixel = phase === "move" ? lastPaintPixelRef.current : null;
+        const nextPixels = previousPixel
+            ? paintPgmPixelSegment(currentPixels, image.width, image.height, previousPixel, pixel, tool, brushSize)
+            : paintPgmPixels(currentPixels, image.width, image.height, pixelX, pixelY, tool, brushSize);
         let editedPixels = 0;
         for (let index = 0; index < currentPixels.length; index += 1) {
             if (currentPixels[index] !== nextPixels[index])
                 editedPixels += 1;
         }
         if (editedPixels === 0) {
+            lastPaintPixelRef.current = pixel;
             onMessage("No pixels changed");
             return;
         }
+        lastPaintPixelRef.current = pixel;
         pixelsRef.current = nextPixels;
         setUndoStack((stack) => [...stack, { type: "pixels", pixels: currentPixels }]);
         setRedoStack([]);
@@ -740,7 +787,7 @@ function SegButton({ selected, disabled, onClick, title, ariaLabel, children, na
             onClick={onClick}
             title={title}
             aria-label={ariaLabel}
-            className={`h-[30px] ${narrow ? "w-[34px] justify-center" : "px-3"} inline-flex items-center gap-1.5 text-[12.5px] font-semibold transition-colors disabled:opacity-50`}
+            className={`h-[30px] ${narrow ? "min-w-[42px] px-2 justify-center" : "px-3"} inline-flex items-center gap-1.5 text-[12.5px] font-semibold transition-colors disabled:opacity-50`}
             style={{
                 borderRadius: 9,
                 border: "none",
@@ -753,6 +800,20 @@ function SegButton({ selected, disabled, onClick, title, ariaLabel, children, na
     );
 }
 
+function EditorSection({ label, children }) {
+    return (
+        <section
+            className="inline-flex flex-wrap items-center gap-2 px-2 py-1"
+            style={{ borderRadius: 12, border: "1px solid var(--mc-border)", backgroundColor: "var(--mc-surface)" }}
+        >
+            <span className="text-[9.5px] font-mono tracking-[0.1em]" style={{ color: "var(--mc-text-subtle)" }}>
+                {label}
+            </span>
+            {children}
+        </section>
+    );
+}
+
 export function MapEditorControls({ files, selectedPath, setSelectedPath, tool, setTool, brushSize, setBrushSize, busy, image, dirty, canUndo = false, canRedo = false, undo, redo, save, enableAnnotations = false, annotations = [], annotationLabel = "Area", setAnnotationLabel = () => { }, clearAnnotations = () => { }, }) {
     const iconButtonStyle = (enabled) => ({
         borderRadius: 9,
@@ -760,19 +821,16 @@ export function MapEditorControls({ files, selectedPath, setSelectedPath, tool, 
         backgroundColor: "var(--mc-surface)",
         color: enabled ? "var(--mc-text)" : "var(--mc-text-subtle)",
     });
-    const tools = enableAnnotations ? [...EDIT_TOOLS, ANNOTATION_TOOL, ANNOTATION_ERASE_TOOL] : EDIT_TOOLS;
+    const areaTools = [ANNOTATION_TOOL, ANNOTATION_ERASE_TOOL];
     const labelActive = enableAnnotations && tool === ANNOTATION_TOOL.id;
-    const eraseAreaActive = enableAnnotations && tool === ANNOTATION_ERASE_TOOL.id;
-    const brushActive = !labelActive && !eraseAreaActive;
 
     return (
-        <div className="flex flex-wrap items-center gap-3">
-            {/* map file */}
+        <div className="flex flex-wrap items-center gap-2">
             <select
                 value={selectedPath}
                 disabled={busy || files.length === 0}
                 onChange={(event) => setSelectedPath(event.currentTarget.value)}
-                className="h-9 min-w-64 px-3 text-[12px] font-mono"
+                className="h-9 min-w-[220px] px-3 text-[12px] font-mono"
                 style={{ borderRadius: 10, color: "var(--mc-text)", backgroundColor: "var(--mc-surface)", border: "1px solid var(--mc-border-strong)" }}
             >
                 {files.map((file) => (
@@ -780,73 +838,83 @@ export function MapEditorControls({ files, selectedPath, setSelectedPath, tool, 
                 ))}
             </select>
 
-            <div className="h-6 w-px" aria-hidden="true" style={{ backgroundColor: "var(--mc-border)" }} />
+            <SegButton selected={tool === "view"} disabled={busy} onClick={() => setTool("view")} title="View" ariaLabel="View">
+                {TOOL_ICONS.view}View
+            </SegButton>
 
-            {/* tools — segmented, ink active pill */}
-            <SegGroup ariaLabel="Edit tool">
-                <SegButton selected={tool === "view"} disabled={busy} onClick={() => setTool("view")} title="View" ariaLabel="View">
-                    {TOOL_ICONS.view}View
-                </SegButton>
-                {tools.map((editTool) => (
-                    <SegButton
-                        key={editTool.id}
-                        selected={tool === editTool.id}
-                        disabled={busy}
-                        onClick={() => setTool(editTool.id)}
-                        title={editTool.label}
-                        ariaLabel={editTool.label}
-                    >
-                        {TOOL_ICONS[editTool.id]}{editTool.label}
-                    </SegButton>
-                ))}
-            </SegGroup>
-
-            {/* brush size — segmented S/M/L/XL (replaces the <select>) */}
-            {brushActive && <div className="flex items-center gap-2">
-                <span className="text-[9.5px] font-mono tracking-[0.1em]" style={{ color: "var(--mc-text-subtle)" }}>BRUSH</span>
-                <SegGroup ariaLabel="Brush size">
-                    {BRUSH_SIZE_OPTIONS.map((option) => (
+            <EditorSection label="MAP EDIT">
+                <SegGroup ariaLabel="Map edit tools">
+                    {EDIT_TOOLS.map((editTool) => (
                         <SegButton
-                            key={option.value}
-                            narrow
-                            selected={brushSize === option.value}
+                            key={editTool.id}
+                            selected={tool === editTool.id}
                             disabled={busy}
-                            onClick={() => setBrushSize(option.value)}
-                            title={`Brush ${option.label}`}
-                            ariaLabel={`Brush size ${option.label}`}
+                            onClick={() => setTool(editTool.id)}
+                            title={editTool.label}
+                            ariaLabel={editTool.label}
                         >
-                            {option.label === "Small" ? "S" : option.label === "Medium" ? "M" : option.label === "Large" ? "L" : "XL"}
+                            {TOOL_ICONS[editTool.id]}{editTool.label}
                         </SegButton>
                     ))}
                 </SegGroup>
-            </div>}
+                <div className="flex items-center gap-1">
+                    <span className="text-[9.5px] font-mono tracking-[0.1em]" style={{ color: "var(--mc-text-subtle)" }}>BRUSH</span>
+                    <SegGroup ariaLabel="Brush size">
+                        {BRUSH_SIZE_OPTIONS.map((option) => (
+                            <SegButton
+                                key={option.value}
+                                narrow
+                                selected={brushSize === option.value}
+                                disabled={busy}
+                                onClick={() => setBrushSize(option.value)}
+                                title={`Brush ${option.label}: ${option.value}px`}
+                                ariaLabel={`Brush size ${option.label}`}
+                            >
+                                {option.value}px
+                            </SegButton>
+                        ))}
+                    </SegGroup>
+                </div>
+            </EditorSection>
 
-            {labelActive && (
-                <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-[9.5px] font-mono tracking-[0.1em]" style={{ color: "var(--mc-text-subtle)" }}>AREA</span>
-                    <input
-                        aria-label="Area name"
-                        value={annotationLabel}
-                        disabled={busy}
-                        onChange={(event) => setAnnotationLabel(event.currentTarget.value)}
-                        className="h-9 w-32 px-3 text-[12px] font-semibold"
-                        style={{ borderRadius: 10, color: "var(--mc-text)", backgroundColor: "var(--mc-surface)", border: "1px solid var(--mc-border-strong)" }}
-                    />
+            {enableAnnotations && (
+                <EditorSection label="AREA EDIT">
+                    <SegGroup ariaLabel="Area edit tools">
+                        {areaTools.map((editTool) => (
+                            <SegButton
+                                key={editTool.id}
+                                selected={tool === editTool.id}
+                                disabled={busy}
+                                onClick={() => setTool(editTool.id)}
+                                title={editTool.label}
+                                ariaLabel={editTool.label}
+                            >
+                                {TOOL_ICONS[editTool.id]}{editTool.label}
+                            </SegButton>
+                        ))}
+                    </SegGroup>
+                    {labelActive && (
+                        <input
+                            aria-label="Area name"
+                            value={annotationLabel}
+                            disabled={busy}
+                            onChange={(event) => setAnnotationLabel(event.currentTarget.value)}
+                            className="h-8 w-28 px-3 text-[12px] font-semibold"
+                            style={{ borderRadius: 9, color: "var(--mc-text)", backgroundColor: "var(--mc-surface)", border: "1px solid var(--mc-border-strong)" }}
+                        />
+                    )}
                     <button
                         type="button"
                         disabled={busy || annotations.length === 0}
                         onClick={clearAnnotations}
-                        className="h-9 px-3 text-[12px] font-semibold transition-all active:translate-y-px disabled:opacity-50 disabled:active:translate-y-0"
+                        className="h-8 px-3 text-[12px] font-semibold transition-all active:translate-y-px disabled:opacity-50 disabled:active:translate-y-0"
                         style={{ borderRadius: 9, border: "1px solid var(--mc-border-strong)", backgroundColor: "var(--mc-surface)", color: "var(--mc-text)" }}
                     >
                         Clear Areas
                     </button>
-                </div>
+                </EditorSection>
             )}
 
-            <div className="h-6 w-px" aria-hidden="true" style={{ backgroundColor: "var(--mc-border)" }} />
-
-            {/* undo / redo / save */}
             <button type="button" disabled={busy || !canUndo} onClick={undo} title="Undo" aria-label="Undo"
                 className="h-9 w-9 inline-flex items-center justify-center transition-all active:translate-y-px disabled:opacity-50 disabled:active:translate-y-0"
                 style={iconButtonStyle(canUndo)}>
@@ -863,7 +931,6 @@ export function MapEditorControls({ files, selectedPath, setSelectedPath, tool, 
                 Save
             </button>
 
-            {/* dimensions + dirty state */}
             <span className="text-[11px] font-mono" style={{ color: "var(--mc-text-subtle)" }}>
                 {image ? (
                     <>
