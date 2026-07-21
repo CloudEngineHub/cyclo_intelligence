@@ -626,21 +626,9 @@ function focusCameraToWaypoint(camera, controls, meta, spot, roll = 0) {
 }
 function BtCanvasNode({ className = "", children, tone = "default" }) {
     const styles = {
-        default: {
-            color: "#111827",
-            backgroundColor: "rgba(255,255,255,0.9)",
-            borderColor: "#94a3b8",
-        },
-        active: {
-            color: "#052e16",
-            backgroundColor: "rgba(220,252,231,0.94)",
-            borderColor: "#15803d",
-        },
-        muted: {
-            color: "#334155",
-            backgroundColor: "rgba(248,250,252,0.82)",
-            borderColor: "#cbd5e1",
-        },
+        default: { color: "var(--mc-text)", backgroundColor: "var(--mc-surface)", borderColor: "var(--mc-text)" },
+        active: { color: "var(--mc-accent-fg)", backgroundColor: "var(--mc-accent)", borderColor: "var(--mc-accent)" },
+        muted: { color: "var(--mc-text-muted)", backgroundColor: "var(--mc-surface-2)", borderColor: "var(--mc-success)" },
     };
     return (<div className={`absolute min-w-[112px] h-10 px-3 border rounded-md flex items-center justify-center text-xs font-semibold shadow-sm ${className}`} style={styles[tone] || styles.default}>
       {children}
@@ -652,27 +640,27 @@ function WaypointBtFocusLayer({ layer, onClose }) {
         return null;
     return (<section className="absolute inset-0 z-20 pointer-events-none" role="region" aria-label="Waypoint BT focus canvas">
       <div className="absolute inset-y-0 left-0 w-[25%] pointer-events-none" style={{
-            background: "linear-gradient(90deg, rgba(15,23,42,0.1), rgba(15,23,42,0))",
+            background: "linear-gradient(90deg, rgba(28,26,23,0.08), rgba(28,26,23,0))",
         }}/>
       <div className="absolute inset-y-0 right-0 w-[75%] pointer-events-auto overflow-hidden" style={{
-            color: "#111827",
-            backgroundColor: "#ffffff",
-            borderLeft: "1px solid rgba(148,163,184,0.82)",
+            color: "var(--mc-text)",
+            backgroundColor: "var(--mc-surface)",
+            borderLeft: "1px solid var(--mc-border-strong)",
         }}>
         <div className="h-full min-h-0 p-4">
           <div className="relative min-h-0 overflow-hidden rounded-md border" style={{
-            borderColor: "#e2e8f0",
+            borderColor: "var(--mc-border)",
             height: "100%",
         }}>
             {layer.editor ? layer.editor : (<>
             <div className="absolute inset-0 opacity-80" style={{
-            backgroundImage: "linear-gradient(rgba(148,163,184,0.18) 1px, transparent 1px), linear-gradient(90deg, rgba(148,163,184,0.18) 1px, transparent 1px)",
+            backgroundImage: "linear-gradient(rgba(28,26,23,0.13) 1px, transparent 1px), linear-gradient(90deg, rgba(28,26,23,0.13) 1px, transparent 1px)",
             backgroundSize: "28px 28px",
         }}/>
             <svg className="absolute inset-0 h-full w-full" aria-hidden="true">
-              <line x1="20%" y1="49%" x2="42%" y2="49%" stroke="#111827" strokeWidth="2.5" strokeLinecap="round"/>
-              <line x1="56%" y1="38%" x2="76%" y2="28%" stroke="#111827" strokeWidth="2.5" strokeLinecap="round"/>
-              <line x1="56%" y1="60%" x2="76%" y2="72%" stroke="#111827" strokeWidth="2.5" strokeLinecap="round"/>
+              <line x1="20%" y1="49%" x2="42%" y2="49%" stroke="var(--mc-accent)" strokeWidth="2.5" strokeLinecap="round"/>
+              <line x1="56%" y1="38%" x2="76%" y2="28%" stroke="var(--mc-accent)" strokeWidth="2.5" strokeLinecap="round"/>
+              <line x1="56%" y1="60%" x2="76%" y2="72%" stroke="var(--mc-accent)" strokeWidth="2.5" strokeLinecap="round"/>
             </svg>
             <BtCanvasNode className="left-[8%] top-[43%]" tone={spot.linked_bt_tree ? "active" : "muted"}>
               {spot.linked_bt_tree ? "Tree" : "New BT"}
@@ -692,7 +680,12 @@ function WaypointBtFocusLayer({ layer, onClose }) {
       </div>
     </section>);
 }
-export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, goalPose, footprint, tf, showMap, showGlobalCostmap, showLocalCostmap, showScan, showGlobalPlan, showGoalPose, showTf, showRobotModel, interactionDisabled, interactionMode, editorActive, viewKey, waitingLabel = "Waiting for /map", fitContainer = false, spots = [], selectedSpotId = "", behaviorNodes = [], selectedBehaviorNodeId = "", behaviorPreviewNode = null, missionRouteOrder = [], missionRouteMode = false, selectedMissionRouteSourceId = "", btLayer = null, onBtLayerClose, onSpotClick, onBehaviorNodeClick, onMissionRouteSpotClick, onMissionRouteMapClick, onSpotPoseChange, onBehaviorNodePoseChange, onEditorMapPoint, onMapClick, onMapPose, }) {
+// Scene background per theme (warm-minimal). Light uses warm paper; dark uses a
+// warm near-black so the occupancy palette (free ~245, occupied ~28) still reads
+// as a clean floor-plan without retuning makeOccupancyTexture.
+const SCENE_BG = { light: 0xefece3, dark: 0x1b1916 };
+
+export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, goalPose, footprint, tf, showMap, showGlobalCostmap, showLocalCostmap, showScan, showGlobalPlan, showGoalPose, showTf, showRobotModel, interactionDisabled, interactionMode, editorActive, viewKey, isDark = false, waitingLabel = "Waiting for /map", fitContainer = false, spots = [], selectedSpotId = "", behaviorNodes = [], selectedBehaviorNodeId = "", behaviorPreviewNode = null, missionRouteOrder = [], missionRouteMode = false, selectedMissionRouteSourceId = "", btLayer = null, onBtLayerClose, onSpotClick, onBehaviorNodeClick, onMissionRouteSpotClick, onMissionRouteMapClick, onSpotPoseChange, onBehaviorNodePoseChange, onEditorMapPoint, onMapClick, onMapPose, }) {
     const containerRef = useRef(null);
     const sceneRef = useRef(null);
     const rendererRef = useRef(null);
@@ -732,7 +725,7 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, 
         let resize = null;
         try {
             scene = new THREE.Scene();
-            scene.background = new THREE.Color(0x1b1b1b);
+            scene.background = new THREE.Color(isDark ? SCENE_BG.dark : SCENE_BG.light);
             sceneRef.current = scene;
             camera = new THREE.PerspectiveCamera(48, 1, CAMERA_NEAR, CAMERA_FAR);
             camera.up.set(0, 1, 0);
@@ -740,7 +733,7 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, 
             cameraRef.current = camera;
             renderer = new THREE.WebGLRenderer({ antialias: true });
             renderer.setPixelRatio(window.devicePixelRatio || 1);
-            renderer.setClearColor(0x1b1b1b, 1);
+            renderer.setClearColor(isDark ? SCENE_BG.dark : SCENE_BG.light, 1);
             renderer.domElement.className = "block w-full h-full cursor-grab";
             containerEl.appendChild(renderer.domElement);
             rendererRef.current = renderer;
@@ -832,6 +825,20 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, 
             layersRef.current = null;
         };
     }, []);
+    useEffect(() => {
+        const scene = sceneRef.current;
+        const renderer = rendererRef.current;
+        if (!scene || !renderer)
+            return;
+        const bg = isDark ? SCENE_BG.dark : SCENE_BG.light;
+        if (scene.background instanceof THREE.Color) {
+            scene.background.set(bg);
+        }
+        else {
+            scene.background = new THREE.Color(bg);
+        }
+        renderer.setClearColor(bg, 1);
+    }, [isDark]);
     useEffect(() => {
         const renderer = rendererRef.current;
         const controls = controlsRef.current;

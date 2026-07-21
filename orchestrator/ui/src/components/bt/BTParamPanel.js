@@ -176,7 +176,7 @@ export default function BTParamPanel({
 
   const renderInput = (key, value, disabled = false) => {
     const disabledCls = disabled
-      ? ' bg-gray-100 text-gray-400 cursor-not-allowed'
+      ? ' !bg-[var(--mc-surface-hover)] !text-[var(--mc-text-subtle)] cursor-not-allowed'
       : '';
 
     if (ENUM_PARAMS[key]) {
@@ -189,7 +189,7 @@ export default function BTParamPanel({
             // select has no meaningful blur event for this; sync immediately
             onParamChange(selectedNodeId, key, e.target.value);
           }}
-          className={`w-full px-2 py-1.5 border border-gray-300 rounded text-sm bg-white focus:outline-none focus:ring-1 focus:ring-blue-400${disabledCls}`}
+          className={`w-full px-2 py-1.5 border border-[var(--mc-border-strong)] rounded-lg text-sm bg-[var(--mc-surface)] text-[var(--mc-text)] focus:outline-none focus:ring-1 focus:ring-[var(--mc-accent)]${disabledCls}`}
         >
           {ENUM_PARAMS[key].map((opt) => (
             <option key={opt} value={opt}>{opt}</option>
@@ -200,7 +200,7 @@ export default function BTParamPanel({
 
     if (BOOL_PARAMS.has(key)) {
       return (
-        <label className={`flex items-center gap-2 ${disabled ? 'cursor-not-allowed text-gray-400' : 'cursor-pointer'}`}>
+        <label className={`flex items-center gap-2 ${disabled ? 'cursor-not-allowed text-[var(--mc-text-subtle)]' : 'cursor-pointer'}`}>
           <input
             type="checkbox"
             disabled={disabled}
@@ -210,9 +210,9 @@ export default function BTParamPanel({
               handleChange(key, v);
               onParamChange(selectedNodeId, key, v);
             }}
-            className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-400"
+            className="w-4 h-4 rounded border-[var(--mc-border-strong)] text-[var(--mc-accent)] focus:ring-[var(--mc-accent)]"
           />
-          <span className="text-sm text-gray-600">{value === 'true' || value === true ? 'true' : 'false'}</span>
+          <span className="text-sm text-[var(--mc-text-muted)]">{value === 'true' || value === true ? 'true' : 'false'}</span>
         </label>
       );
     }
@@ -227,13 +227,13 @@ export default function BTParamPanel({
             onBlur={() => handleBlur(key)}
             rows={String(value).length > 60 ? 3 : 1}
             placeholder="Enter Policy Path or Repo ID"
-            className={`flex-1 min-w-0 px-2 py-1.5 border border-gray-300 rounded text-sm focus:outline-none focus:ring-1 focus:ring-blue-400 resize-y${disabledCls}`}
+            className={`flex-1 min-w-0 px-2 py-1.5 border border-[var(--mc-border-strong)] rounded-lg text-sm bg-[var(--mc-surface)] text-[var(--mc-text)] focus:outline-none focus:ring-1 focus:ring-[var(--mc-accent)] resize-y${disabledCls}`}
           />
           <button
             type="button"
             onClick={() => !disabled && setShowPolicyBrowser(true)}
             disabled={disabled}
-            className="flex items-center justify-center w-8 h-8 text-blue-500 bg-gray-100 border border-gray-300 rounded hover:text-blue-700 hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
+            className="flex items-center justify-center w-8 h-8 text-[var(--mc-accent)] bg-[var(--mc-surface-2)] border border-[var(--mc-border-strong)] rounded-lg hover:bg-[var(--mc-surface-hover)] disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
             aria-label="Browse for policy model folder"
             title="Browse for policy model folder"
           >
@@ -252,7 +252,7 @@ export default function BTParamPanel({
           disabled={disabled}
           onChange={(e) => handleChange(key, e.target.value)}
           onBlur={() => handleBlur(key)}
-          className={`w-full px-2 py-1.5 border border-gray-300 rounded text-sm focus:outline-none focus:ring-1 focus:ring-blue-400${disabledCls}`}
+          className={`w-full px-2 py-1.5 border border-[var(--mc-border-strong)] rounded-lg text-sm bg-[var(--mc-surface)] text-[var(--mc-text)] focus:outline-none focus:ring-1 focus:ring-[var(--mc-accent)]${disabledCls}`}
         />
       );
     }
@@ -264,17 +264,17 @@ export default function BTParamPanel({
         onChange={(e) => handleChange(key, e.target.value)}
         onBlur={() => handleBlur(key)}
         rows={String(value).length > 60 ? 3 : 1}
-        className={`w-full px-2 py-1.5 border border-gray-300 rounded text-sm focus:outline-none focus:ring-1 focus:ring-blue-400 resize-y${disabledCls}`}
+        className={`w-full px-2 py-1.5 border border-[var(--mc-border-strong)] rounded-lg text-sm bg-[var(--mc-surface)] text-[var(--mc-text)] focus:outline-none focus:ring-1 focus:ring-[var(--mc-accent)] resize-y${disabledCls}`}
       />
     );
   };
 
   return (
-    <div className="absolute right-0 top-0 bottom-0 w-[320px] bg-white border-l border-gray-200 shadow-lg z-10 flex flex-col">
+    <div className="absolute right-0 top-0 bottom-0 w-[320px] bg-[var(--mc-surface-2)] border-l border-[var(--mc-border)] shadow-lg z-10 flex flex-col">
       {/* Header */}
-      <div className="flex items-start justify-between px-4 py-3 border-b border-gray-200">
+      <div className="flex items-start justify-between px-4 py-3 border-b border-[var(--mc-border)]">
         <div className="flex-1 min-w-0 pr-2">
-          <div className="text-xs text-gray-500 mb-1">{nodeType}</div>
+          <div className="text-xs text-[var(--mc-text-muted)] mb-1 font-mono">{nodeType}</div>
           <input
             type="text"
             value={localName}
@@ -288,12 +288,12 @@ export default function BTParamPanel({
                 e.currentTarget.blur();
               }
             }}
-            className="w-full text-sm font-bold text-gray-800 bg-transparent border-0 border-b border-transparent hover:border-gray-300 focus:border-blue-400 focus:outline-none px-0 py-0.5"
+            className="w-full text-sm font-bold text-[var(--mc-text)] bg-transparent border-0 border-b border-transparent hover:border-[var(--mc-border-strong)] focus:border-[var(--mc-accent)] focus:outline-none px-0 py-0.5"
           />
         </div>
         <button
           onClick={() => (typeof onClose === 'function' ? onClose() : dispatch(setSelectedNodeId(null)))}
-          className="p-1 rounded hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors"
+          className="p-1 rounded-lg hover:bg-[var(--mc-surface-hover)] text-[var(--mc-text-subtle)] hover:text-[var(--mc-text)] transition-colors"
         >
           <MdClose size={20} />
         </button>
@@ -302,7 +302,7 @@ export default function BTParamPanel({
       {/* Params */}
       <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3">
         {paramEntries.length === 0 ? (
-          <p className="text-sm text-gray-400">No parameters</p>
+          <p className="text-sm text-[var(--mc-text-subtle)]">No parameters</p>
         ) : (
           paramEntries.map(([key, value]) => {
             const disabled = isFieldDisabled(nodeType, key, localParams);
@@ -310,15 +310,15 @@ export default function BTParamPanel({
             return (
               <div key={key}>
                 <label
-                  className={`block text-xs font-medium mb-1 ${
-                    disabled ? 'text-gray-400' : 'text-gray-600'
+                  className={`block text-xs font-medium mb-1 font-mono ${
+                    disabled ? 'text-[var(--mc-text-subtle)]' : 'text-[var(--mc-text-muted)]'
                   }`}
                 >
                   {key}
                 </label>
                 {renderInput(key, value, disabled)}
                 {help && !disabled && (
-                  <div className="mt-1 text-xs text-gray-500">{help}</div>
+                  <div className="mt-1 text-xs text-[var(--mc-text-subtle)]">{help}</div>
                 )}
               </div>
             );

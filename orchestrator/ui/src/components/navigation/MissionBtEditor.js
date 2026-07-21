@@ -47,6 +47,25 @@ const nodeTypes = {
 
 const reactFlowProOptions = { hideAttribution: true };
 
+// Observe the app's dark theme via the `dark` class on <html> so the ReactFlow
+// canvas (which needs a JS color value for its dot grid) stays theme-aware.
+function useIsDark() {
+  const [isDark, setIsDark] = useState(() => (
+    typeof document !== "undefined" &&
+    document.documentElement.classList.contains("dark")
+  ));
+  useEffect(() => {
+    if (typeof document === "undefined") return undefined;
+    const root = document.documentElement;
+    const sync = () => setIsDark(root.classList.contains("dark"));
+    sync();
+    const observer = new MutationObserver(sync);
+    observer.observe(root, { attributes: true, attributeFilter: ["class"] });
+    return () => observer.disconnect();
+  }, []);
+  return isDark;
+}
+
 function catalogEntryToParams(entry) {
   return Object.fromEntries(
     (entry?.ports || []).map((port) => [port.name, port.default]),
@@ -96,6 +115,7 @@ export default function MissionBtEditor({
   activeNodeNames = [],
   onXmlChange,
 }) {
+  const isDark = useIsDark();
   const { catalog: nodeCatalog = [] } = useBTNodeCatalog();
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
@@ -390,16 +410,18 @@ export default function MissionBtEditor({
   }, [activeNodeNames, edges, handleToggleCollapse, nodes, selectedNodeId]);
 
   return (
-    <div className="h-full min-h-0 relative flex bg-white text-gray-900">
-      <div className="absolute top-3 right-3 z-20 flex items-center gap-1 rounded-md border border-gray-200 bg-white/95 p-1 shadow-sm">
+    <div className="h-full min-h-0 relative flex bg-[var(--mc-bg)] text-[var(--mc-text)]">
+      <div className="absolute top-3 right-3 z-20 flex items-center gap-1 rounded-[10px] border border-[var(--mc-border)] bg-[var(--mc-surface)]/95 p-1 shadow-sm">
           <button
             type="button"
             onClick={undoHistory}
             disabled={!canUndo}
             title="Undo"
             className={clsx(
-              "h-8 w-8 rounded-md flex items-center justify-center transition-colors",
-              canUndo ? "bg-gray-100 hover:bg-gray-200 text-gray-700" : "bg-gray-100 text-gray-300",
+              "h-8 w-8 rounded-lg flex items-center justify-center transition-colors",
+              canUndo
+                ? "bg-[var(--mc-surface-2)] hover:bg-[var(--mc-surface-hover)] text-[var(--mc-text-muted)]"
+                : "bg-[var(--mc-surface-2)] text-[var(--mc-text-subtle)] opacity-50",
             )}
           >
             <MdUndo size={18} />
@@ -410,8 +432,10 @@ export default function MissionBtEditor({
             disabled={!canRedo}
             title="Redo"
             className={clsx(
-              "h-8 w-8 rounded-md flex items-center justify-center transition-colors",
-              canRedo ? "bg-gray-100 hover:bg-gray-200 text-gray-700" : "bg-gray-100 text-gray-300",
+              "h-8 w-8 rounded-lg flex items-center justify-center transition-colors",
+              canRedo
+                ? "bg-[var(--mc-surface-2)] hover:bg-[var(--mc-surface-hover)] text-[var(--mc-text-muted)]"
+                : "bg-[var(--mc-surface-2)] text-[var(--mc-text-subtle)] opacity-50",
             )}
           >
             <MdRedo size={18} />
@@ -422,8 +446,10 @@ export default function MissionBtEditor({
             disabled={!nodes.length}
             title="Auto layout"
             className={clsx(
-              "h-8 w-8 rounded-md flex items-center justify-center transition-colors",
-              nodes.length ? "bg-gray-100 hover:bg-gray-200 text-gray-700" : "bg-gray-100 text-gray-300",
+              "h-8 w-8 rounded-lg flex items-center justify-center transition-colors",
+              nodes.length
+                ? "bg-[var(--mc-surface-2)] hover:bg-[var(--mc-surface-hover)] text-[var(--mc-text-muted)]"
+                : "bg-[var(--mc-surface-2)] text-[var(--mc-text-subtle)] opacity-50",
             )}
           >
             <MdAutoFixHigh size={18} />
@@ -437,18 +463,18 @@ export default function MissionBtEditor({
           onDrop={handleCanvasDrop}
         >
           {loading ? (
-            <div className="h-full flex items-center justify-center text-sm text-gray-500">
+            <div className="h-full flex items-center justify-center text-sm text-[var(--mc-text-muted)]">
               Loading BT XML...
             </div>
           ) : parseError ? (
-            <div className="h-full flex items-center justify-center text-center text-red-600">
+            <div className="h-full flex items-center justify-center text-center text-[var(--mc-danger)]">
               <div>
                 <div className="font-semibold">Parse Error</div>
                 <div className="mt-1 text-xs">{parseError}</div>
               </div>
             </div>
           ) : nodes.length === 0 ? (
-            <div className="h-full flex items-center justify-center text-center text-gray-400">
+            <div className="h-full flex items-center justify-center text-center text-[var(--mc-text-subtle)]">
               <div>
                 <div className="text-sm font-semibold">No behavior tree</div>
                 <div className="mt-1 text-xs">Drag nodes from the palette.</div>
@@ -480,7 +506,7 @@ export default function MissionBtEditor({
               proOptions={reactFlowProOptions}
             >
               <Controls showInteractive={false} />
-              <Background color="#e5e7eb" gap={16} />
+              <Background color={isDark ? "#3a352e" : "#dcd7ca"} gap={16} />
             </ReactFlow>
           )}
         </div>

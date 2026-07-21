@@ -251,3 +251,93 @@ body {
   --vscode-titleBar-activeBackground: #0f172a;
   --vscode-toolbar-hoverBackground: #334155;
 }
+
+/*
+ * Mission Canvas design tokens (warm-minimal palette — clay accent, sage live, warm paper).
+ * `--mc-*` are the source of truth; `--vscode-*` aliases keep shared map
+ * chrome (MapViewer, MapEditorControls) theme-correct on this page without
+ * editing them — the vscode tokens are otherwise scoped to `.navigation-page`
+ * only, which is NOT an ancestor of `.mission-canvas-page`.
+ */
+.mission-canvas-page {
+  --mc-bg: #f3f1ea;            /* app / stage fill (warm paper) */
+  --mc-surface: #ffffff;        /* cards, panels */
+  --mc-surface-2: #f6f4ee;      /* inset surfaces, inputs */
+  --mc-surface-hover: #efece3;  /* hover / active surface */
+  --mc-border: #e7e3d9;         /* hairline borders */
+  --mc-border-strong: #dcd7ca;  /* button / panel borders */
+  --mc-text: #1c1a17;           /* near-black warm ink */
+  --mc-text-muted: #6f6a5d;
+  --mc-text-subtle: #a49d8c;
+  --mc-accent: #c96442;         /* clay */
+  --mc-accent-fg: #ffffff;
+  --mc-accent-hover: #b5563a;
+  --mc-accent-soft: #f4e5dc;    /* clay tint (selected rows, chips) */
+  --mc-success: #5b8266;        /* muted sage — "live" / running-ok */
+  --mc-danger: #b0483a;         /* muted brick */
+  --mc-danger-border: #d1796b;
+  --mc-warning: #b4762f;
+  --mc-focus: #c96442;
+  --mc-shadow: 0 1px 2px rgba(28, 26, 23, 0.05), 0 8px 24px -14px rgba(28, 26, 23, 0.18);
+
+  --vscode-foreground: var(--mc-text);
+  --vscode-descriptionForeground: var(--mc-text-muted);
+  --vscode-editor-background: var(--mc-surface);
+  --vscode-panel-border: var(--mc-border-strong);
+  --vscode-focusBorder: var(--mc-focus);
+  --vscode-button-foreground: var(--mc-accent-fg);
+  --vscode-button-background: var(--mc-accent);
+  --vscode-input-foreground: var(--mc-text);
+  --vscode-input-background: var(--mc-surface);
+  --vscode-input-border: var(--mc-border-strong);
+  --vscode-list-activeSelectionBackground: var(--mc-accent-soft);
+  --vscode-inputValidation-errorBackground: var(--mc-danger);
+  --vscode-inputValidation-errorBorder: var(--mc-danger-border);
+
+  color: var(--mc-text);
+}
+
+.dark .mission-canvas-page {
+  --mc-bg: #211f1b;             /* warm near-black */
+  --mc-surface: #2b2823;
+  --mc-surface-2: #242019;
+  --mc-surface-hover: #322e28;
+  --mc-border: #322e28;
+  --mc-border-strong: #3d3931;
+  --mc-text: #ece7dd;           /* near-cream */
+  --mc-text-muted: #9a9384;
+  --mc-text-subtle: #6e685b;
+  --mc-accent: #d5794f;         /* brighter clay for dark */
+  --mc-accent-fg: #1a1815;
+  --mc-accent-hover: #e0895f;
+  --mc-accent-soft: #3d2a20;
+  --mc-success: #6f9a74;
+  --mc-danger: #d47a6b;
+  --mc-danger-border: #a85042;
+  --mc-warning: #d9a05a;
+  --mc-focus: #d5794f;
+  --mc-shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 24px -12px rgba(0, 0, 0, 0.6);
+}
+
+/* ReactFlow injects its own DOM (BT editor); Tailwind utilities can't reach it. */
+.dark .mission-canvas-page .react-flow__controls-button {
+  background: #2b2823;
+  border-color: #3d3931;
+  color: #ece7dd;
+  fill: currentColor;
+}
+
+.dark .mission-canvas-page .react-flow__controls-button:hover {
+  background: #322e28;
+}
+
+/* Light-mode ReactFlow controls — warm neutrals to match the paper canvas. */
+.mission-canvas-page .react-flow__controls-button {
+  background: #faf8f3;
+  border-color: #e7e3d9;
+  color: #6f6a5d;
+  fill: currentColor;
+}
+.mission-canvas-page .react-flow__controls-button:hover {
+  background: #efece3;
+}

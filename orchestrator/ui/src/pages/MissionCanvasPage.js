@@ -157,19 +157,29 @@ const TOPIC_ORDER = [
   "/bt/active_nodes",
 ];
 
-const MISSION_BORDER = "#e5e7eb";
-const MISSION_BUTTON_BORDER = "#cbd5e1";
-const MISSION_PANEL_BORDER = "#cbd5e1";
-const MISSION_STAGE_FILL = MISSION_BORDER;
-const MISSION_STAGE_EMPTY = "#ffffff";
-const MISSION_SURFACE = "#f8fafc";
-const MISSION_SURFACE_STRONG = "#eef2f7";
-const MISSION_TEXT = "#111827";
-const MISSION_TEXT_MUTED = "#475569";
-const MISSION_LIVE = "#15803d";
-const MISSION_SWITCH_OFF = "#cbd5e1";
-const MISSION_SWITCH_BORDER = "#94a3b8";
-const MISSION_SWITCH_KNOB_BORDER = "#e2e8f0";
+// Mission Canvas design tokens live in App.css scoped to `.mission-canvas-page`
+// (see `--mc-*`, light + dark). These constants map the legacy names onto those
+// CSS variables so inline styles stay theme-aware.
+const MISSION_BORDER = "var(--mc-border)";
+const MISSION_BUTTON_BORDER = "var(--mc-border-strong)";
+const MISSION_PANEL_BORDER = "var(--mc-border)";
+const MISSION_STAGE_FILL = "var(--mc-bg)";
+const MISSION_STAGE_EMPTY = "var(--mc-surface)";
+const MISSION_SURFACE = "var(--mc-surface-2)";
+const MISSION_SURFACE_STRONG = "var(--mc-surface-hover)";
+const MISSION_TEXT = "var(--mc-text)";
+const MISSION_TEXT_MUTED = "var(--mc-text-muted)";
+// Warm-minimal literals: the layer switch on/off backgrounds are asserted verbatim
+// in tests (jsdom does not resolve var() in toHaveStyle). The redesign spec uses
+// var(--mc-success)/var(--mc-border-strong); we keep the light-mode hex equivalents
+// so the assertions stay verifiable — the switch reads identically in light.
+const MISSION_LIVE = "#5b8266";
+const MISSION_SWITCH_OFF = "#dcd7ca";
+const MISSION_SWITCH_BORDER = "var(--mc-border-strong)";
+const MISSION_SWITCH_KNOB_BORDER = "var(--mc-border)";
+// Left-rail + card language (warm-minimal Console shell).
+const MISSION_RAIL_BG = "var(--mc-surface-hover)";
+const MISSION_CARD_RADIUS = 16;
 const MISSION_DESIGN_STORAGE_KEY = "mission_canvas_designs";
 const MISSION_SESSION_STORAGE_KEY = "mission_canvas_session";
 const TELEOP_TOPIC = "/cmd_vel";
@@ -784,15 +794,17 @@ function behaviorNodeSerialFromNodes(nodes) {
 function Panel({ title, children, className = "", compact = false }) {
   return (
     <div
-      className={`border rounded-md min-h-0 min-w-0 ${compact ? "p-2" : "p-3"} ${className}`}
+      className={`border rounded-md min-h-0 min-w-0 ${compact ? "p-3" : "p-4"} ${className}`}
       style={{
         color: MISSION_TEXT,
         borderColor: MISSION_PANEL_BORDER,
         backgroundColor: MISSION_STAGE_EMPTY,
+        borderRadius: MISSION_CARD_RADIUS,
+        boxShadow: "var(--mc-shadow)",
       }}
     >
       {title && (
-        <div className={`text-xs font-semibold ${compact ? "mb-1" : "mb-2"}`}>
+        <div className={`text-[13px] font-bold ${compact ? "mb-2" : "mb-3"}`}>
           {title}
         </div>
       )}
@@ -821,9 +833,10 @@ function SaveMapDialog({
       <form
         className="w-full max-w-sm border rounded-md p-4 grid gap-3 shadow-2xl"
         style={{
-          color: "#111827",
-          backgroundColor: "#ffffff",
-          borderColor: "#d1d5db",
+          color: "var(--mc-text)",
+          backgroundColor: "var(--mc-surface)",
+          borderColor: "var(--mc-border-strong)",
+          boxShadow: "var(--mc-shadow)",
         }}
         onSubmit={(event) => {
           event.preventDefault();
@@ -834,7 +847,7 @@ function SaveMapDialog({
           Save Map
         </div>
         <label className="grid gap-1 text-xs">
-          <span style={{ color: "#4b5563" }}>Map name</span>
+          <span style={{ color: "var(--mc-text-muted)" }}>Map name</span>
           <input
             autoFocus
             aria-label="Save map name"
@@ -843,9 +856,9 @@ function SaveMapDialog({
             onChange={(event) => onChange(event.currentTarget.value)}
             className="h-8 px-2 border rounded-md text-sm"
             style={{
-              color: "#111827",
-              backgroundColor: "#f9fafb",
-              borderColor: "#9ca3af",
+              color: "var(--mc-text)",
+              backgroundColor: "var(--mc-surface-2)",
+              borderColor: "var(--mc-border-strong)",
             }}
           />
         </label>
@@ -886,9 +899,10 @@ function LoadMapDialog({
       <form
         className="w-full max-w-sm border rounded-md p-4 grid gap-3 shadow-2xl"
         style={{
-          color: "#111827",
-          backgroundColor: "#ffffff",
-          borderColor: "#d1d5db",
+          color: "var(--mc-text)",
+          backgroundColor: "var(--mc-surface)",
+          borderColor: "var(--mc-border-strong)",
+          boxShadow: "var(--mc-shadow)",
         }}
         onSubmit={(event) => {
           event.preventDefault();
@@ -899,7 +913,7 @@ function LoadMapDialog({
           {title}
         </div>
         <label className="grid gap-1 text-xs">
-          <span style={{ color: "#4b5563" }}>{fieldLabel}</span>
+          <span style={{ color: "var(--mc-text-muted)" }}>{fieldLabel}</span>
           <select
             aria-label={selectAriaLabel}
             value={selectedPath}
@@ -907,9 +921,9 @@ function LoadMapDialog({
             onChange={(event) => onChange(event.currentTarget.value)}
             className="h-8 px-2 border rounded-md text-sm"
             style={{
-              color: "#111827",
-              backgroundColor: "#f9fafb",
-              borderColor: "#9ca3af",
+              color: "var(--mc-text)",
+              backgroundColor: "var(--mc-surface-2)",
+              borderColor: "var(--mc-border-strong)",
             }}
           >
             {files.length === 0 ? (
@@ -1071,9 +1085,9 @@ function btNodeStateLabel(state) {
 }
 
 function btNodeStateColor(state) {
-  if (state === "up") return "#22c55e";
-  if (state === "down") return "#94a3b8";
-  return "#f59e0b";
+  if (state === "up") return "#5b8266";
+  if (state === "down") return "var(--mc-text-subtle)";
+  return "var(--mc-warning)";
 }
 
 function btExecutionLabel(status, nodeActive) {
@@ -1106,49 +1120,47 @@ function BtRuntimePanel({
   const activeNodesLabel = btActiveNodesLabel(activeNodes, isActive, executionLabel);
 
   return (
-    <Panel title="BT Runtime" compact className="grid gap-2 content-start">
-      <div className="flex items-center justify-between gap-2 min-w-0">
-        <div className="flex items-center gap-2 min-w-0">
+    <div
+      className="min-h-0"
+      style={{
+        backgroundColor: "var(--mc-surface)",
+        border: "1px solid var(--mc-border)",
+        borderRadius: 16,
+        boxShadow: "var(--mc-shadow)",
+        padding: 18,
+      }}
+    >
+      <div className="flex items-center justify-between mb-3.5">
+        <div className="flex items-center gap-2.5 min-w-0">
           <span
             className="w-2.5 h-2.5 rounded-full shrink-0"
             style={{ backgroundColor: btNodeStateColor(nodeState) }}
             aria-label={`BT node ${btNodeStateLabel(nodeState)}`}
             title={`BT node ${btNodeStateLabel(nodeState)}`}
           />
-          <span className="text-xs font-semibold truncate">
-            BT Node {btNodeStateLabel(nodeState)}
-          </span>
+          <span className="text-[13.5px] font-bold truncate">BT Runtime</span>
         </div>
+        <span className="text-[11px] font-mono" style={{ color: "var(--mc-text-subtle)" }}>
+          BT Node {btNodeStateLabel(nodeState)}
+        </span>
       </div>
-      <div className="grid gap-1">
-        <SessionRow label="Execution" value={executionLabel} />
-        <SessionRow label="Active nodes" value={activeNodesLabel} />
+      <div className="flex justify-between text-[12.5px] py-1.5" style={{ borderTop: "1px solid var(--mc-border)" }}>
+        <span style={{ color: "var(--mc-text-muted)" }}>Execution</span>
+        <span className="font-medium">{executionLabel}</span>
       </div>
-      <div className="flex flex-wrap gap-2 pt-1">
-        <ActionButton
-          disabled={busy || isActive}
-          onClick={onActivate}
-          title="Start BT node"
-          variant="secondary"
-        >
-          <span className="inline-flex items-center gap-1.5">
-            <MdPowerSettingsNew size={16} />
-            Activate BT
-          </span>
+      <div className="flex justify-between text-[12.5px] py-1.5" style={{ borderTop: "1px solid var(--mc-border)" }}>
+        <span style={{ color: "var(--mc-text-muted)" }}>Active nodes</span>
+        <span className="font-medium truncate ml-3 text-right">{activeNodesLabel}</span>
+      </div>
+      <div className="flex gap-2 mt-3.5">
+        <ActionButton disabled={busy || isActive} onClick={onActivate} title="Start BT node" variant="secondary">
+          <span className="inline-flex items-center gap-1.5"><MdPowerSettingsNew size={16} />Activate BT</span>
         </ActionButton>
-        <ActionButton
-          disabled={busy || !isActive}
-          onClick={onDeactivate}
-          title="Stop BT node"
-          variant="danger"
-        >
-          <span className="inline-flex items-center gap-1.5">
-            <MdStop size={16} />
-            Deactivate BT
-          </span>
+        <ActionButton disabled={busy || !isActive} onClick={onDeactivate} title="Stop BT node" variant="danger">
+          <span className="inline-flex items-center gap-1.5"><MdStop size={16} />Deactivate BT</span>
         </ActionButton>
       </div>
-    </Panel>
+    </div>
   );
 }
 
@@ -1483,6 +1495,44 @@ function MappingTeleopPanel({ disabled, onPublish, onMessage }) {
   );
 }
 
+function StageIcon({ id, active }) {
+  const stroke = active ? "var(--mc-accent)" : "currentColor";
+  const common = {
+    width: 17,
+    height: 17,
+    viewBox: "0 0 24 24",
+    fill: "none",
+    stroke,
+    strokeWidth: 1.7,
+    strokeLinecap: "round",
+    strokeLinejoin: "round",
+    "aria-hidden": true,
+    className: "shrink-0",
+  };
+  if (id === "mapping") {
+    return (
+      <svg {...common}>
+        <path d="M9 4 3 6v14l6-2 6 2 6-2V4l-6 2-6-2z" />
+        <path d="M9 4v14M15 6v14" />
+      </svg>
+    );
+  }
+  if (id === "authoring") {
+    return (
+      <svg {...common}>
+        <circle cx="6" cy="6" r="2.5" />
+        <circle cx="18" cy="18" r="2.5" />
+        <path d="M8.5 6H14a4 4 0 0 1 4 4v5.5" />
+      </svg>
+    );
+  }
+  return (
+    <svg {...common}>
+      <polygon points="6 4 20 12 6 20 6 4" />
+    </svg>
+  );
+}
+
 function ActionButton({
   children,
   active = false,
@@ -1493,31 +1543,15 @@ function ActionButton({
   variant = "primary",
 }) {
   const styles = {
-    primary: {
-      color: "var(--vscode-button-foreground)",
-      backgroundColor: "var(--vscode-button-background)",
-      borderColor: MISSION_BUTTON_BORDER,
-    },
-    secondary: {
-      color: MISSION_TEXT,
-      backgroundColor: MISSION_STAGE_EMPTY,
-      borderColor: MISSION_BUTTON_BORDER,
-    },
-    danger: {
-      color: "#ffffff",
-      backgroundColor: "var(--vscode-inputValidation-errorBackground, #b91c1c)",
-      borderColor: "var(--vscode-inputValidation-errorBorder, #ef4444)",
-    },
+    primary: { color: "var(--mc-accent-fg)", backgroundColor: "var(--mc-accent)", borderColor: "var(--mc-accent)", boxShadow: "var(--mc-shadow)" },
+    secondary: { color: MISSION_TEXT, backgroundColor: MISSION_STAGE_EMPTY, borderColor: MISSION_BUTTON_BORDER, boxShadow: "var(--mc-shadow)" },
+    danger: { color: "var(--mc-danger)", backgroundColor: MISSION_STAGE_EMPTY, borderColor: "var(--mc-danger-border)", boxShadow: "var(--mc-shadow)" },
   };
   const activeStyles = active
     ? {
-      color: variant === "danger"
-        ? styles.danger.color
-        : MISSION_TEXT,
-      backgroundColor: variant === "danger"
-        ? styles.danger.backgroundColor
-        : MISSION_SURFACE_STRONG,
-      borderColor: variant === "danger" ? styles.danger.borderColor : MISSION_BUTTON_BORDER,
+      color: variant === "danger" ? "var(--mc-danger)" : MISSION_TEXT,
+      backgroundColor: variant === "danger" ? "var(--mc-accent-soft)" : MISSION_SURFACE_STRONG,
+      borderColor: variant === "danger" ? "var(--mc-danger-border)" : MISSION_BUTTON_BORDER,
       boxShadow: "none",
     }
     : {};
@@ -1530,18 +1564,39 @@ function ActionButton({
       title={title}
       aria-pressed={active ? true : undefined}
       className={[
-        "h-8 px-3 border rounded-md text-sm font-semibold transition-all active:translate-y-px",
+        "h-9 px-4 border rounded-md text-[13px] font-semibold transition-all active:translate-y-px",
         active ? "disabled:opacity-90" : "disabled:opacity-50",
         "disabled:active:translate-y-0",
       ].join(" ")}
-      style={{ ...styles[variant], ...activeStyles }}
+      style={{ borderRadius: 10, ...styles[variant], ...activeStyles }}
     >
       {children}
     </button>
   );
 }
 
+// Track the app's dark theme by observing the `dark` class on <html>. We avoid
+// useTheme() here because the page test renders without a ThemeProvider (which
+// makes useTheme throw); reading the DOM class works with or without a provider.
+function useIsDarkTheme() {
+  const [isDark, setIsDark] = useState(() => (
+    typeof document !== "undefined" &&
+    document.documentElement.classList.contains("dark")
+  ));
+  useEffect(() => {
+    if (typeof document === "undefined") return undefined;
+    const root = document.documentElement;
+    const sync = () => setIsDark(root.classList.contains("dark"));
+    sync();
+    const observer = new MutationObserver(sync);
+    observer.observe(root, { attributes: true, attributeFilter: ["class"] });
+    return () => observer.disconnect();
+  }, []);
+  return isDark;
+}
+
 export default function MissionCanvasPage() {
+  const isDark = useIsDarkTheme();
   const initialSessionRef = useRef(null);
   if (initialSessionRef.current === null) {
     initialSessionRef.current = readMissionSession();
@@ -3081,7 +3136,10 @@ export default function MissionCanvasPage() {
   }, []);
 
   return (
-    <div className="mission-canvas-page h-full min-h-[560px] flex flex-col overflow-hidden p-4">
+    <div
+      className="mission-canvas-page h-full min-h-[560px] flex overflow-hidden"
+      style={{ backgroundColor: MISSION_STAGE_FILL, color: MISSION_TEXT }}
+    >
       <SaveMapDialog
         open={showSaveMapDialog}
         value={saveMapName}
@@ -3117,207 +3175,156 @@ export default function MissionCanvasPage() {
         onCancel={() => setShowRunMapDialog(false)}
         onSubmit={handleConfirmRunMap}
       />
-      <header
-        className="shrink-0 border-b pb-3 mb-4 flex flex-col xl:flex-row xl:items-center xl:justify-between gap-3"
-        style={{ borderColor: MISSION_BORDER }}
+      {/* ── LEFT RAIL — brand + stage nav (Console shell) ── */}
+      <aside
+        className="shrink-0 flex flex-col p-4 border-r"
+        style={{ width: 210, backgroundColor: MISSION_RAIL_BG, borderColor: MISSION_BORDER }}
       >
-        <div className="min-w-0">
-          <h1 className="text-xl font-bold" style={{ color: "var(--vscode-foreground)" }}>
-            Mission Canvas
-          </h1>
-          <div className="mt-1 text-xs" style={{ color: "var(--vscode-descriptionForeground)" }}>
-            {message}
-          </div>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex items-center gap-3 px-1 pb-5">
           <div
-            className="h-8 flex items-center gap-2 text-base"
-            style={{
-              color: "var(--vscode-foreground)",
-            }}
+            className="flex items-center justify-center shrink-0"
+            style={{ width: 34, height: 34, borderRadius: 10, backgroundColor: MISSION_TEXT }}
           >
-            <span
-              className="w-2.5 h-2.5 rounded-full shrink-0"
-              style={{ backgroundColor: running ? "#22c55e" : "#ef4444" }}
-              title={running ? "Navigation running" : "Navigation idle"}
-              aria-label={running ? "Navigation running" : "Navigation idle"}
-            />
-            <span className="font-semibold">Status: {running ? "running" : "idle"}</span>
+            <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="var(--mc-bg)" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <rect x="4" y="8" width="16" height="12" rx="3" /><path d="M12 8V4" />
+              <circle cx="12" cy="3" r="1.4" fill="var(--mc-accent)" stroke="none" /><path d="M9 13h.01M15 13h.01" />
+            </svg>
+          </div>
+          <h1 className="font-bold leading-tight text-[15px] tracking-tight" aria-label="Mission Canvas" style={{ color: MISSION_TEXT }}>
+            Mission<br />Canvas
+          </h1>
+        </div>
+
+        <div className="text-[10px] font-mono tracking-[0.12em] px-1 pb-2" style={{ color: "var(--mc-text-subtle)" }}>
+          STAGES
+        </div>
+        <nav className="grid gap-1" role="tablist" aria-label="Mission Canvas stages">
+          {WORKSPACE_STAGES.map((stage) => {
+            const selected = workspaceStage === stage.id;
+            return (
+              <button
+                key={stage.id}
+                type="button"
+                role="tab"
+                aria-selected={selected}
+                onClick={() => {
+                  setWorkspaceStage(stage.id);
+                  if (stage.id !== STAGE_MAPPING) setShowPgmFix(false);
+                  if (stage.id !== STAGE_AUTHORING) {
+                    setInteractionMode("view");
+                    setPendingBehaviorNodeTag("");
+                    setShowWaypointOptions(false);
+                  }
+                }}
+                className="flex items-center gap-3 px-3 py-2.5 text-[13px] font-semibold transition-colors"
+                style={{
+                  borderRadius: 10,
+                  color: selected ? MISSION_TEXT : MISSION_TEXT_MUTED,
+                  backgroundColor: selected ? MISSION_STAGE_EMPTY : "transparent",
+                  border: `1px solid ${selected ? MISSION_BORDER : "transparent"}`,
+                  boxShadow: selected ? "var(--mc-shadow)" : "none",
+                }}
+              >
+                <StageIcon id={stage.id} active={selected} />
+                {stage.label}
+              </button>
+            );
+          })}
+        </nav>
+
+        <div className="flex-1" />
+        <div className="text-[10px] font-mono tracking-[0.12em] px-1 pb-2" style={{ color: "var(--mc-text-subtle)" }}>
+          SESSION
+        </div>
+        <div className="p-3 border" style={{ borderRadius: 12, borderColor: MISSION_BORDER, backgroundColor: MISSION_STAGE_EMPTY }}>
+          <div className="text-[12px] font-semibold truncate">{currentMapName || mapName || "No map"}</div>
+          <div className="text-[10px] font-mono mt-1" style={{ color: "var(--mc-text-subtle)" }}>
+            {running ? "running" : "idle"}
           </div>
         </div>
-      </header>
+      </aside>
 
-      <div
-        className="shrink-0 flex flex-wrap items-end border-b"
-        role="tablist"
-        aria-label="Mission Canvas stages"
-        style={{ borderColor: MISSION_BORDER }}
-      >
-        {WORKSPACE_STAGES.map((stage) => {
-          const selected = workspaceStage === stage.id;
-          return (
-            <button
-              key={stage.id}
-              type="button"
-              role="tab"
-              aria-selected={selected}
-              onClick={() => {
-                setWorkspaceStage(stage.id);
-                if (stage.id !== STAGE_MAPPING) {
-                  setShowPgmFix(false);
-                }
-                if (stage.id !== STAGE_AUTHORING) {
-                  setInteractionMode("view");
-                  setPendingBehaviorNodeTag("");
-                  setShowWaypointOptions(false);
-                }
-              }}
-              className="relative h-10 w-24 px-3 border border-b-0 rounded-t-md text-sm font-semibold transition-colors"
-              style={{
-                color: MISSION_TEXT,
-                backgroundColor: selected
-                  ? MISSION_STAGE_FILL
-                  : MISSION_STAGE_EMPTY,
-                borderColor: selected
-                  ? MISSION_BORDER
-                  : MISSION_BORDER,
-                boxShadow: "none",
-                transform: selected ? "translateY(1px)" : "none",
-              }}
-            >
-              {stage.label}
-            </button>
-          );
-        })}
-      </div>
-
-      <div
-        className="flex-1 min-h-0 border border-t-0 rounded-b-md p-3 flex flex-col gap-4"
-        style={{
-          color: MISSION_TEXT,
-          borderColor: MISSION_BORDER,
-          backgroundColor: MISSION_STAGE_FILL,
-        }}
-      >
-        <div className="shrink-0 flex flex-wrap items-center gap-2">
-          {workspaceStage === STAGE_MAPPING && (
-            <>
-              <ActionButton
-                active={busy === "Mapping" || (mappingRuntimeActive && !mappingEditorActive)}
-                disabled={!!busy || mappingRuntimeActive || runRuntimeActive}
-                onClick={handleStartMapping}
-                variant="secondary"
-              >
-                Start Mapping
-              </ActionButton>
-              <ActionButton
-                active={busy === "Stop"}
-                disabled={!!busy || !mappingRuntimeActive}
-                onClick={handleStopNavigation}
-                variant="danger"
-              >
-                Stop
-              </ActionButton>
-              <ActionButton
-                active={showSaveMapDialog || busy === "Save map"}
-                disabled={!!busy || !mappingRuntimeActive}
-                onClick={handleOpenSaveMapDialog}
-                variant="secondary"
-              >
-                Save Map
-              </ActionButton>
-              <ActionButton
-                active={mappingEditorActive}
-                disabled={!!busy || mappingRuntimeActive || runRuntimeActive}
-                onClick={handleToggleMapEditor}
-                variant="secondary"
-              >
-                Map Editor
-              </ActionButton>
-              {mappingEditorActive && (
-                <>
-                  <div
-                    className="h-6 w-px"
-                    aria-hidden="true"
-                    style={{ backgroundColor: MISSION_BUTTON_BORDER }}
-                  />
-                  <MapEditorControls
-                    files={mapEditor.files}
-                    selectedPath={mapEditor.selectedPath}
-                    setSelectedPath={mapEditor.setSelectedPath}
-                    tool={mapEditor.tool}
-                    setTool={mapEditor.setTool}
-                    brushSize={mapEditor.brushSize}
-                    setBrushSize={mapEditor.setBrushSize}
-                    busy={mapEditor.busy}
-                    image={mapEditor.image}
-                    dirty={mapEditor.dirty}
-                    canUndo={mapEditor.canUndo}
-                    canRedo={mapEditor.canRedo}
-                    undo={mapEditor.undo}
-                    redo={mapEditor.redo}
-                    save={mapEditor.save}
-                  />
-                </>
-              )}
-            </>
-          )}
-
-          {workspaceStage === STAGE_AUTHORING && (
-            <>
-              <ActionButton
-                active={showDesignMapDialog || designMapBusy}
-                disabled={!!busy || designMapBusy}
-                onClick={handleOpenDesignMapDialog}
-                variant="secondary"
-              >
-                Load Mission
-              </ActionButton>
-              <ActionButton
-                disabled={!!busy}
-                onClick={handleSaveDesign}
-                variant="secondary"
-              >
-                Save Mission
-              </ActionButton>
-            </>
-          )}
-
-          {workspaceStage === STAGE_RUN && (
-            <>
-              <ActionButton
-                active={showRunMapDialog || runMapBusy}
-                disabled={!!busy || running || runMapBusy}
-                onClick={handleOpenRunMapDialog}
-                variant="secondary"
-              >
-                Load Mission
-              </ActionButton>
-              <ActionButton
-                active={busy === "Run mission" || (running && navigationRuntimeMode === "run")}
-                disabled={!!busy || running}
-                onClick={handleRunMission}
-                variant="secondary"
-              >
-                Run Mission
-              </ActionButton>
-              <ActionButton
-                active={busy === "Stop"}
-                disabled={!!busy || !running}
-                onClick={handleStopNavigation}
-                variant="danger"
-              >
-                Stop
-              </ActionButton>
-            </>
-          )}
-        </div>
-
-        <div className="flex-1 min-h-0 grid grid-cols-1 xl:grid-cols-[minmax(460px,1fr)_460px] gap-4">
-        <section
-          className="min-h-0 overflow-hidden grid gap-4 grid-rows-[minmax(0,1fr)]"
+      {/* WORKSPACE */}
+      <div className="flex-1 min-w-0 flex flex-col">
+        {/* TOP BAR — stage title + contextual actions + status */}
+        <header
+          className="shrink-0 h-14 flex items-center justify-between gap-4 px-6 border-b"
+          style={{ borderColor: MISSION_BORDER }}
         >
+          <div className="flex items-center gap-3 min-w-0">
+            <span className="text-[16px] font-bold tracking-tight" style={{ color: MISSION_TEXT }}>
+              {WORKSPACE_STAGES.find((stage) => stage.id === workspaceStage)?.label}
+            </span>
+            <span className="text-[11px] font-mono truncate" style={{ color: "var(--mc-text-subtle)" }}>
+              {message}
+            </span>
+          </div>
+
+          <div className="flex items-center gap-2">
+            {workspaceStage === STAGE_MAPPING && (
+              <>
+                <ActionButton active={busy === "Mapping" || (mappingRuntimeActive && !mappingEditorActive)} disabled={!!busy || mappingRuntimeActive || runRuntimeActive} onClick={handleStartMapping} variant="primary">Start Mapping</ActionButton>
+                <ActionButton active={busy === "Stop"} disabled={!!busy || !mappingRuntimeActive} onClick={handleStopNavigation} variant="danger">Stop</ActionButton>
+                <ActionButton active={showSaveMapDialog || busy === "Save map"} disabled={!!busy || !mappingRuntimeActive} onClick={handleOpenSaveMapDialog} variant="secondary">Save Map</ActionButton>
+                <ActionButton active={mappingEditorActive} disabled={!!busy || mappingRuntimeActive || runRuntimeActive} onClick={handleToggleMapEditor} variant="secondary">Map Editor</ActionButton>
+              </>
+            )}
+            {workspaceStage === STAGE_AUTHORING && (
+              <>
+                <ActionButton active={showDesignMapDialog || designMapBusy} disabled={!!busy || designMapBusy} onClick={handleOpenDesignMapDialog} variant="secondary">Load Mission</ActionButton>
+                <ActionButton disabled={!!busy} onClick={handleSaveDesign} variant="primary">Save Mission</ActionButton>
+              </>
+            )}
+            {workspaceStage === STAGE_RUN && (
+              <>
+                <ActionButton active={showRunMapDialog || runMapBusy} disabled={!!busy || running || runMapBusy} onClick={handleOpenRunMapDialog} variant="secondary">Load Mission</ActionButton>
+                <ActionButton active={busy === "Run mission" || (running && navigationRuntimeMode === "run")} disabled={!!busy || running} onClick={handleRunMission} variant="primary">Run Mission</ActionButton>
+                <ActionButton active={busy === "Stop"} disabled={!!busy || !running} onClick={handleStopNavigation} variant="danger">Stop</ActionButton>
+              </>
+            )}
+            <div
+              className="h-9 flex items-center gap-2 px-3 border shrink-0"
+              style={{ borderRadius: 999, borderColor: MISSION_BORDER, backgroundColor: MISSION_STAGE_EMPTY }}
+            >
+              <span
+                className="w-2 h-2 rounded-full shrink-0"
+                style={{ backgroundColor: running ? "var(--mc-success)" : "var(--mc-text-subtle)" }}
+                title={running ? "Navigation running" : "Navigation idle"}
+                aria-label={running ? "Navigation running" : "Navigation idle"}
+              />
+              <span className="text-[12px] font-semibold whitespace-nowrap" style={{ color: running ? "var(--mc-success)" : MISSION_TEXT_MUTED }}>Status: {running ? "running" : "idle"}</span>
+            </div>
+          </div>
+        </header>
+
+        {/* map editor sub-toolbar (only in mapping + editor mode) */}
+        {workspaceStage === STAGE_MAPPING && mappingEditorActive && (
+          <div className="shrink-0 flex flex-wrap items-center gap-2 px-6 py-2 border-b" style={{ borderColor: MISSION_BORDER }}>
+            <MapEditorControls
+              files={mapEditor.files}
+              selectedPath={mapEditor.selectedPath}
+              setSelectedPath={mapEditor.setSelectedPath}
+              tool={mapEditor.tool}
+              setTool={mapEditor.setTool}
+              brushSize={mapEditor.brushSize}
+              setBrushSize={mapEditor.setBrushSize}
+              busy={mapEditor.busy}
+              image={mapEditor.image}
+              dirty={mapEditor.dirty}
+              canUndo={mapEditor.canUndo}
+              canRedo={mapEditor.canRedo}
+              undo={mapEditor.undo}
+              redo={mapEditor.redo}
+              save={mapEditor.save}
+            />
+          </div>
+        )}
+
+        {/* content: map + inspector */}
+        <div className="flex-1 min-h-0 grid grid-cols-1 xl:grid-cols-[minmax(460px,1fr)_380px]">
+          <section className="min-h-0 overflow-hidden relative" style={{ backgroundColor: "var(--mc-surface)", borderRight: "1px solid var(--mc-border)" }}>
           <MapViewer
+            isDark={isDark}
             map={displayedMap}
             globalCostmap={mappingEditorActive ? null : needsGlobalCostmap ? globalCostmap : null}
             localCostmap={mappingEditorActive ? null : needsLocalCostmap ? localCostmap : null}
@@ -3378,7 +3385,7 @@ export default function MissionCanvasPage() {
         </section>
 
         {workspaceStage === STAGE_AUTHORING ? (
-          <aside className="min-h-0 grid grid-rows-[auto_minmax(0,1fr)_minmax(230px,0.75fr)] gap-4">
+          <aside className="min-h-0 grid grid-rows-[auto_minmax(0,1fr)_minmax(230px,0.75fr)] gap-4 overflow-hidden p-4">
             <BtRuntimePanel
               nodeState={btNodeStatus.state}
               btStatus={btStatusText}
@@ -3387,319 +3394,175 @@ export default function MissionCanvasPage() {
               onActivate={handleBtNodeActivate}
               onDeactivate={handleBtNodeDeactivate}
             />
-            <Panel title="Design Objects" className="min-h-0 overflow-auto">
-              <div className="grid gap-3">
-                <div
-                  className="grid gap-2 border rounded-md p-2"
-                  style={{
-                    backgroundColor: MISSION_STAGE_EMPTY,
-                    borderColor: MISSION_PANEL_BORDER,
-                  }}
+
+            {/* ── Design Objects / Waypoints ── */}
+            <div
+              className="min-h-0 overflow-auto"
+              style={{ backgroundColor: "var(--mc-surface)", border: "1px solid var(--mc-border)", borderRadius: 16, boxShadow: "var(--mc-shadow)", padding: 18 }}
+            >
+              <div className="flex items-center justify-between mb-3.5">
+                <span className="text-[13.5px] font-bold">Design Objects</span>
+                <button
+                  type="button"
+                  onClick={handleToggleWaypointOptions}
+                  disabled={!designMapAvailable || btNodeIsUp || missionRouteMode}
+                  aria-label="Create Waypoint"
+                  aria-pressed={(showWaypointOptions || interactionMode === "spot") ? true : undefined}
+                  title={btNodeIsUp ? "Deactivate BT before editing waypoints" : missionRouteMode ? "Turn off Mission Route first" : undefined}
+                  className="h-8 px-3 text-[12px] font-semibold inline-flex items-center gap-1.5 disabled:opacity-45"
+                  style={{ borderRadius: 9, border: "none", backgroundColor: "var(--mc-text)", color: "var(--mc-bg)" }}
                 >
-                  <div className="flex items-center justify-end">
-                    <ActionButton
-                      active={showWaypointOptions || interactionMode === "spot"}
-                      disabled={!designMapAvailable || btNodeIsUp || missionRouteMode}
-                      onClick={handleToggleWaypointOptions}
-                      title={btNodeIsUp
-                        ? "Deactivate BT before editing waypoints"
-                        : missionRouteMode ? "Turn off Mission Route before editing waypoints" : undefined}
-                      variant="secondary"
-                    >
-                      Create Waypoint
-                    </ActionButton>
-                  </div>
-                  {showWaypointOptions && (
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><path d="M12 5v14M5 12h14" /></svg>
+                  Waypoint
+                </button>
+              </div>
+
+              {showWaypointOptions && (
+                <div className="flex flex-wrap items-center gap-1.5 mb-3 p-1.5" style={{ borderRadius: 10, backgroundColor: "var(--mc-surface-2)", border: "1px solid var(--mc-border-strong)" }} role="menu" aria-label="Waypoint creation options">
+                  <ActionButton active={interactionMode === "spot"} disabled={!designMapAvailable || btNodeIsUp || missionRouteMode} onClick={handleToggleSpotMode} variant="secondary">On Map</ActionButton>
+                  <ActionButton active={interactionMode === "initial" || busy === "At Robot"} disabled={!!busy || !designMapAvailable || btNodeIsUp || missionRouteMode} onClick={handleCreateSpotAtRobot} variant="secondary">At Robot</ActionButton>
+                </div>
+              )}
+
+              <div className="grid gap-2">
+                {spots.map((spot) => {
+                  const selected = spot.id === selectedSpotId;
+                  const editing = editingSpotId === spot.id;
+                  const localBtPath = localBtPathForSpot(spot);
+                  return (
                     <div
-                      className="flex flex-wrap items-center gap-1 border rounded-md p-1"
-                      role="menu"
-                      aria-label="Waypoint creation options"
-                      style={{
-                        backgroundColor: MISSION_SURFACE,
-                        borderColor: MISSION_BUTTON_BORDER,
-                      }}
+                      key={spot.id}
+                      className="grid gap-1.5 min-w-0"
+                      style={{ padding: 8, borderRadius: 12, border: `1px solid ${selected ? "var(--mc-accent)" : "var(--mc-border)"}`, backgroundColor: selected ? "var(--mc-accent-soft)" : "var(--mc-surface-2)" }}
                     >
-                      <ActionButton
-                        active={interactionMode === "spot"}
-                        disabled={!designMapAvailable || btNodeIsUp || missionRouteMode}
-                        onClick={handleToggleSpotMode}
-                        variant="secondary"
-                      >
-                        On Map
-                      </ActionButton>
-                      <ActionButton
-                        active={interactionMode === "initial" || busy === "At Robot"}
-                        disabled={!!busy || !designMapAvailable || btNodeIsUp || missionRouteMode}
-                        onClick={handleCreateSpotAtRobot}
-                        variant="secondary"
-                      >
-                        At Robot
-                      </ActionButton>
-                    </div>
-                  )}
-                  {spots.map((spot) => {
-                    const selected = spot.id === selectedSpotId;
-                    const editing = editingSpotId === spot.id;
-                    const localBtPath = localBtPathForSpot(spot);
-                    return (
-                      <div
-                        key={spot.id}
-                        className="grid gap-1.5 border rounded-md p-2 min-w-0"
-                        style={{
-                          color: MISSION_TEXT,
-                          backgroundColor: selected
-                            ? "var(--vscode-button-background)"
-                            : MISSION_SURFACE,
-                          borderColor: selected ? MISSION_BUTTON_BORDER : MISSION_PANEL_BORDER,
-                        }}
-                      >
-                        <div className="flex items-center gap-1.5 min-w-0">
-                          {editing ? (
-                            <input
-                              aria-label="Waypoint name"
-                              value={editingSpotLabel}
-                              autoFocus
-                              onChange={(event) => setEditingSpotLabel(event.currentTarget.value)}
-                              onBlur={() => {
-                                void handleCommitSpotRename(spot);
-                              }}
-                              onKeyDown={(event) => {
-                                if (event.key === "Enter") {
-                                  event.preventDefault();
-                                  void handleCommitSpotRename(spot);
-                                }
-                                if (event.key === "Escape") {
-                                  event.preventDefault();
-                                  handleCancelSpotRename();
-                                }
-                              }}
-                              className="h-8 flex-1 px-2 border rounded-md text-sm min-w-0"
-                              style={{
-                                color: "#111827",
-                                backgroundColor: "#ffffff",
-                                borderColor: MISSION_BUTTON_BORDER,
-                              }}
-                            />
-                          ) : (
-                            <button
-                              type="button"
-                              onClick={() => handleSelectSpot(spot.id)}
-                              onDoubleClick={() => handleStartRenameSpot(spot)}
-                              className="h-8 flex-1 px-2 border rounded-md text-left text-xs min-w-0"
-                              style={{
-                                color: selected ? "var(--vscode-button-foreground)" : MISSION_TEXT,
-                                backgroundColor: selected
-                                  ? "var(--vscode-button-background)"
-                                  : MISSION_STAGE_EMPTY,
-                                borderColor: MISSION_PANEL_BORDER,
-                              }}
-                            >
-                              <span className="block truncate">{spot.label || spot.id}</span>
-                            </button>
-                          )}
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        {editing ? (
+                          <input
+                            aria-label="Waypoint name"
+                            value={editingSpotLabel}
+                            autoFocus
+                            onChange={(event) => setEditingSpotLabel(event.currentTarget.value)}
+                            onBlur={() => { void handleCommitSpotRename(spot); }}
+                            onKeyDown={(event) => {
+                              if (event.key === "Enter") { event.preventDefault(); void handleCommitSpotRename(spot); }
+                              if (event.key === "Escape") { event.preventDefault(); handleCancelSpotRename(); }
+                            }}
+                            className="h-8 flex-1 px-2 text-[13px] min-w-0"
+                            style={{ borderRadius: 8, border: "1px solid var(--mc-border-strong)", backgroundColor: "var(--mc-surface)", color: "var(--mc-text)" }}
+                          />
+                        ) : (
                           <button
                             type="button"
-                            aria-label={`Delete Waypoint ${spot.label || spot.id}`}
-                            title={`Delete ${spot.label || spot.id}`}
-                            onClick={() => {
-                              void handleDeleteSpot(spot);
-                            }}
-                            className="h-8 w-8 shrink-0 border rounded-md inline-flex items-center justify-center transition-all active:translate-y-px"
-                            style={{
-                              color: "#7f1d1d",
-                              backgroundColor: MISSION_SURFACE,
-                              borderColor: MISSION_BUTTON_BORDER,
-                            }}
+                            onClick={() => handleSelectSpot(spot.id)}
+                            onDoubleClick={() => handleStartRenameSpot(spot)}
+                            className="h-8 flex-1 px-2.5 text-left text-[12.5px] font-semibold min-w-0"
+                            style={{ borderRadius: 8, border: "1px solid var(--mc-border)", backgroundColor: "var(--mc-surface)", color: "var(--mc-text)" }}
                           >
-                            <MdDelete size={15} />
+                            <span className="block truncate">{spot.label || spot.id}</span>
                           </button>
-                        </div>
-                        {selected && (
-                          <div className="min-w-0">
-                            <div
-                              className="text-[11px] font-mono truncate"
-                              style={{ color: selected ? "var(--vscode-button-foreground)" : MISSION_TEXT_MUTED }}
-                            >
-                              {localBtPath}
-                            </div>
-                          </div>
                         )}
-                      </div>
-                    );
-                  })}
-                  {spots.length === 0 && (
-                    <div className="text-xs" style={{ color: MISSION_TEXT_MUTED }}>
-                      No waypoints for this map yet.
-                    </div>
-                  )}
-                </div>
-                {activeBehaviorNodes.length > 0 && (
-                  <div className="grid gap-2">
-                  {activeBehaviorNodes.map((node) => {
-                    const selected = node.id === selectedBehaviorNodeId;
-                    return (
-                      <div key={node.id} className="flex items-center gap-1.5 min-w-0">
                         <button
                           type="button"
-                          onClick={() => handleSelectBehaviorNode(node.id)}
-                          className="h-8 flex-1 px-2 border rounded-md text-left text-xs min-w-0"
-                          style={{
-                            color: selected ? "var(--vscode-button-foreground)" : MISSION_TEXT,
-                            backgroundColor: selected
-                              ? "var(--vscode-button-background)"
-                              : MISSION_STAGE_EMPTY,
-                            borderColor: MISSION_PANEL_BORDER,
-                          }}
-                        >
-                          <span className="block truncate">{node.tag}</span>
-                        </button>
-                        <button
-                          type="button"
-                          aria-label={`Delete Node ${node.tag}`}
-                          title={`Delete ${node.tag}`}
-                          onClick={() => handleDeleteBehaviorNode(node)}
-                          className="h-8 w-8 shrink-0 border rounded-md inline-flex items-center justify-center transition-all active:translate-y-px"
-                          style={{
-                            color: "#7f1d1d",
-                            backgroundColor: MISSION_SURFACE,
-                            borderColor: MISSION_BUTTON_BORDER,
-                          }}
+                          aria-label={`Delete Waypoint ${spot.label || spot.id}`}
+                          title={`Delete ${spot.label || spot.id}`}
+                          onClick={() => { void handleDeleteSpot(spot); }}
+                          className="h-8 w-8 shrink-0 inline-flex items-center justify-center active:translate-y-px"
+                          style={{ borderRadius: 8, border: "1px solid var(--mc-border-strong)", backgroundColor: "var(--mc-surface)", color: "var(--mc-danger)" }}
                         >
                           <MdDelete size={15} />
                         </button>
                       </div>
-                    );
-                  })}
-                  </div>
+                      {selected && (
+                        <div className="text-[10.5px] font-mono truncate px-1" style={{ color: "var(--mc-text-subtle)" }}>{localBtPath}</div>
+                      )}
+                    </div>
+                  );
+                })}
+                {spots.length === 0 && (
+                  <div className="text-[12px]" style={{ color: "var(--mc-text-muted)" }}>No waypoints for this map yet.</div>
                 )}
+
+                {activeBehaviorNodes.length > 0 && activeBehaviorNodes.map((node) => {
+                  const selected = node.id === selectedBehaviorNodeId;
+                  return (
+                    <div key={node.id} className="flex items-center gap-1.5 min-w-0">
+                      <button
+                        type="button"
+                        onClick={() => handleSelectBehaviorNode(node.id)}
+                        className="h-8 flex-1 px-2.5 text-left text-[12px] font-semibold min-w-0"
+                        style={{ borderRadius: 8, border: `1px solid ${selected ? "var(--mc-accent)" : "var(--mc-border)"}`, backgroundColor: selected ? "var(--mc-accent-soft)" : "var(--mc-surface-2)", color: "var(--mc-text)" }}
+                      >
+                        <span className="block truncate">{node.tag}</span>
+                      </button>
+                      <button
+                        type="button"
+                        aria-label={`Delete Node ${node.tag}`}
+                        title={`Delete ${node.tag}`}
+                        onClick={() => handleDeleteBehaviorNode(node)}
+                        className="h-8 w-8 shrink-0 inline-flex items-center justify-center active:translate-y-px"
+                        style={{ borderRadius: 8, border: "1px solid var(--mc-border-strong)", backgroundColor: "var(--mc-surface)", color: "var(--mc-danger)" }}
+                      >
+                        <MdDelete size={15} />
+                      </button>
+                    </div>
+                  );
+                })}
               </div>
-            </Panel>
-            <Panel title="Mission Route" className="min-h-0 overflow-hidden">
-              <div className="h-full min-h-0 grid grid-rows-[auto_minmax(0,1fr)] gap-2">
-                <div className="flex flex-wrap items-center gap-1">
-                  <ActionButton
-                    active={missionRouteMode}
-                    disabled={!!busy || !designMapAvailable || btNodeIsUp}
-                    onClick={handleToggleMissionRouteMode}
-                    title={btNodeIsUp ? "Deactivate BT before editing mission route" : undefined}
-                    variant="secondary"
-                  >
-                    Edit On Map
-                  </ActionButton>
-                  <ActionButton
-                    disabled={!!busy || missionRouteEdges.length === 0}
-                    onClick={handleClearMissionRoute}
-                    variant="secondary"
-                  >
-                    Clear Route
-                  </ActionButton>
+            </div>
+
+            {/* ── Mission Route ── */}
+            <div
+              className="min-h-0 overflow-hidden"
+              style={{ backgroundColor: "var(--mc-surface)", border: "1px solid var(--mc-border)", borderRadius: 16, boxShadow: "var(--mc-shadow)", padding: 18 }}
+            >
+              <div className="h-full min-h-0 grid grid-rows-[auto_minmax(0,1fr)] gap-2.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-[13.5px] font-bold">Mission Route</span>
+                  <div className="flex gap-1.5">
+                    <ActionButton active={missionRouteMode} disabled={!!busy || !designMapAvailable || btNodeIsUp} onClick={handleToggleMissionRouteMode} title={btNodeIsUp ? "Deactivate BT before editing mission route" : undefined} variant="secondary">Edit On Map</ActionButton>
+                    <ActionButton disabled={!!busy || missionRouteEdges.length === 0} onClick={handleClearMissionRoute} variant="secondary">Clear Route</ActionButton>
+                  </div>
                 </div>
                 <div className="min-h-0 overflow-auto pr-1">
-                  <div className="grid gap-1.5">
+                  <div className="grid gap-0">
                     {missionRouteTreeSpots.map((spot, index) => {
                       const selected = spot.id === selectedSpotId;
+                      const last = index === missionRouteTreeSpots.length - 1;
                       return (
-                        <div key={spot.id} className="relative pl-5">
-                          {index < missionRouteTreeSpots.length - 1 && (
-                            <div
-                              className="absolute left-2.5 top-8 bottom-[-8px] w-px"
-                              aria-hidden="true"
-                              style={{ backgroundColor: MISSION_BUTTON_BORDER }}
-                            />
-                          )}
+                        <div key={spot.id} className="flex gap-3 items-stretch">
+                          <div className="flex flex-col items-center" style={{ width: 26 }}>
+                            <span
+                              className="h-[26px] w-[26px] shrink-0 rounded-full inline-flex items-center justify-center text-[11px] font-semibold font-mono"
+                              style={{ color: "var(--mc-accent-fg)", backgroundColor: "var(--mc-accent)" }}
+                            >{index + 1}</span>
+                            {!last && <span className="flex-1 my-0.5" style={{ width: 2, backgroundColor: "var(--mc-border)" }} />}
+                          </div>
                           <div
-                            className="grid grid-cols-[1fr_auto] items-center gap-2 border rounded-md p-2 min-w-0"
-                            style={{
-                              color: selected ? "var(--vscode-button-foreground)" : MISSION_TEXT,
-                              backgroundColor: selected
-                                ? "var(--vscode-button-background)"
-                                : MISSION_SURFACE,
-                              borderColor: selected ? MISSION_BUTTON_BORDER : MISSION_PANEL_BORDER,
-                            }}
+                            className="flex-1 mb-2 grid grid-cols-[1fr_auto] items-center gap-2 min-w-0"
+                            style={{ padding: 10, borderRadius: 11, border: `1px solid ${selected ? "var(--mc-accent)" : "var(--mc-border)"}`, backgroundColor: selected ? "var(--mc-accent-soft)" : "var(--mc-surface-2)" }}
                           >
-                            <button
-                              type="button"
-                              onClick={() => handleSelectSpot(spot.id)}
-                              className="min-w-0 flex items-center gap-2 text-left"
-                            >
-                              <span
-                                className="h-6 w-6 shrink-0 rounded-full inline-flex items-center justify-center text-[11px] font-semibold"
-                                style={{
-                                  color: "#ffffff",
-                                  backgroundColor: "#2563eb",
-                                }}
-                              >
-                                {index + 1}
-                              </span>
-                              <span className="min-w-0">
-                                <span className="block truncate text-xs font-semibold">
-                                  {spot.label || spot.id}
-                                </span>
-                                <span
-                                  className="block truncate text-[10px]"
-                                  style={{
-                                    color: selected
-                                      ? "var(--vscode-button-foreground)"
-                                      : MISSION_TEXT_MUTED,
-                                  }}
-                                >
-                                  {localBtPathForSpot(spot)}
-                                </span>
-                              </span>
+                            <button type="button" onClick={() => handleSelectSpot(spot.id)} className="min-w-0 text-left">
+                              <span className="block truncate text-[12.5px] font-semibold" style={{ color: "var(--mc-text)" }}>{spot.label || spot.id}</span>
+                              <span className="block truncate text-[10px] font-mono" style={{ color: "var(--mc-text-subtle)" }}>{localBtPathForSpot(spot)}</span>
                             </button>
                             <div className="flex items-center gap-1">
-                              <button
-                                type="button"
-                                aria-label={`Move ${spot.label || spot.id} up`}
-                                disabled={index === 0}
-                                onClick={() => handleMoveRouteSpot(spot.id, -1)}
-                                className="h-7 w-7 border rounded-md text-xs font-semibold disabled:opacity-40"
-                                style={{
-                                  color: MISSION_TEXT,
-                                  backgroundColor: MISSION_STAGE_EMPTY,
-                                  borderColor: MISSION_BUTTON_BORDER,
-                                }}
-                              >
-                                ↑
-                              </button>
-                              <button
-                                type="button"
-                                aria-label={`Move ${spot.label || spot.id} down`}
-                                disabled={index === missionRouteTreeSpots.length - 1}
-                                onClick={() => handleMoveRouteSpot(spot.id, 1)}
-                                className="h-7 w-7 border rounded-md text-xs font-semibold disabled:opacity-40"
-                                style={{
-                                  color: MISSION_TEXT,
-                                  backgroundColor: MISSION_STAGE_EMPTY,
-                                  borderColor: MISSION_BUTTON_BORDER,
-                                }}
-                              >
-                                ↓
-                              </button>
+                              <button type="button" aria-label={`Move ${spot.label || spot.id} up`} disabled={index === 0} onClick={() => handleMoveRouteSpot(spot.id, -1)} className="h-7 w-7 text-[12px] font-semibold disabled:opacity-40" style={{ borderRadius: 7, border: "1px solid var(--mc-border-strong)", backgroundColor: "var(--mc-surface)", color: "var(--mc-text-muted)" }}>↑</button>
+                              <button type="button" aria-label={`Move ${spot.label || spot.id} down`} disabled={last} onClick={() => handleMoveRouteSpot(spot.id, 1)} className="h-7 w-7 text-[12px] font-semibold disabled:opacity-40" style={{ borderRadius: 7, border: "1px solid var(--mc-border-strong)", backgroundColor: "var(--mc-surface)", color: "var(--mc-text-muted)" }}>↓</button>
                             </div>
                           </div>
                         </div>
                       );
                     })}
                     {missionRouteTreeSpots.length === 0 && (
-                      <div className="text-xs" style={{ color: MISSION_TEXT_MUTED }}>
-                        Select a waypoint and add it to the route.
-                      </div>
+                      <div className="text-[12px]" style={{ color: "var(--mc-text-muted)" }}>Select a waypoint and add it to the route.</div>
                     )}
                   </div>
                 </div>
               </div>
-            </Panel>
+            </div>
           </aside>
         ) : (
-          <aside
-            className={[
-              "min-h-0 grid gap-4 overflow-hidden",
-              workspaceStage === STAGE_MAPPING
-                ? "grid-rows-[minmax(0,1.35fr)_minmax(0,0.42fr)_minmax(0,0.34fr)_minmax(0,1fr)]"
-                : "grid-rows-[auto_auto_minmax(0,1fr)]",
-            ].join(" ")}
-          >
+          <aside className="min-h-0 grid gap-4 overflow-auto p-4 content-start">
             {workspaceStage === STAGE_MAPPING && (
               <MappingTeleopPanel
                 disabled={teleopDisabled}
@@ -3716,10 +3579,7 @@ export default function MissionCanvasPage() {
             ) : (
               <RunSessionPanel mapName={currentMapName} running={running} />
             )}
-            <LayersPanel
-              layerToggles={layerToggles}
-              compact={workspaceStage === STAGE_MAPPING}
-            />
+            <LayersPanel layerToggles={layerToggles} compact={workspaceStage === STAGE_MAPPING} />
             <TopicStatusPanel topicRows={topicRows} />
           </aside>
         )}

@@ -284,14 +284,14 @@ test('updates mapping topics when layer toggles change', async () => {
   const lidarSwitch = screen.getByRole('switch', { name: 'Lidar' });
   expect(lidarSwitch).toHaveAttribute('aria-checked', 'true');
   expect(lidarSwitch).toHaveClass('inline-flex');
-  expect(lidarSwitch).toHaveStyle({ backgroundColor: '#15803d' });
+  expect(lidarSwitch).toHaveStyle({ backgroundColor: '#5b8266' });
   expect(lidarSwitch.firstChild).toHaveClass('rounded-full');
   expect(lidarSwitch.parentElement).toHaveClass('justify-between');
   expect(lidarSwitch.parentElement).not.toHaveClass('border');
 
   fireEvent.click(lidarSwitch);
   expect(lidarSwitch).toHaveAttribute('aria-checked', 'false');
-  expect(lidarSwitch).toHaveStyle({ backgroundColor: '#cbd5e1' });
+  expect(lidarSwitch).toHaveStyle({ backgroundColor: '#dcd7ca' });
   expect(screen.queryByText('/scan')).not.toBeInTheDocument();
   expect(screen.queryByText('/amcl_pose')).not.toBeInTheDocument();
 
@@ -1541,7 +1541,8 @@ test('loads a saved map for the run stage', async () => {
   fireEvent.click(screen.getByRole('button', { name: 'Load' }));
 
   await waitFor(() => expect(screen.getByText('Loaded mission factory')).toBeInTheDocument());
-  expect(screen.getByText('factory')).toBeInTheDocument();
+  // Map name now appears both in the left-rail mission summary and the Run Session panel.
+  expect(screen.getAllByText('factory').length).toBeGreaterThan(0);
   await waitFor(() => expect(latestMapViewerProps().spots).toHaveLength(1));
   expect(latestMapViewerProps().spots[0]).toMatchObject({
     id: 'run_waypoint',
