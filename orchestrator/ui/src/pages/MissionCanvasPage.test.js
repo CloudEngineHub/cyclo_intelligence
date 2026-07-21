@@ -1257,6 +1257,15 @@ test('edits the mission route directly on the map', async () => {
     { id: 'spot_a', order: 2 },
   ]);
 
+  act(() => {
+    latestMapViewerProps().onMissionRouteSpotClick('spot_b');
+  });
+  await waitFor(() => expect(latestMapViewerProps().selectedMissionRouteSourceId).toBe(''));
+  expect(latestMapViewerProps().missionRouteOrder).toEqual([
+    { id: 'spot_b', order: 1 },
+    { id: 'spot_a', order: 2 },
+  ]);
+
   fireEvent.click(screen.getByRole('button', { name: 'Save Mission' }));
 
   await waitFor(() => expect(saveNavigationMission).toHaveBeenCalledWith(
@@ -1270,11 +1279,23 @@ test('edits the mission route directly on the map', async () => {
       ]),
       metadata: expect.objectContaining({
         mission_flow: expect.objectContaining({
-          edges: [expect.objectContaining({ source: 'spot_b', target: 'spot_a' })],
+          edges: [
+            expect.objectContaining({ source: 'spot_b', target: 'spot_a' }),
+            expect.objectContaining({ source: 'spot_a', target: 'spot_b' }),
+          ],
         }),
       }),
     }),
   ));
+  await waitFor(() => {
+    const globalSave = saveNavigationMissionBtFile.mock.calls.find(([mapName, path]) => (
+      mapName === 'map' && path === 'global.xml'
+    ));
+    expect(globalSave).toBeTruthy();
+    const globalXml = globalSave[2];
+    expect(globalXml.match(/<MissionStep/g)).toHaveLength(3);
+    expect(globalXml).toMatch(/waypoint_id="spot_b"[\s\S]*waypoint_id="spot_a"[\s\S]*waypoint_id="spot_b"/);
+  });
   expect(screen.queryByRole('button', { name: 'Create BT' })).not.toBeInTheDocument();
   expect(screen.queryByRole('button', { name: 'Edit BT' })).not.toBeInTheDocument();
 

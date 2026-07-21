@@ -571,7 +571,9 @@ function connectMissionFlowEdge(edges, source, target) {
     return { edges, changed: false, reason: "same" };
   }
   const nextBase = missionFlowPrefixEdges(edges, source);
-  if (missionFlowHasPath(nextBase, target, source)) {
+  const routeStartId = nextBase[0]?.source || source;
+  const closesLoop = nextBase.length > 0 && target === routeStartId;
+  if (!closesLoop && missionFlowHasPath(nextBase, target, source)) {
     return { edges, changed: false, reason: "cycle" };
   }
   return {
@@ -586,6 +588,7 @@ function connectMissionFlowEdge(edges, source, target) {
       },
     ],
     changed: true,
+    closesLoop,
     reason: "",
   };
 }
@@ -607,7 +610,7 @@ function serializeMissionFlow(nodes, edges) {
   };
 }
 
-function orderedSpotsFromMissionFlow(spots, nodes, edges) {
+function orderedSpotIdsFromMissionFlow(spots, nodes, edges, { includeClosingTarget = false } = {}) {
   const spotById = new Map(spots.map((spot) => [spot.id, spot]));
   const validEdges = edges.filter((edge) => (
     spotById.has(edge.source) && spotById.has(edge.target)
@@ -629,7 +632,7 @@ function orderedSpotsFromMissionFlow(spots, nodes, edges) {
   const outgoing = new Map(ids.map((id) => [id, []]));
   validEdges.forEach((edge) => {
     if (!nodeById.has(edge.source) || !nodeById.has(edge.target)) return;
-    outgoing.get(edge.source).push(edge.target);
+    outgoing.get(edge.source).push(edge);
     incoming.set(edge.target, (incoming.get(edge.target) || 0) + 1);
   });
   const byPosition = (a, b) => {
@@ -639,18 +642,39 @@ function orderedSpotsFromMissionFlow(spots, nodes, edges) {
     if (Math.abs(xDiff) > 0.001) return xDiff;
     return Number(nodeA?.position?.y ?? 0) - Number(nodeB?.position?.y ?? 0);
   };
-  outgoing.forEach((targets) => targets.sort(byPosition));
-  const visited = new Set();
+  outgoing.forEach((targets) => targets.sort((a, b) => byPosition(a.target, b.target)));
+  const startId = ids.find((id) => (incoming.get(id) || 0) === 0) || validEdges[0].source;
+  const visitedEdges = new Set();
   const orderedIds = [];
-  const visit = (id) => {
-    if (visited.has(id)) return;
-    visited.add(id);
-    orderedIds.push(id);
-    (outgoing.get(id) || []).forEach(visit);
-  };
-  ids.filter((id) => (incoming.get(id) || 0) === 0).sort(byPosition).forEach(visit);
-  ids.filter((id) => !visited.has(id)).sort(byPosition).forEach(visit);
-  return orderedIds.map((id) => spotById.get(id)).filter(Boolean);
+  let currentId = startId;
+  while (currentId && nodeById.has(currentId)) {
+    orderedIds.push(currentId);
+    const nextEdge = (outgoing.get(currentId) || [])[0];
+    if (!nextEdge) break;
+    const edgeKey = nextEdge.id || missionFlowEdgeId(nextEdge.source, nextEdge.target);
+    if (visitedEdges.has(edgeKey)) break;
+    visitedEdges.add(edgeKey);
+    currentId = nextEdge.target;
+    if (currentId === startId) {
+      if (includeClosingTarget) orderedIds.push(currentId);
+      break;
+    }
+  }
+  return orderedIds;
+}
+
+function orderedSpotsFromMissionFlow(spots, nodes, edges) {
+  const spotById = new Map(spots.map((spot) => [spot.id, spot]));
+  return orderedSpotIdsFromMissionFlow(spots, nodes, edges)
+    .map((id) => spotById.get(id))
+    .filter(Boolean);
+}
+
+function missionStepSpotsFromMissionFlow(spots, nodes, edges) {
+  const spotById = new Map(spots.map((spot) => [spot.id, spot]));
+  return orderedSpotIdsFromMissionFlow(spots, nodes, edges, { includeClosingTarget: true })
+    .map((id) => spotById.get(id))
+    .filter(Boolean);
 }
 
 function missionStepXmlLines(spots, tagName) {
@@ -2271,7 +2295,7 @@ export default function MissionCanvasPage() {
         normalizedMapName,
         missionSpots,
         mission,
-        orderedSpotsFromMissionFlow(missionSpots, missionFlow.nodes, missionFlow.edges),
+        missionStepSpotsFromMissionFlow(missionSpots, missionFlow.nodes, missionFlow.edges),
       );
       return {
         exists: true,
@@ -2389,7 +2413,7 @@ export default function MissionCanvasPage() {
         missionFlowEdges,
         canonicalMissionSpots,
       );
-      const routeMissionSpots = orderedSpotsFromMissionFlow(
+      const routeMissionSpots = missionStepSpotsFromMissionFlow(
         canonicalMissionSpots,
         syncedMissionFlowNodes,
         syncedMissionFlowEdges,
@@ -2650,14 +2674,19 @@ export default function MissionCanvasPage() {
       const result = connectMissionFlowEdge(current, missionRouteSourceId, spotId);
       if (!result.changed) {
         setMessage(result.reason === "cycle"
-          ? "Route cannot loop back to an earlier waypoint"
+          ? "Route can only loop back to its start waypoint"
           : "Select a different waypoint");
         return current;
       }
-      setMessage(`Route: ${sourceSpot?.label || missionRouteSourceId} -> ${spot.label || spot.id}`);
+      if (result.closesLoop) {
+        setMissionRouteSourceId("");
+        setMessage(`Route closed: ${sourceSpot?.label || missionRouteSourceId} -> ${spot.label || spot.id}`);
+      } else {
+        setMissionRouteSourceId(spotId);
+        setMessage(`Route: ${sourceSpot?.label || missionRouteSourceId} -> ${spot.label || spot.id}`);
+      }
       return result.edges;
     });
-    setMissionRouteSourceId(spotId);
   }, [btNodeIsUp, missionRouteMode, missionRouteSourceId, visibleSpots]);
 
   const handleMissionRouteMapClick = useCallback(() => {
