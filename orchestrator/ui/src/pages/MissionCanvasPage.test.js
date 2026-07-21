@@ -1401,10 +1401,9 @@ test('edits and saves loaded map pixels from the fix editor', async () => {
   fireEvent.click(screen.getByRole('button', { name: 'Map Editor' }));
 
   await waitFor(() => expect(getPgmImage).toHaveBeenCalledWith('factory.pgm'));
-  fireEvent.change(screen.getByLabelText('Brush size'), {
-    target: { value: '10' },
-  });
-  expect(screen.getByLabelText('Brush size')).toHaveValue('10');
+  // Brush size is now a segmented S/M/L/XL group (XL = 10 cells) instead of a <select>.
+  fireEvent.click(screen.getByRole('button', { name: 'Brush size XL' }));
+  expect(screen.getByRole('button', { name: 'Brush size XL' })).toHaveAttribute('aria-pressed', 'true');
 
   fireEvent.click(screen.getByRole('button', { name: 'Add Obstacle' }));
   await waitFor(() => expect(latestMapViewerProps().editorActive).toBe(true));
