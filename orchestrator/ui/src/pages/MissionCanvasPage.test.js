@@ -1589,6 +1589,65 @@ test('marks free-space areas with automatic color and undo/redo support', async 
   expect(savePgmImage).not.toHaveBeenCalled();
 });
 
+test('removes selected map areas with the erase area tool', async () => {
+  const latestMapViewerProps = () => (
+    mockMapViewer.mock.calls[mockMapViewer.mock.calls.length - 1][0]
+  );
+  getPgmFiles.mockResolvedValue({
+    files: [{ path: 'factory.pgm', name: 'factory.pgm' }],
+  });
+  getPgmImage.mockResolvedValue({
+    path: 'factory.pgm',
+    width: 1,
+    height: 1,
+    maxval: 255,
+    pixels_base64: '/g==',
+  });
+  getMapAnnotations.mockResolvedValue({
+    path: 'factory.pgm',
+    annotations: [{
+      id: 'area_dock',
+      label: 'Dock',
+      color: '#3B241F',
+      pose: { frame_id: 'map', x: 0.5, y: 0.5, yaw: 0 },
+      region: {
+        seed_cell: { x: 0, y: 0 },
+        bounds: { x_min: 0, y_min: 0, x_max: 0, y_max: 0 },
+        cell_count: 1,
+        width: 1,
+        height: 1,
+      },
+    }],
+  });
+
+  render(<MissionCanvasPage />);
+
+  fireEvent.click(screen.getByRole('button', { name: 'Map Editor' }));
+
+  await waitFor(() => expect(getMapAnnotations).toHaveBeenCalledWith('factory.pgm'));
+  await waitFor(() => expect(latestMapViewerProps().mapAnnotations).toEqual([
+    expect.objectContaining({ label: 'Dock', color: '#3B241F' }),
+  ]));
+
+  fireEvent.click(screen.getByRole('button', { name: 'Erase Area' }));
+  await waitFor(() => expect(latestMapViewerProps().editorAreaSelection).toBe(true));
+
+  await act(async () => {
+    latestMapViewerProps().onEditorMapArea(0, 0, 0, 0);
+  });
+
+  await waitFor(() => expect(latestMapViewerProps().mapAnnotations).toEqual([]));
+  expect(screen.getByText('Removed 1 map area')).toBeInTheDocument();
+  expect(screen.getByText('Unsaved changes')).toBeInTheDocument();
+  expect(saveMapAnnotations).not.toHaveBeenCalled();
+
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Save' })).toBeEnabled());
+  fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+  await waitFor(() => expect(saveMapAnnotations).toHaveBeenCalledWith('factory.pgm', []));
+  expect(savePgmImage).not.toHaveBeenCalled();
+});
+
 test('enables live robot and lidar layers while navigation runtime is active', async () => {
   getServiceStatus.mockResolvedValueOnce({ is_up: true, mode: 'map' });
 

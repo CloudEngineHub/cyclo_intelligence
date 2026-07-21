@@ -36,6 +36,7 @@ const EDIT_TOOLS = [
     { id: "draw_black", label: "Add Obstacle" },
 ];
 const ANNOTATION_TOOL = { id: "label_marker", label: "Area" };
+const ANNOTATION_ERASE_TOOL = { id: "erase_area", label: "Erase Area" };
 const ANNOTATION_COLORS = [
     { id: "dark_brown", label: "Dark brown", value: "#3B241F" },
     { id: "red_wine", label: "Red wine", value: "#6D1F2A" },
@@ -99,6 +100,48 @@ function annotationCoversPgmPixel(annotation, image, pixelX, pixelY) {
         pixelX <= bounds.x_max &&
         gridY >= bounds.y_min &&
         gridY <= bounds.y_max);
+}
+function pgmSelectionGridBounds(image, startPixel, endPixel) {
+    if (!image || !startPixel || !endPixel)
+        return null;
+    const xMin = Math.max(0, Math.min(startPixel.pixelX, endPixel.pixelX));
+    const xMax = Math.min(image.width - 1, Math.max(startPixel.pixelX, endPixel.pixelX));
+    const yMin = Math.max(0, Math.min(startPixel.pixelY, endPixel.pixelY));
+    const yMax = Math.min(image.height - 1, Math.max(startPixel.pixelY, endPixel.pixelY));
+    return {
+        x_min: xMin,
+        y_min: image.height - 1 - yMax,
+        x_max: xMax,
+        y_max: image.height - 1 - yMin,
+    };
+}
+function annotationGridBounds(annotation, image) {
+    const region = normalizeAnnotationRegion(annotation === null || annotation === void 0 ? void 0 : annotation.region);
+    if (!region)
+        return null;
+    if ((region.width && region.width !== image.width) || (region.height && region.height !== image.height))
+        return null;
+    const bounds = region.bounds || {
+        x_min: region.seed_cell.x,
+        y_min: region.seed_cell.y,
+        x_max: region.seed_cell.x,
+        y_max: region.seed_cell.y,
+    };
+    return {
+        x_min: Math.max(0, Math.min(bounds.x_min, bounds.x_max)),
+        y_min: Math.max(0, Math.min(bounds.y_min, bounds.y_max)),
+        x_max: Math.min(image.width - 1, Math.max(bounds.x_min, bounds.x_max)),
+        y_max: Math.min(image.height - 1, Math.max(bounds.y_min, bounds.y_max)),
+    };
+}
+function annotationIntersectsGridBounds(annotation, image, selectionBounds) {
+    const bounds = annotationGridBounds(annotation, image);
+    if (!bounds || !selectionBounds)
+        return false;
+    return !(bounds.x_max < selectionBounds.x_min ||
+        bounds.x_min > selectionBounds.x_max ||
+        bounds.y_max < selectionBounds.y_min ||
+        bounds.y_min > selectionBounds.y_max);
 }
 function selectedFreePgmRegion(pixels, image, startPixel, endPixel, existingAnnotations = []) {
     if (!pixels || !image || !startPixel || !endPixel)
@@ -512,6 +555,25 @@ export function useMapEditor({ open, mapName, onMessage, reloadToken = 0 }) {
     const placeAnnotationAtMapPoint = useCallback((x, y) => {
         placeAnnotationAtMapArea(x, y, x, y);
     }, [placeAnnotationAtMapArea]);
+    const eraseAnnotationsAtMapArea = useCallback((startX, startY, endX = startX, endY = startY) => {
+        if (!open || !image || busy || tool !== ANNOTATION_ERASE_TOOL.id)
+            return;
+        const startPixel = mapPointToPgmPixel(image, startX, startY);
+        const endPixel = mapPointToPgmPixel(image, endX, endY);
+        const selectionBounds = pgmSelectionGridBounds(image, startPixel, endPixel);
+        if (!selectionBounds) {
+            onMessage("Select an area inside the map");
+            return;
+        }
+        const currentAnnotations = annotationsRef.current;
+        const nextAnnotations = currentAnnotations.filter((annotation) => !annotationIntersectsGridBounds(annotation, image, selectionBounds));
+        const removedCount = currentAnnotations.length - nextAnnotations.length;
+        if (removedCount === 0) {
+            onMessage("No map areas selected");
+            return;
+        }
+        persistAnnotations(nextAnnotations, `Removed ${removedCount} map area${removedCount === 1 ? "" : "s"}`);
+    }, [busy, image, onMessage, open, persistAnnotations, tool]);
     const clearAnnotations = useCallback(() => {
         if (!annotationsRef.current.length)
             return;
@@ -622,6 +684,7 @@ export function useMapEditor({ open, mapName, onMessage, reloadToken = 0 }) {
         editAtMapPoint,
         placeAnnotationAtMapPoint,
         placeAnnotationAtMapArea,
+        eraseAnnotationsAtMapArea,
         clearAnnotations,
     };
 }
@@ -646,6 +709,11 @@ const TOOL_ICONS = {
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
             <path d="M20.6 13.2 13.2 20.6a2 2 0 0 1-2.8 0l-7-7A2 2 0 0 1 2.8 12V4.4A1.6 1.6 0 0 1 4.4 2.8H12a2 2 0 0 1 1.4.6l7.2 7a2 2 0 0 1 0 2.8z" />
             <circle cx="7.5" cy="7.5" r="1.2" />
+        </svg>
+    ),
+    erase_area: (
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M4 5h16" /><path d="M9 5V3h6v2" /><path d="M7 9l1 11h8l1-11" /><path d="M10 12v5" /><path d="M14 12v5" />
         </svg>
     ),
 };
@@ -692,9 +760,10 @@ export function MapEditorControls({ files, selectedPath, setSelectedPath, tool, 
         backgroundColor: "var(--mc-surface)",
         color: enabled ? "var(--mc-text)" : "var(--mc-text-subtle)",
     });
-    const tools = enableAnnotations ? [...EDIT_TOOLS, ANNOTATION_TOOL] : EDIT_TOOLS;
+    const tools = enableAnnotations ? [...EDIT_TOOLS, ANNOTATION_TOOL, ANNOTATION_ERASE_TOOL] : EDIT_TOOLS;
     const labelActive = enableAnnotations && tool === ANNOTATION_TOOL.id;
-    const brushActive = !labelActive;
+    const eraseAreaActive = enableAnnotations && tool === ANNOTATION_ERASE_TOOL.id;
+    const brushActive = !labelActive && !eraseAreaActive;
 
     return (
         <div className="flex flex-wrap items-center gap-3">

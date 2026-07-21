@@ -3374,8 +3374,8 @@ export default function MissionCanvasPage() {
             }
             interactionMode={mappingEditorActive ? "view" : interactionMode}
             editorActive={mappingEditorActive && !!mapEditor.map && mapEditor.tool !== "view"}
-            editorPaintOnDrag={mapEditor.tool !== "label_marker"}
-            editorAreaSelection={mapEditor.tool === "label_marker"}
+            editorPaintOnDrag={mapEditor.tool !== "label_marker" && mapEditor.tool !== "erase_area"}
+            editorAreaSelection={mapEditor.tool === "label_marker" || mapEditor.tool === "erase_area"}
             fitContainer
             viewKey={mappingEditorActive
               ? `mission-editor:${mapEditor.selectedPath || "none"}`
@@ -3396,7 +3396,7 @@ export default function MissionCanvasPage() {
             onSpotPoseChange={btNodeIsUp || missionRouteMode ? undefined : handleMoveSpot}
             onBehaviorNodePoseChange={handleMoveBehaviorNode}
             onEditorMapPoint={mapEditor.editAtMapPoint}
-            onEditorMapArea={mapEditor.placeAnnotationAtMapArea}
+            onEditorMapArea={mapEditor.tool === "erase_area" ? mapEditor.eraseAnnotationsAtMapArea : mapEditor.placeAnnotationAtMapArea}
             onMapClick={handleClearMapSelection}
             onMapPose={handleCreateSpotAtPose}
             onBtLayerClose={() => setBtLayerSpotId("")}
