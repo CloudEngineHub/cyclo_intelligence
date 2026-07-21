@@ -3351,7 +3351,13 @@ export default function MissionCanvasPage() {
             missionRouteOrder={missionOverlayActive ? missionRouteOrder : []}
             missionRouteMode={workspaceStage === STAGE_AUTHORING && missionRouteMode && !btNodeIsUp}
             selectedMissionRouteSourceId={missionRouteSourceId}
-            mapAnnotations={mappingEditorActive ? mapEditor.annotations : []}
+            mapAnnotations={
+              mappingEditorActive
+                ? mapEditor.annotations
+                : workspaceStage === STAGE_AUTHORING && designMapActive
+                  ? designMapEditor.annotations
+                  : []
+            }
             btLayer={waypointBtLayer}
             showMap={mappingEditorActive ? true : activeLayers.map}
             showGlobalCostmap={mappingEditorActive ? false : needsGlobalCostmap}

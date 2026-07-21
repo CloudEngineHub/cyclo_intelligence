@@ -461,6 +461,22 @@ test('loads a saved map into the design stage', async () => {
     maxval: 255,
     pixels_base64: 'AA==',
   });
+  getMapAnnotations.mockResolvedValue({
+    path: 'factory.pgm',
+    annotations: [{
+      id: 'area_dock',
+      label: 'Dock',
+      color: '#3B241F',
+      pose: { frame_id: 'map', x: 0.5, y: 0.5, yaw: 0 },
+      region: {
+        seed_cell: { x: 0, y: 0 },
+        bounds: { x_min: 0, y_min: 0, x_max: 0, y_max: 0 },
+        cell_count: 1,
+        width: 1,
+        height: 1,
+      },
+    }],
+  });
 
   render(<MissionCanvasPage />);
 
@@ -473,9 +489,19 @@ test('loads a saved map into the design stage', async () => {
   fireEvent.click(screen.getByRole('button', { name: 'Load' }));
 
   await waitFor(() => expect(getPgmImage).toHaveBeenCalledWith('factory.pgm'));
+  await waitFor(() => expect(getMapAnnotations).toHaveBeenCalledWith('factory.pgm'));
   await waitFor(() => expect(latestMapViewerProps().map).toMatchObject({
     info: { width: 1, height: 1 },
   }));
+  await waitFor(() => expect(latestMapViewerProps().mapAnnotations).toEqual([
+    expect.objectContaining({
+      label: 'Dock',
+      color: '#3B241F',
+      region: expect.objectContaining({
+        bounds: { x_min: 0, y_min: 0, x_max: 0, y_max: 0 },
+      }),
+    }),
+  ]));
   expect(screen.getByRole('button', { name: 'Create Waypoint' })).toBeEnabled();
   fireEvent.click(screen.getByRole('button', { name: 'Create Waypoint' }));
   expect(screen.getByRole('menu', { name: 'Waypoint creation options' })).toBeInTheDocument();
