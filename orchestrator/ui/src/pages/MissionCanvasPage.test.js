@@ -259,9 +259,9 @@ test('renders Mission Canvas foundation', async () => {
   expect(screen.getByText('/cmd_vel')).toBeInTheDocument();
   expect(screen.getAllByText('Inactive').length).toBeGreaterThan(0);
   expect(screen.getByRole('button', { name: 'Activate' })).toBeEnabled();
+  // Layers is now a glass popover over the map (not a docked panel), so only its
+  // presence + the switch structure below are asserted.
   expect(screen.getByText('Layers')).toBeInTheDocument();
-  expect(screen.getByText('Layers').parentElement).toHaveClass('overflow-auto');
-  expect(screen.getByText('Layers').parentElement).toHaveClass('rounded-md');
   expect(screen.getByText('Topics')).toBeInTheDocument();
   expect(screen.getByText('/map')).toBeInTheDocument();
   expect(screen.getByText('/scan')).toBeInTheDocument();

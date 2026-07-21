@@ -175,11 +175,10 @@ const MISSION_TEXT_MUTED = "var(--mc-text-muted)";
 // so the assertions stay verifiable — the switch reads identically in light.
 const MISSION_LIVE = "#5b8266";
 const MISSION_SWITCH_OFF = "#dcd7ca";
-const MISSION_SWITCH_BORDER = "var(--mc-border-strong)";
-const MISSION_SWITCH_KNOB_BORDER = "var(--mc-border)";
 // Left-rail + card language (warm-minimal Console shell).
 const MISSION_RAIL_BG = "var(--mc-surface-hover)";
 const MISSION_CARD_RADIUS = 16;
+const MISSION_GLASS = "color-mix(in srgb, var(--mc-surface) 88%, transparent)";
 const MISSION_DESIGN_STORAGE_KEY = "mission_canvas_designs";
 const MISSION_SESSION_STORAGE_KEY = "mission_canvas_session";
 const TELEOP_TOPIC = "/cmd_vel";
@@ -804,7 +803,7 @@ function Panel({ title, children, className = "", compact = false }) {
       }}
     >
       {title && (
-        <div className={`text-[13px] font-bold ${compact ? "mb-2" : "mb-3"}`}>
+        <div className={`text-[13.5px] font-bold ${compact ? "mb-2" : "mb-3"}`}>
           {title}
         </div>
       )}
@@ -813,135 +812,61 @@ function Panel({ title, children, className = "", compact = false }) {
   );
 }
 
-function SaveMapDialog({
-  open,
-  value,
-  busy,
-  onChange,
-  onCancel,
-  onSubmit,
-}) {
+function SaveMapDialog({ open, value, busy, onChange, onCancel, onSubmit }) {
   if (!open) return null;
-
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 px-4"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="mission-save-map-title"
-    >
+    <div className="fixed inset-0 z-50 flex items-center justify-center px-4" role="dialog" aria-modal="true" aria-labelledby="mission-save-map-title"
+      style={{ backgroundColor: "rgba(28,26,23,0.45)", backdropFilter: "blur(3px)" }}>
       <form
-        className="w-full max-w-sm border rounded-md p-4 grid gap-3 shadow-2xl"
-        style={{
-          color: "var(--mc-text)",
-          backgroundColor: "var(--mc-surface)",
-          borderColor: "var(--mc-border-strong)",
-          boxShadow: "var(--mc-shadow)",
-        }}
-        onSubmit={(event) => {
-          event.preventDefault();
-          onSubmit();
-        }}
+        className="w-full max-w-sm grid gap-4 p-5"
+        style={{ color: "var(--mc-text)", backgroundColor: "var(--mc-surface)", border: "1px solid var(--mc-border)", borderRadius: 16, boxShadow: "var(--mc-shadow)" }}
+        onSubmit={(event) => { event.preventDefault(); onSubmit(); }}
       >
-        <div id="mission-save-map-title" className="text-sm font-semibold">
-          Save Map
-        </div>
-        <label className="grid gap-1 text-xs">
+        <div id="mission-save-map-title" className="text-[15px] font-bold">Save Map</div>
+        <label className="grid gap-1.5 text-xs">
           <span style={{ color: "var(--mc-text-muted)" }}>Map name</span>
           <input
-            autoFocus
-            aria-label="Save map name"
-            value={value}
-            disabled={busy}
+            autoFocus aria-label="Save map name" value={value} disabled={busy}
             onChange={(event) => onChange(event.currentTarget.value)}
-            className="h-8 px-2 border rounded-md text-sm"
-            style={{
-              color: "var(--mc-text)",
-              backgroundColor: "var(--mc-surface-2)",
-              borderColor: "var(--mc-border-strong)",
-            }}
+            className="h-9 px-3 text-sm"
+            style={{ color: "var(--mc-text)", backgroundColor: "var(--mc-surface-2)", border: "1px solid var(--mc-border-strong)", borderRadius: 10 }}
           />
         </label>
         <div className="flex justify-end gap-2">
-          <ActionButton disabled={busy} onClick={onCancel} variant="secondary">
-            Cancel
-          </ActionButton>
-          <ActionButton disabled={busy || !value.trim()} type="submit">
-            Save
-          </ActionButton>
+          <ActionButton disabled={busy} onClick={onCancel} variant="secondary">Cancel</ActionButton>
+          <ActionButton disabled={busy || !value.trim()} type="submit">Save</ActionButton>
         </div>
       </form>
     </div>
   );
 }
 
-function LoadMapDialog({
-  open,
-  files,
-  selectedPath,
-  busy,
-  title = "Load Map",
-  fieldLabel = "Map file",
-  selectAriaLabel = "Map file",
-  onChange,
-  onCancel,
-  onSubmit,
-}) {
+function LoadMapDialog({ open, files, selectedPath, busy, title = "Load Map", fieldLabel = "Map file", selectAriaLabel = "Map file", onChange, onCancel, onSubmit }) {
   if (!open) return null;
-
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 px-4"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="mission-load-map-title"
-    >
+    <div className="fixed inset-0 z-50 flex items-center justify-center px-4" role="dialog" aria-modal="true" aria-labelledby="mission-load-map-title"
+      style={{ backgroundColor: "rgba(28,26,23,0.45)", backdropFilter: "blur(3px)" }}>
       <form
-        className="w-full max-w-sm border rounded-md p-4 grid gap-3 shadow-2xl"
-        style={{
-          color: "var(--mc-text)",
-          backgroundColor: "var(--mc-surface)",
-          borderColor: "var(--mc-border-strong)",
-          boxShadow: "var(--mc-shadow)",
-        }}
-        onSubmit={(event) => {
-          event.preventDefault();
-          onSubmit();
-        }}
+        className="w-full max-w-sm grid gap-4 p-5"
+        style={{ color: "var(--mc-text)", backgroundColor: "var(--mc-surface)", border: "1px solid var(--mc-border)", borderRadius: 16, boxShadow: "var(--mc-shadow)" }}
+        onSubmit={(event) => { event.preventDefault(); onSubmit(); }}
       >
-        <div id="mission-load-map-title" className="text-sm font-semibold">
-          {title}
-        </div>
-        <label className="grid gap-1 text-xs">
+        <div id="mission-load-map-title" className="text-[15px] font-bold">{title}</div>
+        <label className="grid gap-1.5 text-xs">
           <span style={{ color: "var(--mc-text-muted)" }}>{fieldLabel}</span>
           <select
-            aria-label={selectAriaLabel}
-            value={selectedPath}
-            disabled={busy || files.length === 0}
+            aria-label={selectAriaLabel} value={selectedPath} disabled={busy || files.length === 0}
             onChange={(event) => onChange(event.currentTarget.value)}
-            className="h-8 px-2 border rounded-md text-sm"
-            style={{
-              color: "var(--mc-text)",
-              backgroundColor: "var(--mc-surface-2)",
-              borderColor: "var(--mc-border-strong)",
-            }}
+            className="h-9 px-2.5 text-sm"
+            style={{ color: "var(--mc-text)", backgroundColor: "var(--mc-surface-2)", border: "1px solid var(--mc-border-strong)", borderRadius: 10 }}
           >
-            {files.length === 0 ? (
-              <option value="">No maps found</option>
-            ) : files.map((file) => (
-              <option key={file.path} value={file.path}>
-                {file.name || file.path}
-              </option>
-            ))}
+            {files.length === 0 ? (<option value="">No maps found</option>)
+              : files.map((file) => (<option key={file.path} value={file.path}>{file.name || file.path}</option>))}
           </select>
         </label>
         <div className="flex justify-end gap-2">
-          <ActionButton disabled={busy} onClick={onCancel} variant="secondary">
-            Cancel
-          </ActionButton>
-          <ActionButton disabled={busy || !selectedPath} type="submit" variant="secondary">
-            Load
-          </ActionButton>
+          <ActionButton disabled={busy} onClick={onCancel} variant="secondary">Cancel</ActionButton>
+          <ActionButton disabled={busy || !selectedPath} type="submit" variant="secondary">Load</ActionButton>
         </div>
       </form>
     </div>
@@ -949,42 +874,28 @@ function LoadMapDialog({
 }
 
 function LayerToggle({ label, checked, compact = false, onChange }) {
+  const trackW = compact ? 36 : 40;
+  const trackH = compact ? 20 : 22;
+  const knob = trackH - 6;
   return (
-    <div
-      className={`${compact ? "min-h-7" : "min-h-8"} flex items-center justify-between gap-3 text-xs font-medium select-none`}
-      style={{
-        color: MISSION_TEXT,
-      }}
-    >
-      <span className="truncate">{label}</span>
+    <div className={`${compact ? "min-h-6" : "min-h-7"} flex items-center justify-between gap-3 text-xs font-medium select-none`} style={{ color: MISSION_TEXT }}>
+      <span className="truncate" style={{ color: checked ? MISSION_TEXT : MISSION_TEXT_MUTED }}>{label}</span>
       <button
         type="button"
         role="switch"
         aria-checked={checked}
         aria-label={label}
         onClick={() => onChange(!checked)}
-        className={`${compact ? "h-5 w-9" : "h-6 w-11"} inline-flex rounded-full relative shrink-0 border cursor-pointer transition-colors active:translate-y-px`}
-        style={{
-          backgroundColor: checked
-            ? MISSION_LIVE
-            : MISSION_SWITCH_OFF,
-          borderColor: checked
-            ? MISSION_LIVE
-            : MISSION_SWITCH_BORDER,
-          boxShadow: checked
-            ? "inset 0 0 0 1px rgba(255,255,255,0.18)"
-            : "inset 0 0 0 1px rgba(15,23,42,0.08)",
-        }}
+        className="inline-flex relative shrink-0 cursor-pointer transition-colors active:translate-y-px"
+        style={{ width: trackW, height: trackH, borderRadius: 999, border: "none", backgroundColor: checked ? MISSION_LIVE : MISSION_SWITCH_OFF }}
       >
         <span
           aria-hidden="true"
-          className={`${compact ? "h-4 w-4 top-0.5" : "h-5 w-5 top-0.5"} block absolute left-0.5 rounded-full bg-white transition-transform duration-150 ease-out`}
+          className="block absolute rounded-full transition-transform duration-150 ease-out"
           style={{
-            border: `1px solid ${MISSION_SWITCH_KNOB_BORDER}`,
-            boxShadow: "0 1px 3px rgba(15,23,42,0.24)",
-            transform: checked
-              ? `translateX(${compact ? "16px" : "20px"})`
-              : "translateX(0)",
+            width: knob, height: knob, top: 3, left: 3, backgroundColor: "#fff",
+            boxShadow: "0 1px 2px rgba(28,26,23,0.3)",
+            transform: checked ? `translateX(${trackW - knob - 6}px)` : "translateX(0)",
           }}
         />
       </button>
@@ -992,35 +903,32 @@ function LayerToggle({ label, checked, compact = false, onChange }) {
   );
 }
 
-function LayersPanel({ layerToggles, compact = false }) {
+// Layers as a glass popover over the map (replaces the docked LayersPanel).
+function LayersPopover({ layerToggles }) {
   return (
-    <Panel title="Layers" compact={compact} className={`grid content-start overflow-auto ${compact ? "gap-1" : "gap-2"}`}>
-      <div className={`grid min-w-0 ${compact ? "gap-1" : "gap-2"}`}>
+    <div
+      className="absolute top-5 right-5 z-10 p-3.5"
+      style={{ width: 190, borderRadius: 14, backgroundColor: MISSION_GLASS, border: "1px solid var(--mc-border)", boxShadow: "var(--mc-shadow)", backdropFilter: "blur(8px)" }}
+    >
+      <div className="text-[12.5px] font-bold mb-2.5">Layers</div>
+      <div className="grid gap-2.5">
         {layerToggles.map((layer) => (
-          <LayerToggle
-            key={layer.id}
-            label={layer.label}
-            checked={layer.checked}
-            compact={compact}
-            onChange={layer.onChange}
-          />
+          <LayerToggle key={layer.id} label={layer.label} checked={layer.checked} compact onChange={layer.onChange} />
         ))}
       </div>
-    </Panel>
+    </div>
   );
 }
 
 function TopicStatusPanel({ topicRows }) {
   return (
-    <Panel title="Topics" className="grid gap-1 text-xs min-h-0 overflow-auto content-start">
+    <Panel title="Topics" className="grid gap-2 text-xs min-h-0 overflow-auto content-start">
       {topicRows.map(({ topic, isLive }) => (
-        <div key={topic} className="min-h-5 flex items-center justify-between gap-2 min-w-0">
-          <div className="font-mono truncate min-w-0">
-            {topic}
-          </div>
+        <div key={topic} className="min-h-6 flex items-center justify-between gap-2 min-w-0">
+          <div className="font-mono truncate min-w-0 text-[11.5px]" style={{ color: "var(--mc-text-muted)" }}>{topic}</div>
           <span
-            className="shrink-0"
-            style={{ color: isLive ? MISSION_LIVE : MISSION_TEXT_MUTED }}
+            className="shrink-0 text-[11px] font-semibold px-2 py-0.5"
+            style={{ borderRadius: 6, color: isLive ? "var(--mc-success)" : "var(--mc-text-subtle)", backgroundColor: isLive ? "color-mix(in srgb, var(--mc-success) 16%, transparent)" : "var(--mc-surface-2)" }}
           >
             {isLive ? "live" : "wait"}
           </span>
@@ -1221,12 +1129,12 @@ function TeleopButton({
       onPointerUp={handlePointerStop}
       onPointerCancel={handlePointerStop}
       onPointerLeave={handlePointerStop}
-      className="h-12 w-14 border rounded-md text-base font-bold transition-all active:translate-y-px disabled:opacity-45"
+      className="h-12 w-14 text-[16px] font-bold transition-all active:translate-y-px disabled:opacity-45"
       style={{
-        color: active ? "var(--vscode-button-foreground)" : MISSION_TEXT,
-        backgroundColor: active ? "var(--vscode-button-background)" : MISSION_STAGE_EMPTY,
-        borderColor: MISSION_BUTTON_BORDER,
-        boxShadow: "none",
+        borderRadius: 13,
+        border: `1px solid ${active ? "var(--mc-text)" : "var(--mc-border-strong)"}`,
+        color: active ? "var(--mc-bg)" : "var(--mc-text)",
+        backgroundColor: active ? "var(--mc-text)" : "var(--mc-surface-2)",
       }}
     >
       {children}
@@ -3249,8 +3157,26 @@ export default function MissionCanvasPage() {
         {/* TOP BAR — stage title + contextual actions + status */}
         <header
           className="shrink-0 h-14 flex items-center justify-between gap-4 px-6 border-b"
-          style={{ borderColor: MISSION_BORDER }}
+          style={{ borderColor: MISSION_BORDER, backgroundColor: MISSION_SURFACE }}
         >
+          {workspaceStage === STAGE_AUTHORING && waypointBtLayer ? (
+            <>
+              <div className="flex items-center gap-2.5 min-w-0 text-[14px]">
+                <span className="font-bold tracking-tight">Design</span>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--mc-text-subtle)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m9 18 6-6-6-6" /></svg>
+                <span className="font-semibold truncate" style={{ color: MISSION_TEXT_MUTED }}>{waypointBtLayer.spot.label || waypointBtLayer.spot.id}</span>
+                <span className="text-[11px] font-mono shrink-0" style={{ color: "var(--mc-text-subtle)" }}>· Local BT</span>
+              </div>
+              <div className="flex items-center gap-2.5">
+                <div className="flex items-center gap-2 px-3 py-1.5" style={{ borderRadius: 999, backgroundColor: "color-mix(in srgb, var(--mc-success) 14%, transparent)", border: "1px solid color-mix(in srgb, var(--mc-success) 35%, transparent)" }}>
+                  <span className="w-2 h-2 rounded-full" style={{ backgroundColor: "var(--mc-success)" }} />
+                  <span className="text-[12px] font-semibold" style={{ color: "var(--mc-success)" }}>BT Active · {waypointBtLayer.executionLabel}</span>
+                </div>
+                <ActionButton disabled={!!btNodeBusy} onClick={handleBtNodeDeactivate} variant="danger">Deactivate BT</ActionButton>
+              </div>
+            </>
+          ) : (
+            <>
           <div className="flex items-center gap-3 min-w-0">
             <span className="text-[16px] font-bold tracking-tight" style={{ color: MISSION_TEXT }}>
               {WORKSPACE_STAGES.find((stage) => stage.id === workspaceStage)?.label}
@@ -3295,6 +3221,8 @@ export default function MissionCanvasPage() {
               <span className="text-[12px] font-semibold whitespace-nowrap" style={{ color: running ? "var(--mc-success)" : MISSION_TEXT_MUTED }}>Status: {running ? "running" : "idle"}</span>
             </div>
           </div>
+            </>
+          )}
         </header>
 
         {/* map editor sub-toolbar (only in mapping + editor mode) */}
@@ -3383,7 +3311,7 @@ export default function MissionCanvasPage() {
             onBtLayerClose={() => setBtLayerSpotId("")}
           />
 
-          {workspaceStage === STAGE_AUTHORING && !selectedBtLayerSpot && (
+          {workspaceStage === STAGE_AUTHORING && !waypointBtLayer && (
             <>
               {/* HUD toolbar — top-left (glass): Create Waypoint + Edit/Clear Route */}
               <div
@@ -3434,23 +3362,11 @@ export default function MissionCanvasPage() {
                   Clear Route
                 </button>
               </div>
-
-              {/* Layers popover — top-right (glass) */}
-              {layerToggles.length > 0 && (
-                <div
-                  className="absolute top-5 right-5 z-10 p-3.5"
-                  style={{ width: 180, borderRadius: 14, backgroundColor: "color-mix(in srgb, var(--mc-surface) 90%, transparent)", border: "1px solid var(--mc-border)", boxShadow: "var(--mc-shadow)", backdropFilter: "blur(8px)" }}
-                >
-                  <div className="text-[12.5px] font-bold mb-2.5">Layers</div>
-                  <div className="grid gap-2.5">
-                    {layerToggles.map((layer) => (
-                      <LayerToggle key={layer.id} label={layer.label} checked={layer.checked} compact onChange={layer.onChange} />
-                    ))}
-                  </div>
-                </div>
-              )}
             </>
           )}
+
+          {/* Layers popover — all stages, hidden during the BT split view */}
+          {!waypointBtLayer && <LayersPopover layerToggles={layerToggles} />}
         </section>
 
         {workspaceStage === STAGE_AUTHORING ? (
@@ -3576,7 +3492,6 @@ export default function MissionCanvasPage() {
             ) : (
               <RunSessionPanel mapName={currentMapName} running={running} />
             )}
-            <LayersPanel layerToggles={layerToggles} compact={workspaceStage === STAGE_MAPPING} />
             <TopicStatusPanel topicRows={topicRows} />
           </aside>
         )}

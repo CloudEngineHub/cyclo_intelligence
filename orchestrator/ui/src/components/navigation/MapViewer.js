@@ -105,7 +105,24 @@ function scanCellsForGrid(grid, scan, scanPose, framePose) {
     });
     return cells;
 }
-function makeOccupancyTexture(grid, alpha, mode, highlightedCells = null) {
+// Warm, theme-aware occupancy palette (see design handoff, turn 6).
+const OCC_COLORS = {
+    light: {
+        unknown: [227, 221, 207, 220], // #E3DDCF, blends into paper scene bg
+        free: [250, 248, 243, 255],    // #FAF8F3
+        wall: [42, 38, 32, 255],       // #2A2620 warm ink
+        lethal: [193, 78, 52, 215],    // #C14E34
+        inflate: [217, 130, 43, 235],  // #D9822B
+    },
+    dark: {
+        unknown: [30, 28, 24, 220],    // #1E1C18
+        free: [43, 40, 35, 255],       // #2B2823
+        wall: [216, 210, 196, 255],    // #D8D2C4 cream walls (blueprint invert)
+        lethal: [209, 90, 62, 215],    // #D15A3E
+        inflate: [224, 154, 69, 235],  // #E09A45
+    },
+};
+function makeOccupancyTexture(grid, alpha, mode, highlightedCells = null, isDark = false) {
     var _a;
     const meta = gridMeta(grid);
     if (!meta || !grid.data || grid.data.length < meta.width * meta.height)
@@ -116,6 +133,7 @@ function makeOccupancyTexture(grid, alpha, mode, highlightedCells = null) {
     const ctx = canvas.getContext("2d");
     if (!ctx)
         return null;
+    const palette = isDark ? OCC_COLORS.dark : OCC_COLORS.light;
     const image = ctx.createImageData(meta.width, meta.height);
     for (let y = 0; y < meta.height; y += 1) {
         for (let x = 0; x < meta.width; x += 1) {
@@ -127,68 +145,42 @@ function makeOccupancyTexture(grid, alpha, mode, highlightedCells = null) {
             let b = 118;
             let a = alpha;
             if (mode === "map") {
-                if (value < 0) {
-                    r = 150;
-                    g = 150;
-                    b = 150;
-                    a = 210;
-                }
-                else if (value === 0) {
-                    r = 245;
-                    g = 245;
-                    b = 245;
-                    a = 255;
-                }
-                else {
-                    r = 28;
-                    g = 28;
-                    b = 28;
-                    a = 255;
-                }
+                const px = value < 0 ? palette.unknown : value === 0 ? palette.free : palette.wall;
+                r = px[0]; g = px[1]; b = px[2]; a = px[3];
             }
             else if (mode === "globalCostmap") {
                 if (value < 0) {
-                    r = 12;
-                    g = 15;
-                    b = 15;
-                    a = 210;
+                    // fully transparent over the warm scene — unknown costmap cells add noise
+                    r = 0; g = 0; b = 0; a = 0;
                 }
                 else if (value === 0) {
-                    r = 10;
-                    g = 13;
-                    b = 13;
-                    a = 205;
+                    r = 0; g = 0; b = 0; a = 0;
                 }
                 else {
+                    // warm-tinted gray ramp (same intensity curve as before)
                     const normalized = Math.min(Math.max(value, 0), 100) / 100;
                     const gray = Math.round(220 - normalized * 205);
                     r = gray;
-                    g = gray;
-                    b = gray;
+                    g = Math.round(gray * 0.97);
+                    b = Math.round(gray * 0.90);
                     a = Math.round(95 + normalized * 150);
                 }
             }
             else if (mode === "localCostmap") {
                 if (highlightedCells === null || highlightedCells === void 0 ? void 0 : highlightedCells.has(srcIndex)) {
-                    r = 220;
-                    g = 28;
-                    b = 28;
-                    a = 215;
+                    const px = palette.lethal;
+                    r = px[0]; g = px[1]; b = px[2]; a = px[3];
                 }
                 else if (value <= 20) {
                     a = 0;
                 }
                 else if (value < 70) {
-                    r = 220;
-                    g = 28;
-                    b = 28;
-                    a = 215;
+                    const px = palette.lethal;
+                    r = px[0]; g = px[1]; b = px[2]; a = px[3];
                 }
                 else {
-                    r = 245;
-                    g = 124;
-                    b = 0;
-                    a = 235;
+                    const px = palette.inflate;
+                    r = px[0]; g = px[1]; b = px[2]; a = px[3];
                 }
             }
             image.data[dstIndex] = r;
@@ -230,10 +222,10 @@ function disposeObject(object) {
         }
     });
 }
-function makeGridPlane(grid, mode, z, framePose = null, highlightedCells = null) {
+function makeGridPlane(grid, mode, z, framePose = null, highlightedCells = null, isDark = false) {
     var _a, _b, _c, _d;
     const meta = gridMeta(grid);
-    const texture = makeOccupancyTexture(grid, mode === "map" ? 255 : 170, mode, highlightedCells);
+    const texture = makeOccupancyTexture(grid, mode === "map" ? 255 : 170, mode, highlightedCells, isDark);
     if (!meta || !texture)
         return null;
     const width = meta.width * meta.resolution;
@@ -894,10 +886,10 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, 
         mapLayer.clear();
         if (!showMap || !map)
             return;
-        const mapPlane = makeGridPlane(map, "map", 0);
+        const mapPlane = makeGridPlane(map, "map", 0, null, null, isDark);
         if (mapPlane)
             mapLayer.add(mapPlane);
-    }, [map, showMap]);
+    }, [map, showMap, isDark]);
     useEffect(() => {
         var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p, _q, _r, _s, _t, _u, _v, _w, _x, _y, _z, _0, _1, _2, _3, _4;
         const scene = sceneRef.current;
@@ -916,7 +908,7 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, 
         const tfFramePoseByName = new Map(tfFramePoses.map(({ frame, pose: framePose }) => [frame, framePose]));
         if (showGlobalCostmap) {
             if (globalCostmap) {
-                const plane = makeGridPlane(globalCostmap, "globalCostmap", 0.03);
+                const plane = makeGridPlane(globalCostmap, "globalCostmap", 0.03, null, null, isDark);
                 if (plane)
                     layers.add(plane);
             }
@@ -930,7 +922,7 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, 
                 const scanFrame = normalizeFrameId((_c = scan === null || scan === void 0 ? void 0 : scan.header) === null || _c === void 0 ? void 0 : _c.frame_id) || "base_link";
                 const scanPose = (_d = tfFramePoseByName.get(scanFrame)) !== null && _d !== void 0 ? _d : pose;
                 const scanCells = scanCellsForGrid(localCostmap, scan, scanPose, localFramePose);
-                const plane = makeGridPlane(localCostmap, "localCostmap", 0.1, localFramePose, scanCells);
+                const plane = makeGridPlane(localCostmap, "localCostmap", 0.1, localFramePose, scanCells, isDark);
                 if (plane)
                     layers.add(plane);
             }
@@ -1105,6 +1097,7 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, 
         spots,
         tf,
         viewKey,
+        isDark,
     ]);
     useEffect(() => {
         const renderer = rendererRef.current;

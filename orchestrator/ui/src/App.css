@@ -16,6 +16,12 @@
  * Author: Kiwoong Park
  */
 
+/* Mission Canvas typography (warm-minimal): Hanken Grotesk (UI) + IBM Plex Mono
+ * (data). @import must precede all other rules to be honored. On offline robot
+ * PCs this fetch fails silently and the stacks fall back to Pretendard / the
+ * system mono — self-host the two families to guarantee them offline. */
+@import url('https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500&display=swap');
+
 @font-face {
   font-family: 'Pretendard Variable';
   src: url('../public/fonts/PretendardVariable.woff2') format('woff2-variations');
@@ -340,4 +346,18 @@ body {
 }
 .mission-canvas-page .react-flow__controls-button:hover {
   background: #efece3;
+}
+
+/* ── Typography (scoped): Hanken Grotesk UI, IBM Plex Mono for data —
+ * both fall back to Pretendard / system mono when the webfont is absent. */
+.mission-canvas-page {
+  font-family: "Hanken Grotesk", "Pretendard Variable", Pretendard, system-ui, sans-serif;
+  letter-spacing: -0.01em;
+  -webkit-font-smoothing: antialiased;
+}
+.mission-canvas-page .font-mono,
+.mission-canvas-page code,
+.mission-canvas-page kbd {
+  font-family: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  letter-spacing: 0;
 }
