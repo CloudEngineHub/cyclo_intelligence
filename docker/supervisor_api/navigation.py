@@ -182,6 +182,7 @@ class MapAnnotationBounds(BaseModel):
 class MapAnnotationRegion(BaseModel):
     seed_cell: MapAnnotationSeedCell
     bounds: Optional[MapAnnotationBounds] = None
+    cells: Optional[list[MapAnnotationSeedCell]] = None
     cell_count: Optional[int] = Field(default=None, ge=0)
     width: Optional[int] = Field(default=None, ge=0)
     height: Optional[int] = Field(default=None, ge=0)
@@ -633,6 +634,10 @@ def _annotation_payload(annotation: MapAnnotation) -> dict[str, object]:
                 "x_max": int(bounds.x_max),
                 "y_max": int(bounds.y_max),
             } if bounds is not None else None,
+            "cells": [
+                {"x": int(cell.x), "y": int(cell.y)}
+                for cell in (annotation.region.cells or [])
+            ] or None,
             "cell_count": annotation.region.cell_count,
             "width": annotation.region.width,
             "height": annotation.region.height,
@@ -649,6 +654,7 @@ def _annotation_from_raw(raw: object) -> Optional[dict[str, object]]:
     region = raw.get("region")
     seed_cell = region.get("seed_cell") if isinstance(region, dict) else None
     bounds = region.get("bounds") if isinstance(region, dict) else None
+    cells = region.get("cells") if isinstance(region, dict) else None
     try:
         annotation = MapAnnotation(
             id=str(raw.get("id") or ""),
@@ -671,6 +677,14 @@ def _annotation_from_raw(raw: object) -> Optional[dict[str, object]]:
                     x_max=int(bounds.get("x_max")),
                     y_max=int(bounds.get("y_max")),
                 ) if isinstance(bounds, dict) else None,
+                cells=[
+                    MapAnnotationSeedCell(
+                        x=int(cell.get("x")),
+                        y=int(cell.get("y")),
+                    )
+                    for cell in cells
+                    if isinstance(cell, dict)
+                ] if isinstance(cells, list) else None,
                 cell_count=(
                     int(region.get("cell_count"))
                     if region.get("cell_count") is not None

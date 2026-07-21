@@ -119,13 +119,17 @@ function annotationCoversPgmPixel(annotation, image, pixelX, pixelY) {
         return false;
     if ((region.width && region.width !== image.width) || (region.height && region.height !== image.height))
         return false;
+    const gridY = image.height - 1 - pixelY;
+    const cells = normalizeRegionCells(region.cells, image.width, image.height);
+    if (cells.length) {
+        return cells.some((cell) => cell.x === pixelX && cell.y === gridY);
+    }
     const bounds = region.bounds || {
         x_min: region.seed_cell.x,
         y_min: region.seed_cell.y,
         x_max: region.seed_cell.x,
         y_max: region.seed_cell.y,
     };
-    const gridY = image.height - 1 - pixelY;
     return (pixelX >= bounds.x_min &&
         pixelX <= bounds.x_max &&
         gridY >= bounds.y_min &&
@@ -172,6 +176,163 @@ function annotationIntersectsGridBounds(annotation, image, selectionBounds) {
         bounds.x_min > selectionBounds.x_max ||
         bounds.y_max < selectionBounds.y_min ||
         bounds.y_min > selectionBounds.y_max);
+}
+function cellKey(cell) {
+    return `${cell.x}:${cell.y}`;
+}
+function normalizeRegionCells(cells, width = null, height = null) {
+    if (!Array.isArray(cells))
+        return [];
+    const seen = new Set();
+    const normalized = [];
+    cells.forEach((cell) => {
+        if (!cell)
+            return;
+        const x = Math.floor(Number(cell.x));
+        const y = Math.floor(Number(cell.y));
+        if (!Number.isFinite(x) || !Number.isFinite(y) || x < 0 || y < 0)
+            return;
+        if (width && x >= width)
+            return;
+        if (height && y >= height)
+            return;
+        const key = `${x}:${y}`;
+        if (seen.has(key))
+            return;
+        seen.add(key);
+        normalized.push({ x, y });
+    });
+    normalized.sort((a, b) => a.y - b.y || a.x - b.x);
+    return normalized;
+}
+function pgmPixelToGridCell(image, pixel) {
+    return {
+        x: pixel.pixelX,
+        y: image.height - 1 - pixel.pixelY,
+    };
+}
+function gridCellToPgmIndex(image, cell) {
+    const pgmY = image.height - 1 - cell.y;
+    if (cell.x < 0 || cell.x >= image.width || pgmY < 0 || pgmY >= image.height)
+        return -1;
+    return cell.x + pgmY * image.width;
+}
+function annotationCells(annotation, image, pixels = null) {
+    const region = normalizeAnnotationRegion(annotation === null || annotation === void 0 ? void 0 : annotation.region);
+    if (!region)
+        return [];
+    if ((region.width && region.width !== image.width) || (region.height && region.height !== image.height))
+        return [];
+    if (Array.isArray(region.cells) && region.cells.length) {
+        return normalizeRegionCells(region.cells, image.width, image.height);
+    }
+    const bounds = annotationGridBounds(annotation, image);
+    if (!bounds)
+        return [];
+    const cells = [];
+    for (let y = bounds.y_min; y <= bounds.y_max; y += 1) {
+        for (let x = bounds.x_min; x <= bounds.x_max; x += 1) {
+            const cell = { x, y };
+            const index = pixels ? gridCellToPgmIndex(image, cell) : -1;
+            if (pixels && (index < 0 || pixels[index] < FREE_THRESHOLD))
+                continue;
+            cells.push(cell);
+        }
+    }
+    return cells;
+}
+function cellsToRegion(cells, image) {
+    const normalizedCells = normalizeRegionCells(cells, image.width, image.height);
+    if (!normalizedCells.length)
+        return null;
+    let xMin = normalizedCells[0].x;
+    let xMax = normalizedCells[0].x;
+    let yMin = normalizedCells[0].y;
+    let yMax = normalizedCells[0].y;
+    let sumX = 0;
+    let sumY = 0;
+    normalizedCells.forEach((cell) => {
+        xMin = Math.min(xMin, cell.x);
+        xMax = Math.max(xMax, cell.x);
+        yMin = Math.min(yMin, cell.y);
+        yMax = Math.max(yMax, cell.y);
+        sumX += cell.x;
+        sumY += cell.y;
+    });
+    const seedCell = {
+        x: Math.floor(sumX / normalizedCells.length),
+        y: Math.floor(sumY / normalizedCells.length),
+    };
+    const centroidPgmY = image.height - 1 - (sumY / normalizedCells.length);
+    const centroid = pgmPixelToMapPoint(image, sumX / normalizedCells.length, centroidPgmY);
+    return {
+        pose: { frame_id: "map", x: centroid.x, y: centroid.y, yaw: 0 },
+        region: {
+            seed_cell: seedCell,
+            bounds: { x_min: xMin, y_min: yMin, x_max: xMax, y_max: yMax },
+            cells: normalizedCells,
+            cell_count: normalizedCells.length,
+            width: image.width,
+            height: image.height,
+        },
+    };
+}
+function coveredAnnotationCellSet(annotations, image, pixels, excludeId = "") {
+    const covered = new Set();
+    annotations.forEach((annotation) => {
+        if (excludeId && annotation.id === excludeId)
+            return;
+        annotationCells(annotation, image, pixels).forEach((cell) => covered.add(cellKey(cell)));
+    });
+    return covered;
+}
+function brushCellsForSegment(pixels, image, startPixel, endPixel, brushSizeCells, coveredCells = new Set()) {
+    const cells = new Map();
+    const addBrush = (pixelX, pixelY) => {
+        const offset = Math.floor(brushSizeCells / 2);
+        for (let y = pixelY - offset; y < pixelY - offset + brushSizeCells; y += 1) {
+            if (y < 0 || y >= image.height)
+                continue;
+            for (let x = pixelX - offset; x < pixelX - offset + brushSizeCells; x += 1) {
+                if (x < 0 || x >= image.width)
+                    continue;
+                if (pixels[x + y * image.width] < FREE_THRESHOLD)
+                    continue;
+                const cell = pgmPixelToGridCell(image, { pixelX: x, pixelY: y });
+                const key = cellKey(cell);
+                if (coveredCells.has(key))
+                    continue;
+                cells.set(key, cell);
+            }
+        }
+    };
+    let x0 = startPixel.pixelX;
+    let y0 = startPixel.pixelY;
+    const x1 = endPixel.pixelX;
+    const y1 = endPixel.pixelY;
+    const dx = Math.abs(x1 - x0);
+    const sx = x0 < x1 ? 1 : -1;
+    const dy = -Math.abs(y1 - y0);
+    const sy = y0 < y1 ? 1 : -1;
+    let err = dx + dy;
+    while (true) {
+        addBrush(x0, y0);
+        if (x0 === x1 && y0 === y1)
+            break;
+        const e2 = 2 * err;
+        if (e2 >= dy) {
+            err += dy;
+            x0 += sx;
+        }
+        if (e2 <= dx) {
+            err += dx;
+            y0 += sy;
+        }
+    }
+    return Array.from(cells.values());
+}
+function annotationAtPixel(annotations, image, pixel) {
+    return annotations.find((annotation) => annotationCoversPgmPixel(annotation, image, pixel.pixelX, pixel.pixelY)) || null;
 }
 function selectedFreePgmRegion(pixels, image, startPixel, endPixel, existingAnnotations = []) {
     if (!pixels || !image || !startPixel || !endPixel)
@@ -349,6 +510,11 @@ function normalizeAnnotationRegion(region) {
             };
         }
     }
+    const cells = normalizeRegionCells(region === null || region === void 0 ? void 0 : region.cells, normalized.width, normalized.height);
+    if (cells.length) {
+        normalized.cells = cells;
+        normalized.cell_count = cells.length;
+    }
     return normalized;
 }
 function normalizeAnnotation(annotation) {
@@ -379,6 +545,8 @@ export function useMapEditor({ open, mapName, onMessage, reloadToken = 0 }) {
     const pixelsRef = useRef(null);
     const annotationsRef = useRef([]);
     const lastPaintPixelRef = useRef(null);
+    const areaPaintRef = useRef(null);
+    const areaEraseRef = useRef(null);
     const [files, setFiles] = useState([]);
     const [selectedPath, setSelectedPath] = useState("");
     const [image, setImage] = useState(null);
@@ -431,6 +599,8 @@ export function useMapEditor({ open, mapName, onMessage, reloadToken = 0 }) {
             setPixels(null);
             pixelsRef.current = null;
             lastPaintPixelRef.current = null;
+            areaPaintRef.current = null;
+            areaEraseRef.current = null;
             setUndoStack([]);
             setRedoStack([]);
             setDirty(false);
@@ -447,6 +617,8 @@ export function useMapEditor({ open, mapName, onMessage, reloadToken = 0 }) {
             const decodedPixels = decodePgmPixels(response);
             pixelsRef.current = decodedPixels;
             lastPaintPixelRef.current = null;
+            areaPaintRef.current = null;
+            areaEraseRef.current = null;
             setPixels(decodedPixels);
             setUndoStack([]);
             setRedoStack([]);
@@ -507,6 +679,8 @@ export function useMapEditor({ open, mapName, onMessage, reloadToken = 0 }) {
     }, [image, pixels]);
     useEffect(() => {
         lastPaintPixelRef.current = null;
+        areaPaintRef.current = null;
+        areaEraseRef.current = null;
     }, [brushSize, open, selectedPath, tool]);
     const editAtMapPoint = useCallback((x, y, phase = "paint") => {
         if (phase === "end") {
@@ -562,6 +736,144 @@ export function useMapEditor({ open, mapName, onMessage, reloadToken = 0 }) {
         setRedoStack([]);
         applyAnnotationsSnapshot(nextAnnotations, successMessage);
     }, [applyAnnotationsSnapshot, busy, selectedPath]);
+    const recordAnnotationUndo = useCallback((session) => {
+        if (!session || session.undoPushed)
+            return;
+        const currentAnnotations = annotationsRef.current;
+        setUndoStack((stack) => [...stack, { type: "annotations", annotations: currentAnnotations }]);
+        setRedoStack([]);
+        session.undoPushed = true;
+    }, []);
+    const updatePaintedArea = useCallback((pixel, phase) => {
+        const currentPixels = pixelsRef.current;
+        if (!open || !image || busy || !currentPixels)
+            return;
+        let session = areaPaintRef.current;
+        if (phase === "start" || !session) {
+            session = {
+                id: makeAnnotationId(),
+                label: annotationLabel.trim() || "Area",
+                color: chooseAnnotationColor(annotationsRef.current),
+                lastPixel: pixel,
+                undoPushed: false,
+            };
+            areaPaintRef.current = session;
+        }
+        const startPixel = phase === "move" && session.lastPixel ? session.lastPixel : pixel;
+        const coveredCells = coveredAnnotationCellSet(annotationsRef.current, image, currentPixels, session.id);
+        const newCells = brushCellsForSegment(currentPixels, image, startPixel, pixel, brushSize, coveredCells);
+        session.lastPixel = pixel;
+        if (!newCells.length) {
+            onMessage("Paint over unmarked white free-space");
+            return;
+        }
+        const currentAnnotations = annotationsRef.current;
+        const annotationIndex = currentAnnotations.findIndex((annotation) => annotation.id === session.id);
+        const existingAnnotation = annotationIndex >= 0 ? currentAnnotations[annotationIndex] : null;
+        const mergedCells = new Map(annotationCells(existingAnnotation, image, currentPixels).map((cell) => [cellKey(cell), cell]));
+        newCells.forEach((cell) => mergedCells.set(cellKey(cell), cell));
+        const geometry = cellsToRegion(Array.from(mergedCells.values()), image);
+        if (!geometry)
+            return;
+        recordAnnotationUndo(session);
+        const nextAnnotation = normalizeAnnotation({
+            ...(existingAnnotation || {}),
+            id: session.id,
+            label: session.label,
+            color: session.color,
+            pose: geometry.pose,
+            region: geometry.region,
+        });
+        const nextAnnotations = annotationIndex >= 0
+            ? currentAnnotations.map((annotation, index) => index === annotationIndex ? nextAnnotation : annotation)
+            : [...currentAnnotations, nextAnnotation];
+        applyAnnotationsSnapshot(nextAnnotations, `Painted area ${nextAnnotation.label}`);
+    }, [annotationLabel, applyAnnotationsSnapshot, brushSize, busy, image, onMessage, open, recordAnnotationUndo]);
+    const applyAreaCellErase = useCallback((startPixel, endPixel, session) => {
+        const currentPixels = pixelsRef.current;
+        if (!open || !image || busy || !currentPixels)
+            return false;
+        const eraseCells = brushCellsForSegment(currentPixels, image, startPixel, endPixel, brushSize);
+        if (!eraseCells.length)
+            return false;
+        const eraseKeys = new Set(eraseCells.map(cellKey));
+        let changed = false;
+        const nextAnnotations = [];
+        annotationsRef.current.forEach((annotation) => {
+            const originalCells = annotationCells(annotation, image, currentPixels);
+            const remainingCells = originalCells
+                .filter((cell) => !eraseKeys.has(cellKey(cell)));
+            if (remainingCells.length !== originalCells.length)
+                changed = true;
+            if (!remainingCells.length)
+                return;
+            const geometry = cellsToRegion(remainingCells, image);
+            if (!geometry)
+                return;
+            nextAnnotations.push(normalizeAnnotation({
+                ...annotation,
+                pose: geometry.pose,
+                region: geometry.region,
+            }));
+        });
+        if (!changed)
+            return false;
+        recordAnnotationUndo(session);
+        applyAnnotationsSnapshot(nextAnnotations, "Erased area pixels");
+        return true;
+    }, [applyAnnotationsSnapshot, brushSize, busy, image, open, recordAnnotationUndo]);
+    const deleteAnnotationAtPixel = useCallback((pixel, session) => {
+        if (!open || !image || busy)
+            return;
+        const target = annotationAtPixel(annotationsRef.current, image, pixel);
+        if (!target) {
+            onMessage("No map area selected");
+            return;
+        }
+        recordAnnotationUndo(session);
+        applyAnnotationsSnapshot(
+            annotationsRef.current.filter((annotation) => annotation.id !== target.id),
+            `Removed area ${target.label || "Area"}`,
+        );
+    }, [applyAnnotationsSnapshot, busy, image, onMessage, open, recordAnnotationUndo]);
+    const editAreaAtMapPoint = useCallback((x, y, phase = "paint") => {
+        if (!open || !image || busy || (tool !== ANNOTATION_TOOL.id && tool !== ANNOTATION_ERASE_TOOL.id))
+            return;
+        if (phase === "end") {
+            if (tool === ANNOTATION_ERASE_TOOL.id) {
+                const session = areaEraseRef.current;
+                if (session && !session.moved && session.startPixel) {
+                    deleteAnnotationAtPixel(session.startPixel, session);
+                }
+            }
+            areaPaintRef.current = null;
+            areaEraseRef.current = null;
+            return;
+        }
+        const pixel = mapPointToPgmPixel(image, x, y);
+        if (!pixel)
+            return;
+        if (tool === ANNOTATION_TOOL.id) {
+            updatePaintedArea(pixel, phase);
+            return;
+        }
+        let session = areaEraseRef.current;
+        if (phase === "start" || !session) {
+            session = {
+                startPixel: pixel,
+                lastPixel: pixel,
+                moved: false,
+                undoPushed: false,
+            };
+            areaEraseRef.current = session;
+            return;
+        }
+        const startPixel = session.lastPixel || pixel;
+        session.moved = true;
+        if (applyAreaCellErase(startPixel, pixel, session)) {
+            session.lastPixel = pixel;
+        }
+    }, [applyAreaCellErase, busy, deleteAnnotationAtPixel, image, open, tool, updatePaintedArea]);
     const placeAnnotationAtMapArea = useCallback((startX, startY, endX = startX, endY = startY) => {
         if (!open || !image || busy || tool !== ANNOTATION_TOOL.id)
             return;
@@ -729,6 +1041,7 @@ export function useMapEditor({ open, mapName, onMessage, reloadToken = 0 }) {
         redo,
         save,
         editAtMapPoint,
+        editAreaAtMapPoint,
         placeAnnotationAtMapPoint,
         placeAnnotationAtMapArea,
         eraseAnnotationsAtMapArea,
@@ -842,6 +1155,24 @@ export function MapEditorControls({ files, selectedPath, setSelectedPath, tool, 
                 {TOOL_ICONS.view}View
             </SegButton>
 
+            <EditorSection label="BRUSH">
+                <SegGroup ariaLabel="Brush size">
+                    {BRUSH_SIZE_OPTIONS.map((option) => (
+                        <SegButton
+                            key={option.value}
+                            narrow
+                            selected={brushSize === option.value}
+                            disabled={busy}
+                            onClick={() => setBrushSize(option.value)}
+                            title={`Brush ${option.label}: ${option.value}px`}
+                            ariaLabel={`Brush size ${option.label}`}
+                        >
+                            {option.label === "Small" ? "S" : option.label === "Medium" ? "M" : option.label === "Large" ? "L" : "XL"}
+                        </SegButton>
+                    ))}
+                </SegGroup>
+            </EditorSection>
+
             <EditorSection label="MAP EDIT">
                 <SegGroup ariaLabel="Map edit tools">
                     {EDIT_TOOLS.map((editTool) => (
@@ -857,24 +1188,6 @@ export function MapEditorControls({ files, selectedPath, setSelectedPath, tool, 
                         </SegButton>
                     ))}
                 </SegGroup>
-                <div className="flex items-center gap-1">
-                    <span className="text-[9.5px] font-mono tracking-[0.1em]" style={{ color: "var(--mc-text-subtle)" }}>BRUSH</span>
-                    <SegGroup ariaLabel="Brush size">
-                        {BRUSH_SIZE_OPTIONS.map((option) => (
-                            <SegButton
-                                key={option.value}
-                                narrow
-                                selected={brushSize === option.value}
-                                disabled={busy}
-                                onClick={() => setBrushSize(option.value)}
-                                title={`Brush ${option.label}: ${option.value}px`}
-                                ariaLabel={`Brush size ${option.label}`}
-                            >
-                                {option.value}px
-                            </SegButton>
-                        ))}
-                    </SegGroup>
-                </div>
             </EditorSection>
 
             {enableAnnotations && (

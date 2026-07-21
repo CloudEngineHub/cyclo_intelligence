@@ -139,6 +139,10 @@ def test_navigation_map_annotations_sidecar(monkeypatch):
                             x_max=6,
                             y_max=8,
                         ),
+                        cells=[
+                            navigation.MapAnnotationSeedCell(x=3, y=4),
+                            navigation.MapAnnotationSeedCell(x=4, y=4),
+                        ],
                         cell_count=12,
                         width=20,
                         height=10,
@@ -162,6 +166,10 @@ def test_navigation_map_annotations_sidecar(monkeypatch):
         "x_max": 6,
         "y_max": 8,
     }
+    assert loaded["annotations"][0]["region"]["cells"] == [
+        {"x": 3, "y": 4},
+        {"x": 4, "y": 4},
+    ]
 
 
 def test_navigation_rejects_map_path_escape():

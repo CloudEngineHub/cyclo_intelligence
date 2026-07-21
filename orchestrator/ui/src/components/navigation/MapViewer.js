@@ -413,6 +413,36 @@ function boundedFreeRegion(grid, regionSpec, excludedCells = null) {
     const meta = gridMeta(grid);
     if (!meta || !grid.data || !regionSpec)
         return null;
+    if (Array.isArray(regionSpec.cells) && regionSpec.cells.length) {
+        const cells = [];
+        const seen = new Set();
+        let sumX = 0;
+        let sumY = 0;
+        regionSpec.cells.forEach((cell) => {
+            const x = Math.floor(Number(cell === null || cell === void 0 ? void 0 : cell.x));
+            const y = Math.floor(Number(cell === null || cell === void 0 ? void 0 : cell.y));
+            if (!Number.isFinite(x) || !Number.isFinite(y) || x < 0 || y < 0 || x >= meta.width || y >= meta.height)
+                return;
+            const index = x + y * meta.width;
+            if (seen.has(index) || grid.data[index] !== 0)
+                return;
+            if (excludedCells === null || excludedCells === void 0 ? void 0 : excludedCells.has(index))
+                return;
+            seen.add(index);
+            cells.push(index);
+            sumX += x;
+            sumY += y;
+        });
+        if (!cells.length)
+            return null;
+        return {
+            cells,
+            centroid: {
+                x: sumX / cells.length,
+                y: sumY / cells.length,
+            },
+        };
+    }
     const seed = regionSpec.seed_cell;
     const bounds = regionSpec.bounds || (seed ? {
         x_min: seed.x,

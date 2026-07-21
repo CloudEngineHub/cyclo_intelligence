@@ -1587,7 +1587,8 @@ test('marks free-space areas with automatic color and undo/redo support', async 
   await waitFor(() => expect(latestMapViewerProps().editorActive).toBe(true));
 
   await act(async () => {
-    latestMapViewerProps().onEditorMapArea(0, 0, 0, 0);
+    latestMapViewerProps().onEditorMapPoint(0, 0, 'start');
+    latestMapViewerProps().onEditorMapPoint(0, 0, 'end');
   });
 
   await waitFor(() => expect(latestMapViewerProps().mapAnnotations).toEqual([
@@ -1598,20 +1599,22 @@ test('marks free-space areas with automatic color and undo/redo support', async 
       region: expect.objectContaining({
         seed_cell: { x: 0, y: 0 },
         bounds: { x_min: 0, y_min: 0, x_max: 0, y_max: 0 },
+        cells: [{ x: 0, y: 0 }],
       }),
     }),
   ]));
-  expect(latestMapViewerProps().editorPaintOnDrag).toBe(false);
-  expect(latestMapViewerProps().editorAreaSelection).toBe(true);
+  expect(latestMapViewerProps().editorPaintOnDrag).toBe(true);
+  expect(latestMapViewerProps().editorAreaSelection).toBe(false);
   expect(screen.getByText('Unsaved changes')).toBeInTheDocument();
   expect(saveMapAnnotations).not.toHaveBeenCalled();
 
   const areaSaveCalls = saveMapAnnotations.mock.calls.length;
   await act(async () => {
-    latestMapViewerProps().onEditorMapArea(0, 0, 0, 0);
+    latestMapViewerProps().onEditorMapPoint(0, 0, 'start');
+    latestMapViewerProps().onEditorMapPoint(0, 0, 'end');
   });
   expect(saveMapAnnotations).toHaveBeenCalledTimes(areaSaveCalls);
-  expect(screen.getByText('Drag over an unmarked white free-space area')).toBeInTheDocument();
+  expect(screen.getByText('Paint over unmarked white free-space')).toBeInTheDocument();
 
   await waitFor(() => expect(screen.getByRole('button', { name: 'Undo' })).toBeEnabled());
   fireEvent.click(screen.getByRole('button', { name: 'Undo' }));
@@ -1625,7 +1628,11 @@ test('marks free-space areas with automatic color and undo/redo support', async 
   fireEvent.click(screen.getByRole('button', { name: 'Save' }));
   await waitFor(() => expect(saveMapAnnotations).toHaveBeenCalledWith(
     'factory.pgm',
-    [expect.objectContaining({ label: 'Dock', color: '#3B241F' })],
+    [expect.objectContaining({
+      label: 'Dock',
+      color: '#3B241F',
+      region: expect.objectContaining({ cells: [{ x: 0, y: 0 }] }),
+    })],
   ));
   expect(savePgmImage).not.toHaveBeenCalled();
 });
@@ -1671,14 +1678,15 @@ test('removes selected map areas with the erase area tool', async () => {
   ]));
 
   fireEvent.click(screen.getByRole('button', { name: 'Erase Area' }));
-  await waitFor(() => expect(latestMapViewerProps().editorAreaSelection).toBe(true));
+  await waitFor(() => expect(latestMapViewerProps().editorAreaSelection).toBe(false));
 
   await act(async () => {
-    latestMapViewerProps().onEditorMapArea(0, 0, 0, 0);
+    latestMapViewerProps().onEditorMapPoint(0, 0, 'start');
+    latestMapViewerProps().onEditorMapPoint(0, 0, 'end');
   });
 
   await waitFor(() => expect(latestMapViewerProps().mapAnnotations).toEqual([]));
-  expect(screen.getByText('Removed 1 map area')).toBeInTheDocument();
+  expect(screen.getByText('Removed area Dock')).toBeInTheDocument();
   expect(screen.getByText('Unsaved changes')).toBeInTheDocument();
   expect(saveMapAnnotations).not.toHaveBeenCalled();
 
@@ -1687,6 +1695,73 @@ test('removes selected map areas with the erase area tool', async () => {
 
   await waitFor(() => expect(saveMapAnnotations).toHaveBeenCalledWith('factory.pgm', []));
   expect(savePgmImage).not.toHaveBeenCalled();
+});
+
+test('erases map area pixels with brush drag', async () => {
+  const latestMapViewerProps = () => (
+    mockMapViewer.mock.calls[mockMapViewer.mock.calls.length - 1][0]
+  );
+  getPgmFiles.mockResolvedValue({
+    files: [{ path: 'factory.pgm', name: 'factory.pgm' }],
+  });
+  getPgmImage.mockResolvedValue({
+    path: 'factory.pgm',
+    width: 3,
+    height: 1,
+    maxval: 255,
+    pixels_base64: '/v7+',
+  });
+  getMapAnnotations.mockResolvedValue({
+    path: 'factory.pgm',
+    annotations: [{
+      id: 'area_dock',
+      label: 'Dock',
+      color: '#3B241F',
+      pose: { frame_id: 'map', x: 1.5, y: 0.5, yaw: 0 },
+      region: {
+        seed_cell: { x: 1, y: 0 },
+        bounds: { x_min: 0, y_min: 0, x_max: 2, y_max: 0 },
+        cells: [{ x: 0, y: 0 }, { x: 1, y: 0 }, { x: 2, y: 0 }],
+        cell_count: 3,
+        width: 3,
+        height: 1,
+      },
+    }],
+  });
+
+  render(<MissionCanvasPage />);
+
+  fireEvent.click(screen.getByRole('button', { name: 'Map Editor' }));
+
+  await waitFor(() => expect(latestMapViewerProps().mapAnnotations).toEqual([
+    expect.objectContaining({ label: 'Dock' }),
+  ]));
+
+  fireEvent.click(screen.getByRole('button', { name: 'Erase Area' }));
+  await act(async () => {
+    latestMapViewerProps().onEditorMapPoint(0.5, 0.5, 'start');
+    latestMapViewerProps().onEditorMapPoint(1.5, 0.5, 'move');
+    latestMapViewerProps().onEditorMapPoint(0, 0, 'end');
+  });
+
+  await waitFor(() => expect(latestMapViewerProps().mapAnnotations).toEqual([
+    expect.objectContaining({
+      label: 'Dock',
+      region: expect.objectContaining({
+        cells: [{ x: 2, y: 0 }],
+        cell_count: 1,
+      }),
+    }),
+  ]));
+  expect(screen.getByText('Erased area pixels')).toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+  await waitFor(() => expect(saveMapAnnotations).toHaveBeenCalledWith(
+    'factory.pgm',
+    [expect.objectContaining({
+      region: expect.objectContaining({ cells: [{ x: 2, y: 0 }] }),
+    })],
+  ));
 });
 
 test('enables live robot and lidar layers while navigation runtime is active', async () => {
