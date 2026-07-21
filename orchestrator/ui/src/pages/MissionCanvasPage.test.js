@@ -1550,6 +1550,13 @@ test('marks free-space areas with automatic color and undo/redo support', async 
   expect(latestMapViewerProps().editorPaintOnDrag).toBe(false);
   expect(latestMapViewerProps().editorAreaSelection).toBe(true);
 
+  const areaSaveCalls = saveMapAnnotations.mock.calls.length;
+  await act(async () => {
+    latestMapViewerProps().onEditorMapArea(0, 0, 0, 0);
+  });
+  expect(saveMapAnnotations).toHaveBeenCalledTimes(areaSaveCalls);
+  expect(screen.getByText('Drag over an unmarked white free-space area')).toBeInTheDocument();
+
   await waitFor(() => expect(screen.getByRole('button', { name: 'Undo' })).toBeEnabled());
   fireEvent.click(screen.getByRole('button', { name: 'Undo' }));
   await waitFor(() => expect(saveMapAnnotations).toHaveBeenLastCalledWith('factory.pgm', []));

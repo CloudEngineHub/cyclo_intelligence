@@ -82,7 +82,25 @@ function paintPgmPixels(pixels, width, height, pixelX, pixelY, operation, brushS
     }
     return next;
 }
-function selectedFreePgmRegion(pixels, image, startPixel, endPixel) {
+function annotationCoversPgmPixel(annotation, image, pixelX, pixelY) {
+    const region = normalizeAnnotationRegion(annotation === null || annotation === void 0 ? void 0 : annotation.region);
+    if (!region)
+        return false;
+    if ((region.width && region.width !== image.width) || (region.height && region.height !== image.height))
+        return false;
+    const bounds = region.bounds || {
+        x_min: region.seed_cell.x,
+        y_min: region.seed_cell.y,
+        x_max: region.seed_cell.x,
+        y_max: region.seed_cell.y,
+    };
+    const gridY = image.height - 1 - pixelY;
+    return (pixelX >= bounds.x_min &&
+        pixelX <= bounds.x_max &&
+        gridY >= bounds.y_min &&
+        gridY <= bounds.y_max);
+}
+function selectedFreePgmRegion(pixels, image, startPixel, endPixel, existingAnnotations = []) {
     if (!pixels || !image || !startPixel || !endPixel)
         return null;
     const xMin = Math.max(0, Math.min(startPixel.pixelX, endPixel.pixelX));
@@ -95,6 +113,8 @@ function selectedFreePgmRegion(pixels, image, startPixel, endPixel) {
     for (let y = yMin; y <= yMax; y += 1) {
         for (let x = xMin; x <= xMax; x += 1) {
             if (pixels[x + y * image.width] < FREE_THRESHOLD)
+                continue;
+            if (existingAnnotations.some((annotation) => annotationCoversPgmPixel(annotation, image, x, y)))
                 continue;
             count += 1;
             sumX += x;
@@ -472,9 +492,9 @@ export function useMapEditor({ open, mapName, onMessage, reloadToken = 0 }) {
         const currentPixels = pixelsRef.current;
         if (!currentPixels)
             return;
-        const region = selectedFreePgmRegion(currentPixels, image, startPixel, endPixel);
+        const region = selectedFreePgmRegion(currentPixels, image, startPixel, endPixel, annotationsRef.current);
         if (!region || region.count === 0) {
-            onMessage("Drag over a white free-space area");
+            onMessage("Drag over an unmarked white free-space area");
             return;
         }
         const label = annotationLabel.trim() || "Area";

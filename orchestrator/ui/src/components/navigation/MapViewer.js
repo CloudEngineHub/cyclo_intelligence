@@ -409,7 +409,7 @@ function gridCellToMapPoint(meta, cellX, cellY) {
         y: meta.originY + Math.sin(meta.originYaw) * localX + Math.cos(meta.originYaw) * localY,
     };
 }
-function boundedFreeRegion(grid, regionSpec) {
+function boundedFreeRegion(grid, regionSpec, excludedCells = null) {
     const meta = gridMeta(grid);
     if (!meta || !grid.data || !regionSpec)
         return null;
@@ -439,6 +439,8 @@ function boundedFreeRegion(grid, regionSpec) {
         for (let x = xMin; x <= xMax; x += 1) {
             const index = x + y * meta.width;
             if (grid.data[index] !== 0)
+                continue;
+            if (excludedCells === null || excludedCells === void 0 ? void 0 : excludedCells.has(index))
                 continue;
             cells.push(index);
             sumX += x;
@@ -829,7 +831,7 @@ function makeMissionRouteBadge(spot, order, selected = false, scale = 1, isDark 
     sprite.userData = { spotId: spot.id, dragAction: "move" };
     return sprite;
 }
-function makeMapAnnotationRegion(annotation, grid, isDark = false) {
+function makeMapAnnotationRegion(annotation, grid, isDark = false, coveredCells = null) {
     var _a, _b, _c, _d, _e, _f;
     const meta = gridMeta(grid);
     if (!meta)
@@ -837,7 +839,7 @@ function makeMapAnnotationRegion(annotation, grid, isDark = false) {
     const pose = (_a = annotation === null || annotation === void 0 ? void 0 : annotation.pose) !== null && _a !== void 0 ? _a : {};
     const fallbackCell = mapPointToGridCell(meta, Number((_b = pose.x) !== null && _b !== void 0 ? _b : NaN), Number((_c = pose.y) !== null && _c !== void 0 ? _c : NaN));
     const regionSpec = (_d = annotation === null || annotation === void 0 ? void 0 : annotation.region) !== null && _d !== void 0 ? _d : (fallbackCell ? { seed_cell: fallbackCell } : null);
-    const region = boundedFreeRegion(grid, regionSpec);
+    const region = boundedFreeRegion(grid, regionSpec, coveredCells);
     if (!region)
         return null;
     const colorString = hexColorString(annotation === null || annotation === void 0 ? void 0 : annotation.color, isDark ? "#6D1F2A" : "#6D1F2A");
@@ -847,6 +849,9 @@ function makeMapAnnotationRegion(annotation, grid, isDark = false) {
         return null;
     const group = new THREE.Group();
     group.add(plane);
+    if (coveredCells) {
+        region.cells.forEach((index) => coveredCells.add(index));
+    }
     const label = String((annotation === null || annotation === void 0 ? void 0 : annotation.label) || "Area").trim();
     if (label) {
         const { sprite, aspect } = makeAnnotationLabelSprite(label, colorString, isDark);
@@ -1398,8 +1403,9 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, 
                 layers.add(preview);
         }
         const spotById = new Map(spots.map((spot) => [spot.id, spot]));
+        const coveredAnnotationCells = new Set();
         mapAnnotations.forEach((annotation) => {
-            const marker = makeMapAnnotationRegion(annotation, map, isDark);
+            const marker = makeMapAnnotationRegion(annotation, map, isDark, coveredAnnotationCells);
             if (marker)
                 layers.add(marker);
         });
