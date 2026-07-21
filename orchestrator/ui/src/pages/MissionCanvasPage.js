@@ -3382,10 +3382,79 @@ export default function MissionCanvasPage() {
             onMapPose={handleCreateSpotAtPose}
             onBtLayerClose={() => setBtLayerSpotId("")}
           />
+
+          {workspaceStage === STAGE_AUTHORING && !selectedBtLayerSpot && (
+            <>
+              {/* HUD toolbar — top-left (glass): Create Waypoint + Edit/Clear Route */}
+              <div
+                className="absolute top-5 left-5 z-10 flex items-center gap-2 p-2"
+                style={{ borderRadius: 14, backgroundColor: "color-mix(in srgb, var(--mc-surface) 88%, transparent)", border: "1px solid var(--mc-border)", boxShadow: "var(--mc-shadow)", backdropFilter: "blur(8px)" }}
+              >
+                <div className="relative">
+                  <button
+                    type="button"
+                    onClick={handleToggleWaypointOptions}
+                    disabled={!designMapAvailable || btNodeIsUp || missionRouteMode}
+                    aria-label="Create Waypoint"
+                    aria-pressed={(showWaypointOptions || interactionMode === "spot") ? true : undefined}
+                    title={btNodeIsUp ? "Deactivate BT before editing waypoints" : missionRouteMode ? "Turn off Edit Route first" : "Add a waypoint"}
+                    className="h-8 px-3 text-[12.5px] font-semibold inline-flex items-center gap-1.5 disabled:opacity-45"
+                    style={{ borderRadius: 9, border: "none", backgroundColor: (showWaypointOptions || interactionMode === "spot") ? "var(--mc-accent)" : "var(--mc-text)", color: (showWaypointOptions || interactionMode === "spot") ? "var(--mc-accent-fg)" : "var(--mc-bg)" }}
+                  >
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><path d="M12 5v14M5 12h14" /></svg>
+                    Waypoint
+                  </button>
+                  {showWaypointOptions && (
+                    <div className="absolute left-0 top-[calc(100%+6px)] flex items-center gap-1.5 p-1.5" role="menu" aria-label="Waypoint creation options" style={{ borderRadius: 10, backgroundColor: "var(--mc-surface)", border: "1px solid var(--mc-border-strong)", boxShadow: "var(--mc-shadow)" }}>
+                      <ActionButton active={interactionMode === "spot"} disabled={!designMapAvailable || btNodeIsUp || missionRouteMode} onClick={handleToggleSpotMode} variant="secondary">On Map</ActionButton>
+                      <ActionButton active={interactionMode === "initial" || busy === "At Robot"} disabled={!!busy || !designMapAvailable || btNodeIsUp || missionRouteMode} onClick={handleCreateSpotAtRobot} variant="secondary">At Robot</ActionButton>
+                    </div>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  onClick={handleToggleMissionRouteMode}
+                  disabled={!!busy || !designMapAvailable || btNodeIsUp}
+                  aria-label="Edit On Map"
+                  aria-pressed={missionRouteMode ? true : undefined}
+                  title={btNodeIsUp ? "Deactivate BT before editing mission route" : "Edit the mission route on the map"}
+                  className="h-8 px-3 text-[12.5px] font-semibold disabled:opacity-45"
+                  style={{ borderRadius: 9, border: `1px solid ${missionRouteMode ? "var(--mc-accent)" : "var(--mc-border-strong)"}`, backgroundColor: missionRouteMode ? "var(--mc-accent-soft)" : "var(--mc-surface)", color: "var(--mc-text)" }}
+                >
+                  Edit Route
+                </button>
+                <button
+                  type="button"
+                  onClick={handleClearMissionRoute}
+                  disabled={!!busy || missionRouteEdges.length === 0}
+                  title="Clear the mission route"
+                  className="h-8 px-3 text-[12.5px] font-semibold disabled:opacity-45"
+                  style={{ borderRadius: 9, border: "1px solid var(--mc-border-strong)", backgroundColor: "var(--mc-surface)", color: "var(--mc-text-muted)" }}
+                >
+                  Clear Route
+                </button>
+              </div>
+
+              {/* Layers popover — top-right (glass) */}
+              {layerToggles.length > 0 && (
+                <div
+                  className="absolute top-5 right-5 z-10 p-3.5"
+                  style={{ width: 180, borderRadius: 14, backgroundColor: "color-mix(in srgb, var(--mc-surface) 90%, transparent)", border: "1px solid var(--mc-border)", boxShadow: "var(--mc-shadow)", backdropFilter: "blur(8px)" }}
+                >
+                  <div className="text-[12.5px] font-bold mb-2.5">Layers</div>
+                  <div className="grid gap-2.5">
+                    {layerToggles.map((layer) => (
+                      <LayerToggle key={layer.id} label={layer.label} checked={layer.checked} compact onChange={layer.onChange} />
+                    ))}
+                  </div>
+                </div>
+              )}
+            </>
+          )}
         </section>
 
         {workspaceStage === STAGE_AUTHORING ? (
-          <aside className="min-h-0 grid grid-rows-[auto_minmax(0,1fr)_minmax(230px,0.75fr)] gap-4 overflow-hidden p-4">
+          <aside className="min-h-0 grid grid-rows-[auto_minmax(0,1fr)_minmax(220px,0.7fr)] gap-4 overflow-hidden p-4">
             <BtRuntimePanel
               nodeState={btNodeStatus.state}
               btStatus={btStatusText}
@@ -3395,113 +3464,55 @@ export default function MissionCanvasPage() {
               onDeactivate={handleBtNodeDeactivate}
             />
 
-            {/* ── Design Objects / Waypoints ── */}
-            <div
-              className="min-h-0 overflow-auto"
-              style={{ backgroundColor: "var(--mc-surface)", border: "1px solid var(--mc-border)", borderRadius: 16, boxShadow: "var(--mc-shadow)", padding: 18 }}
-            >
+            {/* Waypoints — LIST ONLY (Create moved to the map HUD) */}
+            <div className="min-h-0 overflow-auto" style={{ backgroundColor: "var(--mc-surface)", border: "1px solid var(--mc-border)", borderRadius: 16, boxShadow: "var(--mc-shadow)", padding: 18 }}>
               <div className="flex items-center justify-between mb-3.5">
                 <span className="text-[13.5px] font-bold">Design Objects</span>
-                <button
-                  type="button"
-                  onClick={handleToggleWaypointOptions}
-                  disabled={!designMapAvailable || btNodeIsUp || missionRouteMode}
-                  aria-label="Create Waypoint"
-                  aria-pressed={(showWaypointOptions || interactionMode === "spot") ? true : undefined}
-                  title={btNodeIsUp ? "Deactivate BT before editing waypoints" : missionRouteMode ? "Turn off Mission Route first" : undefined}
-                  className="h-8 px-3 text-[12px] font-semibold inline-flex items-center gap-1.5 disabled:opacity-45"
-                  style={{ borderRadius: 9, border: "none", backgroundColor: "var(--mc-text)", color: "var(--mc-bg)" }}
-                >
-                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><path d="M12 5v14M5 12h14" /></svg>
-                  Waypoint
-                </button>
+                <span className="text-[11px] font-mono" style={{ color: "var(--mc-text-subtle)" }}>{spots.length}</span>
               </div>
-
-              {showWaypointOptions && (
-                <div className="flex flex-wrap items-center gap-1.5 mb-3 p-1.5" style={{ borderRadius: 10, backgroundColor: "var(--mc-surface-2)", border: "1px solid var(--mc-border-strong)" }} role="menu" aria-label="Waypoint creation options">
-                  <ActionButton active={interactionMode === "spot"} disabled={!designMapAvailable || btNodeIsUp || missionRouteMode} onClick={handleToggleSpotMode} variant="secondary">On Map</ActionButton>
-                  <ActionButton active={interactionMode === "initial" || busy === "At Robot"} disabled={!!busy || !designMapAvailable || btNodeIsUp || missionRouteMode} onClick={handleCreateSpotAtRobot} variant="secondary">At Robot</ActionButton>
-                </div>
-              )}
-
               <div className="grid gap-2">
                 {spots.map((spot) => {
                   const selected = spot.id === selectedSpotId;
                   const editing = editingSpotId === spot.id;
                   const localBtPath = localBtPathForSpot(spot);
                   return (
-                    <div
-                      key={spot.id}
-                      className="grid gap-1.5 min-w-0"
-                      style={{ padding: 8, borderRadius: 12, border: `1px solid ${selected ? "var(--mc-accent)" : "var(--mc-border)"}`, backgroundColor: selected ? "var(--mc-accent-soft)" : "var(--mc-surface-2)" }}
-                    >
+                    <div key={spot.id} className="grid gap-1.5 min-w-0" style={{ padding: 8, borderRadius: 12, border: `1px solid ${selected ? "var(--mc-accent)" : "var(--mc-border)"}`, backgroundColor: selected ? "var(--mc-accent-soft)" : "var(--mc-surface-2)" }}>
                       <div className="flex items-center gap-1.5 min-w-0">
                         {editing ? (
-                          <input
-                            aria-label="Waypoint name"
-                            value={editingSpotLabel}
-                            autoFocus
-                            onChange={(event) => setEditingSpotLabel(event.currentTarget.value)}
+                          <input aria-label="Waypoint name" value={editingSpotLabel} autoFocus
+                            onChange={(e) => setEditingSpotLabel(e.currentTarget.value)}
                             onBlur={() => { void handleCommitSpotRename(spot); }}
-                            onKeyDown={(event) => {
-                              if (event.key === "Enter") { event.preventDefault(); void handleCommitSpotRename(spot); }
-                              if (event.key === "Escape") { event.preventDefault(); handleCancelSpotRename(); }
-                            }}
-                            className="h-8 flex-1 px-2 text-[13px] min-w-0"
-                            style={{ borderRadius: 8, border: "1px solid var(--mc-border-strong)", backgroundColor: "var(--mc-surface)", color: "var(--mc-text)" }}
-                          />
+                            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void handleCommitSpotRename(spot); } if (e.key === "Escape") { e.preventDefault(); handleCancelSpotRename(); } }}
+                            className="h-8 flex-1 px-2 text-[13px] min-w-0" style={{ borderRadius: 8, border: "1px solid var(--mc-border-strong)", backgroundColor: "var(--mc-surface)", color: "var(--mc-text)" }} />
                         ) : (
-                          <button
-                            type="button"
-                            onClick={() => handleSelectSpot(spot.id)}
-                            onDoubleClick={() => handleStartRenameSpot(spot)}
+                          <button type="button" onClick={() => handleSelectSpot(spot.id)} onDoubleClick={() => handleStartRenameSpot(spot)}
                             className="h-8 flex-1 px-2.5 text-left text-[12.5px] font-semibold min-w-0"
-                            style={{ borderRadius: 8, border: "1px solid var(--mc-border)", backgroundColor: "var(--mc-surface)", color: "var(--mc-text)" }}
-                          >
+                            style={{ borderRadius: 8, border: "1px solid var(--mc-border)", backgroundColor: "var(--mc-surface)", color: "var(--mc-text)" }}>
                             <span className="block truncate">{spot.label || spot.id}</span>
                           </button>
                         )}
-                        <button
-                          type="button"
-                          aria-label={`Delete Waypoint ${spot.label || spot.id}`}
-                          title={`Delete ${spot.label || spot.id}`}
-                          onClick={() => { void handleDeleteSpot(spot); }}
+                        <button type="button" aria-label={`Delete Waypoint ${spot.label || spot.id}`} title={`Delete ${spot.label || spot.id}`} onClick={() => { void handleDeleteSpot(spot); }}
                           className="h-8 w-8 shrink-0 inline-flex items-center justify-center active:translate-y-px"
-                          style={{ borderRadius: 8, border: "1px solid var(--mc-border-strong)", backgroundColor: "var(--mc-surface)", color: "var(--mc-danger)" }}
-                        >
+                          style={{ borderRadius: 8, border: "1px solid var(--mc-border-strong)", backgroundColor: "var(--mc-surface)", color: "var(--mc-danger)" }}>
                           <MdDelete size={15} />
                         </button>
                       </div>
-                      {selected && (
-                        <div className="text-[10.5px] font-mono truncate px-1" style={{ color: "var(--mc-text-subtle)" }}>{localBtPath}</div>
-                      )}
+                      {selected && <div className="text-[10.5px] font-mono truncate px-1" style={{ color: "var(--mc-text-subtle)" }}>{localBtPath}</div>}
                     </div>
                   );
                 })}
-                {spots.length === 0 && (
-                  <div className="text-[12px]" style={{ color: "var(--mc-text-muted)" }}>No waypoints for this map yet.</div>
-                )}
-
-                {activeBehaviorNodes.length > 0 && activeBehaviorNodes.map((node) => {
+                {spots.length === 0 && <div className="text-[12px]" style={{ color: "var(--mc-text-muted)" }}>No waypoints for this map yet.</div>}
+                {activeBehaviorNodes.map((node) => {
                   const selected = node.id === selectedBehaviorNodeId;
                   return (
                     <div key={node.id} className="flex items-center gap-1.5 min-w-0">
-                      <button
-                        type="button"
-                        onClick={() => handleSelectBehaviorNode(node.id)}
-                        className="h-8 flex-1 px-2.5 text-left text-[12px] font-semibold min-w-0"
-                        style={{ borderRadius: 8, border: `1px solid ${selected ? "var(--mc-accent)" : "var(--mc-border)"}`, backgroundColor: selected ? "var(--mc-accent-soft)" : "var(--mc-surface-2)", color: "var(--mc-text)" }}
-                      >
+                      <button type="button" onClick={() => handleSelectBehaviorNode(node.id)} className="h-8 flex-1 px-2.5 text-left text-[12px] font-semibold min-w-0"
+                        style={{ borderRadius: 8, border: `1px solid ${selected ? "var(--mc-accent)" : "var(--mc-border)"}`, backgroundColor: selected ? "var(--mc-accent-soft)" : "var(--mc-surface-2)", color: "var(--mc-text)" }}>
                         <span className="block truncate">{node.tag}</span>
                       </button>
-                      <button
-                        type="button"
-                        aria-label={`Delete Node ${node.tag}`}
-                        title={`Delete ${node.tag}`}
-                        onClick={() => handleDeleteBehaviorNode(node)}
+                      <button type="button" aria-label={`Delete Node ${node.tag}`} title={`Delete ${node.tag}`} onClick={() => handleDeleteBehaviorNode(node)}
                         className="h-8 w-8 shrink-0 inline-flex items-center justify-center active:translate-y-px"
-                        style={{ borderRadius: 8, border: "1px solid var(--mc-border-strong)", backgroundColor: "var(--mc-surface)", color: "var(--mc-danger)" }}
-                      >
+                        style={{ borderRadius: 8, border: "1px solid var(--mc-border-strong)", backgroundColor: "var(--mc-surface)", color: "var(--mc-danger)" }}>
                         <MdDelete size={15} />
                       </button>
                     </div>
@@ -3510,18 +3521,12 @@ export default function MissionCanvasPage() {
               </div>
             </div>
 
-            {/* ── Mission Route ── */}
-            <div
-              className="min-h-0 overflow-hidden"
-              style={{ backgroundColor: "var(--mc-surface)", border: "1px solid var(--mc-border)", borderRadius: 16, boxShadow: "var(--mc-shadow)", padding: 18 }}
-            >
+            {/* Mission Route — LIST ONLY (Edit/Clear moved to the map HUD) */}
+            <div className="min-h-0 overflow-hidden" style={{ backgroundColor: "var(--mc-surface)", border: "1px solid var(--mc-border)", borderRadius: 16, boxShadow: "var(--mc-shadow)", padding: 18 }}>
               <div className="h-full min-h-0 grid grid-rows-[auto_minmax(0,1fr)] gap-2.5">
                 <div className="flex items-center justify-between">
                   <span className="text-[13.5px] font-bold">Mission Route</span>
-                  <div className="flex gap-1.5">
-                    <ActionButton active={missionRouteMode} disabled={!!busy || !designMapAvailable || btNodeIsUp} onClick={handleToggleMissionRouteMode} title={btNodeIsUp ? "Deactivate BT before editing mission route" : undefined} variant="secondary">Edit On Map</ActionButton>
-                    <ActionButton disabled={!!busy || missionRouteEdges.length === 0} onClick={handleClearMissionRoute} variant="secondary">Clear Route</ActionButton>
-                  </div>
+                  {missionRouteMode && <span className="text-[10.5px] font-mono px-2 py-1" style={{ borderRadius: 6, backgroundColor: "var(--mc-accent-soft)", color: "var(--mc-accent-hover)" }}>editing on map</span>}
                 </div>
                 <div className="min-h-0 overflow-auto pr-1">
                   <div className="grid gap-0">
@@ -3531,16 +3536,10 @@ export default function MissionCanvasPage() {
                       return (
                         <div key={spot.id} className="flex gap-3 items-stretch">
                           <div className="flex flex-col items-center" style={{ width: 26 }}>
-                            <span
-                              className="h-[26px] w-[26px] shrink-0 rounded-full inline-flex items-center justify-center text-[11px] font-semibold font-mono"
-                              style={{ color: "var(--mc-accent-fg)", backgroundColor: "var(--mc-accent)" }}
-                            >{index + 1}</span>
+                            <span className="h-[26px] w-[26px] shrink-0 rounded-full inline-flex items-center justify-center text-[11px] font-semibold font-mono" style={{ color: "var(--mc-accent-fg)", backgroundColor: "var(--mc-accent)" }}>{index + 1}</span>
                             {!last && <span className="flex-1 my-0.5" style={{ width: 2, backgroundColor: "var(--mc-border)" }} />}
                           </div>
-                          <div
-                            className="flex-1 mb-2 grid grid-cols-[1fr_auto] items-center gap-2 min-w-0"
-                            style={{ padding: 10, borderRadius: 11, border: `1px solid ${selected ? "var(--mc-accent)" : "var(--mc-border)"}`, backgroundColor: selected ? "var(--mc-accent-soft)" : "var(--mc-surface-2)" }}
-                          >
+                          <div className="flex-1 mb-2 grid grid-cols-[1fr_auto] items-center gap-2 min-w-0" style={{ padding: 10, borderRadius: 11, border: `1px solid ${selected ? "var(--mc-accent)" : "var(--mc-border)"}`, backgroundColor: selected ? "var(--mc-accent-soft)" : "var(--mc-surface-2)" }}>
                             <button type="button" onClick={() => handleSelectSpot(spot.id)} className="min-w-0 text-left">
                               <span className="block truncate text-[12.5px] font-semibold" style={{ color: "var(--mc-text)" }}>{spot.label || spot.id}</span>
                               <span className="block truncate text-[10px] font-mono" style={{ color: "var(--mc-text-subtle)" }}>{localBtPathForSpot(spot)}</span>
@@ -3553,9 +3552,7 @@ export default function MissionCanvasPage() {
                         </div>
                       );
                     })}
-                    {missionRouteTreeSpots.length === 0 && (
-                      <div className="text-[12px]" style={{ color: "var(--mc-text-muted)" }}>Select a waypoint and add it to the route.</div>
-                    )}
+                    {missionRouteTreeSpots.length === 0 && <div className="text-[12px]" style={{ color: "var(--mc-text-muted)" }}>Select a waypoint and add it to the route.</div>}
                   </div>
                 </div>
               </div>
