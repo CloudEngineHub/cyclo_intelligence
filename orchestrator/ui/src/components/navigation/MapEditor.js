@@ -314,6 +314,7 @@ export function useMapEditor({ open, mapName, onMessage, reloadToken = 0 }) {
     const [undoStack, setUndoStack] = useState([]);
     const [redoStack, setRedoStack] = useState([]);
     const [dirty, setDirty] = useState(false);
+    const [annotationsDirty, setAnnotationsDirty] = useState(false);
     const [tool, setTool] = useState("view");
     const [brushSize, setBrushSize] = useState(DEFAULT_BRUSH_SIZE_CELLS);
     const [busy, setBusy] = useState(false);
@@ -358,6 +359,7 @@ export function useMapEditor({ open, mapName, onMessage, reloadToken = 0 }) {
             setUndoStack([]);
             setRedoStack([]);
             setDirty(false);
+            setAnnotationsDirty(false);
             return;
         }
         let cancelled = false;
@@ -373,6 +375,7 @@ export function useMapEditor({ open, mapName, onMessage, reloadToken = 0 }) {
             setUndoStack([]);
             setRedoStack([]);
             setDirty(false);
+            setAnnotationsDirty(false);
             onMessage(`Loaded ${response.path}`);
         })
             .catch((error) => {
@@ -394,6 +397,7 @@ export function useMapEditor({ open, mapName, onMessage, reloadToken = 0 }) {
         if (!open || !selectedPath) {
             annotationsRef.current = [];
             setAnnotations([]);
+            setAnnotationsDirty(false);
             return;
         }
         let cancelled = false;
@@ -406,12 +410,14 @@ export function useMapEditor({ open, mapName, onMessage, reloadToken = 0 }) {
                 : [];
             annotationsRef.current = next;
             setAnnotations(next);
+            setAnnotationsDirty(false);
         })
             .catch((error) => {
             if (cancelled)
                 return;
             annotationsRef.current = [];
             setAnnotations([]);
+            setAnnotationsDirty(false);
             onMessage(error instanceof Error ? error.message : "Failed to load map areas");
         });
         return () => {
@@ -451,35 +457,21 @@ export function useMapEditor({ open, mapName, onMessage, reloadToken = 0 }) {
         const action = tool === "erase_black" ? "Removed" : "Added";
         onMessage(`${action} ${editedPixels} pixels locally`);
     }, [brushSize, busy, image, onMessage, open, tool]);
-    const saveAnnotationsSnapshot = useCallback((nextAnnotations, successMessage) => {
-        if (!selectedPath || busy)
-            return;
+    const applyAnnotationsSnapshot = useCallback((nextAnnotations, successMessage) => {
         const normalized = nextAnnotations.map(normalizeAnnotation);
         annotationsRef.current = normalized;
         setAnnotations(normalized);
-        setBusy(true);
-        saveMapAnnotations(selectedPath, normalized)
-            .then((response) => {
-            const saved = Array.isArray(response === null || response === void 0 ? void 0 : response.annotations)
-                ? response.annotations.map(normalizeAnnotation)
-                : normalized;
-            annotationsRef.current = saved;
-            setAnnotations(saved);
-            onMessage(successMessage);
-        })
-            .catch((error) => {
-            onMessage(error instanceof Error ? error.message : "Failed to save map areas");
-            })
-            .finally(() => setBusy(false));
-    }, [busy, onMessage, selectedPath]);
+        setAnnotationsDirty(true);
+        onMessage(successMessage);
+    }, [onMessage]);
     const persistAnnotations = useCallback((nextAnnotations, successMessage) => {
         if (!selectedPath || busy)
             return;
         const currentAnnotations = annotationsRef.current;
         setUndoStack((stack) => [...stack, { type: "annotations", annotations: currentAnnotations }]);
         setRedoStack([]);
-        saveAnnotationsSnapshot(nextAnnotations, successMessage);
-    }, [busy, saveAnnotationsSnapshot, selectedPath]);
+        applyAnnotationsSnapshot(nextAnnotations, successMessage);
+    }, [applyAnnotationsSnapshot, busy, selectedPath]);
     const placeAnnotationAtMapArea = useCallback((startX, startY, endX = startX, endY = startY) => {
         if (!open || !image || busy || tool !== ANNOTATION_TOOL.id)
             return;
@@ -543,11 +535,11 @@ export function useMapEditor({ open, mapName, onMessage, reloadToken = 0 }) {
             else if (previous.type === "annotations") {
                 const currentAnnotations = annotationsRef.current;
                 setRedoStack((redo) => [...redo, { type: "annotations", annotations: currentAnnotations }]);
-                saveAnnotationsSnapshot(previous.annotations, "Undid last area edit");
+                applyAnnotationsSnapshot(previous.annotations, "Undid last area edit");
             }
             return stack.slice(0, -1);
         });
-    }, [onMessage, saveAnnotationsSnapshot]);
+    }, [applyAnnotationsSnapshot, onMessage]);
     const redo = useCallback(() => {
         const currentPixels = pixelsRef.current;
         setRedoStack((stack) => {
@@ -566,27 +558,45 @@ export function useMapEditor({ open, mapName, onMessage, reloadToken = 0 }) {
             else if (next.type === "annotations") {
                 const currentAnnotations = annotationsRef.current;
                 setUndoStack((undoHistory) => [...undoHistory, { type: "annotations", annotations: currentAnnotations }]);
-                saveAnnotationsSnapshot(next.annotations, "Redid last area edit");
+                applyAnnotationsSnapshot(next.annotations, "Redid last area edit");
             }
             return stack.slice(0, -1);
         });
-    }, [onMessage, saveAnnotationsSnapshot]);
+    }, [applyAnnotationsSnapshot, onMessage]);
     const save = useCallback(() => {
-        if (!image || !pixels || !dirty || busy)
+        if (!image || !pixels || busy || (!dirty && !annotationsDirty))
             return;
         setBusy(true);
-        savePgmImage(image.path, image.width, image.height, image.maxval, encodePgmPixels(pixels))
-            .then((response) => {
+        Promise.resolve()
+            .then(async () => {
+            const savedParts = [];
+            let savedPath = image.path;
+            if (dirty) {
+                const response = await savePgmImage(image.path, image.width, image.height, image.maxval, encodePgmPixels(pixels));
+                savedPath = (response === null || response === void 0 ? void 0 : response.path) || savedPath;
+                setDirty(false);
+                savedParts.push("map");
+            }
+            if (annotationsDirty) {
+                const response = await saveMapAnnotations(image.path, annotationsRef.current);
+                const saved = Array.isArray(response === null || response === void 0 ? void 0 : response.annotations)
+                    ? response.annotations.map(normalizeAnnotation)
+                    : annotationsRef.current;
+                annotationsRef.current = saved;
+                setAnnotations(saved);
+                setAnnotationsDirty(false);
+                savedParts.push("areas");
+            }
             setUndoStack([]);
             setRedoStack([]);
-            setDirty(false);
-            onMessage(`Saved ${response.path}`);
+            onMessage(savedParts.length > 1 ? `Saved map and areas ${savedPath}` : `Saved ${savedParts[0] === "areas" ? "map areas" : savedPath}`);
         })
             .catch((error) => {
-            onMessage(error instanceof Error ? error.message : "Failed to save PGM file");
+            onMessage(error instanceof Error ? error.message : "Failed to save map");
         })
             .finally(() => setBusy(false));
-    }, [busy, dirty, image, onMessage, pixels]);
+    }, [annotationsDirty, busy, dirty, image, onMessage, pixels]);
+    const hasUnsavedChanges = dirty || annotationsDirty;
     return {
         files,
         selectedPath,
@@ -601,7 +611,9 @@ export function useMapEditor({ open, mapName, onMessage, reloadToken = 0 }) {
         brushSize,
         setBrushSize: (value) => setBrushSize(normalizeBrushSize(value)),
         busy,
-        dirty,
+        dirty: hasUnsavedChanges,
+        pixelsDirty: dirty,
+        annotationsDirty,
         canUndo: undoStack.length > 0,
         canRedo: redoStack.length > 0,
         undo,

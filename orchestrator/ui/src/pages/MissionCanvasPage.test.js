@@ -1523,19 +1523,6 @@ test('marks free-space areas with automatic color and undo/redo support', async 
     latestMapViewerProps().onEditorMapArea(0, 0, 0, 0);
   });
 
-  await waitFor(() => expect(saveMapAnnotations).toHaveBeenCalledWith(
-    'factory.pgm',
-    [expect.objectContaining({
-      label: 'Dock',
-      color: '#3B241F',
-      pose: expect.objectContaining({ frame_id: 'map', x: 0.5, y: 0.5 }),
-      region: expect.objectContaining({
-        seed_cell: { x: 0, y: 0 },
-        bounds: { x_min: 0, y_min: 0, x_max: 0, y_max: 0 },
-        cell_count: 1,
-      }),
-    })],
-  ));
   await waitFor(() => expect(latestMapViewerProps().mapAnnotations).toEqual([
     expect.objectContaining({
       label: 'Dock',
@@ -1549,6 +1536,8 @@ test('marks free-space areas with automatic color and undo/redo support', async 
   ]));
   expect(latestMapViewerProps().editorPaintOnDrag).toBe(false);
   expect(latestMapViewerProps().editorAreaSelection).toBe(true);
+  expect(screen.getByText('Unsaved changes')).toBeInTheDocument();
+  expect(saveMapAnnotations).not.toHaveBeenCalled();
 
   const areaSaveCalls = saveMapAnnotations.mock.calls.length;
   await act(async () => {
@@ -1559,10 +1548,15 @@ test('marks free-space areas with automatic color and undo/redo support', async 
 
   await waitFor(() => expect(screen.getByRole('button', { name: 'Undo' })).toBeEnabled());
   fireEvent.click(screen.getByRole('button', { name: 'Undo' }));
-  await waitFor(() => expect(saveMapAnnotations).toHaveBeenLastCalledWith('factory.pgm', []));
+  await waitFor(() => expect(latestMapViewerProps().mapAnnotations).toEqual([]));
   await waitFor(() => expect(screen.getByRole('button', { name: 'Redo' })).toBeEnabled());
   fireEvent.click(screen.getByRole('button', { name: 'Redo' }));
-  await waitFor(() => expect(saveMapAnnotations).toHaveBeenLastCalledWith(
+  await waitFor(() => expect(latestMapViewerProps().mapAnnotations).toEqual([
+    expect.objectContaining({ label: 'Dock', color: '#3B241F' }),
+  ]));
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Save' })).toBeEnabled());
+  fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+  await waitFor(() => expect(saveMapAnnotations).toHaveBeenCalledWith(
     'factory.pgm',
     [expect.objectContaining({ label: 'Dock', color: '#3B241F' })],
   ));
