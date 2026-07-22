@@ -1,5 +1,5 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import MissionCanvasPage from './MissionCanvasPage';
+import MissionCanvasPage, { assembleMissionBtFilesForSave } from './MissionCanvasPage';
 import {
   configureDesignLocalizationAmcl,
   getMapAnnotations,
@@ -2193,4 +2193,53 @@ test('lists the mission route waypoints in the run session panel', async () => {
   const waypointList = await screen.findByRole('list', { name: 'Mission waypoints' });
   expect(within(waypointList).getByText('Kitchen')).toBeInTheDocument();
   expect(within(waypointList).getByText('Living Room')).toBeInTheDocument();
+});
+
+describe('assembleMissionBtFilesForSave', () => {
+  const EDITED = [
+    '<root BTCPP_format="4" main_tree_to_execute="MainTree">',
+    '  <BehaviorTree ID="MainTree"><Wait duration="2.0"/></BehaviorTree>',
+    '</root>',
+  ].join('\n');
+
+  test('migrates authored BT content to the canonical label path', () => {
+    // The editor stored content under a non-canonical path (e.g. an id-based or
+    // pre-rename path); it must follow the waypoint to locals/bay.xml on save.
+    const spot = {
+      id: 'spot_a',
+      label: 'Bay',
+      linked_bt_tree: 'locals/dock.xml',
+      metadata: { local_bt: 'locals/dock.xml' },
+    };
+    const { files, stalePaths } = assembleMissionBtFilesForSave(
+      [spot],
+      { 'locals/dock.xml': EDITED },
+      [],
+      'global.xml',
+      '<global/>',
+    );
+    expect(files['locals/bay.xml']).toBe(EDITED);
+    expect(files['locals/dock.xml']).toBeUndefined();
+    expect(files['global.xml']).toBe('<global/>');
+    expect(stalePaths).toContain('locals/dock.xml');
+  });
+
+  test('preserves edited content when the stored path already matches', () => {
+    const spot = { id: 'spot_a', label: 'Dock', metadata: { local_bt: 'locals/dock.xml' } };
+    const { files, stalePaths } = assembleMissionBtFilesForSave(
+      [spot],
+      { 'locals/dock.xml': EDITED },
+      [],
+      'global.xml',
+      '<global/>',
+    );
+    expect(files['locals/dock.xml']).toBe(EDITED);
+    expect(stalePaths).toEqual([]);
+  });
+
+  test('writes an empty default for an unedited waypoint', () => {
+    const spot = { id: 'spot_a', label: 'Dock', metadata: {} };
+    const { files } = assembleMissionBtFilesForSave([spot], {}, [], 'global.xml', '<global/>');
+    expect(files['locals/dock.xml']).toContain('<BehaviorTree ID="MainTree"/>');
+  });
 });

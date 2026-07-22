@@ -740,6 +740,34 @@ function missionBtFileDefaultsForSpots(spots) {
   return entries;
 }
 
+// Assemble the BT files to persist on save. Each waypoint's authored content
+// (stored under its current path — which may be an id-based or pre-rename path)
+// is migrated to its canonical label-based path, so a mismatch between where the
+// editor wrote the XML and the canonical filename never drops the user's tree.
+// Returns the files to write plus the now-orphaned local paths to delete.
+export function assembleMissionBtFilesForSave(spots, missionBtFiles, deletedPaths, globalPath, globalXml) {
+  const files = { [globalPath]: globalXml };
+  const activePaths = new Set();
+  spots.forEach((spot) => {
+    const fromPath = localBtPathForSpot(spot);
+    const toPath = canonicalLocalBtPathForSpot(spot);
+    activePaths.add(toPath);
+    const content = missionBtFiles[fromPath] !== undefined
+      ? missionBtFiles[fromPath]
+      : missionBtFiles[toPath] !== undefined
+        ? missionBtFiles[toPath]
+        : defaultLocalBtXml(spot);
+    files[toPath] = content;
+  });
+  const stale = new Set();
+  const considerStale = (path) => {
+    if (path.startsWith("locals/") && !activePaths.has(path)) stale.add(path);
+  };
+  Object.keys(missionBtFiles).forEach(considerStale);
+  (deletedPaths || []).forEach(considerStale);
+  return { files, stalePaths: [...stale] };
+}
+
 function spotsFromMissionWaypoints(mapName, waypoints) {
   if (!Array.isArray(waypoints)) return [];
   return waypoints.map((waypoint) => {
@@ -2603,26 +2631,17 @@ export default function MissionCanvasPage() {
       );
       const globalPath = "global.xml";
       const globalXml = buildGlobalMissionXml(routeMissionSpots);
-      const activeLocalBtPaths = new Set(canonicalMissionSpots.map((spot) => localBtPathForSpot(spot)));
-      const nextBtFiles = {
-        ...missionBtFileDefaultsForSpots(canonicalMissionSpots),
-        ...missionBtFiles,
-        [globalPath]: globalXml,
-      };
-      Object.keys(nextBtFiles).forEach((path) => {
-        if (path.startsWith("locals/") && !activeLocalBtPaths.has(path)) {
-          delete nextBtFiles[path];
-        }
-      });
-      const staleLocalBtPaths = Object.keys(missionBtFiles).filter((path) => (
-        path.startsWith("locals/") && !activeLocalBtPaths.has(path)
-      ));
-      deletedMissionBtPaths.forEach((path) => {
-        if (path.startsWith("locals/") && !activeLocalBtPaths.has(path)) {
-          staleLocalBtPaths.push(path);
-        }
-      });
-      const uniqueStaleLocalBtPaths = [...new Set(staleLocalBtPaths)];
+      // Migrate authored content from each waypoint's current storage path to its
+      // canonical path so a path mismatch never saves an empty BT (visibleSpots
+      // still carry the pre-canonicalization metadata used to find that content).
+      const { files: nextBtFiles, stalePaths: uniqueStaleLocalBtPaths } =
+        assembleMissionBtFilesForSave(
+          visibleSpots,
+          missionBtFiles,
+          deletedMissionBtPaths,
+          globalPath,
+          globalXml,
+        );
       await saveNavigationMission(currentMapName, {
         global_bt: globalPath,
         waypoints: missionWaypointsFromSpots(canonicalMissionSpots),
