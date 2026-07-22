@@ -134,16 +134,23 @@ export function useMissionRunner({
   }, [btStatusRef]);
 
   // Poll TF pose until it settles inside tolerance, times out, or is cancelled.
-  const awaitArrival = useCallback(async (goal, signal) => {
+  // Periodically re-issues the goal (onResend) so a goal dropped right after
+  // nav bringup doesn't strand the robot short of the waypoint.
+  const awaitArrival = useCallback(async (goal, signal, onResend) => {
     const cfg = configRef.current;
     const deadline = Date.now() + cfg.navTimeoutMs;
     let arrivedSince = null;
+    let lastSend = Date.now();
     for (;;) {
       if (isArrived(currentPoseRef.current, goal, cfg)) {
         if (arrivedSince == null) arrivedSince = Date.now();
         if (Date.now() - arrivedSince >= cfg.settleMs) return "arrived";
       } else {
         arrivedSince = null;
+        if (cfg.goalResendMs > 0 && onResend && Date.now() - lastSend >= cfg.goalResendMs) {
+          lastSend = Date.now();
+          Promise.resolve().then(onResend).catch(() => { /* best-effort resend */ });
+        }
       }
       if (Date.now() > deadline) return "timeout";
       await cancellableSleep(cfg.pollMs, signal);
@@ -159,7 +166,11 @@ export function useMissionRunner({
     await sendGoalRef.current(goal.x, goal.y, goal.yaw);
     dispatch({ type: "phase", phase: RunnerPhase.AWAITING_ARRIVAL });
 
-    const arrival = await awaitArrival(goal, signal);
+    const arrival = await awaitArrival(
+      goal,
+      signal,
+      () => sendGoalRef.current(goal.x, goal.y, goal.yaw),
+    );
     if (arrival === "timeout") {
       dispatch({ type: "fail", reason: `Navigation timed out at ${label}`, index });
       return false;

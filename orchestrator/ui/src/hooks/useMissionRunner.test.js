@@ -104,6 +104,18 @@ test("fails with a nav-timeout reason when the robot never arrives", async () =>
   expect(h.callService).not.toHaveBeenCalled();
 });
 
+test("re-issues the nav goal while the robot is still en route", async () => {
+  const h = makeHarness({ config: { ...FAST, goalResendMs: 40, navTimeoutMs: 3000 } });
+  act(() => { h.view.result.current.start(); });
+  await waitFor(() => expect(h.sendGoal).toHaveBeenCalledTimes(1));
+  // The robot never arrives, so the same goal should be re-sent.
+  await waitFor(
+    () => expect(h.sendGoal.mock.calls.length).toBeGreaterThanOrEqual(2),
+    { timeout: 3000 },
+  );
+  expect(h.sendGoal.mock.calls.every(([x, y]) => x === 0 && y === 0)).toBe(true);
+});
+
 test("skips load_and_run for a waypoint whose BT is empty", async () => {
   const h = makeHarness({ resolveBtXml: () => emptyBt });
   act(() => { h.view.result.current.start(); });

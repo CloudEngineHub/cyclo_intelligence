@@ -55,6 +55,7 @@ export const DEFAULT_RUNNER_CONFIG = {
   yawRad: 0.4,
   settleMs: 800,
   navTimeoutMs: 120000,
+  goalResendMs: 12000,
   btStartTimeoutMs: 5000,
   btTimeoutMs: 300000,
   pollMs: 250,
