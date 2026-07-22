@@ -2095,15 +2095,18 @@ export default function MissionCanvasPage() {
     setMissionFlowEdges((current) => filterMissionFlowEdges(current, visibleSpots));
   }, [setMissionFlowEdges, setMissionFlowNodes, visibleSpots]);
 
+  // Design: an active BT node blocks waypoint editing, so drop spot/initial
+  // modes. Run is exempt — it needs the BT node up AND uses "initial" for the
+  // localization pose-set gesture, so this must not fire there.
   useEffect(() => {
-    if (!btNodeIsUp) return;
+    if (!btNodeIsUp || workspaceStage !== STAGE_AUTHORING) return;
     if (showWaypointOptions) {
       setShowWaypointOptions(false);
     }
     if (interactionMode === "spot" || interactionMode === "initial") {
       setInteractionMode("view");
     }
-  }, [btNodeIsUp, interactionMode, showWaypointOptions]);
+  }, [btNodeIsUp, interactionMode, showWaypointOptions, workspaceStage]);
 
   useEffect(() => {
     if (workspaceStage === STAGE_AUTHORING && designMapAvailable && !btNodeIsUp) {

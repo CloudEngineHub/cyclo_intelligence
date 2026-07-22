@@ -2269,6 +2269,54 @@ test('gates the mission run on an initial robot pose', async () => {
   expect(goal.pose.pose.position).toMatchObject({ x: 1, y: 0 });
 }, 20000);
 
+test('keeps Run localization active while the BT node is up', async () => {
+  const latestMapViewerProps = () => (
+    mockMapViewer.mock.calls[mockMapViewer.mock.calls.length - 1][0]
+  );
+  // A running mission keeps the BT node up; the design-only "deactivate BT
+  // before editing" guard must not cancel the Run pose-set gesture.
+  global.fetch.mockResolvedValue(mockJsonResponse({ name: 'bt_node', state: 'up', raw: 'up' }));
+  getPgmFiles.mockResolvedValue({
+    files: [{ path: 'factory.pgm', name: 'factory.pgm' }],
+  });
+  getNavigationMission.mockImplementation((mapName) => Promise.resolve(
+    mapName === 'factory'
+      ? {
+        exists: true,
+        map_name: 'factory',
+        global_bt: 'global.xml',
+        waypoints: [
+          { id: 'wp1', label: 'Kitchen', pose: { frame_id: 'map', x: 1, y: 0, yaw: 0 }, local_bt: 'locals/wp1.xml', metadata: {} },
+        ],
+        metadata: {},
+      }
+      : { exists: false, map_name: mapName, global_bt: 'global.xml', waypoints: [], metadata: {} },
+  ));
+
+  render(<MissionCanvasPage />);
+
+  // Establish that the BT node is up (observable in the design stage).
+  fireEvent.click(screen.getByRole('tab', { name: 'Design' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Load Mission' }));
+  await screen.findByRole('combobox', { name: 'Design mission map file' });
+  fireEvent.click(screen.getByRole('button', { name: 'Load' }));
+  await waitFor(() => expect(screen.getByText('BT Node Active')).toBeInTheDocument());
+
+  // Move to Run and localize; the BT node stays up throughout.
+  fireEvent.click(screen.getByRole('tab', { name: 'Run' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Load Mission' }));
+  const mapSelect = await screen.findByRole('combobox', { name: 'Run mission map file' });
+  await waitFor(() => expect(mapSelect).toHaveValue('factory.pgm'));
+  fireEvent.click(screen.getByRole('button', { name: 'Load' }));
+  await waitFor(() => expect(getMapAnnotations).toHaveBeenCalledWith('factory.pgm'));
+
+  fireEvent.click(screen.getByRole('button', { name: 'Localize' }));
+  // Settle so the guard effect (which would reset "initial" in the buggy code)
+  // has run; the pose-set mode must remain active.
+  await act(async () => { await Promise.resolve(); });
+  await waitFor(() => expect(latestMapViewerProps().interactionMode).toBe('initial'));
+}, 15000);
+
 describe('assembleMissionBtFilesForSave', () => {
   const EDITED = [
     '<root BTCPP_format="4" main_tree_to_execute="MainTree">',
