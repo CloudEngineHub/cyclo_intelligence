@@ -1822,6 +1822,19 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, 
             if (marker)
                 layers.add(marker);
         });
+        if (missionRouteOrder.length >= 2) {
+            const routePoints = [...missionRouteOrder]
+                .sort((a, b) => a.order - b.order)
+                .map(({ id }) => spotById.get(id))
+                .filter((spot) => spot === null || spot === void 0 ? void 0 : spot.pose)
+                .map((spot) => new THREE.Vector3(Number(spot.pose.x ?? 0), Number(spot.pose.y ?? 0), 0.12));
+            const routeLine = makeLine(routePoints, markerPalette(isDark).idle, 2);
+            if (routeLine) {
+                routeLine.material.transparent = true;
+                routeLine.material.opacity = 0.72;
+                layers.add(routeLine);
+            }
+        }
         missionRouteOrder.forEach(({ id, order }) => {
             const spot = spotById.get(id);
             const badge = makeMissionRouteBadge(spot, order, id === selectedMissionRouteSourceId, waypointScale, isDark);
