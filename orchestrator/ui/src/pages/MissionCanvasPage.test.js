@@ -374,7 +374,9 @@ test('shows Waypoint and BT authoring panels in the authoring stage', async () =
   expect(getPgmImage).not.toHaveBeenCalled();
   expect(latestMapViewerProps().map).toBeNull();
   expect(latestMapViewerProps().waitingLabel).toBe('Load a map');
-  expect(latestMapViewerProps().mapRefined).toBe(true);
+  // Design shows the raw grid — waypoints are placed against real pixels, so
+  // the beautified floor-plan rendering is reserved for the Run stage.
+  expect(latestMapViewerProps().mapRefined).toBe(false);
   expect(latestMapViewerProps().missionRouteOrder).toEqual([]);
 });
 
@@ -2232,6 +2234,8 @@ test('hides run waypoints with the map after leaving and returning to Run', asyn
   fireEvent.click(screen.getByRole('button', { name: 'Load' }));
   await waitFor(() => expect(screen.getByText('Loaded mission factory')).toBeInTheDocument());
   await waitFor(() => expect(latestMapViewerProps().spots).toHaveLength(2));
+  // Run keeps the beautified floor-plan rendering.
+  expect(latestMapViewerProps().mapRefined).toBe(true);
 
   // Leave to Design and come back: the ephemeral map is dropped, and the
   // waypoints must vanish with it (without a map they would render at raw

@@ -3665,7 +3665,7 @@ export default function MissionCanvasPage() {
                   : []
             }
             selectedMapAnnotationId={mappingEditorActive ? mapEditor.selectedAnnotationId : ""}
-            mapRefined={!mappingEditorActive}
+            mapRefined={!mappingEditorActive && workspaceStage !== STAGE_AUTHORING}
             editorBrush={
               mappingEditorActive && mapEditor.map && EDITOR_BRUSH_RING_COLORS.light[mapEditor.tool]
                 ? {
