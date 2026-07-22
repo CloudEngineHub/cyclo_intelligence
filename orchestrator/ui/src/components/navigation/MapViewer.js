@@ -951,7 +951,7 @@ function makePoseMarker(pose, color, z, isDark = false) {
     group.add(arrow);
     return group;
 }
-function makeSpotMarker(spot, selected = false, scale = 1, isDark = false) {
+function makeSpotMarker(spot, selected = false, scale = 1, isDark = false, active = false) {
     var _a, _b, _c, _d;
     const pose = spot === null || spot === void 0 ? void 0 : spot.pose;
     if (!pose)
@@ -960,7 +960,7 @@ function makeSpotMarker(spot, selected = false, scale = 1, isDark = false) {
     const y = Number((_b = pose.y) !== null && _b !== void 0 ? _b : 0);
     const yaw = Number((_c = pose.yaw) !== null && _c !== void 0 ? _c : 0);
     const pal = markerPalette(isDark);
-    const color = selected ? pal.selected : pal.idle;
+    const color = active ? pal.selected : (selected ? pal.selected : pal.idle);
     const group = new THREE.Group();
     group.position.set(x, y, 0.24);
     group.scale.setScalar(scale);
@@ -968,7 +968,20 @@ function makeSpotMarker(spot, selected = false, scale = 1, isDark = false) {
     const marker = new THREE.Group();
     marker.rotation.z = yaw;
     marker.userData = { spotId: spot.id, dragAction: "move" };
-    if (selected) {
+    if (active) {
+        // Pulsing halo for the waypoint the mission is currently working on;
+        // the animation loop drives opacity + scale from userData.pulse.
+        const pulseBase = 0.5;
+        const pulse = new THREE.Mesh(new THREE.RingGeometry(WAYPOINT_SELECTED_HALO_OUTER_RADIUS + 0.5, WAYPOINT_SELECTED_HALO_OUTER_RADIUS + 1.5, 44), new THREE.MeshBasicMaterial({
+            color: pal.selected,
+            transparent: true,
+            opacity: pulseBase,
+            side: THREE.DoubleSide,
+        }));
+        pulse.userData = { spotId: spot.id, dragAction: "move", pulse: true, pulseBase };
+        marker.add(pulse);
+    }
+    if (selected || active) {
         const halo = new THREE.Mesh(new THREE.RingGeometry(WAYPOINT_SELECTED_HALO_INNER_RADIUS, WAYPOINT_SELECTED_HALO_OUTER_RADIUS, 40), new THREE.MeshBasicMaterial({
             color,
             transparent: true,
@@ -1349,7 +1362,7 @@ function WaypointBtFocusLayer({ layer, onClose }) {
 // as a clean floor-plan without retuning makeOccupancyTexture.
 const SCENE_BG = { light: 0xefece3, dark: 0x1b1916 };
 
-export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, goalPose, footprint, tf, showMap, showGlobalCostmap, showLocalCostmap, showScan, showGlobalPlan, showGoalPose, showTf, showRobotModel, interactionDisabled, interactionMode, editorActive, editorPaintOnDrag = true, editorAreaSelection = false, editorBrush = null, mapRefined = true, viewKey, isDark = false, waitingLabel = "Waiting for /map", fitContainer = false, spots = [], selectedSpotId = "", behaviorNodes = [], selectedBehaviorNodeId = "", behaviorPreviewNode = null, missionRouteOrder = [], missionRouteMode = false, selectedMissionRouteSourceId = "", mapAnnotations = [], selectedMapAnnotationId = "", btLayer = null, onBtLayerClose, onSpotClick, onBehaviorNodeClick, onMissionRouteSpotClick, onMissionRouteMapClick, onSpotPoseChange, onBehaviorNodePoseChange, onEditorMapPoint, onEditorMapArea, onMapClick, onMapPose, }) {
+export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, goalPose, footprint, tf, showMap, showGlobalCostmap, showLocalCostmap, showScan, showGlobalPlan, showGoalPose, showTf, showRobotModel, interactionDisabled, interactionMode, editorActive, editorPaintOnDrag = true, editorAreaSelection = false, editorBrush = null, mapRefined = true, viewKey, isDark = false, waitingLabel = "Waiting for /map", fitContainer = false, spots = [], selectedSpotId = "", activeWaypointId = "", missionFollowRobot = false, behaviorNodes = [], selectedBehaviorNodeId = "", behaviorPreviewNode = null, missionRouteOrder = [], missionRouteMode = false, selectedMissionRouteSourceId = "", mapAnnotations = [], selectedMapAnnotationId = "", btLayer = null, onBtLayerClose, onSpotClick, onBehaviorNodeClick, onMissionRouteSpotClick, onMissionRouteMapClick, onSpotPoseChange, onBehaviorNodePoseChange, onEditorMapPoint, onEditorMapArea, onMapClick, onMapPose, }) {
     const containerRef = useRef(null);
     const sceneRef = useRef(null);
     const rendererRef = useRef(null);
@@ -1362,6 +1375,8 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, 
     const viewRollRef = useRef(0);
     const viewRotateDragRef = useRef(null);
     const btFocusActiveRef = useRef(false);
+    const followRobotRef = useRef(false);
+    const followPoseRef = useRef(null);
     const latestFootprintRef = useRef(null);
     const tfSyncedFootprintRef = useRef(null);
     const [dragPreviewPose, setDragPreviewPose] = useState(null);
@@ -1443,8 +1458,33 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, 
             else {
                 window.addEventListener("resize", resize);
             }
+            const pulseStart = performance.now();
             const animate = () => {
                 animationFrameRef.current = requestAnimationFrame(animate);
+                const elapsed = (performance.now() - pulseStart) / 1000;
+                // Pulse the active-waypoint halo (userData.pulse), and smoothly pan
+                // the camera to keep the robot centered while it navigates.
+                const wave = 0.5 + 0.5 * Math.sin(elapsed * 3.2);
+                const activeLayers = layersRef.current;
+                if (activeLayers) {
+                    activeLayers.traverse((object) => {
+                        if (object.userData && object.userData.pulse && object.material) {
+                            object.material.opacity = object.userData.pulseBase * (0.35 + 0.65 * wave);
+                            object.scale.setScalar(1 + 0.16 * wave);
+                        }
+                    });
+                }
+                if (followRobotRef.current && followPoseRef.current) {
+                    const target = followPoseRef.current;
+                    const dx = (target.x - controls.target.x) * 0.08;
+                    const dy = (target.y - controls.target.y) * 0.08;
+                    if (Math.abs(dx) > 1e-4 || Math.abs(dy) > 1e-4) {
+                        controls.target.x += dx;
+                        controls.target.y += dy;
+                        camera.position.x += dx;
+                        camera.position.y += dy;
+                    }
+                }
                 controls.update();
                 renderer.render(scene, camera);
             };
@@ -1649,6 +1689,16 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, 
         map,
         viewKey,
     ]);
+    // While the runner is navigating, glide the camera to follow the robot; the
+    // animation loop reads these refs each frame (no per-pose re-render).
+    useEffect(() => {
+        followRobotRef.current = missionFollowRobot;
+    }, [missionFollowRobot]);
+    useEffect(() => {
+        followPoseRef.current = (pose === null || pose === void 0 ? void 0 : pose.position)
+            ? { x: pose.position.x, y: pose.position.y }
+            : null;
+    }, [pose]);
     useEffect(() => {
         latestFootprintRef.current = footprint;
     }, [footprint]);
@@ -1768,7 +1818,7 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, 
                         yaw: preview.yaw,
                     },
                 }
-                : spot, spot.id === selectedSpotId, waypointScale, isDark);
+                : spot, spot.id === selectedSpotId, waypointScale, isDark, spot.id === activeWaypointId);
             if (marker)
                 layers.add(marker);
         });
@@ -1879,6 +1929,7 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, 
         btLayer?.spot?.id,
         selectedBehaviorNodeId,
         selectedSpotId,
+        activeWaypointId,
         showGlobalCostmap,
         showLocalCostmap,
         showGlobalPlan,

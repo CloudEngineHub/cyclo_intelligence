@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import MissionCanvasPage from './MissionCanvasPage';
 import {
   configureDesignLocalizationAmcl,
@@ -88,8 +88,14 @@ jest.mock('../utils/navigationApi', () => ({
   saveMapAnnotations: jest.fn().mockImplementation((path, annotations) => Promise.resolve({ path, annotations, saved: true })),
   savePgmImage: jest.fn().mockResolvedValue({ path: 'map.pgm', saved: true }),
   sendInitialPoseEstimate: jest.fn().mockResolvedValue({ ok: true }),
+  sendNavigateToPoseGoal: jest.fn().mockResolvedValue({ ok: true, message: 'Goal accepted' }),
+  cancelNavigateToPoseGoal: jest.fn().mockResolvedValue({ ok: true }),
   startNavigation: jest.fn().mockResolvedValue({ ok: true }),
   stopNavigation: jest.fn().mockResolvedValue({ ok: true }),
+}));
+
+jest.mock('../hooks/useRosServiceCaller', () => ({
+  useRosServiceCaller: () => ({ callService: jest.fn().mockResolvedValue({ success: true }) }),
 }));
 
 jest.mock('../utils/navigationSpotsApi', () => ({
@@ -2147,4 +2153,44 @@ test('loads a saved map for the run stage', async () => {
   fireEvent.click(screen.getByRole('button', { name: 'Run Mission' }));
 
   await waitFor(() => expect(startNavigation).toHaveBeenCalledWith('nav', 'factory'));
+});
+
+test('lists the mission route waypoints in the run session panel', async () => {
+  getPgmFiles.mockResolvedValue({
+    files: [{ path: 'factory.pgm', name: 'factory.pgm' }],
+  });
+  getNavigationMission.mockImplementation((mapName) => Promise.resolve(
+    mapName === 'factory'
+      ? {
+        exists: true,
+        map_name: 'factory',
+        global_bt: 'global.xml',
+        waypoints: [
+          { id: 'wp1', label: 'Kitchen', pose: { frame_id: 'map', x: 1, y: 0, yaw: 0 }, local_bt: 'locals/wp1.xml', metadata: {} },
+          { id: 'wp2', label: 'Living Room', pose: { frame_id: 'map', x: 4, y: 0, yaw: 0 }, local_bt: 'locals/wp2.xml', metadata: {} },
+        ],
+        metadata: {
+          mission_flow: {
+            nodes: [{ id: 'wp1', position: { x: 80, y: 72 } }, { id: 'wp2', position: { x: 300, y: 72 } }],
+            edges: [{ id: 'e1', source: 'wp1', target: 'wp2' }],
+          },
+        },
+      }
+      : { exists: false, map_name: mapName, global_bt: 'global.xml', waypoints: [], metadata: {} },
+  ));
+
+  render(<MissionCanvasPage />);
+
+  fireEvent.click(screen.getByRole('tab', { name: 'Run' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Load Mission' }));
+  const mapSelect = await screen.findByRole('combobox', { name: 'Run mission map file' });
+  await waitFor(() => expect(mapSelect).toHaveValue('factory.pgm'));
+  fireEvent.click(screen.getByRole('button', { name: 'Load' }));
+
+  await waitFor(() => expect(screen.getByText('Loaded mission factory')).toBeInTheDocument());
+
+  // The Run Session panel reflects the loaded route as an ordered checklist.
+  const waypointList = await screen.findByRole('list', { name: 'Mission waypoints' });
+  expect(within(waypointList).getByText('Kitchen')).toBeInTheDocument();
+  expect(within(waypointList).getByText('Living Room')).toBeInTheDocument();
 });

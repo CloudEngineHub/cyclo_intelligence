@@ -23,6 +23,7 @@ import { MapViewer } from "../components/navigation/MapViewer";
 import { NavigationSidePanel, } from "../components/navigation/NavigationSidePanel";
 import { NavigationToolbar } from "../components/navigation/NavigationToolbar";
 import { mergeTfMessages, orientationFromYaw, poseFromBaseLinkTf, tfMessageFromBuffer, updateTfBuffer, yawFromPose, } from "../utils/navigationTf";
+import { rosTimestampNow } from "../utils/rosTime";
 import FixedLogPanel from "../components/navigation/FixedLogPanel";
 const NAVIGATION_SERVICE = "ai_worker_navigation";
 const SERVICE_MODE_STORAGE_KEY = "cyclo.navigation.serviceMode";
@@ -108,12 +109,6 @@ function isGoalReached(current, goal) {
     const distance = Math.hypot(dx, dy);
     const yawError = Math.abs(normalizeAngle(yawFromPose(current) - yawFromPose(goalPose)));
     return distance <= GOAL_REACHED_XY_TOLERANCE_M && yawError <= GOAL_REACHED_YAW_TOLERANCE_RAD;
-}
-function rosTimestampNow() {
-    const nowMs = Date.now();
-    const sec = Math.floor(nowMs / 1000);
-    const nanosec = Math.floor((nowMs % 1000) * 1000000);
-    return { sec, nanosec };
 }
 function clamp(value, min, max) {
     return Math.min(Math.max(value, min), max);

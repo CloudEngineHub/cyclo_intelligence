@@ -8,12 +8,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { MdDelete, MdPowerSettingsNew, MdStop } from "react-icons/md";
 import {
+  cancelNavigateToPoseGoal,
   configureDesignLocalizationAmcl,
   getServiceStatus,
   getPgmFiles,
   requestNoMotionUpdate,
   saveNavigationMap,
   sendInitialPoseEstimate,
+  sendNavigateToPoseGoal,
   startNavigation,
   stopNavigation,
 } from "../utils/navigationApi";
@@ -34,13 +36,19 @@ import { useNavigationRosPublisher, useNavigationRosTopic } from "../hooks/useNa
 import { MapEditorControls, useMapEditor } from "../components/navigation/MapEditor";
 import { MapViewer } from "../components/navigation/MapViewer";
 import MissionBtEditor from "../components/navigation/MissionBtEditor";
+import MissionBtRunView from "../components/navigation/MissionBtRunView";
 import {
   mergeTfMessages,
+  orientationFromYaw,
   poseFromBaseLinkTf,
   tfMessageFromBuffer,
   updateTfBuffer,
   yawFromPose,
 } from "../utils/navigationTf";
+import { rosTimestampNow } from "../utils/rosTime";
+import { useRosServiceCaller } from "../hooks/useRosServiceCaller";
+import { useMissionRunner } from "../hooks/useMissionRunner";
+import { RunnerStatus } from "../hooks/missionRunnerCore";
 import { FALLBACK_CATALOG } from "../constants/btNodeCatalogFallback";
 import { BT_SUPPORTED_ROBOT_TYPE } from "../constants/btSupport";
 
@@ -1029,11 +1037,89 @@ function MappingSessionPanel({ mappingEditorActive, selectedPath, dirty }) {
   );
 }
 
-function RunSessionPanel({ mapName, running }) {
+const RUNNER_STATUS_META = {
+  idle: { label: "Idle", color: "var(--mc-text-subtle)" },
+  starting: { label: "Starting", color: "var(--mc-warning)" },
+  navigating: { label: "Running", color: "var(--mc-success)" },
+  "running-bt": { label: "Running", color: "var(--mc-success)" },
+  advancing: { label: "Running", color: "var(--mc-success)" },
+  done: { label: "Completed", color: "var(--mc-success)" },
+  failed: { label: "Failed", color: "var(--mc-danger)" },
+  cancelled: { label: "Stopped", color: "var(--mc-warning)" },
+};
+
+const RUNNER_PHASE_LABEL = {
+  "nav-sent": "Navigating",
+  "awaiting-arrival": "Navigating",
+  arrived: "Arrived",
+  "bt-loading": "Starting behavior",
+  "bt-running": "Running behavior",
+  "bt-done": "Waypoint done",
+};
+
+const WAYPOINT_STATE_META = {
+  pending: { mark: "○", color: "var(--mc-text-subtle)", note: "" },
+  navigating: { mark: "◐", color: "var(--mc-success)", note: "Navigating" },
+  "running-bt": { mark: "◑", color: "var(--mc-accent)", note: "Behavior" },
+  done: { mark: "●", color: "var(--mc-success)", note: "" },
+  skipped: { mark: "●", color: "var(--mc-text-subtle)", note: "Nav only" },
+  failed: { mark: "✕", color: "var(--mc-danger)", note: "Failed" },
+};
+
+function RunSessionPanel({ mapName, running, runner }) {
+  const statusMeta = RUNNER_STATUS_META[runner.status] || RUNNER_STATUS_META.idle;
+  const showProgress = runner.total > 0;
+  const showReason = (runner.status === "failed" || runner.status === "cancelled") && runner.reason;
+  const phaseLabel = RUNNER_PHASE_LABEL[runner.phase];
   return (
     <Panel title="Run Session" className="grid gap-2">
       <SessionRow label="Runtime" value={running ? "Running" : "Idle"} />
       <SessionRow label="Selected map" value={mapName || "Not selected"} />
+      <div className="flex items-center justify-between gap-2 text-xs min-w-0">
+        <span style={{ color: MISSION_TEXT_MUTED }}>Mission</span>
+        <span className="flex items-center gap-1.5 font-mono">
+          <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: statusMeta.color }} />
+          {statusMeta.label}
+        </span>
+      </div>
+      {showProgress && (
+        <SessionRow
+          label="Progress"
+          value={
+            runner.currentIndex >= 0
+              ? `Waypoint ${runner.currentIndex + 1} / ${runner.total}${phaseLabel ? ` · ${phaseLabel}` : ""}`
+              : `${runner.total} waypoint${runner.total === 1 ? "" : "s"}`
+          }
+        />
+      )}
+      {showReason && (
+        <div
+          className="text-xs rounded-md px-2.5 py-1.5"
+          style={{
+            color: runner.status === "failed" ? "var(--mc-danger)" : "var(--mc-warning)",
+            backgroundColor: "var(--mc-surface-2)",
+          }}
+        >
+          {runner.reason}
+        </div>
+      )}
+      {showProgress && (
+        <ol className="grid gap-1 mt-0.5 max-h-40 overflow-y-auto" role="list" aria-label="Mission waypoints">
+          {runner.progress.map((entry, index) => {
+            const meta = WAYPOINT_STATE_META[entry.state] || WAYPOINT_STATE_META.pending;
+            return (
+              <li key={entry.id} className="flex items-center gap-2 text-xs min-w-0">
+                <span className="shrink-0 font-mono" style={{ color: meta.color, width: 14 }}>{meta.mark}</span>
+                <span className="shrink-0 tabular-nums" style={{ color: MISSION_TEXT_MUTED, width: 18 }}>{index + 1}</span>
+                <span className="truncate flex-1" style={{ color: MISSION_TEXT }}>{entry.label}</span>
+                {meta.note && (
+                  <span className="shrink-0 font-mono text-[10.5px]" style={{ color: meta.color }}>{meta.note}</span>
+                )}
+              </li>
+            );
+          })}
+        </ol>
+      )}
     </Panel>
   );
 }
@@ -1595,6 +1681,8 @@ export default function MissionCanvasPage() {
   const tfBufferRef = useRef(new Map());
   const currentPoseRef = useRef(null);
   const amclPoseRef = useRef(null);
+  const btStatusRef = useRef("stopped");
+  const missionAutoStartRef = useRef(false);
   const behaviorNodeSerialRef = useRef(0);
   const skipNextSpotLoadForMapRef = useRef("");
   const legacySpotLoadGenerationRef = useRef(0);
@@ -1856,6 +1944,46 @@ export default function MissionCanvasPage() {
       .map((name) => name.trim())
       .filter(Boolean)
   ), [btActiveNodesText]);
+
+  // ── Mission runner (Run stage): navigate → run waypoint BT → advance ──────
+  const { callService } = useRosServiceCaller();
+  const resolveMissionBtXml = useCallback(
+    (spot) => (spot ? missionBtFiles[localBtPathForSpot(spot)] : ""),
+    [missionBtFiles],
+  );
+  const sendMissionGoal = useCallback(async (x, y, yaw) => {
+    const poseStamped = {
+      header: { frame_id: "map", stamp: rosTimestampNow() },
+      pose: { position: { x, y, z: 0 }, orientation: orientationFromYaw(yaw) },
+    };
+    return sendNavigateToPoseGoal({ pose: poseStamped });
+  }, []);
+  const stopMissionBt = useCallback(
+    () => callService("/bt/set_running", "std_srvs/srv/SetBool", { data: false }),
+    [callService],
+  );
+  const missionRunnerFlags = useCallback(
+    () => ({ navRunning: running, btNodeIsUp }),
+    [btNodeIsUp, running],
+  );
+  const missionRunner = useMissionRunner({
+    orderedSpots: missionRouteOrderedSpots,
+    resolveBtXml: resolveMissionBtXml,
+    currentPoseRef,
+    btStatusRef,
+    callService,
+    sendGoal: sendMissionGoal,
+    cancelGoal: cancelNavigateToPoseGoal,
+    stopBt: stopMissionBt,
+    getFlags: missionRunnerFlags,
+    onMessage: setMessage,
+  });
+  const missionRunnerActive = missionRunner.isRunning;
+  const missionFollowRobot = (
+    missionRunnerActive
+    && (missionRunner.phase === "nav-sent" || missionRunner.phase === "awaiting-arrival")
+  );
+
   const waypointBtEditor = selectedBtLayerSpot ? (
     <MissionBtEditor
       title={`${selectedBtLayerSpot.label || selectedBtLayerSpot.id} Local BT`}
@@ -1883,6 +2011,28 @@ export default function MissionCanvasPage() {
       editor: waypointBtEditor,
     }
     : null;
+  // While the runner is executing a waypoint's BT, surface a read-only view of
+  // that tree beside the map with the ticking node glowing.
+  const runActiveSpot = (
+    workspaceStage === STAGE_RUN
+    && missionRunner.status === RunnerStatus.RUNNING_BT
+    && missionRunner.activeSpotId
+  )
+    ? visibleSpots.find((spot) => spot.id === missionRunner.activeSpotId) || null
+    : null;
+  const runBtLayer = runActiveSpot ? {
+    spot: runActiveSpot,
+    nodeLabel: btNodeStateLabel(btNodeStatus.state),
+    executionLabel: btLayerExecutionLabel,
+    activeNodesLabel: btLayerActiveNodesLabel,
+    editor: (
+      <MissionBtRunView
+        xml={missionBtFiles[localBtPathForSpot(runActiveSpot)] || defaultLocalBtXml(runActiveSpot)}
+        activeNodeNames={btActiveNodeNames}
+      />
+    ),
+  } : null;
+  const activeBtLayer = waypointBtLayer || runBtLayer;
 
   useEffect(() => {
     setMissionFlowNodes((current) => syncMissionFlowNodesWithSpots(current, visibleSpots));
@@ -2126,6 +2276,24 @@ export default function MissionCanvasPage() {
   useEffect(() => {
     amclPoseRef.current = amclPose;
   }, [amclPose]);
+
+  useEffect(() => {
+    btStatusRef.current = btStatusText;
+  }, [btStatusText]);
+
+  // Auto-start the runner once the nav stack is up in the Run stage, guarded so
+  // it fires once per Run-Mission trigger (not after a completed/stopped run).
+  useEffect(() => {
+    if (workspaceStage !== STAGE_RUN || !runRuntimeActive) {
+      missionAutoStartRef.current = false;
+      return;
+    }
+    if (missionAutoStartRef.current) return;
+    if (!missionRouteOrderedSpots.length) return;
+    if (missionRunner.status !== RunnerStatus.IDLE) return;
+    missionAutoStartRef.current = true;
+    missionRunner.start();
+  }, [missionRouteOrderedSpots.length, missionRunner, runRuntimeActive, workspaceStage]);
 
   useEffect(() => {
     saveMissionSession({
@@ -2604,16 +2772,18 @@ export default function MissionCanvasPage() {
     setShowPgmFix((value) => !value);
   }, [showPgmFix]);
 
+  const stopMissionRunner = missionRunner.stop;
   const handleStopNavigation = useCallback(() => runCommand(
     "Stop",
     async () => {
+      stopMissionRunner();
       const result = await stopNavigation();
       setNavigationRuntimeMode("idle");
       setDesignPoseInitialized(false);
       saveMissionSession({ navigationRuntimeMode: "idle", designPoseInitialized: false });
       return result;
     },
-  ), [runCommand]);
+  ), [runCommand, stopMissionRunner]);
 
   const handleSelectSpot = useCallback((spotId) => {
     setSelectedSpotId(spotId);
@@ -3257,6 +3427,22 @@ export default function MissionCanvasPage() {
                 <ActionButton disabled={!!btNodeBusy} onClick={handleBtNodeDeactivate} variant="danger">Deactivate BT</ActionButton>
               </div>
             </>
+          ) : workspaceStage === STAGE_RUN && runBtLayer ? (
+            <>
+              <div className="flex items-center gap-2.5 min-w-0 text-[14px]">
+                <span className="font-bold tracking-tight">Run</span>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--mc-text-subtle)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m9 18 6-6-6-6" /></svg>
+                <span className="font-semibold truncate" style={{ color: MISSION_TEXT_MUTED }}>{runBtLayer.spot.label || runBtLayer.spot.id}</span>
+                <span className="text-[11px] font-mono shrink-0" style={{ color: "var(--mc-text-subtle)" }}>· Waypoint {missionRunner.currentIndex + 1} / {missionRunner.total}</span>
+              </div>
+              <div className="flex items-center gap-2.5">
+                <div className="flex items-center gap-2 px-3 py-1.5" style={{ borderRadius: 999, backgroundColor: "color-mix(in srgb, var(--mc-success) 14%, transparent)", border: "1px solid color-mix(in srgb, var(--mc-success) 35%, transparent)" }}>
+                  <span className="w-2 h-2 rounded-full" style={{ backgroundColor: "var(--mc-success)" }} />
+                  <span className="text-[12px] font-semibold" style={{ color: "var(--mc-success)" }}>Behavior running</span>
+                </div>
+                <ActionButton active={busy === "Stop"} disabled={!!busy} onClick={handleStopNavigation} variant="danger">Stop</ActionButton>
+              </div>
+            </>
           ) : (
             <>
           <div className="flex items-center gap-3 min-w-0">
@@ -3286,8 +3472,8 @@ export default function MissionCanvasPage() {
             {workspaceStage === STAGE_RUN && (
               <>
                 <ActionButton active={showRunMapDialog || runMapBusy} disabled={!!busy || running || runMapBusy} onClick={handleOpenRunMapDialog} variant="secondary">Load Mission</ActionButton>
-                <ActionButton active={busy === "Run mission" || (running && navigationRuntimeMode === "run")} disabled={!!busy || running} onClick={handleRunMission} variant="primary">Run Mission</ActionButton>
-                <ActionButton active={busy === "Stop"} disabled={!!busy || !running} onClick={handleStopNavigation} variant="danger">Stop</ActionButton>
+                <ActionButton active={busy === "Run mission" || missionRunnerActive || (running && navigationRuntimeMode === "run")} disabled={!!busy || running} onClick={handleRunMission} variant="primary">Run Mission</ActionButton>
+                <ActionButton active={busy === "Stop"} disabled={!!busy || (!running && !missionRunnerActive)} onClick={handleStopNavigation} variant="danger">Stop</ActionButton>
               </>
             )}
             <div
@@ -3355,6 +3541,8 @@ export default function MissionCanvasPage() {
             tf={mappingEditorActive ? null : needsTf ? bufferedTf : null}
             spots={missionOverlayActive ? visibleSpots : []}
             selectedSpotId={missionOverlayActive ? selectedSpotId : ""}
+            activeWaypointId={workspaceStage === STAGE_RUN ? missionRunner.activeSpotId : ""}
+            missionFollowRobot={missionFollowRobot}
             behaviorNodes={missionOverlayActive ? activeBehaviorNodes : []}
             selectedBehaviorNodeId={missionOverlayActive ? selectedBehaviorNodeId : ""}
             behaviorPreviewNode={missionOverlayActive ? behaviorPreviewNode : null}
@@ -3378,7 +3566,7 @@ export default function MissionCanvasPage() {
                 }
                 : null
             }
-            btLayer={waypointBtLayer}
+            btLayer={activeBtLayer}
             showMap={mappingEditorActive ? true : activeLayers.map}
             showGlobalCostmap={mappingEditorActive ? false : needsGlobalCostmap}
             showLocalCostmap={mappingEditorActive ? false : needsLocalCostmap}
@@ -3471,7 +3659,7 @@ export default function MissionCanvasPage() {
           )}
 
           {/* Layers popover — all stages, hidden during the BT split view */}
-          {!waypointBtLayer && <LayersPopover layerToggles={layerToggles} />}
+          {!activeBtLayer && <LayersPopover layerToggles={layerToggles} />}
         </section>
 
         {workspaceStage === STAGE_AUTHORING ? (
@@ -3598,7 +3786,7 @@ export default function MissionCanvasPage() {
                 dirty={mapEditor.dirty}
               />
             ) : (
-              <RunSessionPanel mapName={currentMapName} running={running} />
+              <RunSessionPanel mapName={currentMapName} running={running} runner={missionRunner} />
             )}
             <TopicStatusPanel topicRows={topicRows} />
           </aside>
