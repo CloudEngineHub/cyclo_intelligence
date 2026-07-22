@@ -20,6 +20,7 @@ import * as THREE from "three";
 // @ts-ignore
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { buildTfFramePoses, normalizeFrameId, orientationFromYaw, yawFromPose, } from "../../utils/navigationTf";
+import { roomSegmentationParams, segmentFreeRooms } from "../../utils/roomSegmentation";
 const CAMERA_NEAR = 0.05;
 const CAMERA_FAR = 2000;
 const MAP_DISPLAY_ROTATION = Math.PI;
@@ -220,8 +221,130 @@ function drawRoundedOccupancyLayer(targetCtx, cells, w, h, scale, type, color) {
         ctx.globalCompositeOperation = "source-over";
     }
     targetCtx.drawImage(layer, 0, 0);
+    return layer;
 }
-function makeOccupancyTexture(grid, alpha, mode, highlightedCells = null, isDark = false) {
+// Display-only "floor plan" refinement (viewer mode; the editor renders the raw
+// grid so pixel edits stay faithful). Geometry is never altered — only how the
+// grid is drawn: lidar speckles are despeckled, small holes filled, walls get a
+// uniform stroke, and unknown space turns transparent so the known floor floats
+// as a silhouette with a soft shadow on the scene background.
+const OCC_REFINE = {
+    minWallCells: 6,     // wall specks smaller than this become floor
+    minFreeCells: 24,    // stray free islands smaller than this become unknown
+    holeFillCells: 24,   // enclosed unknown holes smaller than this become floor
+    minGridCells: 400,   // skip refinement for tiny grids
+    wallThickenPasses: 1,
+};
+// Per-room pastel tints (refined viewer only). Hues stay off green/orange so
+// rooms never read as marker or area colors; the tint sits under annotations.
+const ROOM_TINTS = {
+    light: ["#D7E3F0", "#F0DCE3", "#E4DEF0", "#D9EAE8", "#DFE6EF", "#EFDCE9"],
+    dark: ["#31405A", "#4A3340", "#3C3452", "#2E4441", "#3A4258", "#472F45"],
+    alphaLight: 0.5,
+    alphaDark: 0.4,
+};
+function occRefineComponents(cells, w, h, { type, minSize, replacement, interiorOnly = false }) {
+    const labels = new Uint8Array(w * h);
+    const queue = new Int32Array(w * h);
+    const component = [];
+    for (let start = 0; start < w * h; start += 1) {
+        if (cells[start] !== type || labels[start])
+            continue;
+        let head = 0;
+        let tail = 0;
+        queue[tail] = start;
+        tail += 1;
+        labels[start] = 1;
+        component.length = 0;
+        let touchesBorder = false;
+        while (head < tail) {
+            const index = queue[head];
+            head += 1;
+            component.push(index);
+            const x = index % w;
+            const y = (index / w) | 0;
+            if (x === 0 || y === 0 || x === w - 1 || y === h - 1)
+                touchesBorder = true;
+            if (x > 0 && cells[index - 1] === type && !labels[index - 1]) {
+                labels[index - 1] = 1;
+                queue[tail] = index - 1;
+                tail += 1;
+            }
+            if (x < w - 1 && cells[index + 1] === type && !labels[index + 1]) {
+                labels[index + 1] = 1;
+                queue[tail] = index + 1;
+                tail += 1;
+            }
+            if (y > 0 && cells[index - w] === type && !labels[index - w]) {
+                labels[index - w] = 1;
+                queue[tail] = index - w;
+                tail += 1;
+            }
+            if (y < h - 1 && cells[index + w] === type && !labels[index + w]) {
+                labels[index + w] = 1;
+                queue[tail] = index + w;
+                tail += 1;
+            }
+        }
+        if (component.length < minSize && (!interiorOnly || !touchesBorder)) {
+            for (let i = 0; i < component.length; i += 1)
+                cells[component[i]] = replacement;
+        }
+    }
+}
+function occThickenWalls(cells, w, h, passes) {
+    // Thicken OUTWARD only (into unknown): room interiors keep their exact
+    // edges, so walls read as a clean stroke without visually shrinking rooms.
+    for (let pass = 0; pass < passes; pass += 1) {
+        const source = new Uint8Array(cells);
+        for (let y = 0; y < h; y += 1) {
+            for (let x = 0; x < w; x += 1) {
+                if (source[x + y * w] !== OCC_CELL_WALL)
+                    continue;
+                for (let dy = -1; dy <= 1; dy += 1) {
+                    for (let dx = -1; dx <= 1; dx += 1) {
+                        const nx = x + dx;
+                        const ny = y + dy;
+                        if (nx < 0 || nx >= w || ny < 0 || ny >= h)
+                            continue;
+                        const index = nx + ny * w;
+                        if (cells[index] === OCC_CELL_UNKNOWN)
+                            cells[index] = OCC_CELL_WALL;
+                    }
+                }
+            }
+        }
+    }
+}
+function occSilhouetteShadow(cells, w, h, scale, isDark) {
+    const silhouette = document.createElement("canvas");
+    silhouette.width = w;
+    silhouette.height = h;
+    const sctx = silhouette.getContext("2d");
+    if (!sctx)
+        return null;
+    const image = sctx.createImageData(w, h);
+    for (let i = 0; i < w * h; i += 1) {
+        if (cells[i] !== OCC_CELL_UNKNOWN)
+            image.data[i * 4 + 3] = 255;
+    }
+    sctx.putImageData(image, 0, 0);
+    const big = document.createElement("canvas");
+    big.width = w * scale;
+    big.height = h * scale;
+    const bctx = big.getContext("2d");
+    if (!bctx)
+        return null;
+    bctx.imageSmoothingEnabled = true;
+    bctx.filter = `blur(${Math.max(2, scale * 1.6)}px)`;
+    bctx.drawImage(silhouette, 0, 0, big.width, big.height);
+    bctx.filter = "none";
+    bctx.globalCompositeOperation = "source-in";
+    bctx.fillStyle = isDark ? "rgba(0,0,0,0.5)" : "rgba(28,26,23,0.26)";
+    bctx.fillRect(0, 0, big.width, big.height);
+    return big;
+}
+function makeOccupancyTexture(grid, alpha, mode, highlightedCells = null, isDark = false, refined = false) {
     var _a;
     const meta = gridMeta(grid);
     if (!meta || !grid.data || grid.data.length < meta.width * meta.height)
@@ -242,14 +365,78 @@ function makeOccupancyTexture(grid, alpha, mode, highlightedCells = null, isDark
             }
         }
 
+        const refine = refined && w * h >= OCC_REFINE.minGridCells;
+        if (refine) {
+            // Despeckle: wall specks inside the floor become floor, stray free
+            // islands vanish, and small enclosed unknown holes are filled in.
+            occRefineComponents(cells, w, h, { type: OCC_CELL_WALL, minSize: OCC_REFINE.minWallCells, replacement: OCC_CELL_FREE });
+            occRefineComponents(cells, w, h, { type: OCC_CELL_FREE, minSize: OCC_REFINE.minFreeCells, replacement: OCC_CELL_UNKNOWN });
+            occRefineComponents(cells, w, h, { type: OCC_CELL_UNKNOWN, minSize: OCC_REFINE.holeFillCells, replacement: OCC_CELL_FREE, interiorOnly: true });
+            occThickenWalls(cells, w, h, OCC_REFINE.wallThickenPasses);
+        }
+
         const out = document.createElement("canvas");
         out.width = w * scale; out.height = h * scale;
         const ctx = out.getContext("2d");
         if (!ctx)
             return null;
-        ctx.fillStyle = occRgba(palette.unknown);
-        ctx.fillRect(0, 0, out.width, out.height);
-        drawRoundedOccupancyLayer(ctx, cells, w, h, scale, OCC_CELL_FREE, palette.free);
+        let roomLabels = null;
+        if (refine) {
+            // Room segmentation for the pastel tint (2+ rooms only).
+            const freeMask = new Uint8Array(w * h);
+            for (let i = 0; i < w * h; i += 1)
+                freeMask[i] = cells[i] === OCC_CELL_FREE ? 1 : 0;
+            const segmented = segmentFreeRooms(freeMask, w, h, roomSegmentationParams(meta.resolution));
+            if (segmented.roomCount >= 2)
+                roomLabels = segmented.labels;
+        }
+        if (refine) {
+            // Floating silhouette: unknown stays transparent, the known floor
+            // casts a soft shadow onto the warm scene background.
+            const shadow = occSilhouetteShadow(cells, w, h, scale, isDark);
+            if (shadow)
+                ctx.drawImage(shadow, scale * 1.2, scale * 1.6);
+        }
+        else {
+            ctx.fillStyle = occRgba(palette.unknown);
+            ctx.fillRect(0, 0, out.width, out.height);
+        }
+        const freeLayer = drawRoundedOccupancyLayer(ctx, cells, w, h, scale, OCC_CELL_FREE, palette.free);
+        if (roomLabels && freeLayer) {
+            const tintSmall = document.createElement("canvas");
+            tintSmall.width = w;
+            tintSmall.height = h;
+            const tctx = tintSmall.getContext("2d");
+            if (tctx) {
+                const tintPalette = (isDark ? ROOM_TINTS.dark : ROOM_TINTS.light).map((hex) => rgbaArrayFromHex(hex, 255));
+                const tintImage = tctx.createImageData(w, h);
+                for (let i = 0; i < w * h; i += 1) {
+                    const label = roomLabels[i];
+                    if (label <= 0)
+                        continue;
+                    const [r, g, b] = tintPalette[(label - 1) % tintPalette.length];
+                    tintImage.data[i * 4] = r;
+                    tintImage.data[i * 4 + 1] = g;
+                    tintImage.data[i * 4 + 2] = b;
+                    tintImage.data[i * 4 + 3] = 255;
+                }
+                tctx.putImageData(tintImage, 0, 0);
+                const tintBig = document.createElement("canvas");
+                tintBig.width = w * scale;
+                tintBig.height = h * scale;
+                const btx = tintBig.getContext("2d");
+                if (btx) {
+                    btx.imageSmoothingEnabled = true;
+                    btx.drawImage(tintSmall, 0, 0, tintBig.width, tintBig.height);
+                    // Clip the tint to the rounded free-space silhouette.
+                    btx.globalCompositeOperation = "destination-in";
+                    btx.drawImage(freeLayer, 0, 0);
+                    ctx.globalAlpha = isDark ? ROOM_TINTS.alphaDark : ROOM_TINTS.alphaLight;
+                    ctx.drawImage(tintBig, 0, 0);
+                    ctx.globalAlpha = 1;
+                }
+            }
+        }
         drawRoundedOccupancyLayer(ctx, cells, w, h, scale, OCC_CELL_WALL, palette.wall);
 
         const texture = new THREE.CanvasTexture(out);
@@ -334,10 +521,10 @@ function disposeObject(object) {
         }
     });
 }
-function makeGridPlane(grid, mode, z, framePose = null, highlightedCells = null, isDark = false) {
+function makeGridPlane(grid, mode, z, framePose = null, highlightedCells = null, isDark = false, refined = false) {
     var _a, _b, _c, _d;
     const meta = gridMeta(grid);
-    const texture = makeOccupancyTexture(grid, mode === "map" ? 255 : 170, mode, highlightedCells, isDark);
+    const texture = makeOccupancyTexture(grid, mode === "map" ? 255 : 170, mode, highlightedCells, isDark, refined);
     if (!meta || !texture)
         return null;
     const width = meta.width * meta.resolution;
@@ -345,7 +532,7 @@ function makeGridPlane(grid, mode, z, framePose = null, highlightedCells = null,
     const geometry = new THREE.PlaneGeometry(width, height);
     const material = new THREE.MeshBasicMaterial({
         map: texture,
-        transparent: mode !== "map",
+        transparent: mode !== "map" || refined,
         opacity: mode === "map" ? 1 : 0.82,
         depthWrite: mode === "map",
         side: THREE.DoubleSide,
@@ -1162,7 +1349,7 @@ function WaypointBtFocusLayer({ layer, onClose }) {
 // as a clean floor-plan without retuning makeOccupancyTexture.
 const SCENE_BG = { light: 0xefece3, dark: 0x1b1916 };
 
-export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, goalPose, footprint, tf, showMap, showGlobalCostmap, showLocalCostmap, showScan, showGlobalPlan, showGoalPose, showTf, showRobotModel, interactionDisabled, interactionMode, editorActive, editorPaintOnDrag = true, editorAreaSelection = false, editorBrush = null, viewKey, isDark = false, waitingLabel = "Waiting for /map", fitContainer = false, spots = [], selectedSpotId = "", behaviorNodes = [], selectedBehaviorNodeId = "", behaviorPreviewNode = null, missionRouteOrder = [], missionRouteMode = false, selectedMissionRouteSourceId = "", mapAnnotations = [], selectedMapAnnotationId = "", btLayer = null, onBtLayerClose, onSpotClick, onBehaviorNodeClick, onMissionRouteSpotClick, onMissionRouteMapClick, onSpotPoseChange, onBehaviorNodePoseChange, onEditorMapPoint, onEditorMapArea, onMapClick, onMapPose, }) {
+export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, goalPose, footprint, tf, showMap, showGlobalCostmap, showLocalCostmap, showScan, showGlobalPlan, showGoalPose, showTf, showRobotModel, interactionDisabled, interactionMode, editorActive, editorPaintOnDrag = true, editorAreaSelection = false, editorBrush = null, mapRefined = true, viewKey, isDark = false, waitingLabel = "Waiting for /map", fitContainer = false, spots = [], selectedSpotId = "", behaviorNodes = [], selectedBehaviorNodeId = "", behaviorPreviewNode = null, missionRouteOrder = [], missionRouteMode = false, selectedMissionRouteSourceId = "", mapAnnotations = [], selectedMapAnnotationId = "", btLayer = null, onBtLayerClose, onSpotClick, onBehaviorNodeClick, onMissionRouteSpotClick, onMissionRouteMapClick, onSpotPoseChange, onBehaviorNodePoseChange, onEditorMapPoint, onEditorMapArea, onMapClick, onMapPose, }) {
     const containerRef = useRef(null);
     const sceneRef = useRef(null);
     const rendererRef = useRef(null);
@@ -1478,10 +1665,10 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, 
         mapLayer.clear();
         if (!showMap || !map)
             return;
-        const mapPlane = makeGridPlane(map, "map", 0, null, null, isDark);
+        const mapPlane = makeGridPlane(map, "map", 0, null, null, isDark, mapRefined);
         if (mapPlane)
             mapLayer.add(mapPlane);
-    }, [map, showMap, isDark]);
+    }, [map, showMap, isDark, mapRefined]);
     useEffect(() => {
         var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p, _q, _r, _s, _t, _u, _v, _w, _x, _y, _z, _0, _1, _2, _3, _4;
         const scene = sceneRef.current;

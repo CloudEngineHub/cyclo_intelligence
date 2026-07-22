@@ -367,6 +367,7 @@ test('shows Waypoint and BT authoring panels in the authoring stage', async () =
   expect(getPgmImage).not.toHaveBeenCalled();
   expect(latestMapViewerProps().map).toBeNull();
   expect(latestMapViewerProps().waitingLabel).toBe('Load a map');
+  expect(latestMapViewerProps().mapRefined).toBe(true);
   expect(latestMapViewerProps().missionRouteOrder).toEqual([]);
 });
 
@@ -1465,6 +1466,8 @@ test('loads saved maps into the mapping fix editor', async () => {
   expect(latestMapViewerProps().showScan).toBe(false);
   expect(latestMapViewerProps().showMap).toBe(true);
   expect(latestMapViewerProps().waitingLabel).toBe('Select a PGM');
+  // The editor shows the raw grid; floor-plan refinement is viewer-only.
+  expect(latestMapViewerProps().mapRefined).toBe(false);
 });
 
 test('edits and saves loaded map pixels from the fix editor', async () => {
