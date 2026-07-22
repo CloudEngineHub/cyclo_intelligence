@@ -1784,6 +1784,13 @@ export default function MissionCanvasPage() {
     onMessage: setMessage,
     reloadToken: designMapReloadToken,
   });
+  // Run stage shows the saved floor plan (with its resolution/origin) so loaded
+  // waypoints are framed correctly before the live /map arrives from nav2.
+  const runDisplayMapEditor = useMapEditor({
+    open: workspaceStage === STAGE_RUN,
+    mapName: currentMapName,
+    onMessage: setMessage,
+  });
   const needsGlobalCostmap = stageNavigationTopicsActive && activeLayers.globalCostmap;
   const needsLocalCostmap = stageNavigationTopicsActive && activeLayers.localCostmap;
   const needsScan = designLocalizationActive || (stageNavigationTopicsActive && activeLayers.scan);
@@ -1887,7 +1894,9 @@ export default function MissionCanvasPage() {
     ? mapEditor.map
     : workspaceStage === STAGE_AUTHORING
       ? designMapActive ? designMapEditor.map : null
-      : map;
+      : workspaceStage === STAGE_RUN
+        ? (map || runDisplayMapEditor.map)
+        : map;
   const designMapAvailable = designMapActive && !!designMapEditor.map;
   const missionOverlayActive = (
     workspaceStage === STAGE_RUN ||
@@ -3591,12 +3600,14 @@ export default function MissionCanvasPage() {
                 ? designMapActive
                   ? `mission-design:${designMapEditor.selectedPath || designMapPath || "none"}`
                   : "mission-design:none"
-                : `mission:${mapName}`}
+                : `mission:${mapName}:${displayedMap ? "ready" : "wait"}`}
             waitingLabel={mappingEditorActive
               ? "Select a PGM"
               : workspaceStage === STAGE_AUTHORING
                 ? designMapActive ? "Loading selected map" : "Load a map"
-                : running ? "Waiting for /map" : "Run Mission to view /map"}
+                : running
+                  ? "Waiting for /map"
+                  : runDisplayMapEditor.busy ? "Loading map" : "Load a mission to view the map"}
             onSpotClick={missionRouteMode ? handleMissionRouteSpotClick : handleSelectSpot}
             onBehaviorNodeClick={handleSelectBehaviorNode}
             onMissionRouteSpotClick={handleMissionRouteSpotClick}
