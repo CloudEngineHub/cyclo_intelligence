@@ -318,13 +318,17 @@ function disposeObject(object) {
             if (Array.isArray(material)) {
                 material.forEach((item) => {
                     const texture = item.map;
-                    texture === null || texture === void 0 ? void 0 : texture.dispose();
+                    // Textures flagged `retain` are cached across layer rebuilds
+                    // (annotation regions) and disposed by their cache instead.
+                    if (texture && !texture.userData.retain)
+                        texture.dispose();
                     item.dispose();
                 });
             }
             else {
                 const texture = material === null || material === void 0 ? void 0 : material.map;
-                texture === null || texture === void 0 ? void 0 : texture.dispose();
+                if (texture && !texture.userData.retain)
+                    texture.dispose();
                 material === null || material === void 0 ? void 0 : material.dispose();
             }
         }
@@ -861,6 +865,25 @@ function makeMissionRouteBadge(spot, order, selected = false, scale = 1, isDark 
     sprite.userData = { spotId: spot.id, dragAction: "move" };
     return sprite;
 }
+// Rasterizing an annotation region is the most expensive part of a layers
+// rebuild (supersampled full-map canvas + blur), so cache textures per
+// annotation object. The editor keeps unchanged annotations reference-identical
+// across edits, so only the annotation actually being brushed re-rasterizes.
+const annotationTextureCache = new WeakMap();
+function cachedAnnotationRegionTexture(annotation, grid, region, colorString, isDark, selected) {
+    const hit = annotationTextureCache.get(annotation);
+    if (hit && hit.grid === grid && hit.isDark === isDark && hit.selected === selected) {
+        return hit.texture;
+    }
+    const texture = makeAnnotationRegionTexture(grid, region, colorString, selected ? 210 : 164);
+    if (texture) {
+        texture.userData.retain = true;
+        if ((hit === null || hit === void 0 ? void 0 : hit.texture) && hit.texture !== texture)
+            hit.texture.dispose();
+        annotationTextureCache.set(annotation, { grid, isDark, selected, texture });
+    }
+    return texture;
+}
 function makeMapAnnotationRegion(annotation, grid, isDark = false, coveredCells = null, selected = false) {
     var _a, _b, _c, _d, _e, _f;
     const meta = gridMeta(grid);
@@ -873,41 +896,12 @@ function makeMapAnnotationRegion(annotation, grid, isDark = false, coveredCells 
     if (!region)
         return null;
     const colorString = hexColorString(annotation === null || annotation === void 0 ? void 0 : annotation.color, isDark ? "#6D1F2A" : "#6D1F2A");
-    const texture = makeAnnotationRegionTexture(grid, region, colorString, selected ? 210 : 164);
+    const texture = cachedAnnotationRegionTexture(annotation, grid, region, colorString, isDark, selected);
     const plane = makeGridTexturePlane(grid, texture, 0.065);
     if (!plane)
         return null;
     const group = new THREE.Group();
     group.add(plane);
-    if (selected) {
-        // Ink bounds outline marks the area that Extend / chip actions target.
-        let xMin = Infinity;
-        let yMin = Infinity;
-        let xMax = -Infinity;
-        let yMax = -Infinity;
-        region.cells.forEach((index) => {
-            const gridX = index % meta.width;
-            const gridY = Math.floor(index / meta.width);
-            xMin = Math.min(xMin, gridX);
-            yMin = Math.min(yMin, gridY);
-            xMax = Math.max(xMax, gridX);
-            yMax = Math.max(yMax, gridY);
-        });
-        if (Number.isFinite(xMin)) {
-            // ±0.5 lands gridCellToMapPoint (cell centers) exactly on cell edges.
-            const a = gridCellToMapPoint(meta, xMin - 0.5, yMin - 0.5);
-            const b = gridCellToMapPoint(meta, xMax + 0.5, yMax + 0.5);
-            const outline = makeLine([
-                new THREE.Vector3(a.x, a.y, 0.09),
-                new THREE.Vector3(b.x, a.y, 0.09),
-                new THREE.Vector3(b.x, b.y, 0.09),
-                new THREE.Vector3(a.x, b.y, 0.09),
-                new THREE.Vector3(a.x, a.y, 0.09),
-            ], isDark ? 0xf3f1ea : 0x1c1a17, 2);
-            if (outline)
-                group.add(outline);
-        }
-    }
     if (coveredCells) {
         region.cells.forEach((index) => coveredCells.add(index));
     }
@@ -1194,6 +1188,8 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, 
     const pointerRef = useRef(new THREE.Vector2());
     const pointerDownRef = useRef(null);
     const editorPaintPointerRef = useRef(null);
+    const editorMovePendingRef = useRef(null);
+    const editorMoveRafRef = useRef(null);
     const editorAreaDragRef = useRef(null);
     const editorBrushLayerRef = useRef(null);
     const nodeDragRef = useRef(null);
@@ -1819,6 +1815,36 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, 
             onEditorMapPoint(point.x, point.y, phase);
             return true;
         };
+        // Coalesce paint moves to one commit per animation frame — pointermove can
+        // fire far faster than strokes need, and each commit re-rasterizes the
+        // stroked annotation.
+        const flushEditorMove = () => {
+            if (editorMoveRafRef.current != null) {
+                cancelAnimationFrame(editorMoveRafRef.current);
+                editorMoveRafRef.current = null;
+            }
+            const pending = editorMovePendingRef.current;
+            editorMovePendingRef.current = null;
+            if (pending)
+                paintEditorPoint(pending, "move");
+        };
+        const queueEditorMove = (event) => {
+            editorMovePendingRef.current = {
+                clientX: event.clientX,
+                clientY: event.clientY,
+                preventDefault: () => { },
+                stopImmediatePropagation: () => { },
+            };
+            if (editorMoveRafRef.current == null) {
+                editorMoveRafRef.current = requestAnimationFrame(() => {
+                    editorMoveRafRef.current = null;
+                    const pending = editorMovePendingRef.current;
+                    editorMovePendingRef.current = null;
+                    if (pending)
+                        paintEditorPoint(pending, "move");
+                });
+            }
+        };
         const handlePointerDown = (event) => {
             if (event.button === 2) {
                 if (interactionDisabled || editorActive || interactionMode !== "view")
@@ -1957,7 +1983,8 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, 
                 return;
             }
             if (editorPaintPointerRef.current === event.pointerId) {
-                paintEditorPoint(event, "move");
+                event.preventDefault();
+                queueEditorMove(event);
                 return;
             }
             const nodeDrag = nodeDragRef.current;
@@ -2032,6 +2059,7 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, 
                 event.preventDefault();
                 event.stopImmediatePropagation();
                 editorPaintPointerRef.current = null;
+                flushEditorMove();
                 if (typeof onEditorMapPoint === "function")
                     onEditorMapPoint(0, 0, "end");
                 if (renderer.domElement.hasPointerCapture(event.pointerId)) {
@@ -2097,8 +2125,11 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, 
             setEditorAreaPreview(null);
             setNodeDragPreview(null);
             setDragPreviewPose(null);
-            if (hadPaintPointer && typeof onEditorMapPoint === "function")
-                onEditorMapPoint(0, 0, "end");
+            if (hadPaintPointer) {
+                flushEditorMove();
+                if (typeof onEditorMapPoint === "function")
+                    onEditorMapPoint(0, 0, "end");
+            }
             if (renderer.domElement.hasPointerCapture(event.pointerId)) {
                 renderer.domElement.releasePointerCapture(event.pointerId);
             }
@@ -2122,6 +2153,11 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, 
             renderer.domElement.removeEventListener("pointercancel", handlePointerCancel);
             renderer.domElement.removeEventListener("pointerleave", handlePointerLeave);
             renderer.domElement.removeEventListener("contextmenu", handleContextMenu);
+            if (editorMoveRafRef.current != null) {
+                cancelAnimationFrame(editorMoveRafRef.current);
+                editorMoveRafRef.current = null;
+            }
+            editorMovePendingRef.current = null;
         };
     }, [
         behaviorNodes,

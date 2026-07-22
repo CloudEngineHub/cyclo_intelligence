@@ -38,17 +38,18 @@ const EDIT_TOOLS = [
 const ANNOTATION_TOOL = { id: "label_marker", label: "Area" };
 const ANNOTATION_EXTEND_TOOL = { id: "extend_area", label: "Extend" };
 const ANNOTATION_ERASE_TOOL = { id: "erase_area", label: "Erase Area" };
+// Area colors deliberately avoid green and orange/amber hues — those belong to
+// the marker language (sage = waypoints/actions, amber = decorators, clay =
+// selection) and areas must not read as markers.
 const ANNOTATION_COLORS = [
     { id: "dark_brown", label: "Dark brown", value: "#3B241F" },
     { id: "red_wine", label: "Red wine", value: "#6D1F2A" },
     { id: "navy", label: "Navy", value: "#203A63" },
-    { id: "dark_yellow", label: "Dark yellow", value: "#A77912" },
     { id: "gray", label: "Gray", value: "#5C6670" },
-    { id: "forest", label: "Forest", value: "#2F5D46" },
     { id: "plum", label: "Plum", value: "#57406F" },
     { id: "teal", label: "Teal", value: "#1F6B73" },
-    { id: "rust", label: "Rust", value: "#8A3F28" },
-    { id: "olive", label: "Olive", value: "#58652D" },
+    { id: "indigo", label: "Indigo", value: "#34327D" },
+    { id: "berry", label: "Berry", value: "#7C2D55" },
 ];
 function decodePgmPixels(image) {
     const binary = window.atob(image.pixels_base64);
@@ -113,28 +114,6 @@ function paintPgmPixelSegment(pixels, width, height, startPixel, endPixel, opera
         }
     }
     return next;
-}
-function annotationCoversPgmPixel(annotation, image, pixelX, pixelY) {
-    const region = normalizeAnnotationRegion(annotation === null || annotation === void 0 ? void 0 : annotation.region);
-    if (!region)
-        return false;
-    if ((region.width && region.width !== image.width) || (region.height && region.height !== image.height))
-        return false;
-    const gridY = image.height - 1 - pixelY;
-    const cells = normalizeRegionCells(region.cells, image.width, image.height);
-    if (cells.length) {
-        return cells.some((cell) => cell.x === pixelX && cell.y === gridY);
-    }
-    const bounds = region.bounds || {
-        x_min: region.seed_cell.x,
-        y_min: region.seed_cell.y,
-        x_max: region.seed_cell.x,
-        y_max: region.seed_cell.y,
-    };
-    return (pixelX >= bounds.x_min &&
-        pixelX <= bounds.x_max &&
-        gridY >= bounds.y_min &&
-        gridY <= bounds.y_max);
 }
 function annotationGridBounds(annotation, image) {
     const region = normalizeAnnotationRegion(annotation === null || annotation === void 0 ? void 0 : annotation.region);
@@ -255,6 +234,46 @@ function cellsToRegion(cells, image) {
         },
     };
 }
+// Fast-path region builder for stroke sessions: assumes `cells` are already
+// deduped/in-range (session Maps guarantee this), so it skips the O(n log n)
+// sort + revalidation that cellsToRegion pays on every brush move.
+function regionFromCells(cells, image) {
+    if (!cells.length)
+        return null;
+    let xMin = cells[0].x;
+    let xMax = cells[0].x;
+    let yMin = cells[0].y;
+    let yMax = cells[0].y;
+    let sumX = 0;
+    let sumY = 0;
+    cells.forEach((cell) => {
+        if (cell.x < xMin)
+            xMin = cell.x;
+        if (cell.x > xMax)
+            xMax = cell.x;
+        if (cell.y < yMin)
+            yMin = cell.y;
+        if (cell.y > yMax)
+            yMax = cell.y;
+        sumX += cell.x;
+        sumY += cell.y;
+    });
+    const centroidX = sumX / cells.length;
+    const centroidY = sumY / cells.length;
+    const centroidPgmY = image.height - 1 - centroidY;
+    const centroid = pgmPixelToMapPoint(image, centroidX, centroidPgmY);
+    return {
+        pose: { frame_id: "map", x: centroid.x, y: centroid.y, yaw: 0 },
+        region: {
+            seed_cell: { x: Math.floor(centroidX), y: Math.floor(centroidY) },
+            bounds: { x_min: xMin, y_min: yMin, x_max: xMax, y_max: yMax },
+            cells,
+            cell_count: cells.length,
+            width: image.width,
+            height: image.height,
+        },
+    };
+}
 function coveredAnnotationCellSet(annotations, image, pixels, excludeId = "") {
     const covered = new Set();
     annotations.forEach((annotation) => {
@@ -337,14 +356,26 @@ function selectedFreePgmRegion(pixels, image, startPixel, endPixel, existingAnno
     const xMax = Math.min(image.width - 1, Math.max(startPixel.pixelX, endPixel.pixelX));
     const yMin = Math.max(0, Math.min(startPixel.pixelY, endPixel.pixelY));
     const yMax = Math.min(image.height - 1, Math.max(startPixel.pixelY, endPixel.pixelY));
+    // Precompute the covered pgm-index set ONCE — checking every rect pixel
+    // against every annotation's cell list is O(rect × cells) and freezes the
+    // UI on large selections.
+    const covered = new Set();
+    (existingAnnotations || []).forEach((annotation) => {
+        annotationCells(annotation, image, pixels).forEach((cell) => {
+            const index = gridCellToPgmIndex(image, cell);
+            if (index >= 0)
+                covered.add(index);
+        });
+    });
     let count = 0;
     let sumX = 0;
     let sumY = 0;
     for (let y = yMin; y <= yMax; y += 1) {
         for (let x = xMin; x <= xMax; x += 1) {
-            if (pixels[x + y * image.width] < FREE_THRESHOLD)
+            const index = x + y * image.width;
+            if (pixels[index] < FREE_THRESHOLD)
                 continue;
-            if (existingAnnotations.some((annotation) => annotationCoversPgmPixel(annotation, image, x, y)))
+            if (covered.has(index))
                 continue;
             count += 1;
             sumX += x;
@@ -466,6 +497,21 @@ function hslToHex(h, s, l) {
     const toHex = (value) => Math.round((value + m) * 255).toString(16).padStart(2, "0").toUpperCase();
     return `#${toHex(r1)}${toHex(g1)}${toHex(b1)}`;
 }
+// Hue bands the generated fallback colors may use: reds/browns [0,15), then
+// [170,360) (cyans/blues/purples/magentas). The gap [15,170) — orange, amber,
+// yellow, and every green — is reserved for the marker language.
+const SAFE_ANNOTATION_HUE_SPANS = [[0, 15], [170, 360]];
+const SAFE_ANNOTATION_HUE_TOTAL = SAFE_ANNOTATION_HUE_SPANS.reduce((total, [start, end]) => total + (end - start), 0);
+function safeAnnotationHue(seed) {
+    let t = ((seed % SAFE_ANNOTATION_HUE_TOTAL) + SAFE_ANNOTATION_HUE_TOTAL) % SAFE_ANNOTATION_HUE_TOTAL;
+    for (const [start, end] of SAFE_ANNOTATION_HUE_SPANS) {
+        const length = end - start;
+        if (t < length)
+            return start + t;
+        t -= length;
+    }
+    return SAFE_ANNOTATION_HUE_SPANS[SAFE_ANNOTATION_HUE_SPANS.length - 1][0];
+}
 function chooseAnnotationColor(existingAnnotations) {
     const used = new Set((existingAnnotations || []).map((annotation) => normalizeAnnotationColor(annotation.color)));
     const available = ANNOTATION_COLORS.filter((color) => !used.has(color.value));
@@ -473,12 +519,12 @@ function chooseAnnotationColor(existingAnnotations) {
         return available[Math.floor(Math.random() * available.length)].value;
     }
     for (let attempt = 0; attempt < 48; attempt += 1) {
-        const hue = (Math.random() * 360 + used.size * 137.508 + attempt * 29) % 360;
+        const hue = safeAnnotationHue(Math.random() * SAFE_ANNOTATION_HUE_TOTAL + used.size * 137.508 + attempt * 29);
         const generated = hslToHex(hue, 0.52, 0.32);
         if (!used.has(generated))
             return generated;
     }
-    return hslToHex((used.size * 137.508) % 360, 0.52, 0.32);
+    return hslToHex(safeAnnotationHue(used.size * 137.508), 0.52, 0.32);
 }
 function nextAutoAreaLabel(annotations) {
     let max = 0;
@@ -735,9 +781,12 @@ export function useMapEditor({ open, mapName, onMessage, reloadToken = 0 }) {
         onMessage(`${action} ${editedPixels} pixels locally`);
     }, [brushSize, busy, image, onMessage, open, tool]);
     const applyAnnotationsSnapshot = useCallback((nextAnnotations, successMessage) => {
-        const normalized = nextAnnotations.map(normalizeAnnotation);
-        annotationsRef.current = normalized;
-        setAnnotations(normalized);
+        // Callers pass already-normalized annotations (loads/saves normalize at the
+        // boundary). Skipping re-normalization here keeps unchanged entries
+        // reference-identical — which lets the viewer reuse their rasterized
+        // textures — and avoids re-sorting every region's cells per brush move.
+        annotationsRef.current = nextAnnotations;
+        setAnnotations(nextAnnotations);
         setAnnotationsDirty(true);
         onMessage(successMessage);
     }, [onMessage]);
@@ -768,60 +817,91 @@ export function useMapEditor({ open, mapName, onMessage, reloadToken = 0 }) {
         }
         let session = areaPaintRef.current;
         if (phase === "start" || !session || session.id !== target.id) {
-            session = { id: target.id, lastPixel: pixel, undoPushed: false };
+            // Heavy prep runs ONCE per stroke: the covered-by-others set and the
+            // target's visible cells (not raw bounds, so extending a rect-created
+            // area can never resurrect cells hidden under earlier areas).
+            const covered = coveredAnnotationCellSet(annotationsRef.current, image, currentPixels, target.id);
+            const targetSnapshot = visibleAnnotationCellSnapshots(annotationsRef.current, image, currentPixels)
+                .find((snapshot) => snapshot.annotation.id === target.id);
+            const cells = new Map();
+            ((targetSnapshot === null || targetSnapshot === void 0 ? void 0 : targetSnapshot.cells) || []).forEach((cell) => cells.set(cellKey(cell), cell));
+            session = { id: target.id, lastPixel: pixel, undoPushed: false, covered, cells };
             areaPaintRef.current = session;
         }
         const startPixel = phase === "move" && session.lastPixel ? session.lastPixel : pixel;
-        const coveredCells = coveredAnnotationCellSet(annotationsRef.current, image, currentPixels, target.id);
-        const newCells = brushCellsForSegment(currentPixels, image, startPixel, pixel, brushSize, coveredCells);
+        const newCells = brushCellsForSegment(currentPixels, image, startPixel, pixel, brushSize, session.covered);
         session.lastPixel = pixel;
         if (!newCells.length) {
             onMessage("Paint over unmarked white free-space");
             return;
         }
-        // Merge into the target's VISIBLE cells (not its raw bounds) so extending a
-        // rect-created area can never resurrect cells hidden under earlier areas.
-        const targetSnapshot = visibleAnnotationCellSnapshots(annotationsRef.current, image, currentPixels)
-            .find((snapshot) => snapshot.annotation.id === target.id);
-        const mergedCells = new Map(((targetSnapshot === null || targetSnapshot === void 0 ? void 0 : targetSnapshot.cells) || []).map((cell) => [cellKey(cell), cell]));
-        newCells.forEach((cell) => mergedCells.set(cellKey(cell), cell));
-        const geometry = cellsToRegion(Array.from(mergedCells.values()), image);
+        let added = 0;
+        newCells.forEach((cell) => {
+            const key = cellKey(cell);
+            if (session.cells.has(key))
+                return;
+            session.cells.set(key, cell);
+            added += 1;
+        });
+        if (!added)
+            return;
+        const geometry = regionFromCells(Array.from(session.cells.values()), image);
         if (!geometry)
             return;
         recordAnnotationUndo(session);
-        const nextAnnotation = normalizeAnnotation({
+        const nextAnnotation = {
             ...target,
             pose: geometry.pose,
             region: geometry.region,
-        });
+        };
         applyAnnotationsSnapshot(annotationsRef.current.map((annotation) => (annotation.id === target.id ? nextAnnotation : annotation)), `Extended area ${nextAnnotation.label}`);
     }, [applyAnnotationsSnapshot, brushSize, busy, image, onMessage, open, recordAnnotationUndo, selectedAnnotationId]);
     const applyAreaCellErase = useCallback((startPixel, endPixel, session) => {
         const currentPixels = pixelsRef.current;
         if (!open || !image || busy || !currentPixels)
             return false;
+        // Snapshot every annotation's visible cells ONCE per stroke; moves then
+        // only delete brush keys from these Maps instead of rebuilding the world.
+        if (!session.entries) {
+            session.entries = visibleAnnotationCellSnapshots(annotationsRef.current, image, currentPixels)
+                .map(({ annotation, cells }) => ({
+                    annotation,
+                    cells: new Map(cells.map((cell) => [cellKey(cell), cell])),
+                    changed: false,
+                }));
+        }
         const eraseCells = brushCellsForSegment(currentPixels, image, startPixel, endPixel, brushSize);
         if (!eraseCells.length)
             return false;
-        const eraseKeys = new Set(eraseCells.map(cellKey));
         let changed = false;
-        const nextAnnotations = [];
-        visibleAnnotationCellSnapshots(annotationsRef.current, image, currentPixels).forEach(({ annotation, cells }) => {
-            const originalCells = cells;
-            const remainingCells = originalCells
-                .filter((cell) => !eraseKeys.has(cellKey(cell)));
-            if (remainingCells.length !== originalCells.length)
-                changed = true;
-            if (!remainingCells.length)
-                return;
-            const nextAnnotation = annotationWithCells(annotation, remainingCells, image);
-            if (!nextAnnotation)
-                return;
-            nextAnnotations.push(nextAnnotation);
+        eraseCells.forEach((cell) => {
+            const key = cellKey(cell);
+            session.entries.forEach((entry) => {
+                if (entry.cells.delete(key)) {
+                    entry.changed = true;
+                    changed = true;
+                }
+            });
         });
         if (!changed)
             return false;
         recordAnnotationUndo(session);
+        session.entries = session.entries.filter((entry) => entry.cells.size > 0);
+        const nextAnnotations = session.entries.map((entry) => {
+            if (!entry.changed)
+                return entry.annotation;
+            const geometry = regionFromCells(Array.from(entry.cells.values()), image);
+            if (!geometry)
+                return entry.annotation;
+            const nextAnnotation = {
+                ...entry.annotation,
+                pose: geometry.pose,
+                region: geometry.region,
+            };
+            entry.annotation = nextAnnotation;
+            entry.changed = false;
+            return nextAnnotation;
+        });
         applyAnnotationsSnapshot(nextAnnotations, "Erased area pixels");
         return true;
     }, [applyAnnotationsSnapshot, brushSize, busy, image, open, recordAnnotationUndo]);
