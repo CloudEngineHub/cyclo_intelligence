@@ -2197,6 +2197,52 @@ test('lists the mission route waypoints in the run session panel', async () => {
   expect(within(waypointList).getByText('Living Room')).toBeInTheDocument();
 });
 
+test('hides run waypoints with the map after leaving and returning to Run', async () => {
+  const latestMapViewerProps = () => (
+    mockMapViewer.mock.calls[mockMapViewer.mock.calls.length - 1][0]
+  );
+  getPgmFiles.mockResolvedValue({
+    files: [{ path: 'factory.pgm', name: 'factory.pgm' }],
+  });
+  getNavigationMission.mockImplementation((mapName) => Promise.resolve(
+    mapName === 'factory'
+      ? {
+        exists: true,
+        map_name: 'factory',
+        global_bt: 'global.xml',
+        waypoints: [
+          { id: 'wp1', label: 'Kitchen', pose: { frame_id: 'map', x: 1, y: 0, yaw: 0 }, local_bt: 'locals/wp1.xml', metadata: {} },
+          { id: 'wp2', label: 'Living Room', pose: { frame_id: 'map', x: 4, y: 0, yaw: 0 }, local_bt: 'locals/wp2.xml', metadata: {} },
+        ],
+        metadata: {},
+      }
+      : { exists: false, map_name: mapName, global_bt: 'global.xml', waypoints: [], metadata: {} },
+  ));
+
+  render(<MissionCanvasPage />);
+
+  fireEvent.click(screen.getByRole('tab', { name: 'Run' }));
+  // The BT node lifecycle control is available in the Run inspector too.
+  expect(screen.getByText('BT Runtime')).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Activate BT' })).toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole('button', { name: 'Load Mission' }));
+  const mapSelect = await screen.findByRole('combobox', { name: 'Run mission map file' });
+  await waitFor(() => expect(mapSelect).toHaveValue('factory.pgm'));
+  fireEvent.click(screen.getByRole('button', { name: 'Load' }));
+  await waitFor(() => expect(screen.getByText('Loaded mission factory')).toBeInTheDocument());
+  await waitFor(() => expect(latestMapViewerProps().spots).toHaveLength(2));
+
+  // Leave to Design and come back: the ephemeral map is dropped, and the
+  // waypoints must vanish with it (without a map they would render at raw
+  // scale — huge and overlapping).
+  fireEvent.click(screen.getByRole('tab', { name: 'Design' }));
+  fireEvent.click(screen.getByRole('tab', { name: 'Run' }));
+  await waitFor(() => expect(latestMapViewerProps().spots).toEqual([]));
+  expect(latestMapViewerProps().map).toBeNull();
+  expect(latestMapViewerProps().missionRouteOrder).toEqual([]);
+});
+
 test('gates the mission run on an initial robot pose', async () => {
   const latestMapViewerProps = () => (
     mockMapViewer.mock.calls[mockMapViewer.mock.calls.length - 1][0]

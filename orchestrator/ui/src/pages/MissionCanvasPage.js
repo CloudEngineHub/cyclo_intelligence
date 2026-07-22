@@ -1945,8 +1945,11 @@ export default function MissionCanvasPage() {
         ? (map || runDisplayMapEditor.map)
         : map;
   const designMapAvailable = designMapActive && !!designMapEditor.map;
+  // Waypoints/route only render on top of a loaded map: marker size and
+  // placement derive from the map's resolution, so without a map they would
+  // draw at raw scale — huge, overlapping, and floating in empty space.
   const missionOverlayActive = (
-    workspaceStage === STAGE_RUN ||
+    (workspaceStage === STAGE_RUN && !!displayedMap) ||
     (workspaceStage === STAGE_AUTHORING && designMapAvailable)
   );
   const visibleSpots = useMemo(
@@ -3893,7 +3896,19 @@ export default function MissionCanvasPage() {
                 dirty={mapEditor.dirty}
               />
             ) : (
-              <RunSessionPanel mapName={currentMapName} running={running} runner={missionRunner} poseReady={runPoseInitialized} />
+              <>
+                <RunSessionPanel mapName={currentMapName} running={running} runner={missionRunner} poseReady={runPoseInitialized} />
+                {/* The BT node executes each waypoint's tree during a run, so its
+                    lifecycle control lives here too — not just in Design. */}
+                <BtRuntimePanel
+                  nodeState={btNodeStatus.state}
+                  btStatus={btStatusText}
+                  activeNodes={btActiveNodesText}
+                  busy={!!btNodeBusy}
+                  onActivate={handleBtNodeActivate}
+                  onDeactivate={handleBtNodeDeactivate}
+                />
+              </>
             )}
             <TopicStatusPanel topicRows={topicRows} />
           </aside>
