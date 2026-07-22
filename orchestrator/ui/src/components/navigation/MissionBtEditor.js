@@ -128,10 +128,12 @@ export default function MissionBtEditor({
   const nodeDataMapRef = useRef(nodeDataMap);
   const lastEmittedXmlRef = useRef(null);
   const lastEmittedPathRef = useRef("");
+  const onXmlChangeRef = useRef(onXmlChange);
 
   nodesRef.current = nodes;
   edgesRef.current = edges;
   nodeDataMapRef.current = nodeDataMap;
+  onXmlChangeRef.current = onXmlChange;
 
   const getHistorySnapshot = useCallback(() => {
     if (nodes.length === 0) return null;
@@ -194,20 +196,32 @@ export default function MissionBtEditor({
     }
   }, [filePath, resetHistory, setEdges, setNodes, xml]);
 
+  // Persist tree edits to the parent immediately (not debounced): a debounce
+  // whose timer was reset by every parent re-render never fired, and switching
+  // waypoints cleared the pending timer, silently dropping the whole tree.
+  // serializeFromGraph omits node positions, so drags produce identical XML and
+  // are skipped by the guard below — only real structural edits re-emit. filePath
+  // is intentionally excluded from the deps: on a waypoint switch it changes one
+  // render before `nodes` reloads, and emitting in that gap would write the old
+  // tree to the new path.
   useEffect(() => {
-    if (parseError || typeof onXmlChange !== "function") return undefined;
-    const timer = window.setTimeout(() => {
-      try {
-        const serialized = serializeFromGraph(nodes, edges, nodeDataMap);
-        lastEmittedXmlRef.current = serialized;
-        lastEmittedPathRef.current = filePath;
-        onXmlChange(serialized);
-      } catch {
-        // Keep the last valid XML while the user is mid-editing a partial graph.
-      }
-    }, 250);
-    return () => window.clearTimeout(timer);
-  }, [edges, filePath, nodeDataMap, nodes, onXmlChange, parseError]);
+    if (parseError) return;
+    const emit = onXmlChangeRef.current;
+    if (typeof emit !== "function") return;
+    let serialized;
+    try {
+      serialized = serializeFromGraph(nodes, edges, nodeDataMap);
+    } catch {
+      return; // partial graph mid-edit; wait for the next change
+    }
+    if (filePath === lastEmittedPathRef.current && serialized === lastEmittedXmlRef.current) {
+      return;
+    }
+    lastEmittedXmlRef.current = serialized;
+    lastEmittedPathRef.current = filePath;
+    emit(serialized);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [edges, nodeDataMap, nodes, parseError]);
 
   const handleCanvasDragOver = useCallback((event) => {
     if (event.dataTransfer.types.includes(PALETTE_DRAG_MIME)) {
