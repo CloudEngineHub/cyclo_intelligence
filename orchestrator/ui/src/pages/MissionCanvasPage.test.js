@@ -1110,12 +1110,6 @@ test('syncs design localization state from navigation status mode', async () => 
   const latestMapViewerProps = () => (
     mockMapViewer.mock.calls[mockMapViewer.mock.calls.length - 1][0]
   );
-  window.sessionStorage.setItem('mission_canvas_session', JSON.stringify({
-    mapName: 'factory',
-    workspaceStage: 'authoring',
-    designMapPath: 'factory.pgm',
-    navigationRuntimeMode: 'idle',
-  }));
   getServiceStatus.mockResolvedValue({
     is_up: true,
     mode: 'localize',
@@ -1132,6 +1126,9 @@ test('syncs design localization state from navigation status mode', async () => 
       },
     }],
   };
+  getPgmFiles.mockResolvedValue({
+    files: [{ path: 'factory.pgm', name: 'factory.pgm' }],
+  });
   getPgmImage.mockResolvedValue({
     path: 'factory.pgm',
     width: 1,
@@ -1142,9 +1139,12 @@ test('syncs design localization state from navigation status mode', async () => 
 
   render(<MissionCanvasPage />);
 
-  await waitFor(() => (
-    expect(screen.getByRole('tab', { name: 'Design' })).toHaveAttribute('aria-selected', 'true')
-  ));
+  // The map must be loaded in-session (it is not auto-restored on refresh).
+  fireEvent.click(screen.getByRole('tab', { name: 'Design' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Load Mission' }));
+  await screen.findByRole('combobox', { name: 'Design mission map file' });
+  fireEvent.click(screen.getByRole('button', { name: 'Load' }));
+
   await waitFor(() => expect(latestMapViewerProps().showScan).toBe(true));
   expect(latestMapViewerProps().showRobotModel).toBe(true);
   expect(latestMapViewerProps().pose).not.toBeNull();
@@ -2151,7 +2151,8 @@ test('loads a saved map for the run stage', async () => {
   });
   expect(getNavigationSpots.mock.calls.some(([mapName]) => mapName === 'factory')).toBe(false);
 
-  fireEvent.click(screen.getByRole('button', { name: 'Run Mission' }));
+  // Localize brings the nav stack up (Run Mission runs the route afterwards).
+  fireEvent.click(screen.getByRole('button', { name: 'Localize' }));
 
   await waitFor(() => expect(startNavigation).toHaveBeenCalledWith('nav', 'factory'));
 });
@@ -2237,14 +2238,16 @@ test('gates the mission run on an initial robot pose', async () => {
   fireEvent.click(screen.getByRole('button', { name: 'Load' }));
   await waitFor(() => expect(screen.getByText('Loaded mission factory')).toBeInTheDocument());
 
-  // Run Mission brings nav up but must NOT start the route yet.
+  // Run Mission is disabled until the robot is localized.
   getServiceStatus.mockResolvedValue({ is_up: true, mode: 'nav' });
-  fireEvent.click(screen.getByRole('button', { name: 'Run Mission' }));
+  expect(screen.getByRole('button', { name: 'Run Mission' })).toBeDisabled();
+  expect(sendNavigateToPoseGoal).not.toHaveBeenCalled();
+
+  // Localize brings the nav stack up and enters the pose-set gesture.
+  fireEvent.click(screen.getByRole('button', { name: 'Localize' }));
   await waitFor(() => expect(startNavigation).toHaveBeenCalledWith('nav', 'factory'));
   await waitFor(() => expect(latestMapViewerProps().interactionMode).toBe('initial'));
   expect(screen.getAllByText('Click and drag the robot pose on the map').length).toBeGreaterThan(0);
-  expect(screen.getByText('Set robot pose')).toBeInTheDocument();
-  expect(sendNavigateToPoseGoal).not.toHaveBeenCalled();
 
   // Operator sets the robot's real pose on the map.
   await act(async () => {
@@ -2256,12 +2259,14 @@ test('gates the mission run on an initial robot pose', async () => {
     yaw: 0.1,
     frameId: 'map',
   }));
+  await waitFor(() => expect(screen.getByText('Ready')).toBeInTheDocument(), { timeout: 6000 });
+  expect(sendNavigateToPoseGoal).not.toHaveBeenCalled();
 
-  // After AMCL converges the runner auto-starts toward the first waypoint.
+  // Now Run Mission executes the route toward the first waypoint.
+  fireEvent.click(screen.getByRole('button', { name: 'Run Mission' }));
   await waitFor(() => expect(sendNavigateToPoseGoal).toHaveBeenCalled(), { timeout: 8000 });
   const goal = sendNavigateToPoseGoal.mock.calls[0][0];
   expect(goal.pose.pose.position).toMatchObject({ x: 1, y: 0 });
-  await waitFor(() => expect(screen.getByText('Ready')).toBeInTheDocument());
 }, 20000);
 
 describe('assembleMissionBtFilesForSave', () => {

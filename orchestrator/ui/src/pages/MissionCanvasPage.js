@@ -1722,7 +1722,6 @@ export default function MissionCanvasPage() {
   const currentPoseRef = useRef(null);
   const amclPoseRef = useRef(null);
   const btStatusRef = useRef("stopped");
-  const missionAutoStartRef = useRef(false);
   const behaviorNodeSerialRef = useRef(0);
   const skipNextSpotLoadForMapRef = useRef("");
   const legacySpotLoadGenerationRef = useRef(0);
@@ -1774,6 +1773,11 @@ export default function MissionCanvasPage() {
   const [showDesignMapDialog, setShowDesignMapDialog] = useState(false);
   const [designMapFiles, setDesignMapFiles] = useState([]);
   const [designMapPath, setDesignMapPath] = useState(restoredDesignMapPath);
+  // Whether a map is loaded for display in Design/Run. Deliberately NOT restored
+  // from session: a refresh, a stage switch, or the backend going down should
+  // drop the stale map so it never lingers after the system is off.
+  const [missionMapLoaded, setMissionMapLoaded] = useState(false);
+  const prevRunningRef = useRef(false);
   const [pendingDesignMapPath, setPendingDesignMapPath] = useState(restoredDesignMapPath);
   const [designMapBusy, setDesignMapBusy] = useState(false);
   const [designMapReloadToken, setDesignMapReloadToken] = useState(0);
@@ -1791,7 +1795,7 @@ export default function MissionCanvasPage() {
 
   const running = status?.is_up ?? false;
   const mappingEditorActive = workspaceStage === STAGE_MAPPING && showPgmFix;
-  const designMapActive = workspaceStage === STAGE_AUTHORING && !!designMapPath;
+  const designMapActive = workspaceStage === STAGE_AUTHORING && !!designMapPath && missionMapLoaded;
   const robotPoseCaptureActive = workspaceStage === STAGE_AUTHORING && designMapActive;
   const mappingRuntimeActive = running && navigationRuntimeMode === "mapping";
   const runRuntimeActive = running && navigationRuntimeMode === "run";
@@ -1830,7 +1834,7 @@ export default function MissionCanvasPage() {
   // Run stage shows the saved floor plan (with its resolution/origin) so loaded
   // waypoints are framed correctly before the live /map arrives from nav2.
   const runDisplayMapEditor = useMapEditor({
-    open: workspaceStage === STAGE_RUN,
+    open: workspaceStage === STAGE_RUN && missionMapLoaded,
     mapName: currentMapName,
     onMessage: setMessage,
   });
@@ -2338,22 +2342,12 @@ export default function MissionCanvasPage() {
     if (!runRuntimeActive) setRunPoseInitialized(false);
   }, [runRuntimeActive]);
 
-  // Auto-start the runner once the nav stack is up AND the robot is localized,
-  // guarded so it fires once per Run-Mission trigger (not after a completed or
-  // stopped run). Without the pose gate a lost robot would receive goals it can
-  // never execute — it would just sit still until the nav timeout.
+  // Drop the displayed map when the backend goes down (was up, now down) so a
+  // stale floor plan never lingers after the system is off.
   useEffect(() => {
-    if (workspaceStage !== STAGE_RUN || !runRuntimeActive) {
-      missionAutoStartRef.current = false;
-      return;
-    }
-    if (!runPoseInitialized) return;
-    if (missionAutoStartRef.current) return;
-    if (!missionRouteOrderedSpots.length) return;
-    if (missionRunner.status !== RunnerStatus.IDLE) return;
-    missionAutoStartRef.current = true;
-    missionRunner.start();
-  }, [missionRouteOrderedSpots.length, missionRunner, runPoseInitialized, runRuntimeActive, workspaceStage]);
+    if (prevRunningRef.current && !running) setMissionMapLoaded(false);
+    prevRunningRef.current = running;
+  }, [running]);
 
   useEffect(() => {
     saveMissionSession({
@@ -2599,6 +2593,7 @@ export default function MissionCanvasPage() {
     skipNextSpotLoadForMapRef.current = selectedMapName;
     setMapName(selectedMapName);
     setDesignMapPath(pendingDesignMapPath);
+    setMissionMapLoaded(true);
     setShowDesignMapDialog(false);
     setWorkspaceStage(STAGE_AUTHORING);
     setInteractionMode("view");
@@ -2709,26 +2704,44 @@ export default function MissionCanvasPage() {
     visibleSpots,
   ]);
 
-  const handleRunMission = useCallback(() => runCommand(
-    "Run mission",
+  // Step 1 of a run: bring the nav stack up (AMCL included) and enter pose-set
+  // mode so the operator can tell AMCL where the robot actually is. Localization
+  // must happen before the route runs — a lost robot ignores nav goals.
+  const handleLocalize = useCallback(() => runCommand(
+    "Localize",
     async () => {
+      const runMapName = mapName.trim() || DEFAULT_MAP_NAME;
       setWorkspaceStage(STAGE_RUN);
-      await startNavigation("nav", mapName.trim() || DEFAULT_MAP_NAME);
-      setNavigationRuntimeMode("run");
+      if (!running || navigationRuntimeMode !== "run") {
+        await startNavigation("nav", runMapName);
+        setNavigationRuntimeMode("run");
+      }
       setDesignPoseInitialized(false);
       setRunPoseInitialized(false);
       saveMissionSession({
-        mapName: mapName.trim() || DEFAULT_MAP_NAME,
+        mapName: runMapName,
         workspaceStage: STAGE_RUN,
         navigationRuntimeMode: "run",
         designPoseInitialized: false,
       });
-      // AMCL comes up lost; the mission only starts after the operator sets the
-      // robot's real pose on the map (handleRunPoseEstimate).
       setInteractionMode("initial");
       return "Click and drag the robot pose on the map";
     },
-  ), [mapName, runCommand]);
+  ), [mapName, navigationRuntimeMode, running, runCommand]);
+
+  // Step 2: with the robot localized, run the route. This only executes the
+  // waypoint sequence — navigation is already up from the localize step.
+  const handleRunMission = useCallback(() => {
+    if (!runPoseInitialized) {
+      setMessage("Localize the robot first");
+      return;
+    }
+    if (!missionRouteOrderedSpots.length) {
+      setMessage("No route to run — connect waypoints in Design first");
+      return;
+    }
+    missionRunner.start();
+  }, [missionRouteOrderedSpots.length, missionRunner, runPoseInitialized]);
 
   const handleOpenRunMapDialog = useCallback(() => {
     setWorkspaceStage(STAGE_RUN);
@@ -2761,6 +2774,7 @@ export default function MissionCanvasPage() {
     }
     skipNextSpotLoadForMapRef.current = selectedMapName;
     setMapName(selectedMapName);
+    setMissionMapLoaded(true);
     setShowRunMapDialog(false);
     setWorkspaceStage(STAGE_RUN);
     setInteractionMode("view");
@@ -3454,6 +3468,7 @@ export default function MissionCanvasPage() {
                 role="tab"
                 aria-selected={selected}
                 onClick={() => {
+                  if (stage.id !== workspaceStage) setMissionMapLoaded(false);
                   setWorkspaceStage(stage.id);
                   if (stage.id !== STAGE_MAPPING) setShowPgmFix(false);
                   if (stage.id !== STAGE_AUTHORING) {
@@ -3558,20 +3573,8 @@ export default function MissionCanvasPage() {
             {workspaceStage === STAGE_RUN && (
               <>
                 <ActionButton active={showRunMapDialog || runMapBusy} disabled={!!busy || running || runMapBusy} onClick={handleOpenRunMapDialog} variant="secondary">Load Mission</ActionButton>
-                <ActionButton active={busy === "Run mission" || missionRunnerActive || (running && navigationRuntimeMode === "run")} disabled={!!busy || running} onClick={handleRunMission} variant="primary">Run Mission</ActionButton>
-                {runRuntimeActive && (
-                  <ActionButton
-                    active={interactionMode === "initial" || busy === "Set robot pose"}
-                    disabled={!!busy}
-                    onClick={() => {
-                      setInteractionMode("initial");
-                      setMessage("Click and drag the robot pose on the map");
-                    }}
-                    variant="secondary"
-                  >
-                    Set Robot Pose
-                  </ActionButton>
-                )}
+                <ActionButton active={interactionMode === "initial" || busy === "Localize" || busy === "Set robot pose"} disabled={!!busy} onClick={handleLocalize} variant="secondary">Localize</ActionButton>
+                <ActionButton active={busy === "Run mission" || missionRunnerActive} disabled={!!busy || !runPoseInitialized || missionRunnerActive} onClick={handleRunMission} variant="primary">Run Mission</ActionButton>
                 <ActionButton active={busy === "Stop"} disabled={!!busy || (!running && !missionRunnerActive)} onClick={handleStopNavigation} variant="danger">Stop</ActionButton>
               </>
             )}
