@@ -11,6 +11,7 @@ import {
   saveMapAnnotations,
   savePgmImage,
   sendInitialPoseEstimate,
+  sendNavigateToPoseGoal,
   startNavigation,
   stopNavigation,
 } from '../utils/navigationApi';
@@ -2194,6 +2195,74 @@ test('lists the mission route waypoints in the run session panel', async () => {
   expect(within(waypointList).getByText('Kitchen')).toBeInTheDocument();
   expect(within(waypointList).getByText('Living Room')).toBeInTheDocument();
 });
+
+test('gates the mission run on an initial robot pose', async () => {
+  const latestMapViewerProps = () => (
+    mockMapViewer.mock.calls[mockMapViewer.mock.calls.length - 1][0]
+  );
+  getPgmFiles.mockResolvedValue({
+    files: [{ path: 'factory.pgm', name: 'factory.pgm' }],
+  });
+  getNavigationMission.mockImplementation((mapName) => Promise.resolve(
+    mapName === 'factory'
+      ? {
+        exists: true,
+        map_name: 'factory',
+        global_bt: 'global.xml',
+        waypoints: [
+          { id: 'wp1', label: 'Kitchen', pose: { frame_id: 'map', x: 1, y: 0, yaw: 0 }, local_bt: 'locals/wp1.xml', metadata: {} },
+          { id: 'wp2', label: 'Living Room', pose: { frame_id: 'map', x: 4, y: 0, yaw: 0 }, local_bt: 'locals/wp2.xml', metadata: {} },
+        ],
+        metadata: {
+          mission_flow: {
+            nodes: [{ id: 'wp1', position: { x: 80, y: 72 } }, { id: 'wp2', position: { x: 300, y: 72 } }],
+            edges: [{ id: 'e1', source: 'wp1', target: 'wp2' }],
+          },
+        },
+      }
+      : { exists: false, map_name: mapName, global_bt: 'global.xml', waypoints: [], metadata: {} },
+  ));
+  // A fresh AMCL message arrives once the initial pose is published.
+  sendInitialPoseEstimate.mockImplementation(async () => {
+    mockTopicDataByName['/amcl_pose'] = amclPoseMessage(0.6, 0.4, 0.1);
+    return { ok: true };
+  });
+
+  render(<MissionCanvasPage />);
+
+  fireEvent.click(screen.getByRole('tab', { name: 'Run' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Load Mission' }));
+  const mapSelect = await screen.findByRole('combobox', { name: 'Run mission map file' });
+  await waitFor(() => expect(mapSelect).toHaveValue('factory.pgm'));
+  fireEvent.click(screen.getByRole('button', { name: 'Load' }));
+  await waitFor(() => expect(screen.getByText('Loaded mission factory')).toBeInTheDocument());
+
+  // Run Mission brings nav up but must NOT start the route yet.
+  getServiceStatus.mockResolvedValue({ is_up: true, mode: 'nav' });
+  fireEvent.click(screen.getByRole('button', { name: 'Run Mission' }));
+  await waitFor(() => expect(startNavigation).toHaveBeenCalledWith('nav', 'factory'));
+  await waitFor(() => expect(latestMapViewerProps().interactionMode).toBe('initial'));
+  expect(screen.getAllByText('Click and drag the robot pose on the map').length).toBeGreaterThan(0);
+  expect(screen.getByText('Set robot pose')).toBeInTheDocument();
+  expect(sendNavigateToPoseGoal).not.toHaveBeenCalled();
+
+  // Operator sets the robot's real pose on the map.
+  await act(async () => {
+    latestMapViewerProps().onMapPose(0.6, 0.4, 0.1);
+  });
+  await waitFor(() => expect(sendInitialPoseEstimate).toHaveBeenCalledWith({
+    x: 0.6,
+    y: 0.4,
+    yaw: 0.1,
+    frameId: 'map',
+  }));
+
+  // After AMCL converges the runner auto-starts toward the first waypoint.
+  await waitFor(() => expect(sendNavigateToPoseGoal).toHaveBeenCalled(), { timeout: 8000 });
+  const goal = sendNavigateToPoseGoal.mock.calls[0][0];
+  expect(goal.pose.pose.position).toMatchObject({ x: 1, y: 0 });
+  await waitFor(() => expect(screen.getByText('Ready')).toBeInTheDocument());
+}, 20000);
 
 describe('assembleMissionBtFilesForSave', () => {
   const EDITED = [
