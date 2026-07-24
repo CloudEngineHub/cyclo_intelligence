@@ -1394,6 +1394,11 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, 
     const editorMoveRafRef = useRef(null);
     const editorAreaDragRef = useRef(null);
     const editorBrushLayerRef = useRef(null);
+    // Split layer groups so high-frequency signals (TF pose, scan) never force
+    // a rebuild of the expensive layers (costmap pixel planes, marker sprites).
+    const costmapLayerRef = useRef(null);
+    const navPathLayerRef = useRef(null);
+    const liveLayerRef = useRef(null);
     const nodeDragRef = useRef(null);
     useEffect(() => {
         const containerEl = containerRef.current;
@@ -1432,6 +1437,15 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, 
             const brushLayer = new THREE.Group();
             scene.add(brushLayer);
             editorBrushLayerRef.current = brushLayer;
+            const costmapLayer = new THREE.Group();
+            scene.add(costmapLayer);
+            costmapLayerRef.current = costmapLayer;
+            const navPathLayer = new THREE.Group();
+            scene.add(navPathLayer);
+            navPathLayerRef.current = navPathLayer;
+            const liveLayer = new THREE.Group();
+            scene.add(liveLayer);
+            liveLayerRef.current = liveLayer;
             controls = new OrbitControls(camera, renderer.domElement);
             controls.enableDamping = true;
             controls.dampingFactor = 0.08;
@@ -1530,6 +1544,12 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, 
                 disposeObject(layers);
             if (editorBrushLayerRef.current)
                 disposeObject(editorBrushLayerRef.current);
+            if (costmapLayerRef.current)
+                disposeObject(costmapLayerRef.current);
+            if (navPathLayerRef.current)
+                disposeObject(navPathLayerRef.current);
+            if (liveLayerRef.current)
+                disposeObject(liveLayerRef.current);
             renderer === null || renderer === void 0 ? void 0 : renderer.dispose();
             if ((renderer === null || renderer === void 0 ? void 0 : renderer.domElement.parentNode) === containerEl) {
                 containerEl.removeChild(renderer.domElement);
@@ -1541,6 +1561,9 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, 
             mapLayerRef.current = null;
             layersRef.current = null;
             editorBrushLayerRef.current = null;
+            costmapLayerRef.current = null;
+            navPathLayerRef.current = null;
+            liveLayerRef.current = null;
         };
     }, []);
     useEffect(() => {
@@ -1730,44 +1753,7 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, 
         disposeObject(layers);
         layers.clear();
         const meta = gridMeta(map);
-        const mapKey = meta ? `${meta.width}:${meta.height}:${meta.resolution}:${meta.originX}:${meta.originY}` : null;
         const waypointScale = meta?.resolution && meta.resolution > 0 ? meta.resolution : 1;
-        const tfSyncedFootprint = tfSyncedFootprintRef.current;
-        const tfFramePoses = buildTfFramePoses(tf, "map");
-        const tfFramePoseByName = new Map(tfFramePoses.map(({ frame, pose: framePose }) => [frame, framePose]));
-        if (showGlobalCostmap) {
-            if (globalCostmap) {
-                const plane = makeGridPlane(globalCostmap, "globalCostmap", 0.03, null, null, isDark);
-                if (plane)
-                    layers.add(plane);
-            }
-        }
-        if (showLocalCostmap) {
-            if (localCostmap) {
-                const localFrame = normalizeFrameId((_a = localCostmap.header) === null || _a === void 0 ? void 0 : _a.frame_id);
-                const localFramePose = localFrame && localFrame !== "map"
-                    ? (_b = tfFramePoseByName.get(localFrame)) !== null && _b !== void 0 ? _b : null
-                    : null;
-                const scanFrame = normalizeFrameId((_c = scan === null || scan === void 0 ? void 0 : scan.header) === null || _c === void 0 ? void 0 : _c.frame_id) || "base_link";
-                const scanPose = (_d = tfFramePoseByName.get(scanFrame)) !== null && _d !== void 0 ? _d : pose;
-                const scanCells = scanCellsForGrid(localCostmap, scan, scanPose, localFramePose);
-                const plane = makeGridPlane(localCostmap, "localCostmap", 0.1, localFramePose, scanCells, isDark);
-                if (plane)
-                    layers.add(plane);
-            }
-        }
-        if (showGlobalPlan && ((_e = plan === null || plan === void 0 ? void 0 : plan.poses) === null || _e === void 0 ? void 0 : _e.length)) {
-            const points = plan.poses
-                .map((p) => { var _a; return (_a = p.pose) === null || _a === void 0 ? void 0 : _a.position; })
-                .filter((p) => !!p)
-                .map((p) => { var _a, _b; return new THREE.Vector3(Number((_a = p.x) !== null && _a !== void 0 ? _a : 0), Number((_b = p.y) !== null && _b !== void 0 ? _b : 0), 0.09); });
-            const planLine = makeLine(points, 0x0e7fd1, 3);
-            if (planLine)
-                layers.add(planLine);
-        }
-        if (showGoalPose && ((_f = goalPose === null || goalPose === void 0 ? void 0 : goalPose.pose) === null || _f === void 0 ? void 0 : _f.position)) {
-            layers.add(makePoseMarker(goalPose.pose, isDark ? 0xd5794f : 0xc96442, 0.14, isDark));
-        }
         if (dragPreviewPose === null || dragPreviewPose === void 0 ? void 0 : dragPreviewPose.position) {
             const previewX = Number((_g = dragPreviewPose.position.x) !== null && _g !== void 0 ? _g : 0);
             const previewY = Number((_h = dragPreviewPose.position.y) !== null && _h !== void 0 ? _h : 0);
@@ -1859,22 +1845,110 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, 
             if (marker)
                 layers.add(marker);
         });
-        const robotX = Number((_k = (_j = pose === null || pose === void 0 ? void 0 : pose.position) === null || _j === void 0 ? void 0 : _j.x) !== null && _k !== void 0 ? _k : 0);
-        const robotY = Number((_m = (_l = pose === null || pose === void 0 ? void 0 : pose.position) === null || _l === void 0 ? void 0 : _l.y) !== null && _m !== void 0 ? _m : 0);
-        if (showScan && ((_l = scan === null || scan === void 0 ? void 0 : scan.ranges) === null || _l === void 0 ? void 0 : _l.length)) {
-            let points = ((_m = scanProjectionRef.current) === null || _m === void 0 ? void 0 : _m.scan) === scan && scanProjectionRef.current.mapKey === mapKey
+        const fitKey = viewKey !== null && viewKey !== void 0 ? viewKey : "default";
+        if (meta && fitMapKeyRef.current !== fitKey && !(btLayer?.spot?.pose)) {
+            fitCameraToMap(camera, controls, meta, viewRollRef.current);
+            fitMapKeyRef.current = fitKey;
+        }
+    }, [
+        dragPreviewPose,
+        editorAreaPreview,
+        nodeDragPreview,
+        interactionMode,
+        missionRouteOrder,
+        mapAnnotations,
+        selectedMapAnnotationId,
+        selectedMissionRouteSourceId,
+        behaviorPreviewNode,
+        map,
+        behaviorNodes,
+        btLayer?.spot?.id,
+        selectedBehaviorNodeId,
+        selectedSpotId,
+        activeWaypointId,
+        spots,
+        viewKey,
+        isDark,
+    ]);
+    // Global costmap plane — a per-pixel ImageData pass over a map-sized grid.
+    // Isolated so it only redraws when the costmap itself updates, never when
+    // the robot pose ticks.
+    useEffect(() => {
+        const group = costmapLayerRef.current;
+        if (!group)
+            return;
+        disposeObject(group);
+        group.clear();
+        if (!showGlobalCostmap || !globalCostmap)
+            return;
+        const plane = makeGridPlane(globalCostmap, "globalCostmap", 0.03, null, null, isDark);
+        if (plane)
+            group.add(plane);
+    }, [globalCostmap, showGlobalCostmap, isDark]);
+    // Planner output: global plan line + goal marker (updates at plan rate).
+    useEffect(() => {
+        var _a, _b;
+        const group = navPathLayerRef.current;
+        if (!group)
+            return;
+        disposeObject(group);
+        group.clear();
+        if (showGlobalPlan && ((_a = plan === null || plan === void 0 ? void 0 : plan.poses) === null || _a === void 0 ? void 0 : _a.length)) {
+            const points = plan.poses
+                .map((p) => { var _c; return (_c = p.pose) === null || _c === void 0 ? void 0 : _c.position; })
+                .filter((p) => !!p)
+                .map((p) => { var _c, _d; return new THREE.Vector3(Number((_c = p.x) !== null && _c !== void 0 ? _c : 0), Number((_d = p.y) !== null && _d !== void 0 ? _d : 0), 0.09); });
+            const planLine = makeLine(points, 0x0e7fd1, 3);
+            if (planLine)
+                group.add(planLine);
+        }
+        if (showGoalPose && ((_b = goalPose === null || goalPose === void 0 ? void 0 : goalPose.pose) === null || _b === void 0 ? void 0 : _b.position)) {
+            group.add(makePoseMarker(goalPose.pose, isDark ? 0xd5794f : 0xc96442, 0.14, isDark));
+        }
+    }, [plan, showGlobalPlan, goalPose, showGoalPose, isDark]);
+    // High-frequency live overlay: robot pose marker, footprint, scan points,
+    // TF axes, and the (small) local costmap. Rebuilding this group is cheap;
+    // everything expensive lives in the groups above and is untouched by TF.
+    useEffect(() => {
+        var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p, _q, _r, _s, _t, _u;
+        const group = liveLayerRef.current;
+        if (!group)
+            return;
+        disposeObject(group);
+        group.clear();
+        const meta = gridMeta(map);
+        const mapKey = meta ? `${meta.width}:${meta.height}:${meta.resolution}:${meta.originX}:${meta.originY}` : null;
+        const tfSyncedFootprint = tfSyncedFootprintRef.current;
+        const tfFramePoses = buildTfFramePoses(tf, "map");
+        const tfFramePoseByName = new Map(tfFramePoses.map(({ frame, pose: framePose }) => [frame, framePose]));
+        const robotX = Number((_b = (_a = pose === null || pose === void 0 ? void 0 : pose.position) === null || _a === void 0 ? void 0 : _a.x) !== null && _b !== void 0 ? _b : 0);
+        const robotY = Number((_d = (_c = pose === null || pose === void 0 ? void 0 : pose.position) === null || _c === void 0 ? void 0 : _c.y) !== null && _d !== void 0 ? _d : 0);
+        if (showLocalCostmap && localCostmap) {
+            const localFrame = normalizeFrameId((_e = localCostmap.header) === null || _e === void 0 ? void 0 : _e.frame_id);
+            const localFramePose = localFrame && localFrame !== "map"
+                ? (_f = tfFramePoseByName.get(localFrame)) !== null && _f !== void 0 ? _f : null
+                : null;
+            const scanFrame = normalizeFrameId((_g = scan === null || scan === void 0 ? void 0 : scan.header) === null || _g === void 0 ? void 0 : _g.frame_id) || "base_link";
+            const scanPose = (_h = tfFramePoseByName.get(scanFrame)) !== null && _h !== void 0 ? _h : pose;
+            const scanCells = scanCellsForGrid(localCostmap, scan, scanPose, localFramePose);
+            const plane = makeGridPlane(localCostmap, "localCostmap", 0.1, localFramePose, scanCells, isDark);
+            if (plane)
+                group.add(plane);
+        }
+        if (showScan && ((_j = scan === null || scan === void 0 ? void 0 : scan.ranges) === null || _j === void 0 ? void 0 : _j.length)) {
+            let points = ((_k = scanProjectionRef.current) === null || _k === void 0 ? void 0 : _k.scan) === scan && scanProjectionRef.current.mapKey === mapKey
                 ? scanProjectionRef.current.points
                 : null;
             if (!points) {
-                const scanFrame = normalizeFrameId((_o = scan.header) === null || _o === void 0 ? void 0 : _o.frame_id) || "base_link";
-                const scanPose = (_p = tfFramePoseByName.get(scanFrame)) !== null && _p !== void 0 ? _p : pose;
-                const scanX = Number((_r = (_q = scanPose === null || scanPose === void 0 ? void 0 : scanPose.position) === null || _q === void 0 ? void 0 : _q.x) !== null && _r !== void 0 ? _r : robotX);
-                const scanY = Number((_t = (_s = scanPose === null || scanPose === void 0 ? void 0 : scanPose.position) === null || _s === void 0 ? void 0 : _s.y) !== null && _t !== void 0 ? _t : robotY);
+                const scanFrame = normalizeFrameId((_l = scan.header) === null || _l === void 0 ? void 0 : _l.frame_id) || "base_link";
+                const scanPose = (_m = tfFramePoseByName.get(scanFrame)) !== null && _m !== void 0 ? _m : pose;
+                const scanX = Number((_p = (_o = scanPose === null || scanPose === void 0 ? void 0 : scanPose.position) === null || _o === void 0 ? void 0 : _o.x) !== null && _p !== void 0 ? _p : robotX);
+                const scanY = Number((_r = (_q = scanPose === null || scanPose === void 0 ? void 0 : scanPose.position) === null || _q === void 0 ? void 0 : _q.y) !== null && _r !== void 0 ? _r : robotY);
                 const scanYaw = yawFromPose(scanPose);
-                const min = Number((_u = scan.range_min) !== null && _u !== void 0 ? _u : 0.02);
-                const max = Number((_v = scan.range_max) !== null && _v !== void 0 ? _v : 20);
-                const angleMin = Number((_w = scan.angle_min) !== null && _w !== void 0 ? _w : 0);
-                const inc = Number((_x = scan.angle_increment) !== null && _x !== void 0 ? _x : 0);
+                const min = Number((_s = scan.range_min) !== null && _s !== void 0 ? _s : 0.02);
+                const max = Number((_t = scan.range_max) !== null && _t !== void 0 ? _t : 20);
+                const angleMin = Number((_u = scan.angle_min) !== null && _u !== void 0 ? _u : 0);
+                const inc = Number(scan.angle_increment ?? 0);
                 points = [];
                 scan.ranges.forEach((range, index) => {
                     const r = Number(range);
@@ -1888,74 +1962,36 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, 
             const geometry = new THREE.BufferGeometry();
             geometry.setAttribute("position", new THREE.Float32BufferAttribute(points, 3));
             const material = new THREE.PointsMaterial({ color: 0x22c55e, size: 0.1, sizeAttenuation: true });
-            layers.add(new THREE.Points(geometry, material));
+            group.add(new THREE.Points(geometry, material));
         }
-        if (showTf && ((_y = tf === null || tf === void 0 ? void 0 : tf.transforms) === null || _y === void 0 ? void 0 : _y.length)) {
+        if (showTf && (tf === null || tf === void 0 ? void 0 : tf.transforms?.length)) {
             const framePoses = tfFramePoses.slice(0, 80);
             if (framePoses.length > 0) {
                 framePoses.forEach(({ frame, pose: framePose }) => {
-                    layers.add(makeTfAxes(framePose, frame, isDark));
+                    group.add(makeTfAxes(framePose, frame, isDark));
                 });
             }
             else {
-                layers.add(makeTfAxes({
+                group.add(makeTfAxes({
                     position: { x: robotX, y: robotY, z: 0 },
                     orientation: pose === null || pose === void 0 ? void 0 : pose.orientation,
                 }, "base_link", isDark));
             }
         }
-        if (showRobotModel && ((_0 = (_z = tfSyncedFootprint === null || tfSyncedFootprint === void 0 ? void 0 : tfSyncedFootprint.polygon) === null || _z === void 0 ? void 0 : _z.points) === null || _0 === void 0 ? void 0 : _0.length)) {
-            const footprintFrame = normalizeFrameId((_1 = tfSyncedFootprint.header) === null || _1 === void 0 ? void 0 : _1.frame_id);
+        const footprintPoints = tfSyncedFootprint === null || tfSyncedFootprint === void 0 ? void 0 : tfSyncedFootprint.polygon?.points;
+        if (showRobotModel && (footprintPoints === null || footprintPoints === void 0 ? void 0 : footprintPoints.length)) {
+            const footprintFrame = normalizeFrameId(tfSyncedFootprint.header?.frame_id);
             const footprintFramePose = footprintFrame && footprintFrame !== "map"
-                ? (_2 = tfFramePoseByName.get(footprintFrame)) !== null && _2 !== void 0 ? _2 : null
+                ? tfFramePoseByName.get(footprintFrame) ?? null
                 : null;
             const footprintMarker = makeFootprintMarker(tfSyncedFootprint, footprintFramePose);
             if (footprintMarker)
-                layers.add(footprintMarker);
+                group.add(footprintMarker);
         }
         if (pose === null || pose === void 0 ? void 0 : pose.position) {
-            layers.add(makePoseMarker(pose, showRobotModel && ((_4 = (_3 = tfSyncedFootprint === null || tfSyncedFootprint === void 0 ? void 0 : tfSyncedFootprint.polygon) === null || _3 === void 0 ? void 0 : _3.points) === null || _4 === void 0 ? void 0 : _4.length) ? 0x60a5fa : 0x007acc, 0.16, isDark));
+            group.add(makePoseMarker(pose, showRobotModel && (footprintPoints === null || footprintPoints === void 0 ? void 0 : footprintPoints.length) ? 0x60a5fa : 0x007acc, 0.16, isDark));
         }
-        const fitKey = viewKey !== null && viewKey !== void 0 ? viewKey : "default";
-        if (meta && fitMapKeyRef.current !== fitKey && !(btLayer?.spot?.pose)) {
-            fitCameraToMap(camera, controls, meta, viewRollRef.current);
-            fitMapKeyRef.current = fitKey;
-        }
-    }, [
-        globalCostmap,
-        dragPreviewPose,
-        editorAreaPreview,
-        nodeDragPreview,
-        goalPose,
-        interactionMode,
-        missionRouteOrder,
-        mapAnnotations,
-        selectedMapAnnotationId,
-        selectedMissionRouteSourceId,
-        behaviorPreviewNode,
-        localCostmap,
-        map,
-        plan,
-        pose,
-        scan,
-        behaviorNodes,
-        btLayer?.spot?.id,
-        selectedBehaviorNodeId,
-        selectedSpotId,
-        activeWaypointId,
-        showGlobalCostmap,
-        showLocalCostmap,
-        showGlobalPlan,
-        showGoalPose,
-        showMap,
-        showRobotModel,
-        showScan,
-        showTf,
-        spots,
-        tf,
-        viewKey,
-        isDark,
-    ]);
+    }, [tf, pose, scan, localCostmap, showLocalCostmap, showScan, showTf, showRobotModel, map, isDark]);
     useEffect(() => {
         const renderer = rendererRef.current;
         const camera = cameraRef.current;
