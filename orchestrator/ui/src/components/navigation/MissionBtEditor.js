@@ -25,10 +25,13 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import clsx from "clsx";
+import toast from "react-hot-toast";
+import { useSelector } from "react-redux";
 import {
   MdAutoFixHigh,
   MdRedo,
   MdUndo,
+  MdUploadFile,
 } from "react-icons/md";
 
 import BTActionNode from "../bt/BTActionNode";
@@ -39,6 +42,8 @@ import { useBTHistory } from "../../hooks/useBTHistory";
 import { useBTNodeCatalog } from "../../hooks/useBTNodeCatalog";
 import { parseBTXml, applyDagreLayout } from "../../utils/btTreeParser";
 import { serializeFromGraph } from "../../utils/btXmlSerializer";
+import TreeListModal from "../../features/btmanager/components/TreeListModal";
+import { CYCLO_VIDEO_SERVER_PORT } from "../../config/runtimeConfig";
 
 const nodeTypes = {
   btControl: BTControlNode,
@@ -46,6 +51,19 @@ const nodeTypes = {
 };
 
 const reactFlowProOptions = { hideAttribution: true };
+
+export function buildBtTreeFileUrl(rosbridgeUrl, filePath) {
+  let host = "localhost";
+  try {
+    host = new URL(rosbridgeUrl).hostname || host;
+  } catch {
+    // Keep the local-development fallback when ROS bridge configuration is absent.
+  }
+  const authority = host.includes(":") ? `[${host}]` : host;
+  const path = String(filePath || "");
+  const normalizedPath = path.startsWith("/") ? path : `/${path}`;
+  return `http://${authority}:${CYCLO_VIDEO_SERVER_PORT}${normalizedPath}`;
+}
 
 // Observe the app's dark theme via the `dark` class on <html> so the ReactFlow
 // canvas (which needs a JS color value for its dot grid) stays theme-aware.
@@ -107,6 +125,20 @@ function layoutVisibleOnly(nodes, edges) {
   return nodes.map((node) => byId.get(node.id) || node);
 }
 
+// This wrapper is mounted only while the modal is open. It keeps the waypoint
+// editor's file-server host resolution identical to BT Manager without making
+// the editor require a Redux provider in isolated, closed-modal renders.
+function WaypointTreeListModal({ onClose, onSelect }) {
+  const rosbridgeUrl = useSelector((state) => state.ros.rosbridgeUrl);
+  return (
+    <TreeListModal
+      isOpen
+      onClose={onClose}
+      onSelect={(item) => onSelect(item, rosbridgeUrl)}
+    />
+  );
+}
+
 export default function MissionBtEditor({
   title,
   filePath,
@@ -122,6 +154,8 @@ export default function MissionBtEditor({
   const [nodeDataMap, setNodeDataMap] = useState(new Map());
   const [selectedNodeId, setSelectedNodeId] = useState(null);
   const [parseError, setParseError] = useState(null);
+  const [showTreeList, setShowTreeList] = useState(false);
+  const [loadingTreeFile, setLoadingTreeFile] = useState(false);
   const reactFlowRef = useRef(null);
   const nodesRef = useRef(nodes);
   const edgesRef = useRef(edges);
@@ -289,6 +323,35 @@ export default function MissionBtEditor({
     captureHistory();
     setNodes(layoutVisibleOnly(nodesRef.current, edgesRef.current));
   }, [captureHistory, setNodes]);
+
+  // Keep XML loading consistent with BT Manager: select a server-side tree,
+  // fetch its XML from the data file server, validate it, and replace the
+  // current editor graph. The parent persists the loaded content under this
+  // waypoint's local BT path, rather than changing that path to the source.
+  const handleServerFileSelect = useCallback(async (item, rosbridgeUrl) => {
+    if (!item?.full_path) return;
+    setShowTreeList(false);
+    setLoadingTreeFile(true);
+    try {
+      const response = await fetch(buildBtTreeFileUrl(rosbridgeUrl, item.full_path));
+      if (!response.ok) throw new Error(`Failed to fetch file: ${response.status}`);
+
+      const xmlContent = await response.text();
+      const parsed = parseBTXml(xmlContent);
+      setNodes(parsed.nodes || []);
+      setEdges(parsed.edges || []);
+      setNodeDataMap(parsed.nodeDataMap || new Map());
+      setSelectedNodeId(null);
+      setParseError(null);
+      resetHistory();
+      onXmlChangeRef.current?.(xmlContent);
+      toast.success(`Loaded: ${item.name || item.full_path.split("/").pop()}`);
+    } catch (error) {
+      toast.error(`Failed to load file: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setLoadingTreeFile(false);
+    }
+  }, [resetHistory, setEdges, setNodes]);
 
   const handleToggleCollapse = useCallback((nodeId) => {
     const target = nodesRef.current.find((node) => node.id === nodeId);
@@ -468,6 +531,20 @@ export default function MissionBtEditor({
           >
             <MdAutoFixHigh size={18} />
           </button>
+          <button
+            type="button"
+            onClick={() => setShowTreeList(true)}
+            disabled={loadingTreeFile}
+            title="Load XML"
+            aria-label="Load XML"
+            className={clsx(
+              "h-8 flex items-center gap-1.5 rounded-lg bg-[var(--mc-surface-2)] px-2.5 text-xs font-medium text-[var(--mc-text-muted)] transition-colors hover:bg-[var(--mc-surface-hover)]",
+              loadingTreeFile && "cursor-wait opacity-60",
+            )}
+          >
+            <MdUploadFile size={18} />
+            {loadingTreeFile ? "Loading..." : "Load XML"}
+          </button>
       </div>
 
         <BTNodePalette canUpdateCatalog={false} />
@@ -531,6 +608,12 @@ export default function MissionBtEditor({
             onParamChange={handleParamChange}
             onNameChange={handleNameChange}
             onClose={() => setSelectedNodeId(null)}
+          />
+        )}
+        {showTreeList && (
+          <WaypointTreeListModal
+            onClose={() => setShowTreeList(false)}
+            onSelect={handleServerFileSelect}
           />
         )}
     </div>

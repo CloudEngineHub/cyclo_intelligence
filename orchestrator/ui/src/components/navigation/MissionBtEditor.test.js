@@ -12,11 +12,32 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import { render, waitFor } from "@testing-library/react";
-import MissionBtEditor from "./MissionBtEditor";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import MissionBtEditor, { buildBtTreeFileUrl } from "./MissionBtEditor";
 
 jest.mock("../../hooks/useBTNodeCatalog", () => ({
   useBTNodeCatalog: () => ({ catalog: [] }),
+}));
+
+jest.mock("react-redux", () => ({
+  useSelector: (selector) => selector({ ros: { rosbridgeUrl: "ws://robot-host:7090" } }),
+}));
+
+jest.mock("react-hot-toast", () => ({
+  __esModule: true,
+  default: { error: jest.fn(), success: jest.fn() },
+}));
+
+jest.mock("../../features/btmanager/components/TreeListModal", () => ({
+  __esModule: true,
+  default: ({ isOpen, onSelect }) => isOpen ? (
+    <button
+      type="button"
+      onClick={() => onSelect({ name: "template.xml", full_path: "/bt/trees/template.xml" })}
+    >
+      Select XML fixture
+    </button>
+  ) : null,
 }));
 
 const treeXml = (waitName) => [
@@ -24,6 +45,13 @@ const treeXml = (waitName) => [
   `  <BehaviorTree ID="MainTree"><Wait name="${waitName}" duration="1.0"/></BehaviorTree>`,
   "</root>",
 ].join("\n");
+
+test("builds a data-server URL from ws and wss rosbridge URLs", () => {
+  expect(buildBtTreeFileUrl("ws://robot-host:7090", "/bt/trees/example.xml"))
+    .toBe("http://robot-host:7082/bt/trees/example.xml");
+  expect(buildBtTreeFileUrl("wss://[2001:db8::1]:7090", "bt/trees/example.xml"))
+    .toBe("http://[2001:db8::1]:7082/bt/trees/example.xml");
+});
 
 test("emits the loaded tree to the parent without waiting on a debounce", async () => {
   const onXmlChange = jest.fn();
@@ -70,4 +98,33 @@ test("emits to the new file path after a waypoint switch, not the old tree", asy
     expect(onXmlChange.mock.calls.some(([xml]) => xml.includes("StepB"))).toBe(true)
   ));
   expect(onXmlChange.mock.calls.some(([xml]) => xml.includes("StepA"))).toBe(false);
+});
+
+test("loads a BT Manager XML selection into the current waypoint tree", async () => {
+  const onXmlChange = jest.fn();
+  const originalFetch = global.fetch;
+  global.fetch = jest.fn().mockResolvedValue({
+    ok: true,
+    text: () => Promise.resolve(treeXml("LoadedStep")),
+  });
+
+  render(
+    <MissionBtEditor
+      title="A"
+      filePath="locals/a.xml"
+      xml={treeXml("OriginalStep")}
+      onXmlChange={onXmlChange}
+    />,
+  );
+  await waitFor(() => expect(onXmlChange).toHaveBeenCalled());
+  onXmlChange.mockClear();
+
+  fireEvent.click(screen.getByRole("button", { name: "Load XML" }));
+  fireEvent.click(screen.getByRole("button", { name: "Select XML fixture" }));
+
+  await waitFor(() => expect(onXmlChange.mock.calls.some(([xml]) => (
+    xml.includes("LoadedStep")
+  ))).toBe(true));
+  expect(global.fetch).toHaveBeenCalledWith("http://robot-host:7082/bt/trees/template.xml");
+  global.fetch = originalFetch;
 });
