@@ -36,6 +36,7 @@ NAVIGATION_DATA_ROOT = Path(
     os.environ.get("CYCLO_NAVIGATION_DATA_DIR", "/workspace/navigation")
 )
 MISSION_SCHEMA_VERSION = 1
+DEFAULT_MISSION_NAME = "peanutmix"
 _SAFE_NAME = re.compile(r"^[A-Za-z0-9_.-]+$")
 _SAFE_RELATIVE_FILE = re.compile(r"^[A-Za-z0-9_./-]+$")
 
@@ -58,6 +59,7 @@ class MissionWaypoint(BaseModel):
 class MissionManifest(BaseModel):
     schema_version: int = MISSION_SCHEMA_VERSION
     map_name: str = Field(min_length=1, max_length=128)
+    mission_name: str = Field(default=DEFAULT_MISSION_NAME, min_length=1, max_length=128)
     global_bt: str = Field(default="global.xml", max_length=256)
     waypoints: list[MissionWaypoint] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
@@ -65,6 +67,11 @@ class MissionManifest(BaseModel):
 
 class MissionLoadResponse(MissionManifest):
     exists: bool = False
+
+
+class MissionListResponse(BaseModel):
+    map_name: str
+    missions: list[str] = Field(default_factory=list)
 
 
 class MissionSaveRequest(BaseModel):
@@ -100,6 +107,10 @@ def _validate_map_name(value: str) -> str:
     return _validate_safe_name(value, label="map_name")
 
 
+def _validate_mission_name(value: str) -> str:
+    return _validate_safe_name(value, label="mission_name")
+
+
 def _validate_spot_id(value: str) -> str:
     return _validate_safe_name(value, label="waypoint_id")
 
@@ -113,20 +124,42 @@ def _validate_relative_file(value: str, *, default: str) -> str:
     return raw
 
 
-def _mission_dir(map_name: str) -> Path:
+def _mission_root(map_name: str) -> Path:
     return NAVIGATION_DATA_ROOT / "missions" / _validate_map_name(map_name)
 
 
-def _manifest_path(map_name: str) -> Path:
-    return _mission_dir(map_name) / "mission.json"
+def _migrate_legacy_mission(map_name: str) -> None:
+    """Move the pre-mission-name artifact layout into the default mission."""
+    mission_root = _mission_root(map_name)
+    legacy_manifest = mission_root / "mission.json"
+    default_dir = mission_root / DEFAULT_MISSION_NAME
+    if not legacy_manifest.exists() or default_dir.exists():
+        return
+
+    default_dir.mkdir(parents=True)
+    for name in ("mission.json", "global.xml", "locals"):
+        source = mission_root / name
+        if source.exists():
+            os.replace(source, default_dir / name)
 
 
-def _empty_manifest(map_name: str) -> MissionLoadResponse:
+def _mission_dir(map_name: str, mission_name: str) -> Path:
+    _migrate_legacy_mission(map_name)
+    return _mission_root(map_name) / _validate_mission_name(mission_name)
+
+
+def _manifest_path(map_name: str, mission_name: str) -> Path:
+    return _mission_dir(map_name, mission_name) / "mission.json"
+
+
+def _empty_manifest(map_name: str, mission_name: str) -> MissionLoadResponse:
     normalized = _validate_map_name(map_name)
+    normalized_mission = _validate_mission_name(mission_name)
     return MissionLoadResponse(
         exists=False,
         schema_version=MISSION_SCHEMA_VERSION,
         map_name=normalized,
+        mission_name=normalized_mission,
         global_bt="global.xml",
         waypoints=[],
         metadata={},
@@ -156,6 +189,7 @@ def _normalize_waypoint(waypoint: MissionWaypoint) -> MissionWaypoint:
 
 def _normalize_manifest(
     map_name: str,
+    mission_name: str,
     *,
     global_bt: str,
     waypoints: list[MissionWaypoint],
@@ -163,31 +197,34 @@ def _normalize_manifest(
     exists: bool,
 ) -> MissionLoadResponse:
     normalized_map = _validate_map_name(map_name)
+    normalized_mission = _validate_mission_name(mission_name)
     return MissionLoadResponse(
         exists=exists,
         schema_version=MISSION_SCHEMA_VERSION,
         map_name=normalized_map,
+        mission_name=normalized_mission,
         global_bt=_validate_relative_file(global_bt, default="global.xml"),
         waypoints=[_normalize_waypoint(waypoint) for waypoint in waypoints],
         metadata=metadata,
     )
 
 
-def _read_manifest(map_name: str) -> MissionLoadResponse:
+def _read_manifest(map_name: str, mission_name: str = DEFAULT_MISSION_NAME) -> MissionLoadResponse:
     normalized = _validate_map_name(map_name)
-    path = _manifest_path(normalized)
+    normalized_mission = _validate_mission_name(mission_name)
+    path = _manifest_path(normalized, normalized_mission)
     try:
         with path.open("r", encoding="utf-8") as f:
             raw = json.load(f)
     except FileNotFoundError:
-        return _empty_manifest(normalized)
+        return _empty_manifest(normalized, normalized_mission)
     except (OSError, json.JSONDecodeError) as exc:
         raise HTTPException(
             500, f"Failed to read mission for {normalized}: {exc}"
         ) from exc
 
     if not isinstance(raw, dict):
-        return _empty_manifest(normalized)
+        return _empty_manifest(normalized, normalized_mission)
     waypoints = []
     for value in raw.get("waypoints") or []:
         if not isinstance(value, dict):
@@ -198,6 +235,7 @@ def _read_manifest(map_name: str) -> MissionLoadResponse:
             continue
     return _normalize_manifest(
         normalized,
+        normalized_mission,
         global_bt=str(raw.get("global_bt") or "global.xml"),
         waypoints=waypoints,
         metadata=raw.get("metadata") if isinstance(raw.get("metadata"), dict) else {},
@@ -206,7 +244,7 @@ def _read_manifest(map_name: str) -> MissionLoadResponse:
 
 
 def _write_manifest(manifest: MissionLoadResponse) -> None:
-    path = _manifest_path(manifest.map_name)
+    path = _manifest_path(manifest.map_name, manifest.mission_name)
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = _serialize_model(manifest)
     payload.pop("exists", None)
@@ -223,8 +261,8 @@ def _write_manifest(manifest: MissionLoadResponse) -> None:
         ) from exc
 
 
-def _resolve_bt_path(map_name: str, relative_path: str) -> Path:
-    mission_dir = _mission_dir(map_name)
+def _resolve_bt_path(map_name: str, mission_name: str, relative_path: str) -> Path:
+    mission_dir = _mission_dir(map_name, mission_name)
     safe_path = _validate_relative_file(relative_path, default="global.xml")
     path = mission_dir / safe_path
     try:
@@ -234,15 +272,36 @@ def _resolve_bt_path(map_name: str, relative_path: str) -> Path:
     return path
 
 
+@router.get("", response_model=MissionListResponse)
+def list_missions(map_name: str = Query(min_length=1, max_length=128)):
+    normalized = _validate_map_name(map_name)
+    _migrate_legacy_mission(normalized)
+    mission_root = _mission_root(normalized)
+    missions = sorted(
+        path.name for path in mission_root.iterdir()
+        if (
+            path.is_dir()
+            and _SAFE_NAME.fullmatch(path.name)
+            and (path / "mission.json").is_file()
+        )
+    ) if mission_root.exists() else []
+    return MissionListResponse(map_name=normalized, missions=missions)
+
+
 @router.get("/{map_name}", response_model=MissionLoadResponse)
-def load_mission(map_name: str):
-    return _read_manifest(map_name)
+def load_mission(map_name: str, mission_name: str = DEFAULT_MISSION_NAME):
+    return _read_manifest(map_name, mission_name)
 
 
 @router.post("/{map_name}", response_model=MissionLoadResponse)
-def save_mission(map_name: str, request: MissionSaveRequest):
+def save_mission(
+    map_name: str,
+    request: MissionSaveRequest,
+    mission_name: str = DEFAULT_MISSION_NAME,
+):
     manifest = _normalize_manifest(
         map_name,
+        mission_name,
         global_bt=request.global_bt,
         waypoints=request.waypoints,
         metadata=request.metadata,
@@ -256,9 +315,10 @@ def save_mission(map_name: str, request: MissionSaveRequest):
 def load_bt_file(
     map_name: str,
     path: str = Query(min_length=1, max_length=256),
+    mission_name: str = DEFAULT_MISSION_NAME,
 ):
-    bt_path = _resolve_bt_path(map_name, path)
-    safe_path = str(bt_path.relative_to(_mission_dir(map_name)))
+    bt_path = _resolve_bt_path(map_name, mission_name, path)
+    safe_path = str(bt_path.relative_to(_mission_dir(map_name, mission_name)))
     try:
         content = bt_path.read_text(encoding="utf-8")
     except FileNotFoundError:
@@ -269,9 +329,13 @@ def load_bt_file(
 
 
 @router.put("/{map_name}/bt", response_model=MissionBtFileResponse)
-def save_bt_file(map_name: str, request: MissionBtFileRequest):
-    bt_path = _resolve_bt_path(map_name, request.path)
-    safe_path = str(bt_path.relative_to(_mission_dir(map_name)))
+def save_bt_file(
+    map_name: str,
+    request: MissionBtFileRequest,
+    mission_name: str = DEFAULT_MISSION_NAME,
+):
+    bt_path = _resolve_bt_path(map_name, mission_name, request.path)
+    safe_path = str(bt_path.relative_to(_mission_dir(map_name, mission_name)))
     try:
         bt_path.parent.mkdir(parents=True, exist_ok=True)
         bt_path.write_text(request.content, encoding="utf-8")
@@ -284,9 +348,10 @@ def save_bt_file(map_name: str, request: MissionBtFileRequest):
 def delete_bt_file(
     map_name: str,
     path: str = Query(min_length=1, max_length=256),
+    mission_name: str = DEFAULT_MISSION_NAME,
 ):
-    bt_path = _resolve_bt_path(map_name, path)
-    safe_path = str(bt_path.relative_to(_mission_dir(map_name)))
+    bt_path = _resolve_bt_path(map_name, mission_name, path)
+    safe_path = str(bt_path.relative_to(_mission_dir(map_name, mission_name)))
     try:
         bt_path.unlink()
     except FileNotFoundError:

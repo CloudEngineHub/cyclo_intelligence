@@ -9,6 +9,8 @@ import {
   saveNavigationMap,
   sendInitialPoseEstimate,
   requestNoMotionUpdate,
+  sendNavigateToPoseGoalAndWait,
+  sendNavigateThroughPosesGoalsAndWait,
   startNavigation,
 } from './navigationApi';
 
@@ -149,5 +151,42 @@ test('configures design localization AMCL parameters through the supervisor API'
   expect(global.fetch).toHaveBeenCalledWith(
     '/api/navigation/amcl/design-localization-params',
     expect.objectContaining({ method: 'POST' })
+  );
+});
+
+test('waits for the tracked NavigateToPose result with cancellation support', async () => {
+  const controller = new AbortController();
+  const goal = { pose: { header: { frame_id: 'map' }, pose: {} } };
+
+  await sendNavigateToPoseGoalAndWait(goal, controller.signal);
+
+  expect(global.fetch).toHaveBeenCalledWith(
+    '/api/navigation/goal/wait',
+    expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify(goal),
+      signal: controller.signal,
+    })
+  );
+});
+
+test('waits for a NavigateThroughPoses result with cancellation support', async () => {
+  const controller = new AbortController();
+  const goals = {
+    poses: [
+      { header: { frame_id: 'map' }, pose: {} },
+      { header: { frame_id: 'map' }, pose: {} },
+    ],
+  };
+
+  await sendNavigateThroughPosesGoalsAndWait(goals, controller.signal);
+
+  expect(global.fetch).toHaveBeenCalledWith(
+    '/api/navigation/goals/wait',
+    expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify(goals),
+      signal: controller.signal,
+    })
   );
 });

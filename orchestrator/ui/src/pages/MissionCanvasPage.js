@@ -15,7 +15,8 @@ import {
   requestNoMotionUpdate,
   saveNavigationMap,
   sendInitialPoseEstimate,
-  sendNavigateToPoseGoal,
+  sendNavigateToPoseGoalAndWait,
+  sendNavigateThroughPosesGoalsAndWait,
   startNavigation,
   stopNavigation,
 } from "../utils/navigationApi";
@@ -29,6 +30,7 @@ import {
   deleteNavigationMissionBtFile,
   getNavigationMission,
   getNavigationMissionBtFile,
+  getNavigationMissions,
   saveNavigationMission,
   saveNavigationMissionBtFile,
 } from "../utils/navigationMissionsApi";
@@ -53,6 +55,11 @@ import { FALLBACK_CATALOG } from "../constants/btNodeCatalogFallback";
 import { BT_SUPPORTED_ROBOT_TYPE } from "../constants/btSupport";
 
 const DEFAULT_MAP_NAME = "map";
+const DEFAULT_MISSION_NAME = "peanutmix";
+
+function missionRequestName(missionName) {
+  return missionName === DEFAULT_MISSION_NAME ? "" : missionName;
+}
 const STATUS_POLL_MS = 10000;
 const BT_NODE_STATUS_POLL_MS = 5000;
 const NOMOTION_UPDATE_INTERVAL_MS = 1000;
@@ -929,7 +936,22 @@ function SaveMapDialog({ open, value, busy, onChange, onCancel, onSubmit }) {
   );
 }
 
-function LoadMapDialog({ open, files, selectedPath, busy, title = "Load Map", fieldLabel = "Map file", selectAriaLabel = "Map file", onChange, onCancel, onSubmit }) {
+function LoadMapDialog({
+  open,
+  files,
+  selectedPath,
+  missionNames = null,
+  selectedMissionName = "",
+  busy,
+  title = "Load Map",
+  fieldLabel = "Map file",
+  selectAriaLabel = "Map file",
+  missionSelectAriaLabel = "Mission file",
+  onChange,
+  onMissionChange,
+  onCancel,
+  onSubmit,
+}) {
   if (!open) return null;
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center px-4" role="dialog" aria-modal="true" aria-labelledby="mission-load-map-title"
@@ -952,9 +974,30 @@ function LoadMapDialog({ open, files, selectedPath, busy, title = "Load Map", fi
               : files.map((file) => (<option key={file.path} value={file.path}>{file.name || file.path}</option>))}
           </select>
         </label>
+        {missionNames !== null && (
+          <label className="grid gap-1.5 text-xs">
+            <span style={{ color: "var(--mc-text-muted)" }}>Mission file</span>
+            <select
+              aria-label={missionSelectAriaLabel}
+              value={selectedMissionName}
+              disabled={busy || missionNames.length === 0}
+              onChange={(event) => onMissionChange(event.currentTarget.value)}
+              className="h-9 px-2.5 text-sm"
+              style={{ color: "var(--mc-text)", backgroundColor: "var(--mc-surface-2)", border: "1px solid var(--mc-border-strong)", borderRadius: 10 }}
+            >
+              {missionNames.length === 0
+                ? (<option value="">No missions found</option>)
+                : missionNames.map((name) => (<option key={name} value={name}>{name}</option>))}
+            </select>
+          </label>
+        )}
         <div className="flex justify-end gap-2">
           <ActionButton disabled={busy} onClick={onCancel} variant="secondary">Cancel</ActionButton>
-          <ActionButton disabled={busy || !selectedPath} type="submit" variant="secondary">Load</ActionButton>
+          <ActionButton
+            disabled={busy || !selectedPath || (missionNames !== null && !selectedMissionName)}
+            type="submit"
+            variant="secondary"
+          >Load</ActionButton>
         </div>
       </form>
     </div>
@@ -1065,6 +1108,33 @@ function MappingSessionPanel({ mappingEditorActive, selectedPath, dirty }) {
   );
 }
 
+function DesignSessionPanel({
+  mapName,
+  missionName,
+  missionNames,
+  onMissionChange,
+  busy,
+}) {
+  return (
+    <Panel title="Design Session" compact className="grid gap-1 content-start overflow-auto">
+      <SessionRow label="Selected map" value={mapName || "Not selected"} />
+      <label className="flex items-center justify-between gap-2 text-xs min-w-0">
+        <span style={{ color: MISSION_TEXT_MUTED }}>Mission file</span>
+        <select
+          aria-label="Mission file"
+          value={missionName}
+          disabled={busy || !mapName || missionNames.length === 0}
+          onChange={(event) => onMissionChange(event.currentTarget.value)}
+          className="max-w-[11rem] rounded px-1.5 py-1 text-xs"
+          style={{ color: "var(--mc-text)", backgroundColor: "var(--mc-surface-2)", border: "1px solid var(--mc-border-strong)" }}
+        >
+          {missionNames.map((name) => <option key={name} value={name}>{name}</option>)}
+        </select>
+      </label>
+    </Panel>
+  );
+}
+
 const RUNNER_STATUS_META = {
   idle: { label: "Idle", color: "var(--mc-text-subtle)" },
   starting: { label: "Starting", color: "var(--mc-warning)" },
@@ -1078,7 +1148,7 @@ const RUNNER_STATUS_META = {
 
 const RUNNER_PHASE_LABEL = {
   "nav-sent": "Navigating",
-  "awaiting-arrival": "Navigating",
+  "awaiting-nav-result": "Navigating",
   arrived: "Arrived",
   "bt-loading": "Starting behavior",
   "bt-running": "Running behavior",
@@ -1094,7 +1164,15 @@ const WAYPOINT_STATE_META = {
   failed: { mark: "✕", color: "var(--mc-danger)", note: "Failed" },
 };
 
-function RunSessionPanel({ mapName, running, runner, poseReady }) {
+function RunSessionPanel({
+  mapName,
+  missionName,
+  missionNames,
+  onMissionChange,
+  running,
+  runner,
+  poseReady,
+}) {
   const statusMeta = RUNNER_STATUS_META[runner.status] || RUNNER_STATUS_META.idle;
   const showProgress = runner.total > 0;
   const showReason = (runner.status === "failed" || runner.status === "cancelled") && runner.reason;
@@ -1103,6 +1181,19 @@ function RunSessionPanel({ mapName, running, runner, poseReady }) {
     <Panel title="Run Session" className="grid gap-2">
       <SessionRow label="Runtime" value={running ? "Running" : "Idle"} />
       <SessionRow label="Selected map" value={mapName || "Not selected"} />
+      <label className="flex items-center justify-between gap-2 text-xs min-w-0">
+        <span style={{ color: MISSION_TEXT_MUTED }}>Mission file</span>
+        <select
+          aria-label="Mission file"
+          value={missionName}
+          disabled={running || missionNames.length === 0}
+          onChange={(event) => onMissionChange(event.currentTarget.value)}
+          className="max-w-[11rem] rounded px-1.5 py-1 text-xs"
+          style={{ color: "var(--mc-text)", backgroundColor: "var(--mc-surface-2)", border: "1px solid var(--mc-border-strong)" }}
+        >
+          {missionNames.map((name) => <option key={name} value={name}>{name}</option>)}
+        </select>
+      </label>
       {running && (
         <div className="flex items-center justify-between gap-2 text-xs min-w-0">
           <span style={{ color: MISSION_TEXT_MUTED }}>Localization</span>
@@ -1725,11 +1816,14 @@ export default function MissionCanvasPage() {
   const behaviorNodeSerialRef = useRef(0);
   const skipNextSpotLoadForMapRef = useRef("");
   const legacySpotLoadGenerationRef = useRef(0);
+  const runMissionLoadGenerationRef = useRef(0);
   const [mapName, setMapName] = useState(() => (
     typeof initialSession.mapName === "string" && initialSession.mapName.trim()
       ? initialSession.mapName
       : DEFAULT_MAP_NAME
   ));
+  const [missionName, setMissionName] = useState(DEFAULT_MISSION_NAME);
+  const [missionNames, setMissionNames] = useState([DEFAULT_MISSION_NAME]);
   const [status, setStatus] = useState(null);
   const [spots, setSpots] = useState([]);
   const [selectedSpotId, setSelectedSpotId] = useState("");
@@ -1742,6 +1836,15 @@ export default function MissionCanvasPage() {
   const [deletedMissionBtPaths, setDeletedMissionBtPaths] = useState([]);
   const [missionFlowNodes, setMissionFlowNodes] = useState([]);
   const [missionFlowEdges, setMissionFlowEdges] = useState([]);
+  // Run is deliberately a separate, read-only mission session. Loading a
+  // mission to execute must never replace the mission currently being edited.
+  const [runMapName, setRunMapName] = useState("");
+  const [runMissionName, setRunMissionName] = useState(DEFAULT_MISSION_NAME);
+  const [runSessionMissionNames, setRunSessionMissionNames] = useState([DEFAULT_MISSION_NAME]);
+  const [runSpots, setRunSpots] = useState([]);
+  const [runMissionBtFiles, setRunMissionBtFiles] = useState({});
+  const [runMissionFlowNodes, setRunMissionFlowNodes] = useState([]);
+  const [runMissionFlowEdges, setRunMissionFlowEdges] = useState([]);
   const [missionRouteMode, setMissionRouteMode] = useState(false);
   const [missionRouteSourceId, setMissionRouteSourceId] = useState("");
   const [missionBtLoadingPath, setMissionBtLoadingPath] = useState("");
@@ -1772,6 +1875,7 @@ export default function MissionCanvasPage() {
   const [saveMapName, setSaveMapName] = useState(DEFAULT_MAP_NAME);
   const [showDesignMapDialog, setShowDesignMapDialog] = useState(false);
   const [designMapFiles, setDesignMapFiles] = useState([]);
+  const [designMissionNames, setDesignMissionNames] = useState([]);
   const [designMapPath, setDesignMapPath] = useState(restoredDesignMapPath);
   // Whether a map is loaded for display in Design/Run. Deliberately NOT restored
   // from session: a refresh, a stage switch, or the backend going down should
@@ -1779,11 +1883,14 @@ export default function MissionCanvasPage() {
   const [missionMapLoaded, setMissionMapLoaded] = useState(false);
   const prevRunningRef = useRef(false);
   const [pendingDesignMapPath, setPendingDesignMapPath] = useState(restoredDesignMapPath);
+  const [pendingDesignMissionName, setPendingDesignMissionName] = useState(DEFAULT_MISSION_NAME);
   const [designMapBusy, setDesignMapBusy] = useState(false);
   const [designMapReloadToken, setDesignMapReloadToken] = useState(0);
   const [showRunMapDialog, setShowRunMapDialog] = useState(false);
   const [runMapFiles, setRunMapFiles] = useState([]);
+  const [runMissionNames, setRunMissionNames] = useState([]);
   const [runMapPath, setRunMapPath] = useState("");
+  const [pendingRunMissionName, setPendingRunMissionName] = useState(DEFAULT_MISSION_NAME);
   const [runMapBusy, setRunMapBusy] = useState(false);
   const [mapEditorReloadToken, setMapEditorReloadToken] = useState(0);
   const [layersByStage, setLayersByStage] = useState(() => ({
@@ -1818,7 +1925,13 @@ export default function MissionCanvasPage() {
   );
   const stageNavigationTopicsActive = mappingTopicsActive || runTopicsActive;
   const activeLayers = layersByStage[workspaceStage] || LAYER_PRESETS[workspaceStage];
-  const currentMapName = mapName.trim() || DEFAULT_MAP_NAME;
+  const runSessionActive = workspaceStage === STAGE_RUN;
+  const currentMapName = (runSessionActive ? runMapName : mapName).trim() || DEFAULT_MAP_NAME;
+  const activeMissionName = runSessionActive ? runMissionName : missionName;
+  const activeSpots = runSessionActive ? runSpots : spots;
+  const activeMissionBtFiles = runSessionActive ? runMissionBtFiles : missionBtFiles;
+  const activeMissionFlowNodes = runSessionActive ? runMissionFlowNodes : missionFlowNodes;
+  const activeMissionFlowEdges = runSessionActive ? runMissionFlowEdges : missionFlowEdges;
   const mapEditor = useMapEditor({
     open: mappingEditorActive,
     mapName: currentMapName,
@@ -1953,23 +2066,23 @@ export default function MissionCanvasPage() {
     (workspaceStage === STAGE_AUTHORING && designMapAvailable)
   );
   const visibleSpots = useMemo(
-    () => spots.map((spot) => spotForMapDisplay(spot, displayedMap)),
-    [displayedMap, spots],
+    () => activeSpots.map((spot) => spotForMapDisplay(spot, displayedMap)),
+    [activeSpots, displayedMap],
   );
   const missionRouteEdges = useMemo(
-    () => filterMissionFlowEdges(missionFlowEdges, visibleSpots),
-    [missionFlowEdges, visibleSpots],
+    () => filterMissionFlowEdges(activeMissionFlowEdges, visibleSpots),
+    [activeMissionFlowEdges, visibleSpots],
   );
   const missionRouteOrderedSpots = useMemo(
     () => {
       if (missionRouteEdges.length === 0) return [];
       return orderedSpotsFromMissionFlow(
         visibleSpots,
-        missionFlowNodes,
+        activeMissionFlowNodes,
         missionRouteEdges,
       );
     },
-    [missionFlowNodes, missionRouteEdges, visibleSpots],
+    [activeMissionFlowNodes, missionRouteEdges, visibleSpots],
   );
   const missionRouteOrder = useMemo(
     () => (
@@ -2007,15 +2120,22 @@ export default function MissionCanvasPage() {
   // ── Mission runner (Run stage): navigate → run waypoint BT → advance ──────
   const { callService } = useRosServiceCaller();
   const resolveMissionBtXml = useCallback(
-    (spot) => (spot ? missionBtFiles[localBtPathForSpot(spot)] : ""),
-    [missionBtFiles],
+    (spot) => (spot ? activeMissionBtFiles[localBtPathForSpot(spot)] : ""),
+    [activeMissionBtFiles],
   );
-  const sendMissionGoal = useCallback(async (x, y, yaw) => {
+  const sendMissionGoal = useCallback(async (x, y, yaw, signal) => {
     const poseStamped = {
       header: { frame_id: "map", stamp: rosTimestampNow() },
       pose: { position: { x, y, z: 0 }, orientation: orientationFromYaw(yaw) },
     };
-    return sendNavigateToPoseGoal({ pose: poseStamped });
+    return sendNavigateToPoseGoalAndWait({ pose: poseStamped }, signal);
+  }, []);
+  const sendMissionGoals = useCallback(async (goals, signal) => {
+    const poses = goals.map(({ x, y, yaw }) => ({
+      header: { frame_id: "map", stamp: rosTimestampNow() },
+      pose: { position: { x, y, z: 0 }, orientation: orientationFromYaw(yaw) },
+    }));
+    return sendNavigateThroughPosesGoalsAndWait({ poses }, signal);
   }, []);
   const stopMissionBt = useCallback(
     () => callService("/bt/set_running", "std_srvs/srv/SetBool", { data: false }),
@@ -2028,10 +2148,10 @@ export default function MissionCanvasPage() {
   const missionRunner = useMissionRunner({
     orderedSpots: missionRouteOrderedSpots,
     resolveBtXml: resolveMissionBtXml,
-    currentPoseRef,
     btStatusRef,
     callService,
     sendGoal: sendMissionGoal,
+    sendGoals: sendMissionGoals,
     cancelGoal: cancelNavigateToPoseGoal,
     stopBt: stopMissionBt,
     getFlags: missionRunnerFlags,
@@ -2040,7 +2160,7 @@ export default function MissionCanvasPage() {
   const missionRunnerActive = missionRunner.isRunning;
   const missionFollowRobot = (
     missionRunnerActive
-    && (missionRunner.phase === "nav-sent" || missionRunner.phase === "awaiting-arrival")
+    && (missionRunner.phase === "nav-sent" || missionRunner.phase === "awaiting-nav-result")
   );
 
   const waypointBtEditor = selectedBtLayerSpot ? (
@@ -2086,7 +2206,7 @@ export default function MissionCanvasPage() {
     activeNodesLabel: btLayerActiveNodesLabel,
     editor: (
       <MissionBtRunView
-        xml={missionBtFiles[localBtPathForSpot(runActiveSpot)] || defaultLocalBtXml(runActiveSpot)}
+        xml={runMissionBtFiles[localBtPathForSpot(runActiveSpot)] || defaultLocalBtXml(runActiveSpot)}
         activeNodeNames={btActiveNodeNames}
       />
     ),
@@ -2094,9 +2214,10 @@ export default function MissionCanvasPage() {
   const activeBtLayer = waypointBtLayer || runBtLayer;
 
   useEffect(() => {
+    if (workspaceStage !== STAGE_AUTHORING) return;
     setMissionFlowNodes((current) => syncMissionFlowNodesWithSpots(current, visibleSpots));
     setMissionFlowEdges((current) => filterMissionFlowEdges(current, visibleSpots));
-  }, [setMissionFlowEdges, setMissionFlowNodes, visibleSpots]);
+  }, [setMissionFlowEdges, setMissionFlowNodes, visibleSpots, workspaceStage]);
 
   // Design: an active BT node blocks waypoint editing, so drop spot/initial
   // modes. Run is exempt — it needs the BT node up AND uses "initial" for the
@@ -2237,13 +2358,13 @@ export default function MissionCanvasPage() {
     ));
   }, []);
 
-  const loadLegacySpotsForMap = useCallback(async (targetMapName) => {
+  const loadLegacySpotsForMap = useCallback(async (targetMapName, { apply = true } = {}) => {
     const normalizedMapName = String(targetMapName || "").trim() || DEFAULT_MAP_NAME;
     const generation = legacySpotLoadGenerationRef.current + 1;
     legacySpotLoadGenerationRef.current = generation;
     const result = await getNavigationSpots(normalizedMapName);
     const nextSpots = result.spots || [];
-    if (legacySpotLoadGenerationRef.current === generation) {
+    if (apply && legacySpotLoadGenerationRef.current === generation) {
       applySpots(nextSpots);
     }
     return nextSpots;
@@ -2302,7 +2423,11 @@ export default function MissionCanvasPage() {
     if (missionBtFiles[selectedBtLayerPath] !== undefined) return undefined;
     let cancelled = false;
     setMissionBtLoadingPath(selectedBtLayerPath);
-    getNavigationMissionBtFile(currentMapName, selectedBtLayerPath)
+    getNavigationMissionBtFile(
+      currentMapName,
+      selectedBtLayerPath,
+      missionRequestName(missionName),
+    )
       .then((response) => {
         if (cancelled) return;
         setMissionBtFiles((current) => ({
@@ -2325,7 +2450,7 @@ export default function MissionCanvasPage() {
     return () => {
       cancelled = true;
     };
-  }, [currentMapName, missionBtFiles, selectedBtLayerPath, selectedBtLayerSpot]);
+  }, [currentMapName, missionBtFiles, missionName, selectedBtLayerPath, selectedBtLayerSpot]);
 
   useEffect(() => {
     void loadSpots();
@@ -2348,22 +2473,29 @@ export default function MissionCanvasPage() {
     if (!runRuntimeActive) setRunPoseInitialized(false);
   }, [runRuntimeActive]);
 
-  // Drop the displayed map when the backend goes down (was up, now down) so a
-  // stale floor plan never lingers after the system is off.
+  // Drop live Run/Mapping maps when the backend goes down. Design uses the
+  // selected PGM file, so stopping the temporary At Robot localization must
+  // not unload that static map.
   useEffect(() => {
-    if (prevRunningRef.current && !running) setMissionMapLoaded(false);
+    if (
+      prevRunningRef.current
+      && !running
+      && workspaceStage !== STAGE_AUTHORING
+    ) {
+      setMissionMapLoaded(false);
+    }
     prevRunningRef.current = running;
-  }, [running]);
+  }, [running, workspaceStage]);
 
   useEffect(() => {
     saveMissionSession({
-      mapName: currentMapName,
+      mapName,
       workspaceStage,
       designMapPath,
       navigationRuntimeMode,
       designPoseInitialized,
     });
-  }, [currentMapName, designMapPath, designPoseInitialized, navigationRuntimeMode, workspaceStage]);
+  }, [designMapPath, designPoseInitialized, mapName, navigationRuntimeMode, workspaceStage]);
 
   useEffect(() => {
     const statusMode = navigationRuntimeModeFromStatus(status);
@@ -2481,9 +2613,18 @@ export default function MissionCanvasPage() {
     return true;
   }, []);
 
-  const loadMissionBtFileOrDefault = useCallback(async (targetMapName, path, fallback) => {
+  const loadMissionBtFileOrDefault = useCallback(async (
+    targetMapName,
+    targetMissionName,
+    path,
+    fallback,
+  ) => {
     try {
-      const response = await getNavigationMissionBtFile(targetMapName, path);
+      const response = await getNavigationMissionBtFile(
+        targetMapName,
+        path,
+        missionRequestName(targetMissionName),
+      );
       if (response?.exists && typeof response.content === "string") {
         return response.content;
       }
@@ -2495,6 +2636,7 @@ export default function MissionCanvasPage() {
 
   const loadMissionBtFilesForSpots = useCallback(async (
     targetMapName,
+    targetMissionName,
     spotsForMission,
     manifest = {},
     routeSpots = spotsForMission,
@@ -2505,16 +2647,30 @@ export default function MissionCanvasPage() {
     const loadedEntries = await Promise.all(
       Object.entries(defaults).map(async ([path, fallback]) => [
         path,
-        await loadMissionBtFileOrDefault(targetMapName, path, fallback),
+        await loadMissionBtFileOrDefault(targetMapName, targetMissionName, path, fallback),
       ]),
     );
     setMissionBtFiles(Object.fromEntries(loadedEntries));
     setDeletedMissionBtPaths([]);
   }, [loadMissionBtFileOrDefault]);
 
-  const loadMissionForMap = useCallback(async (targetMapName, { loadLegacyDesign = false } = {}) => {
+  const fetchMissionNames = useCallback(async (targetMapName) => {
+    const response = await getNavigationMissions(targetMapName);
+    const available = Array.isArray(response?.missions) ? response.missions : [];
+    return [...new Set([DEFAULT_MISSION_NAME, ...available])];
+  }, []);
+
+  const loadMissionForMap = useCallback(async (
+    targetMapName,
+    { loadLegacyDesign = false, targetMissionName = missionName } = {},
+  ) => {
     const normalizedMapName = String(targetMapName || "").trim() || DEFAULT_MAP_NAME;
-    const mission = await getNavigationMission(normalizedMapName);
+    const normalizedMissionName = String(targetMissionName || DEFAULT_MISSION_NAME).trim()
+      || DEFAULT_MISSION_NAME;
+    const mission = await getNavigationMission(
+      normalizedMapName,
+      missionRequestName(normalizedMissionName),
+    );
     if (mission?.exists) {
       const missionSpots = spotsFromMissionWaypoints(
         normalizedMapName,
@@ -2527,6 +2683,7 @@ export default function MissionCanvasPage() {
       setMissionFlowEdges(missionFlow.edges);
       await loadMissionBtFilesForSpots(
         normalizedMapName,
+        normalizedMissionName,
         missionSpots,
         mission,
         missionStepSpotsFromMissionFlow(missionSpots, missionFlow.nodes, missionFlow.edges),
@@ -2555,9 +2712,52 @@ export default function MissionCanvasPage() {
     loadLegacySpotsForMap,
     loadMissionBtFilesForSpots,
     loadSavedDesignForMap,
+    missionName,
     setMissionFlowEdges,
     setMissionFlowNodes,
   ]);
+  const loadRunMissionForMap = useCallback(async (targetMapName, targetMissionName) => {
+    const normalizedMapName = String(targetMapName || "").trim() || DEFAULT_MAP_NAME;
+    const normalizedMissionName = String(targetMissionName || DEFAULT_MISSION_NAME).trim()
+      || DEFAULT_MISSION_NAME;
+    const generation = runMissionLoadGenerationRef.current + 1;
+    runMissionLoadGenerationRef.current = generation;
+    const mission = await getNavigationMission(
+      normalizedMapName,
+      missionRequestName(normalizedMissionName),
+    );
+    let sessionSpots;
+    let sessionFlow;
+    let sessionBtFiles;
+    const exists = Boolean(mission?.exists);
+    if (exists) {
+      sessionSpots = spotsFromMissionWaypoints(normalizedMapName, mission.waypoints);
+      sessionFlow = normalizeMissionFlow(sessionSpots, mission.metadata?.mission_flow);
+      const defaults = missionBtFileDefaultsForSpots(sessionSpots);
+      const globalPath = mission.global_bt || "global.xml";
+      defaults[globalPath] = buildGlobalMissionXml(
+        missionStepSpotsFromMissionFlow(sessionSpots, sessionFlow.nodes, sessionFlow.edges),
+      );
+      const entries = await Promise.all(Object.entries(defaults).map(async ([path, fallback]) => [
+        path,
+        await loadMissionBtFileOrDefault(normalizedMapName, normalizedMissionName, path, fallback),
+      ]));
+      sessionBtFiles = Object.fromEntries(entries);
+    } else {
+      sessionSpots = await loadLegacySpotsForMap(normalizedMapName, { apply: false });
+      sessionFlow = normalizeMissionFlow(orderedMissionSpots(sessionSpots));
+      sessionBtFiles = missionBtFileDefaultsForSpots(sessionSpots);
+    }
+    if (runMissionLoadGenerationRef.current !== generation) {
+      return { exists, loadedDesign: false, spotCount: sessionSpots.length, stale: true };
+    }
+    setRunSpots(sessionSpots);
+    setRunMissionFlowNodes(sessionFlow.nodes);
+    setRunMissionFlowEdges(sessionFlow.edges);
+    setRunMissionBtFiles(sessionBtFiles);
+    return { exists, loadedDesign: false, spotCount: sessionSpots.length };
+  }, [loadLegacySpotsForMap, loadMissionBtFileOrDefault]);
+
 
   const handleOpenDesignMapDialog = useCallback(() => {
     setWorkspaceStage(STAGE_AUTHORING);
@@ -2568,7 +2768,7 @@ export default function MissionCanvasPage() {
     setDesignMapBusy(true);
     setMessage("Loading saved missions");
     getPgmFiles()
-      .then((response) => {
+      .then(async (response) => {
         const files = response.files || [];
         const existing = files.find((file) => file.path === designMapPath);
         const preferred = existing
@@ -2576,6 +2776,19 @@ export default function MissionCanvasPage() {
           || files[0];
         setDesignMapFiles(files);
         setPendingDesignMapPath(preferred?.path || "");
+        if (preferred?.path) {
+          const selectedMapName = mapNameFromPgmPath(preferred.path);
+          const available = await fetchMissionNames(selectedMapName);
+          setDesignMissionNames(available);
+          setPendingDesignMissionName(
+            selectedMapName === currentMapName && available.includes(missionName)
+              ? missionName
+              : DEFAULT_MISSION_NAME,
+          );
+        } else {
+          setDesignMissionNames([]);
+          setPendingDesignMissionName("");
+        }
         if (!files.length) {
           setMessage("No PGM files found");
         }
@@ -2584,7 +2797,29 @@ export default function MissionCanvasPage() {
         setMessage(error instanceof Error ? error.message : "Failed to list PGM files");
       })
       .finally(() => setDesignMapBusy(false));
-  }, [currentMapName, designMapPath]);
+  }, [currentMapName, designMapPath, fetchMissionNames, missionName]);
+
+  const handleDesignMapChange = useCallback((nextPath) => {
+    setPendingDesignMapPath(nextPath);
+    const selectedMapName = mapNameFromPgmPath(nextPath);
+    if (!selectedMapName) {
+      setDesignMissionNames([]);
+      setPendingDesignMissionName("");
+      return;
+    }
+    setDesignMapBusy(true);
+    fetchMissionNames(selectedMapName)
+      .then((available) => {
+        setDesignMissionNames(available);
+        setPendingDesignMissionName(DEFAULT_MISSION_NAME);
+      })
+      .catch((error) => {
+        setDesignMissionNames([]);
+        setPendingDesignMissionName("");
+        setMessage(error instanceof Error ? error.message : "Failed to list missions");
+      })
+      .finally(() => setDesignMapBusy(false));
+  }, [fetchMissionNames]);
 
   const handleConfirmDesignMap = useCallback(() => {
     if (!pendingDesignMapPath) {
@@ -2596,6 +2831,10 @@ export default function MissionCanvasPage() {
       setMessage("Map file required");
       return;
     }
+    if (!pendingDesignMissionName) {
+      setMessage("Mission file required");
+      return;
+    }
     skipNextSpotLoadForMapRef.current = selectedMapName;
     setMapName(selectedMapName);
     setDesignMapPath(pendingDesignMapPath);
@@ -2604,6 +2843,8 @@ export default function MissionCanvasPage() {
     setWorkspaceStage(STAGE_AUTHORING);
     setInteractionMode("view");
     setDesignMapReloadToken((value) => value + 1);
+    setMissionName(pendingDesignMissionName);
+    setMissionNames(designMissionNames);
     saveMissionSession({
       mapName: selectedMapName,
       workspaceStage: STAGE_AUTHORING,
@@ -2611,7 +2852,10 @@ export default function MissionCanvasPage() {
       navigationRuntimeMode,
     });
     setDesignMapBusy(true);
-    loadMissionForMap(selectedMapName, { loadLegacyDesign: true })
+    loadMissionForMap(selectedMapName, {
+      loadLegacyDesign: true,
+      targetMissionName: pendingDesignMissionName,
+    })
       .then((result) => {
         if (result.exists) {
           setMessage(`Loaded mission ${selectedMapName}`);
@@ -2625,7 +2869,13 @@ export default function MissionCanvasPage() {
         setMessage(error instanceof Error ? error.message : "Failed to load mission");
       })
       .finally(() => setDesignMapBusy(false));
-  }, [loadMissionForMap, navigationRuntimeMode, pendingDesignMapPath]);
+  }, [
+    designMissionNames,
+    loadMissionForMap,
+    navigationRuntimeMode,
+    pendingDesignMapPath,
+    pendingDesignMissionName,
+  ]);
 
   const handleSaveDesign = useCallback(() => runCommand(
     "Save mission",
@@ -2674,12 +2924,12 @@ export default function MissionCanvasPage() {
           behavior_node_count: activeBehaviorNodes.length,
           mission_flow: serializeMissionFlow(syncedMissionFlowNodes, syncedMissionFlowEdges),
         },
-      });
+      }, missionRequestName(missionName));
       await Promise.all(Object.entries(nextBtFiles).map(([path, content]) => (
-        saveNavigationMissionBtFile(currentMapName, path, content)
+        saveNavigationMissionBtFile(currentMapName, path, content, missionRequestName(missionName))
       )));
       await Promise.all(uniqueStaleLocalBtPaths.map((path) => (
-        deleteNavigationMissionBtFile(currentMapName, path)
+        deleteNavigationMissionBtFile(currentMapName, path, missionRequestName(missionName))
       )));
       setMissionBtFiles(nextBtFiles);
       setDeletedMissionBtPaths((current) => current.filter((path) => (
@@ -2706,6 +2956,7 @@ export default function MissionCanvasPage() {
     missionFlowEdges,
     missionFlowNodes,
     missionBtFiles,
+    missionName,
     runCommand,
     visibleSpots,
   ]);
@@ -2716,7 +2967,7 @@ export default function MissionCanvasPage() {
   const handleLocalize = useCallback(() => runCommand(
     "Localize",
     async () => {
-      const runMapName = mapName.trim() || DEFAULT_MAP_NAME;
+      const runMapName = currentMapName;
       setWorkspaceStage(STAGE_RUN);
       if (!running || navigationRuntimeMode !== "run") {
         await startNavigation("nav", runMapName);
@@ -2725,7 +2976,7 @@ export default function MissionCanvasPage() {
       setDesignPoseInitialized(false);
       setRunPoseInitialized(false);
       saveMissionSession({
-        mapName: runMapName,
+        mapName,
         workspaceStage: STAGE_RUN,
         navigationRuntimeMode: "run",
         designPoseInitialized: false,
@@ -2733,7 +2984,7 @@ export default function MissionCanvasPage() {
       setInteractionMode("initial");
       return "Click and drag the robot pose on the map";
     },
-  ), [mapName, navigationRuntimeMode, running, runCommand]);
+  ), [currentMapName, mapName, navigationRuntimeMode, running, runCommand]);
 
   // Step 2: with the robot localized, run the route. This only executes the
   // waypoint sequence — navigation is already up from the localize step.
@@ -2750,18 +3001,32 @@ export default function MissionCanvasPage() {
   }, [missionRouteOrderedSpots.length, missionRunner, runPoseInitialized]);
 
   const handleOpenRunMapDialog = useCallback(() => {
+    const preferredRunMapName = runMapName || mapName || DEFAULT_MAP_NAME;
     setWorkspaceStage(STAGE_RUN);
     setShowPgmFix(false);
     setShowRunMapDialog(true);
     setRunMapBusy(true);
     setMessage("Loading saved missions");
     getPgmFiles()
-      .then((response) => {
+      .then(async (response) => {
         const files = response.files || [];
-        const preferred = files.find((file) => mapNameFromPgmPath(file.path) === currentMapName)
+        const preferred = files.find((file) => mapNameFromPgmPath(file.path) === preferredRunMapName)
           || files[0];
         setRunMapFiles(files);
         setRunMapPath(preferred?.path || "");
+        if (preferred?.path) {
+          const selectedMapName = mapNameFromPgmPath(preferred.path);
+          const available = await fetchMissionNames(selectedMapName);
+          setRunMissionNames(available);
+          setPendingRunMissionName(
+            selectedMapName === preferredRunMapName && available.includes(runMissionName)
+              ? runMissionName
+              : DEFAULT_MISSION_NAME,
+          );
+        } else {
+          setRunMissionNames([]);
+          setPendingRunMissionName("");
+        }
         if (!files.length) {
           setMessage("No PGM files found");
         }
@@ -2770,7 +3035,29 @@ export default function MissionCanvasPage() {
         setMessage(error instanceof Error ? error.message : "Failed to list PGM files");
       })
       .finally(() => setRunMapBusy(false));
-  }, [currentMapName]);
+  }, [fetchMissionNames, mapName, runMapName, runMissionName]);
+
+  const handleRunMapChange = useCallback((nextPath) => {
+    setRunMapPath(nextPath);
+    const selectedMapName = mapNameFromPgmPath(nextPath);
+    if (!selectedMapName) {
+      setRunMissionNames([]);
+      setPendingRunMissionName("");
+      return;
+    }
+    setRunMapBusy(true);
+    fetchMissionNames(selectedMapName)
+      .then((available) => {
+        setRunMissionNames(available);
+        setPendingRunMissionName(DEFAULT_MISSION_NAME);
+      })
+      .catch((error) => {
+        setRunMissionNames([]);
+        setPendingRunMissionName("");
+        setMessage(error instanceof Error ? error.message : "Failed to list missions");
+      })
+      .finally(() => setRunMapBusy(false));
+  }, [fetchMissionNames]);
 
   const handleConfirmRunMap = useCallback(() => {
     const selectedMapName = mapNameFromPgmPath(runMapPath);
@@ -2778,14 +3065,19 @@ export default function MissionCanvasPage() {
       setMessage("Map file required");
       return;
     }
-    skipNextSpotLoadForMapRef.current = selectedMapName;
-    setMapName(selectedMapName);
+    if (!pendingRunMissionName) {
+      setMessage("Mission file required");
+      return;
+    }
+    setRunMapName(selectedMapName);
+    setRunMissionName(pendingRunMissionName);
+    setRunSessionMissionNames(runMissionNames);
     setMissionMapLoaded(true);
     setShowRunMapDialog(false);
     setWorkspaceStage(STAGE_RUN);
     setInteractionMode("view");
     setRunMapBusy(true);
-    loadMissionForMap(selectedMapName)
+    loadRunMissionForMap(selectedMapName, pendingRunMissionName)
       .then((result) => {
         setMessage(result.exists
           ? `Loaded mission ${selectedMapName}`
@@ -2795,7 +3087,54 @@ export default function MissionCanvasPage() {
         setMessage(error instanceof Error ? error.message : "Failed to load mission");
       })
       .finally(() => setRunMapBusy(false));
-  }, [loadMissionForMap, runMapPath]);
+  }, [
+    loadRunMissionForMap,
+    pendingRunMissionName,
+    runMapPath,
+    runMissionNames,
+  ]);
+
+  const handleMissionChange = useCallback((nextMissionName) => {
+    const selectedMissionName = String(nextMissionName || "").trim();
+    if (!selectedMissionName || selectedMissionName === runMissionName) return;
+    setRunMissionName(selectedMissionName);
+    setRunMapBusy(true);
+    loadRunMissionForMap(currentMapName, selectedMissionName)
+      .then((result) => {
+        setMessage(result.exists
+          ? `Loaded mission ${selectedMissionName}`
+          : `Started new mission ${selectedMissionName}`);
+      })
+      .catch((error) => {
+        setMessage(error instanceof Error ? error.message : "Failed to load mission");
+      })
+      .finally(() => setRunMapBusy(false));
+  }, [currentMapName, loadRunMissionForMap, runMissionName]);
+
+  const handleDesignMissionChange = useCallback((nextMissionName) => {
+    const selectedMissionName = String(nextMissionName || "").trim();
+    if (!selectedMissionName || selectedMissionName === missionName || !currentMapName) return;
+    setMissionName(selectedMissionName);
+    setPendingDesignMissionName(selectedMissionName);
+    setSelectedSpotId("");
+    setSelectedBehaviorNodeId("");
+    setBtLayerSpotId("");
+    setMissionRouteMode(false);
+    setDesignMapBusy(true);
+    loadMissionForMap(currentMapName, {
+      loadLegacyDesign: true,
+      targetMissionName: selectedMissionName,
+    })
+      .then((result) => {
+        setMessage(result.exists
+          ? `Loaded mission ${selectedMissionName}`
+          : `Started new mission ${selectedMissionName}`);
+      })
+      .catch((error) => {
+        setMessage(error instanceof Error ? error.message : "Failed to load mission");
+      })
+      .finally(() => setDesignMapBusy(false));
+  }, [currentMapName, loadMissionForMap, missionName]);
 
   const handleStartMapping = useCallback(() => runCommand(
     "Mapping",
@@ -3418,13 +3757,18 @@ export default function MissionCanvasPage() {
         open={showDesignMapDialog}
         files={designMapFiles}
         selectedPath={pendingDesignMapPath}
+        missionNames={designMissionNames}
+        selectedMissionName={pendingDesignMissionName}
         busy={designMapBusy}
         title="Load Mission"
         fieldLabel="Mission map"
         selectAriaLabel="Design mission map file"
-        onChange={setPendingDesignMapPath}
+        missionSelectAriaLabel="Design mission file"
+        onChange={handleDesignMapChange}
+        onMissionChange={setPendingDesignMissionName}
         onCancel={() => {
           setPendingDesignMapPath(designMapPath);
+          setPendingDesignMissionName(missionName);
           setShowDesignMapDialog(false);
         }}
         onSubmit={handleConfirmDesignMap}
@@ -3433,12 +3777,19 @@ export default function MissionCanvasPage() {
         open={showRunMapDialog}
         files={runMapFiles}
         selectedPath={runMapPath}
+        missionNames={runMissionNames}
+        selectedMissionName={pendingRunMissionName}
         busy={runMapBusy}
         title="Load Mission"
         fieldLabel="Mission map"
         selectAriaLabel="Run mission map file"
-        onChange={setRunMapPath}
-        onCancel={() => setShowRunMapDialog(false)}
+        missionSelectAriaLabel="Run mission file"
+        onChange={handleRunMapChange}
+        onMissionChange={setPendingRunMissionName}
+        onCancel={() => {
+          setPendingRunMissionName(missionName);
+          setShowRunMapDialog(false);
+        }}
         onSubmit={handleConfirmRunMap}
       />
       {/* ── LEFT RAIL — brand + stage nav (Console shell) ── */}
@@ -3773,7 +4124,14 @@ export default function MissionCanvasPage() {
         </section>
 
         {workspaceStage === STAGE_AUTHORING ? (
-          <aside className="min-h-0 grid grid-rows-[auto_minmax(0,1fr)_minmax(220px,0.7fr)] gap-4 overflow-hidden p-4">
+          <aside className="min-h-0 grid grid-rows-[auto_auto_minmax(0,1fr)_minmax(220px,0.7fr)] gap-4 overflow-hidden p-4">
+            <DesignSessionPanel
+              mapName={designMapActive ? currentMapName : ""}
+              missionName={missionName}
+              missionNames={missionNames}
+              onMissionChange={handleDesignMissionChange}
+              busy={designMapBusy || !!busy}
+            />
             <BtRuntimePanel
               nodeState={btNodeStatus.state}
               btStatus={btStatusText}
@@ -3897,7 +4255,15 @@ export default function MissionCanvasPage() {
               />
             ) : (
               <>
-                <RunSessionPanel mapName={currentMapName} running={running} runner={missionRunner} poseReady={runPoseInitialized} />
+                <RunSessionPanel
+                  mapName={currentMapName}
+                  missionName={activeMissionName}
+                  missionNames={runSessionMissionNames}
+                  onMissionChange={handleMissionChange}
+                  running={running}
+                  runner={missionRunner}
+                  poseReady={runPoseInitialized}
+                />
                 {/* The BT node executes each waypoint's tree during a run, so its
                     lifecycle control lives here too — not just in Design. */}
                 <BtRuntimePanel

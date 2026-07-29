@@ -12,12 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Frontend-orchestrated Mission Runner. Drives an ordered waypoint list: send a
-// nav goal, wait for TF-based arrival, run that waypoint's behavior tree to a
-// fresh terminal /bt/status, then advance. Live signals are read through refs so
-// the async loop never sees stale React values; the reducer only publishes
-// observable progress for the UI. Cancellation aborts the loop and best-effort
-// stops the robot. See missionRunnerCore.js for the pure, unit-tested pieces.
+// Frontend-orchestrated Mission Runner. Consecutive nav-only waypoints are
+// batched with NavigateThroughPoses; BT endpoints retain the authoritative
+// Nav2 SUCCEEDED → local BT ordering. Live signals are read through refs so the
+// async loop never sees stale React values. Cancellation aborts the loop and
+// best-effort stops the robot.
 
 import { useCallback, useEffect, useMemo, useReducer, useRef } from "react";
 import {
@@ -26,10 +25,10 @@ import {
   RunnerStatus,
   goalFromSpot,
   initialRunnerState,
-  isArrived,
   isEmptyBt,
   isRunnerActive,
   missionRunnerReducer,
+  navigationBatchFromIndex,
 } from "./missionRunnerCore";
 
 const normStatus = (value) => String(value || "").trim().toLowerCase();
@@ -56,13 +55,19 @@ function cancellableSleep(ms, signal) {
 
 const isAbort = (error) => error && error.name === "AbortError";
 
+function throwIfAborted(signal) {
+  if (signal.aborted) {
+    throw new DOMException("Aborted", "AbortError");
+  }
+}
+
 export function useMissionRunner({
   orderedSpots,
   resolveBtXml,
-  currentPoseRef,
   btStatusRef,
   callService,
   sendGoal,
+  sendGoals,
   cancelGoal,
   stopBt,
   getFlags,
@@ -81,6 +86,7 @@ export function useMissionRunner({
   const resolveBtXmlRef = useRef(resolveBtXml);
   const callServiceRef = useRef(callService);
   const sendGoalRef = useRef(sendGoal);
+  const sendGoalsRef = useRef(sendGoals);
   const cancelGoalRef = useRef(cancelGoal);
   const stopBtRef = useRef(stopBt);
   const getFlagsRef = useRef(getFlags);
@@ -102,6 +108,7 @@ export function useMissionRunner({
   useEffect(() => { resolveBtXmlRef.current = resolveBtXml; }, [resolveBtXml]);
   useEffect(() => { callServiceRef.current = callService; }, [callService]);
   useEffect(() => { sendGoalRef.current = sendGoal; }, [sendGoal]);
+  useEffect(() => { sendGoalsRef.current = sendGoals; }, [sendGoals]);
   useEffect(() => { cancelGoalRef.current = cancelGoal; }, [cancelGoal]);
   useEffect(() => { stopBtRef.current = stopBt; }, [stopBt]);
   useEffect(() => { getFlagsRef.current = getFlags; }, [getFlags]);
@@ -133,55 +140,9 @@ export function useMissionRunner({
     }
   }, [btStatusRef]);
 
-  // Poll TF pose until it settles inside tolerance, times out, or is cancelled.
-  // Periodically re-issues the goal (onResend) so a goal dropped right after
-  // nav bringup doesn't strand the robot short of the waypoint.
-  const awaitArrival = useCallback(async (goal, signal, onResend) => {
-    const cfg = configRef.current;
-    const deadline = Date.now() + cfg.navTimeoutMs;
-    let arrivedSince = null;
-    let lastSend = Date.now();
-    for (;;) {
-      if (isArrived(currentPoseRef.current, goal, cfg)) {
-        if (arrivedSince == null) arrivedSince = Date.now();
-        if (Date.now() - arrivedSince >= cfg.settleMs) return "arrived";
-      } else {
-        arrivedSince = null;
-        if (cfg.goalResendMs > 0 && onResend && Date.now() - lastSend >= cfg.goalResendMs) {
-          lastSend = Date.now();
-          Promise.resolve().then(onResend).catch(() => { /* best-effort resend */ });
-        }
-      }
-      if (Date.now() > deadline) return "timeout";
-      await cancellableSleep(cfg.pollMs, signal);
-    }
-  }, [currentPoseRef]);
-
-  const runWaypoint = useCallback(async (index, signal) => {
+  const runWaypointBt = useCallback(async (index, xml, signal) => {
     const spot = spotsRef.current[index];
     const label = (spot && (spot.label || spot.id)) || `Waypoint ${index + 1}`;
-
-    dispatch({ type: "navigate", index });
-    const goal = goalFromSpot(spot);
-    await sendGoalRef.current(goal.x, goal.y, goal.yaw);
-    dispatch({ type: "phase", phase: RunnerPhase.AWAITING_ARRIVAL });
-
-    const arrival = await awaitArrival(
-      goal,
-      signal,
-      () => sendGoalRef.current(goal.x, goal.y, goal.yaw),
-    );
-    if (arrival === "timeout") {
-      dispatch({ type: "fail", reason: `Navigation timed out at ${label}`, index });
-      return false;
-    }
-    dispatch({ type: "phase", phase: RunnerPhase.ARRIVED });
-
-    const xml = resolveBtXmlRef.current ? resolveBtXmlRef.current(spot) : "";
-    if (isEmptyBt(xml)) {
-      dispatch({ type: "finish", index, skipped: true });
-      return true;
-    }
 
     dispatch({ type: "runBt", index });
     let loadResult;
@@ -192,8 +153,9 @@ export function useMissionRunner({
         { tree_xml: xml },
         30000,
       );
+      throwIfAborted(signal);
     } catch (error) {
-      if (isAbort(error)) throw error;
+      if (signal.aborted || isAbort(error)) throw error;
       dispatch({ type: "fail", reason: `BT load failed at ${label}: ${error.message || error}`, index });
       return false;
     }
@@ -218,7 +180,93 @@ export function useMissionRunner({
     }
     dispatch({ type: "fail", reason: reasonByOutcome[outcome] || `Behavior tree error at ${label}`, index });
     return false;
-  }, [awaitArrival, awaitBtTerminal]);
+  }, [awaitBtTerminal]);
+
+  const runNavigationBatch = useCallback(async (startIndex, signal) => {
+    const spots = spotsRef.current;
+    const resolveXml = (spot) => (
+      resolveBtXmlRef.current ? resolveBtXmlRef.current(spot) : ""
+    );
+    const batch = navigationBatchFromIndex(spots, startIndex, resolveXml);
+    const indices = batch.indices;
+    if (!indices.length) {
+      dispatch({
+        type: "fail",
+        reason: `Unable to build navigation batch at waypoint ${startIndex + 1}`,
+        index: startIndex,
+      });
+      return { ok: false, nextIndex: spots.length };
+    }
+
+    const goals = indices.map((index) => goalFromSpot(spots[index]));
+    const labels = indices.map((index) => {
+      const spot = spots[index];
+      return (spot && (spot.label || spot.id)) || `Waypoint ${index + 1}`;
+    });
+    const batchLabel = labels.join(" → ");
+
+    dispatch({ type: "navigate", index: startIndex, indices });
+    dispatch({ type: "phase", phase: RunnerPhase.AWAITING_NAV_RESULT });
+
+    let navigationResult;
+    try {
+      if (batch.useThroughPoses) {
+        if (typeof sendGoalsRef.current !== "function") {
+          throw new Error("NavigateThroughPoses client is unavailable");
+        }
+        navigationResult = await sendGoalsRef.current(goals, signal);
+      } else {
+        const [goal] = goals;
+        navigationResult = await sendGoalRef.current(
+          goal.x,
+          goal.y,
+          goal.yaw,
+          signal,
+        );
+      }
+      throwIfAborted(signal);
+    } catch (error) {
+      if (signal.aborted || isAbort(error)) throw error;
+      dispatch({
+        type: "fail",
+        reason: `Navigation request failed at ${batchLabel}: ${error.message || error}`,
+        index: startIndex,
+        indices,
+      });
+      return { ok: false, nextIndex: indices[indices.length - 1] + 1 };
+    }
+
+    const navigationStatus = String(navigationResult?.status || "UNKNOWN").toUpperCase();
+    if (navigationStatus !== "SUCCEEDED") {
+      dispatch({
+        type: "fail",
+        reason: `Navigation ${navigationStatus.toLowerCase()} at ${batchLabel}`,
+        index: startIndex,
+        indices,
+      });
+      return { ok: false, nextIndex: indices[indices.length - 1] + 1 };
+    }
+    dispatch({ type: "phase", phase: RunnerPhase.ARRIVED });
+
+    const endpointIndex = indices[indices.length - 1];
+    const endpointXml = resolveXml(spots[endpointIndex]);
+    const skippedIndices = indices.filter((index) => isEmptyBt(resolveXml(spots[index])));
+    if (skippedIndices.length) {
+      dispatch({
+        type: "finish",
+        index: skippedIndices[0],
+        indices: skippedIndices,
+        skipped: true,
+      });
+    }
+
+    if (isEmptyBt(endpointXml)) {
+      return { ok: true, nextIndex: endpointIndex + 1 };
+    }
+
+    const ok = await runWaypointBt(endpointIndex, endpointXml, signal);
+    return { ok, nextIndex: endpointIndex + 1 };
+  }, [runWaypointBt]);
 
   const start = useCallback(() => {
     if (isRunningRef.current) return;
@@ -245,16 +293,18 @@ export function useMissionRunner({
 
     (async () => {
       try {
-        for (let index = 0; index < spotsRef.current.length; index += 1) {
+        let index = 0;
+        while (index < spotsRef.current.length) {
           if (controller.signal.aborted) return;
           if (index > 0) dispatch({ type: "advance" });
-          const ok = await runWaypoint(index, controller.signal);
-          if (!ok) return;
+          const result = await runNavigationBatch(index, controller.signal);
+          if (!result.ok) return;
+          index = result.nextIndex;
         }
         dispatch({ type: "done" });
         emit("Mission complete");
       } catch (error) {
-        if (!isAbort(error)) {
+        if (!controller.signal.aborted && !isAbort(error)) {
           dispatch({ type: "fail", reason: error.message || "Mission error", index: -1 });
         }
       } finally {
@@ -262,7 +312,7 @@ export function useMissionRunner({
         if (abortRef.current === controller) abortRef.current = null;
       }
     })();
-  }, [emit, runWaypoint]);
+  }, [emit, runNavigationBatch]);
 
   const stop = useCallback(() => {
     const controller = abortRef.current;

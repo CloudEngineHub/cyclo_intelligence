@@ -74,9 +74,16 @@ DESIGN_LOCALIZATION_AMCL_PARAMETERS = {
 }
 AMCL_PARAMETER_SET_TIMEOUT_SECONDS = 8.0
 AMCL_PARAMETER_SET_RETRY_INTERVAL_SECONDS = 0.4
+NAVIGATE_GOAL_ACCEPT_TIMEOUT_SECONDS = 8
+NAVIGATE_GOAL_RESULT_TIMEOUT_SECONDS = 120
 _SAFE_MAP_NAME = re.compile(r"^[A-Za-z0-9_.-]+$")
 _SAFE_MAP_ANNOTATION_COLOR = re.compile(r"^#[0-9A-Fa-f]{6}$")
 _ANSI_ESCAPE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
+_NAVIGATE_TERMINAL_STATUS = re.compile(
+    r"Goal finished with status:\s*([A-Z_]+)",
+    re.IGNORECASE,
+)
+
 @router.websocket("/topics/ws")
 async def navigation_grid_websocket(websocket: WebSocket, topic: str):
     """Send the latest grid initially, then only when its data CRC changes."""
@@ -142,6 +149,22 @@ class ActionResult(BaseModel):
 class NavigateGoalRequest(BaseModel):
     pose: dict
     behavior_tree: str = ""
+
+
+class NavigateThroughPosesRequest(BaseModel):
+    poses: list[dict] = Field(min_length=2, max_length=3)
+    behavior_tree: str = ""
+
+
+class NavigateGoalResult(ActionResult):
+    status: Literal[
+        "SUCCEEDED",
+        "ABORTED",
+        "CANCELED",
+        "TIMEOUT",
+        "REJECTED",
+        "UNKNOWN",
+    ]
 
 
 class InitialPoseRequest(BaseModel):
@@ -1201,37 +1224,71 @@ def save_map(request: MapSaveRequest):
     )
 
 
-@router.post("/goal", response_model=ActionResult)
-def send_goal(request: NavigateGoalRequest):
-    pose = json.loads(json.dumps(request.pose))
+def _stamped_pose(pose_value: dict) -> dict:
+    pose = json.loads(json.dumps(pose_value))
     header = pose.setdefault("header", {})
     now_ns = time.time_ns()
     header["stamp"] = {
         "sec": now_ns // 1_000_000_000,
         "nanosec": now_ns % 1_000_000_000,
     }
-    payload = json.dumps({
-        "pose": pose,
+    return pose
+
+
+def _navigate_goal_payload(request: NavigateGoalRequest) -> str:
+    return json.dumps({
+        "pose": _stamped_pose(request.pose),
         "behavior_tree": request.behavior_tree,
     })
+
+
+def _navigate_through_poses_payload(
+    request: NavigateThroughPosesRequest,
+) -> str:
+    return json.dumps({
+        "poses": [_stamped_pose(pose) for pose in request.poses],
+        "behavior_tree": request.behavior_tree,
+    })
+
+
+def _navigate_goal_command(payload: str, timeout_seconds: int) -> list[str]:
     command = (
         _ros_shell_prefix()
-        + "timeout 8s ros2 action send_goal "
+        + f"timeout {timeout_seconds}s ros2 action send_goal "
         + "/navigate_to_pose nav2_msgs/action/NavigateToPose "
         + shlex.quote(payload)
     )
-    code, output = _exec(
-        ["bash", "--noprofile", "--norc", "-c", command],
-        environment=_ros_exec_environment(),
+    return ["bash", "--noprofile", "--norc", "-c", command]
+
+
+def _navigate_through_poses_command(
+    payload: str,
+    timeout_seconds: int,
+) -> list[str]:
+    command = (
+        _ros_shell_prefix()
+        + f"timeout {timeout_seconds}s ros2 action send_goal "
+        + "/navigate_through_poses nav2_msgs/action/NavigateThroughPoses "
+        + shlex.quote(payload)
     )
-    accepted = code == 0 or (code == 124 and "Goal accepted" in output)
-    if not accepted:
-        raise HTTPException(503, output or "NavigateToPose goal failed")
-    return ActionResult(ok=True, message=output or "Goal accepted")
+    return ["bash", "--noprofile", "--norc", "-c", command]
 
 
-@router.post("/cancel", response_model=ActionResult)
-def cancel_goal():
+def _navigate_terminal_status(output: str) -> str:
+    match = _NAVIGATE_TERMINAL_STATUS.search(output)
+    if match:
+        status = match.group(1).upper()
+        if status in {"SUCCEEDED", "ABORTED", "CANCELED"}:
+            return status
+    if "Goal was rejected" in output:
+        return "REJECTED"
+    return "UNKNOWN"
+
+
+def _cancel_all_action_goals(
+    action_name: str,
+    action_label: str,
+) -> str:
     payload = json.dumps({
         "goal_info": {
             "goal_id": {"uuid": [0] * 16},
@@ -1241,7 +1298,7 @@ def cancel_goal():
     command = (
         _ros_shell_prefix()
         + "timeout 8s ros2 service call "
-        + "/navigate_to_pose/_action/cancel_goal action_msgs/srv/CancelGoal "
+        + f"{action_name}/_action/cancel_goal action_msgs/srv/CancelGoal "
         + shlex.quote(payload)
     )
     code, output = _exec(
@@ -1249,8 +1306,124 @@ def cancel_goal():
         environment=_ros_exec_environment(),
     )
     if code != 0:
-        raise HTTPException(503, output or "NavigateToPose cancel failed")
-    return ActionResult(ok=True, message=output or "Goals cancelled")
+        raise HTTPException(503, output or f"{action_label} cancel failed")
+    return output or "Goals cancelled"
+
+
+def _cancel_all_navigate_goals() -> str:
+    return _cancel_all_action_goals(
+        "/navigate_to_pose",
+        "NavigateToPose",
+    )
+
+
+def _cancel_all_navigate_through_poses_goals() -> str:
+    return _cancel_all_action_goals(
+        "/navigate_through_poses",
+        "NavigateThroughPoses",
+    )
+
+
+def _cancel_all_navigation_goals() -> str:
+    messages = []
+    errors = []
+    for cancel in (
+        _cancel_all_navigate_goals,
+        _cancel_all_navigate_through_poses_goals,
+    ):
+        try:
+            messages.append(cancel())
+        except HTTPException as exc:
+            errors.append(str(exc.detail))
+    if errors:
+        raise HTTPException(503, "; ".join(errors))
+    return "\n".join(messages) or "Goals cancelled"
+
+
+@router.post("/goal", response_model=ActionResult)
+def send_goal(request: NavigateGoalRequest):
+    payload = _navigate_goal_payload(request)
+    code, output = _exec(
+        _navigate_goal_command(payload, NAVIGATE_GOAL_ACCEPT_TIMEOUT_SECONDS),
+        environment=_ros_exec_environment(),
+    )
+    accepted = code == 0 or (code == 124 and "Goal accepted" in output)
+    if not accepted:
+        raise HTTPException(503, output or "NavigateToPose goal failed")
+    return ActionResult(ok=True, message=output or "Goal accepted")
+
+
+@router.post("/goal/wait", response_model=NavigateGoalResult)
+def send_goal_and_wait(request: NavigateGoalRequest):
+    payload = _navigate_goal_payload(request)
+    code, output = _exec(
+        _navigate_goal_command(payload, NAVIGATE_GOAL_RESULT_TIMEOUT_SECONDS),
+        environment=_ros_exec_environment(),
+    )
+    if code == 124:
+        if "Goal accepted" in output:
+            _cancel_all_navigate_goals()
+            return NavigateGoalResult(
+                ok=False,
+                status="TIMEOUT",
+                message=output or "NavigateToPose goal timed out",
+            )
+        raise HTTPException(503, output or "NavigateToPose action server timed out")
+
+    status = _navigate_terminal_status(output)
+    if status == "REJECTED":
+        return NavigateGoalResult(ok=False, status=status, message=output)
+    if code != 0:
+        raise HTTPException(503, output or "NavigateToPose goal failed")
+    return NavigateGoalResult(
+        ok=status == "SUCCEEDED",
+        status=status,
+        message=output or f"NavigateToPose finished with status {status}",
+    )
+
+
+@router.post("/goals/wait", response_model=NavigateGoalResult)
+def send_goals_and_wait(request: NavigateThroughPosesRequest):
+    payload = _navigate_through_poses_payload(request)
+    timeout_seconds = NAVIGATE_GOAL_RESULT_TIMEOUT_SECONDS * len(request.poses)
+    code, output = _exec(
+        _navigate_through_poses_command(payload, timeout_seconds),
+        environment=_ros_exec_environment(),
+    )
+    if code == 124:
+        if "Goal accepted" in output:
+            _cancel_all_navigate_through_poses_goals()
+            return NavigateGoalResult(
+                ok=False,
+                status="TIMEOUT",
+                message=output or "NavigateThroughPoses goal timed out",
+            )
+        raise HTTPException(
+            503,
+            output or "NavigateThroughPoses action server timed out",
+        )
+
+    status = _navigate_terminal_status(output)
+    if status == "REJECTED":
+        return NavigateGoalResult(ok=False, status=status, message=output)
+    if code != 0:
+        raise HTTPException(
+            503,
+            output or "NavigateThroughPoses goal failed",
+        )
+    return NavigateGoalResult(
+        ok=status == "SUCCEEDED",
+        status=status,
+        message=(
+            output
+            or f"NavigateThroughPoses finished with status {status}"
+        ),
+    )
+
+
+@router.post("/cancel", response_model=ActionResult)
+def cancel_goal():
+    return ActionResult(ok=True, message=_cancel_all_navigation_goals())
 
 
 @router.post("/initial-pose", response_model=ActionResult)

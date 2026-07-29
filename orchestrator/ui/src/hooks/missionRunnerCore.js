@@ -12,12 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Pure, side-effect-free core for the Mission Runner: arrival math, the empty-BT
-// detector, and the state reducer that publishes observable run progress. No
-// React, no ROS — this is the unit-test surface. The async driver that actually
+// Pure, side-effect-free core for the Mission Runner: empty-BT detection and
+// the reducer that publishes observable run progress. The async driver that
 // sends nav goals and ticks behavior trees lives in useMissionRunner.js.
 
-import { yawFromPose } from "../utils/navigationTf";
 
 export const RunnerStatus = {
   IDLE: "idle",
@@ -33,7 +31,7 @@ export const RunnerStatus = {
 export const RunnerPhase = {
   NONE: "none",
   NAV_SENT: "nav-sent",
-  AWAITING_ARRIVAL: "awaiting-arrival",
+  AWAITING_NAV_RESULT: "awaiting-nav-result",
   ARRIVED: "arrived",
   BT_LOADING: "bt-loading",
   BT_RUNNING: "bt-running",
@@ -49,53 +47,21 @@ export const WaypointState = {
   FAILED: "failed",
 };
 
-// Arrival tolerances match NavigationPage's manual-goal check (0.2 m, 0.4 rad).
+// Only BT execution uses polling; Nav2 completion comes from the action result.
 export const DEFAULT_RUNNER_CONFIG = {
-  distM: 0.2,
-  yawRad: 0.4,
-  settleMs: 800,
-  navTimeoutMs: 120000,
-  goalResendMs: 12000,
   btStartTimeoutMs: 5000,
   btTimeoutMs: 300000,
   pollMs: 250,
 };
 
-// Wrap an angle into (-π, π].
-export function angleWrap(angle) {
-  let wrapped = angle;
-  while (wrapped > Math.PI) wrapped -= 2 * Math.PI;
-  while (wrapped <= -Math.PI) wrapped += 2 * Math.PI;
-  return wrapped;
-}
-
-export function poseXyYaw(pose) {
-  if (!pose || !pose.position) return null;
-  return { x: pose.position.x, y: pose.position.y, yaw: yawFromPose(pose) };
-}
-
-// Goal descriptor for a spot; yaw is enforced unless the spot opts out.
+// Convert a stored spot into the pose sent to Nav2.
 export function goalFromSpot(spot) {
   const pose = (spot && spot.pose) || {};
-  const ignoreYaw = Boolean(spot && spot.metadata && spot.metadata.ignore_yaw);
   return {
     x: Number(pose.x ?? 0),
     y: Number(pose.y ?? 0),
     yaw: Number(pose.yaw ?? 0),
-    ignoreYaw,
   };
-}
-
-// Is the live pose within tolerance of the goal? Distance always; yaw unless ignored.
-export function isArrived(currentPose, goal, config = DEFAULT_RUNNER_CONFIG) {
-  if (!currentPose || !goal) return false;
-  const here = poseXyYaw(currentPose);
-  if (!here) return false;
-  const dist = Math.hypot(here.x - goal.x, here.y - goal.y);
-  if (dist > config.distM) return false;
-  if (goal.ignoreYaw) return true;
-  const yawError = Math.abs(angleWrap(here.yaw - goal.yaw));
-  return yawError <= config.yawRad;
 }
 
 // A default/empty local BT (childless MainTree or blank) means "navigate only".
@@ -117,6 +83,46 @@ export function isEmptyBt(xml) {
   }
 }
 
+// Build one navigation action. At most two consecutive nav-only waypoints are
+// collected; the following BT waypoint is included as the terminal pose.
+export function navigationBatchFromIndex(
+  spots,
+  startIndex,
+  resolveBtXml,
+  maxEmptyWaypoints = 2,
+) {
+  if (!Array.isArray(spots) || startIndex < 0 || startIndex >= spots.length) {
+    return { indices: [], useThroughPoses: false };
+  }
+
+  const xmlAt = (index) => (
+    typeof resolveBtXml === "function" ? resolveBtXml(spots[index]) : ""
+  );
+  if (!isEmptyBt(xmlAt(startIndex))) {
+    return { indices: [startIndex], useThroughPoses: false };
+  }
+
+  const indices = [];
+  let index = startIndex;
+  while (
+    index < spots.length
+    && indices.length < maxEmptyWaypoints
+    && isEmptyBt(xmlAt(index))
+  ) {
+    indices.push(index);
+    index += 1;
+  }
+
+  if (index < spots.length && !isEmptyBt(xmlAt(index))) {
+    indices.push(index);
+  }
+
+  return {
+    indices,
+    useThroughPoses: indices.length >= 2,
+  };
+}
+
 export function initialRunnerState(spots = []) {
   return {
     status: RunnerStatus.IDLE,
@@ -124,6 +130,7 @@ export function initialRunnerState(spots = []) {
     phase: RunnerPhase.NONE,
     reason: "",
     total: spots.length,
+    activeIndices: [],
     progress: spots.map((spot) => ({
       id: spot.id,
       label: spot.label || spot.id,
@@ -136,6 +143,14 @@ function withProgress(state, index, waypointState) {
   if (index < 0 || index >= state.progress.length) return state.progress;
   return state.progress.map((entry, i) => (
     i === index ? { ...entry, state: waypointState } : entry
+  ));
+}
+
+function withProgressIndices(state, indices, waypointState) {
+  const selected = new Set(indices || []);
+  if (!selected.size) return state.progress;
+  return state.progress.map((entry, index) => (
+    selected.has(index) ? { ...entry, state: waypointState } : entry
   ));
 }
 
@@ -152,16 +167,21 @@ export function missionRunnerReducer(state, action) {
         currentIndex: -1,
         phase: RunnerPhase.NONE,
         reason: "",
+        activeIndices: [],
         progress: state.progress.map((entry) => ({ ...entry, state: WaypointState.PENDING })),
       };
     case "navigate":
-      return {
-        ...state,
-        status: RunnerStatus.NAVIGATING,
-        currentIndex: action.index,
-        phase: RunnerPhase.NAV_SENT,
-        progress: withProgress(state, action.index, WaypointState.NAVIGATING),
-      };
+      {
+        const indices = action.indices || [action.index];
+        return {
+          ...state,
+          status: RunnerStatus.NAVIGATING,
+          currentIndex: action.index,
+          activeIndices: indices,
+          phase: RunnerPhase.NAV_SENT,
+          progress: withProgressIndices(state, indices, WaypointState.NAVIGATING),
+        };
+      }
     case "phase":
       return { ...state, phase: action.phase };
     case "runBt":
@@ -169,45 +189,61 @@ export function missionRunnerReducer(state, action) {
         ...state,
         status: RunnerStatus.RUNNING_BT,
         currentIndex: action.index,
+        activeIndices: [action.index],
         phase: RunnerPhase.BT_LOADING,
         progress: withProgress(state, action.index, WaypointState.RUNNING_BT),
       };
     case "finish":
-      return {
-        ...state,
-        phase: RunnerPhase.BT_DONE,
-        progress: withProgress(
-          state,
-          action.index,
-          action.skipped ? WaypointState.SKIPPED : WaypointState.DONE,
-        ),
-      };
+      {
+        const indices = action.indices || [action.index];
+        const completed = new Set(indices);
+        return {
+          ...state,
+          phase: RunnerPhase.BT_DONE,
+          activeIndices: state.activeIndices.filter((index) => !completed.has(index)),
+          progress: withProgressIndices(
+            state,
+            indices,
+            action.skipped ? WaypointState.SKIPPED : WaypointState.DONE,
+          ),
+        };
+      }
     case "advance":
       return { ...state, status: RunnerStatus.ADVANCING };
     case "done":
-      return { ...state, status: RunnerStatus.DONE, phase: RunnerPhase.NONE, currentIndex: -1 };
-    case "fail":
       return {
         ...state,
-        status: RunnerStatus.FAILED,
-        reason: action.reason || "Mission failed",
-        progress: action.index >= 0
-          ? withProgress(state, action.index, WaypointState.FAILED)
-          : state.progress,
+        status: RunnerStatus.DONE,
+        phase: RunnerPhase.NONE,
+        currentIndex: -1,
+        activeIndices: [],
       };
+    case "fail":
+      {
+        const indices = action.indices || (action.index >= 0 ? [action.index] : []);
+        return {
+          ...state,
+          status: RunnerStatus.FAILED,
+          reason: action.reason || "Mission failed",
+          activeIndices: [],
+          progress: indices.length
+            ? withProgressIndices(state, indices, WaypointState.FAILED)
+            : state.progress,
+        };
+      }
     case "cancel": {
-      const active = state.currentIndex;
       const resetActive = (
-        active >= 0
-        && (state.status === RunnerStatus.NAVIGATING || state.status === RunnerStatus.RUNNING_BT)
+        state.status === RunnerStatus.NAVIGATING
+        || state.status === RunnerStatus.RUNNING_BT
       );
       return {
         ...state,
         status: RunnerStatus.CANCELLED,
         phase: RunnerPhase.NONE,
         reason: action.reason || "Cancelled",
+        activeIndices: [],
         progress: resetActive
-          ? withProgress(state, active, WaypointState.PENDING)
+          ? withProgressIndices(state, state.activeIndices, WaypointState.PENDING)
           : state.progress,
       };
     }

@@ -17,74 +17,25 @@ import {
   RunnerPhase,
   RunnerStatus,
   WaypointState,
-  angleWrap,
   goalFromSpot,
   initialRunnerState,
-  isArrived,
   isEmptyBt,
   isRunnerActive,
   missionRunnerReducer,
+  navigationBatchFromIndex,
 } from "./missionRunnerCore";
 
-const yawQuat = (yaw) => ({ z: Math.sin(yaw / 2), w: Math.cos(yaw / 2) });
-const poseAt = (x, y, yaw = 0) => ({ position: { x, y, z: 0 }, orientation: yawQuat(yaw) });
 
 const SPOTS = [
   { id: "a", label: "Dock", pose: { x: 0, y: 0, yaw: 0 } },
   { id: "b", label: "Bay", pose: { x: 5, y: 0, yaw: Math.PI / 2 } },
 ];
 
-describe("angleWrap", () => {
-  test("wraps into (-pi, pi]", () => {
-    expect(angleWrap(0)).toBeCloseTo(0);
-    expect(angleWrap(Math.PI)).toBeCloseTo(Math.PI);
-    expect(angleWrap(Math.PI + 0.1)).toBeCloseTo(-Math.PI + 0.1);
-    expect(angleWrap(-Math.PI - 0.1)).toBeCloseTo(Math.PI - 0.1, 5);
-    expect(angleWrap(3 * Math.PI)).toBeCloseTo(Math.PI);
-  });
-});
-
-describe("isArrived", () => {
-  const goal = { x: 5, y: 0, yaw: Math.PI / 2, ignoreYaw: false };
-
-  test("true when within distance and yaw tolerance", () => {
-    expect(isArrived(poseAt(5.1, 0, Math.PI / 2), goal)).toBe(true);
-  });
-
-  test("false when outside distance tolerance", () => {
-    expect(isArrived(poseAt(5.5, 0, Math.PI / 2), goal)).toBe(false);
-  });
-
-  test("false when yaw is off beyond tolerance", () => {
-    expect(isArrived(poseAt(5, 0, -Math.PI / 2), goal)).toBe(false);
-  });
-
-  test("yaw ignored when goal opts out", () => {
-    const relaxed = { ...goal, ignoreYaw: true };
-    expect(isArrived(poseAt(5, 0, -Math.PI / 2), relaxed)).toBe(true);
-  });
-
-  test("yaw wrap boundary handled (pi vs -pi)", () => {
-    const near = { x: 0, y: 0, yaw: Math.PI, ignoreYaw: false };
-    expect(isArrived(poseAt(0, 0, -Math.PI + 0.05), near)).toBe(true);
-  });
-
-  test("false for null pose", () => {
-    expect(isArrived(null, goal)).toBe(false);
-  });
-});
-
 describe("goalFromSpot", () => {
-  test("reads pose and defaults ignoreYaw false", () => {
-    expect(goalFromSpot(SPOTS[1])).toEqual({ x: 5, y: 0, yaw: Math.PI / 2, ignoreYaw: false });
-  });
-
-  test("honors metadata.ignore_yaw", () => {
-    const spot = { pose: { x: 1, y: 2, yaw: 0 }, metadata: { ignore_yaw: true } };
-    expect(goalFromSpot(spot).ignoreYaw).toBe(true);
+  test("reads the pose sent to Nav2", () => {
+    expect(goalFromSpot(SPOTS[1])).toEqual({ x: 5, y: 0, yaw: Math.PI / 2 });
   });
 });
-
 describe("isEmptyBt", () => {
   const emptyXml = [
     '<?xml version="1.0" encoding="UTF-8"?>',
@@ -114,6 +65,58 @@ describe("isEmptyBt", () => {
 
   test("unparseable XML is treated as non-empty so the error surfaces", () => {
     expect(isEmptyBt("<root><unclosed></root>")).toBe(false);
+  });
+});
+
+describe("navigationBatchFromIndex", () => {
+  const empty = '<root><BehaviorTree ID="MainTree"/></root>';
+  const filled = '<root><BehaviorTree ID="MainTree"><Wait/></BehaviorTree></root>';
+  const spots = ["a", "b", "c", "d"].map((id) => ({ id }));
+
+  test("includes up to two empty waypoints and the following BT endpoint", () => {
+    const xmlById = { a: empty, b: empty, c: filled, d: filled };
+    expect(navigationBatchFromIndex(
+      spots,
+      0,
+      (spot) => xmlById[spot.id],
+    )).toEqual({ indices: [0, 1, 2], useThroughPoses: true });
+  });
+
+  test("splits more than two consecutive empty waypoints", () => {
+    const xmlById = { a: empty, b: empty, c: empty, d: filled };
+    expect(navigationBatchFromIndex(
+      spots,
+      0,
+      (spot) => xmlById[spot.id],
+    )).toEqual({ indices: [0, 1], useThroughPoses: true });
+    expect(navigationBatchFromIndex(
+      spots,
+      2,
+      (spot) => xmlById[spot.id],
+    )).toEqual({ indices: [2, 3], useThroughPoses: true });
+  });
+
+  test("keeps a BT waypoint and a lone trailing empty waypoint single", () => {
+    const xmlById = { a: filled, b: empty };
+    expect(navigationBatchFromIndex(
+      spots.slice(0, 2),
+      0,
+      (spot) => xmlById[spot.id],
+    )).toEqual({ indices: [0], useThroughPoses: false });
+    expect(navigationBatchFromIndex(
+      spots.slice(0, 2),
+      1,
+      (spot) => xmlById[spot.id],
+    )).toEqual({ indices: [1], useThroughPoses: false });
+  });
+
+  test("treats malformed XML as a BT endpoint", () => {
+    const xmlById = { a: empty, b: "<root><broken></root>" };
+    expect(navigationBatchFromIndex(
+      spots.slice(0, 2),
+      0,
+      (spot) => xmlById[spot.id],
+    )).toEqual({ indices: [0, 1], useThroughPoses: true });
   });
 });
 
@@ -177,6 +180,36 @@ describe("missionRunnerReducer", () => {
     expect(state.progress[0].state).toBe(WaypointState.PENDING);
   });
 
+  test("group navigation updates, fails, and cancels every active waypoint", () => {
+    let state = initialRunnerState(SPOTS);
+    state = missionRunnerReducer(state, {
+      type: "navigate",
+      index: 0,
+      indices: [0, 1],
+    });
+    expect(state.progress.map((entry) => entry.state)).toEqual([
+      WaypointState.NAVIGATING,
+      WaypointState.NAVIGATING,
+    ]);
+
+    const failed = missionRunnerReducer(state, {
+      type: "fail",
+      reason: "batch aborted",
+      index: 0,
+      indices: [0, 1],
+    });
+    expect(failed.progress.map((entry) => entry.state)).toEqual([
+      WaypointState.FAILED,
+      WaypointState.FAILED,
+    ]);
+
+    const cancelled = missionRunnerReducer(state, { type: "cancel" });
+    expect(cancelled.progress.map((entry) => entry.state)).toEqual([
+      WaypointState.PENDING,
+      WaypointState.PENDING,
+    ]);
+  });
+
   test("start resets progress after a prior failed run", () => {
     let state = initialRunnerState(SPOTS);
     state = missionRunnerReducer(state, { type: "navigate", index: 0 });
@@ -196,7 +229,10 @@ describe("isRunnerActive", () => {
   });
 });
 
-test("DEFAULT_RUNNER_CONFIG exposes the documented tolerances", () => {
-  expect(DEFAULT_RUNNER_CONFIG.distM).toBe(0.2);
-  expect(DEFAULT_RUNNER_CONFIG.yawRad).toBe(0.4);
+test("DEFAULT_RUNNER_CONFIG only contains BT polling timeouts", () => {
+  expect(DEFAULT_RUNNER_CONFIG).toEqual({
+    btStartTimeoutMs: 5000,
+    btTimeoutMs: 300000,
+    pollMs: 250,
+  });
 });

@@ -6,6 +6,8 @@ import types
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 APP_PATH = Path(__file__).resolve().with_name("app.py")
 REPO_ROOT = APP_PATH.parents[2]
 
@@ -540,6 +542,8 @@ def test_navigation_routes_are_registered():
 
     assert "/navigation/status" in paths
     assert "/navigation/start" in paths
+    assert "/navigation/goal/wait" in paths
+    assert "/navigation/goals/wait" in paths
     assert "/navigation/initial-pose" in paths
     assert "/navigation/nomotion-update" in paths
     assert "/navigation/global-localization" in paths
@@ -549,6 +553,7 @@ def test_navigation_routes_are_registered():
     assert "/navigation/maps/annotations/save" in paths
     assert "/navigation/topics/ws" in paths
     assert "/navigation/spots" in paths
+    assert "/navigation/missions" in paths
     assert "/navigation/missions/{map_name}" in paths
     assert "/navigation/missions/{map_name}/bt" in paths
 
@@ -618,6 +623,7 @@ def test_navigation_mission_manifest_and_bt_files(monkeypatch, tmp_path):
     )
     assert saved.exists is True
     assert saved.map_name == "factory"
+    assert saved.mission_name == "peanutmix"
     assert not hasattr(saved, "compiled_bt")
     assert saved.waypoints[0].local_bt == "locals/table_a.xml"
 
@@ -645,7 +651,25 @@ def test_navigation_mission_manifest_and_bt_files(monkeypatch, tmp_path):
         path="locals/table_a.xml",
     )
     assert deleted_bt.exists is False
-    assert not (tmp_path / "missions" / "factory" / "locals" / "table_a.xml").exists()
+    assert not (
+        tmp_path / "missions" / "factory" / "peanutmix" / "locals" / "table_a.xml"
+    ).exists()
+
+
+def test_navigation_missions_migrates_legacy_artifacts(monkeypatch, tmp_path):
+    monkeypatch.setattr(navigation_missions, "NAVIGATION_DATA_ROOT", tmp_path)
+    legacy_dir = tmp_path / "missions" / "map_1floor"
+    legacy_dir.mkdir(parents=True)
+    (legacy_dir / "mission.json").write_text(
+        '{"waypoints": [], "global_bt": "global.xml"}', encoding="utf-8"
+    )
+    (legacy_dir / "global.xml").write_text("<root/>", encoding="utf-8")
+
+    missions = navigation_missions.list_missions("map_1floor")
+
+    assert missions.missions == ["peanutmix"]
+    assert not (legacy_dir / "mission.json").exists()
+    assert (legacy_dir / "peanutmix" / "mission.json").exists()
 
 
 def test_navigation_missions_reject_path_escape(monkeypatch, tmp_path):
@@ -1415,3 +1439,234 @@ def test_compose_env_uses_current_container_mounts(monkeypatch):
     finally:
         app._HOST_WORKSPACE_DIR_CACHE = None
         app._HOST_HUGGINGFACE_DIR_CACHE = None
+
+
+def _navigate_goal_request():
+    return navigation.NavigateGoalRequest(
+        pose={
+            "header": {"frame_id": "map"},
+            "pose": {
+                "position": {"x": 1.0, "y": 2.0, "z": 0.0},
+                "orientation": {
+                    "x": 0.0,
+                    "y": 0.0,
+                    "z": 0.0,
+                    "w": 1.0,
+                },
+            },
+        }
+    )
+
+
+def _navigate_through_poses_request(count=2):
+    pose = _navigate_goal_request().pose
+    return navigation.NavigateThroughPosesRequest(
+        poses=[pose for _index in range(count)]
+    )
+
+
+@pytest.mark.parametrize("pose_count", [1, 4])
+def test_navigation_through_poses_request_rejects_invalid_batch_size(
+    pose_count,
+):
+    with pytest.raises(ValueError):
+        _navigate_through_poses_request(pose_count)
+
+
+def test_navigation_goal_wait_returns_succeeded(monkeypatch):
+    output = "Goal accepted with ID: abc\nGoal finished with status: SUCCEEDED"
+    captured = {}
+
+    def fake_exec(command, *, environment=None, timeout=None):
+        captured["command"] = command
+        return 0, output
+
+    monkeypatch.setattr(navigation, "_exec", fake_exec)
+
+    result = navigation.send_goal_and_wait(_navigate_goal_request())
+
+    assert result.ok is True
+    assert result.status == "SUCCEEDED"
+    assert "timeout 120s ros2 action send_goal" in captured["command"][-1]
+
+
+def test_navigation_goal_wait_returns_terminal_failure(monkeypatch):
+    output = "Goal accepted with ID: abc\nGoal finished with status: ABORTED"
+    monkeypatch.setattr(
+        navigation,
+        "_exec",
+        lambda command, *, environment=None, timeout=None: (0, output),
+    )
+
+    result = navigation.send_goal_and_wait(_navigate_goal_request())
+
+    assert result.ok is False
+    assert result.status == "ABORTED"
+
+
+def test_navigation_goal_wait_cancels_after_timeout(monkeypatch):
+    cancelled = []
+    monkeypatch.setattr(
+        navigation,
+        "_exec",
+        lambda command, *, environment=None, timeout=None: (
+            124,
+            "Goal accepted with ID: abc",
+        ),
+    )
+    monkeypatch.setattr(
+        navigation,
+        "_cancel_all_navigate_goals",
+        lambda: cancelled.append(True) or "Goals cancelled",
+    )
+
+    result = navigation.send_goal_and_wait(_navigate_goal_request())
+
+    assert result.ok is False
+    assert result.status == "TIMEOUT"
+    assert cancelled == [True]
+
+
+def test_navigation_goal_wait_reports_rejection(monkeypatch):
+    monkeypatch.setattr(
+        navigation,
+        "_exec",
+        lambda command, *, environment=None, timeout=None: (
+            1,
+            "Goal was rejected.",
+        ),
+    )
+
+    result = navigation.send_goal_and_wait(_navigate_goal_request())
+
+    assert result.ok is False
+    assert result.status == "REJECTED"
+
+
+@pytest.mark.parametrize(
+    ("pose_count", "expected_timeout"),
+    [(2, 240), (3, 360)],
+)
+def test_navigation_goals_wait_scales_timeout(
+    monkeypatch,
+    pose_count,
+    expected_timeout,
+):
+    output = "Goal accepted with ID: abc\nGoal finished with status: SUCCEEDED"
+    captured = {}
+
+    def fake_exec(command, *, environment=None, timeout=None):
+        captured["command"] = command
+        return 0, output
+
+    monkeypatch.setattr(navigation, "_exec", fake_exec)
+
+    result = navigation.send_goals_and_wait(
+        _navigate_through_poses_request(pose_count)
+    )
+
+    assert result.ok is True
+    assert result.status == "SUCCEEDED"
+    command = captured["command"][-1]
+    assert (
+        f"timeout {expected_timeout}s ros2 action send_goal "
+        "/navigate_through_poses nav2_msgs/action/NavigateThroughPoses"
+    ) in command
+    assert '"poses":' in command
+
+
+def test_navigation_goals_wait_cancels_through_poses_after_timeout(monkeypatch):
+    cancelled = []
+    monkeypatch.setattr(
+        navigation,
+        "_exec",
+        lambda command, *, environment=None, timeout=None: (
+            124,
+            "Goal accepted with ID: abc",
+        ),
+    )
+    monkeypatch.setattr(
+        navigation,
+        "_cancel_all_navigate_through_poses_goals",
+        lambda: cancelled.append(True) or "Goals cancelled",
+    )
+
+    result = navigation.send_goals_and_wait(
+        _navigate_through_poses_request()
+    )
+
+    assert result.ok is False
+    assert result.status == "TIMEOUT"
+    assert cancelled == [True]
+
+
+@pytest.mark.parametrize(
+    "output",
+    [
+        "Goal accepted with ID: abc\nGoal finished with status: ABORTED",
+        "Goal accepted with ID: abc\nGoal finished with status: CANCELED",
+        "Goal was rejected.",
+    ],
+)
+def test_navigation_goals_wait_returns_terminal_failure(monkeypatch, output):
+    monkeypatch.setattr(
+        navigation,
+        "_exec",
+        lambda command, *, environment=None, timeout=None: (
+            1 if "rejected" in output else 0,
+            output,
+        ),
+    )
+
+    result = navigation.send_goals_and_wait(
+        _navigate_through_poses_request()
+    )
+
+    assert result.ok is False
+    assert result.status in {"ABORTED", "CANCELED", "REJECTED"}
+
+
+def test_navigation_cancel_attempts_both_action_types(monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        navigation,
+        "_cancel_all_navigate_goals",
+        lambda: calls.append("pose") or "NavigateToPose cancelled",
+    )
+    monkeypatch.setattr(
+        navigation,
+        "_cancel_all_navigate_through_poses_goals",
+        lambda: calls.append("through") or "NavigateThroughPoses cancelled",
+    )
+
+    result = navigation.cancel_goal()
+
+    assert result.ok is True
+    assert calls == ["pose", "through"]
+    assert "NavigateToPose cancelled" in result.message
+    assert "NavigateThroughPoses cancelled" in result.message
+
+
+def test_navigation_cancel_attempts_both_before_reporting_error(monkeypatch):
+    calls = []
+
+    def fail_pose_cancel():
+        calls.append("pose")
+        raise navigation.HTTPException(503, "pose cancel failed")
+
+    monkeypatch.setattr(
+        navigation,
+        "_cancel_all_navigate_goals",
+        fail_pose_cancel,
+    )
+    monkeypatch.setattr(
+        navigation,
+        "_cancel_all_navigate_through_poses_goals",
+        lambda: calls.append("through") or "through cancelled",
+    )
+
+    with pytest.raises(navigation.HTTPException) as exc_info:
+        navigation.cancel_goal()
+
+    assert calls == ["pose", "through"]
+    assert "pose cancel failed" in str(exc_info.value.detail)

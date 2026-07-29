@@ -38,33 +38,41 @@ async function request(path = '', init) {
   return response.json();
 }
 
-export function getNavigationMission(mapName) {
-  return request(`/${encodeURIComponent(mapName)}`);
+function missionQuery(missionName) {
+  return missionName ? `?mission_name=${encodeURIComponent(missionName)}` : "";
 }
 
-export function saveNavigationMission(mapName, mission) {
-  return request(`/${encodeURIComponent(mapName)}`, {
+export function getNavigationMissions(mapName) {
+  return request(`?map_name=${encodeURIComponent(mapName)}`);
+}
+
+export function getNavigationMission(mapName, missionName = "") {
+  return request(`/${encodeURIComponent(mapName)}${missionQuery(missionName)}`);
+}
+
+export function saveNavigationMission(mapName, mission, missionName = "") {
+  return request(`/${encodeURIComponent(mapName)}${missionQuery(missionName)}`, {
     method: 'POST',
     body: JSON.stringify(mission),
   });
 }
 
-export function getNavigationMissionBtFile(mapName, path) {
+export function getNavigationMissionBtFile(mapName, path, missionName = "") {
   return request(
-    `/${encodeURIComponent(mapName)}/bt?path=${encodeURIComponent(path)}`,
+    `/${encodeURIComponent(mapName)}/bt?path=${encodeURIComponent(path)}${missionName ? `&mission_name=${encodeURIComponent(missionName)}` : ""}`,
   );
 }
 
-export function saveNavigationMissionBtFile(mapName, path, content) {
-  return request(`/${encodeURIComponent(mapName)}/bt`, {
+export function saveNavigationMissionBtFile(mapName, path, content, missionName = "") {
+  return request(`/${encodeURIComponent(mapName)}/bt${missionQuery(missionName)}`, {
     method: 'PUT',
     body: JSON.stringify({ path, content }),
   });
 }
 
-export function deleteNavigationMissionBtFile(mapName, path) {
+export function deleteNavigationMissionBtFile(mapName, path, missionName = "") {
   return request(
-    `/${encodeURIComponent(mapName)}/bt?path=${encodeURIComponent(path)}`,
+    `/${encodeURIComponent(mapName)}/bt?path=${encodeURIComponent(path)}${missionName ? `&mission_name=${encodeURIComponent(missionName)}` : ""}`,
     { method: 'DELETE' },
   );
 }

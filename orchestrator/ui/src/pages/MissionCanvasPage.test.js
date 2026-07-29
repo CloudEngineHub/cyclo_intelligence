@@ -11,7 +11,8 @@ import {
   saveMapAnnotations,
   savePgmImage,
   sendInitialPoseEstimate,
-  sendNavigateToPoseGoal,
+  sendNavigateToPoseGoalAndWait,
+  sendNavigateThroughPosesGoalsAndWait,
   startNavigation,
   stopNavigation,
 } from '../utils/navigationApi';
@@ -25,6 +26,7 @@ import {
   deleteNavigationMissionBtFile,
   getNavigationMission,
   getNavigationMissionBtFile,
+  getNavigationMissions,
   saveNavigationMission,
   saveNavigationMissionBtFile,
 } from '../utils/navigationMissionsApi';
@@ -89,7 +91,8 @@ jest.mock('../utils/navigationApi', () => ({
   saveMapAnnotations: jest.fn().mockImplementation((path, annotations) => Promise.resolve({ path, annotations, saved: true })),
   savePgmImage: jest.fn().mockResolvedValue({ path: 'map.pgm', saved: true }),
   sendInitialPoseEstimate: jest.fn().mockResolvedValue({ ok: true }),
-  sendNavigateToPoseGoal: jest.fn().mockResolvedValue({ ok: true, message: 'Goal accepted' }),
+  sendNavigateToPoseGoalAndWait: jest.fn().mockResolvedValue({ ok: true, status: 'SUCCEEDED', message: 'Goal succeeded' }),
+  sendNavigateThroughPosesGoalsAndWait: jest.fn().mockResolvedValue({ ok: true, status: 'SUCCEEDED', message: 'Goals succeeded' }),
   cancelNavigateToPoseGoal: jest.fn().mockResolvedValue({ ok: true }),
   startNavigation: jest.fn().mockResolvedValue({ ok: true }),
   stopNavigation: jest.fn().mockResolvedValue({ ok: true }),
@@ -132,6 +135,10 @@ jest.mock('../utils/navigationMissionsApi', () => ({
     global_bt: 'global.xml',
     waypoints: [],
     metadata: {},
+  }),
+  getNavigationMissions: jest.fn().mockResolvedValue({
+    map_name: 'map',
+    missions: ['peanutmix'],
   }),
   getNavigationMissionBtFile: jest.fn().mockResolvedValue({
     path: 'global.xml',
@@ -208,6 +215,10 @@ beforeEach(() => {
     global_bt: 'global.xml',
     waypoints: [],
     metadata: {},
+  });
+  getNavigationMissions.mockResolvedValue({
+    map_name: 'map',
+    missions: ['peanutmix'],
   });
   getNavigationMissionBtFile.mockResolvedValue({
     path: 'global.xml',
@@ -493,6 +504,10 @@ test('loads a saved map into the design stage', async () => {
       },
     }],
   });
+  getNavigationMissions.mockResolvedValue({
+    map_name: 'factory',
+    missions: ['chestnut', 'peanutmix'],
+  });
 
   render(<MissionCanvasPage />);
 
@@ -501,9 +516,13 @@ test('loads a saved map into the design stage', async () => {
 
   const mapSelect = await screen.findByRole('combobox', { name: 'Design mission map file' });
   await waitFor(() => expect(mapSelect).toHaveValue('factory.pgm'));
+  const missionSelect = screen.getByRole('combobox', { name: 'Design mission file' });
+  await waitFor(() => expect(missionSelect).toHaveValue('peanutmix'));
+  fireEvent.change(missionSelect, { target: { value: 'chestnut' } });
 
   fireEvent.click(screen.getByRole('button', { name: 'Load' }));
 
+  await waitFor(() => expect(getNavigationMission).toHaveBeenCalledWith('factory', 'chestnut'));
   await waitFor(() => expect(getPgmImage).toHaveBeenCalledWith('factory.pgm'));
   await waitFor(() => expect(getMapAnnotations).toHaveBeenCalledWith('factory.pgm'));
   await waitFor(() => expect(latestMapViewerProps().map).toMatchObject({
@@ -518,6 +537,12 @@ test('loads a saved map into the design stage', async () => {
       }),
     }),
   ]));
+  expect(screen.getByText('Design Session')).toBeInTheDocument();
+  const activeMissionSelect = screen.getByRole('combobox', { name: 'Mission file' });
+  expect(activeMissionSelect).toHaveValue('chestnut');
+  fireEvent.change(activeMissionSelect, { target: { value: 'peanutmix' } });
+  await waitFor(() => expect(getNavigationMission).toHaveBeenCalledWith('factory', ''));
+  await waitFor(() => expect(activeMissionSelect).toHaveValue('peanutmix'));
   expect(screen.getByRole('button', { name: 'Create Waypoint' })).toBeEnabled();
   fireEvent.click(screen.getByRole('button', { name: 'Create Waypoint' }));
   expect(screen.getByRole('menu', { name: 'Waypoint creation options' })).toBeInTheDocument();
@@ -961,6 +986,10 @@ test('creates a waypoint at robot with automatic localization from the waypoint 
     mockTopicDataByName['/amcl_pose'] = amclPoseMessage(1.25, -0.5, 0.75);
     return { ok: true };
   });
+  stopNavigation.mockImplementationOnce(async () => {
+    getServiceStatus.mockResolvedValue({ is_up: false });
+    return { ok: true };
+  });
   getPgmFiles.mockResolvedValue({
     files: [{ path: 'factory.pgm', name: 'factory.pgm' }],
   });
@@ -1015,6 +1044,8 @@ test('creates a waypoint at robot with automatic localization from the waypoint 
   );
   await waitFor(() => expect(screen.getByText('Created Waypoint A at robot')).toBeInTheDocument());
   await waitFor(() => expect(latestMapViewerProps().showScan).toBe(false));
+  await waitFor(() => expect(getServiceStatus.mock.calls.length).toBeGreaterThan(2));
+  expect(latestMapViewerProps().map).not.toBeNull();
   expect(latestMapViewerProps().showRobotModel).toBe(false);
 
   fireEvent.click(screen.getByRole('tab', { name: 'Mapping' }));
@@ -2291,7 +2322,7 @@ test('gates the mission run on an initial robot pose', async () => {
   // Run Mission is disabled until the robot is localized.
   getServiceStatus.mockResolvedValue({ is_up: true, mode: 'nav' });
   expect(screen.getByRole('button', { name: 'Run Mission' })).toBeDisabled();
-  expect(sendNavigateToPoseGoal).not.toHaveBeenCalled();
+  expect(sendNavigateToPoseGoalAndWait).not.toHaveBeenCalled();
 
   // Localize brings the nav stack up and enters the pose-set gesture.
   fireEvent.click(screen.getByRole('button', { name: 'Localize' }));
@@ -2310,13 +2341,18 @@ test('gates the mission run on an initial robot pose', async () => {
     frameId: 'map',
   }));
   await waitFor(() => expect(screen.getByText('Ready')).toBeInTheDocument(), { timeout: 6000 });
-  expect(sendNavigateToPoseGoal).not.toHaveBeenCalled();
+  expect(sendNavigateToPoseGoalAndWait).not.toHaveBeenCalled();
 
-  // Now Run Mission executes the route toward the first waypoint.
+  // Both saved waypoints have empty local BTs, so Run batches the route.
   fireEvent.click(screen.getByRole('button', { name: 'Run Mission' }));
-  await waitFor(() => expect(sendNavigateToPoseGoal).toHaveBeenCalled(), { timeout: 8000 });
-  const goal = sendNavigateToPoseGoal.mock.calls[0][0];
-  expect(goal.pose.pose.position).toMatchObject({ x: 1, y: 0 });
+  await waitFor(
+    () => expect(sendNavigateThroughPosesGoalsAndWait).toHaveBeenCalled(),
+    { timeout: 8000 },
+  );
+  const goals = sendNavigateThroughPosesGoalsAndWait.mock.calls[0][0];
+  expect(goals.poses).toHaveLength(2);
+  expect(goals.poses[0].pose.position).toMatchObject({ x: 1, y: 0 });
+  expect(sendNavigateToPoseGoalAndWait).not.toHaveBeenCalled();
 }, 20000);
 
 test('keeps Run localization active while the BT node is up', async () => {

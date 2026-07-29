@@ -111,6 +111,22 @@ export function sendNavigateToPoseGoal(goal) {
   });
 }
 
+export function sendNavigateToPoseGoalAndWait(goal, signal) {
+  return request('/goal/wait', {
+    method: 'POST',
+    body: JSON.stringify(goal),
+    signal,
+  });
+}
+
+export function sendNavigateThroughPosesGoalsAndWait(goals, signal) {
+  return request('/goals/wait', {
+    method: 'POST',
+    body: JSON.stringify(goals),
+    signal,
+  });
+}
+
 export function cancelNavigateToPoseGoal() {
   return request('/cancel', { method: 'POST' });
 }
