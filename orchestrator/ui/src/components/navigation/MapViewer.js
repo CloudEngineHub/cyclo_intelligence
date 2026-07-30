@@ -1362,7 +1362,7 @@ function WaypointBtFocusLayer({ layer, onClose }) {
 // as a clean floor-plan without retuning makeOccupancyTexture.
 const SCENE_BG = { light: 0xefece3, dark: 0x1b1916 };
 
-export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, goalPose, footprint, tf, showMap, showGlobalCostmap, showLocalCostmap, showScan, showGlobalPlan, showGoalPose, showTf, showRobotModel, interactionDisabled, interactionMode, editorActive, editorPaintOnDrag = true, editorAreaSelection = false, editorBrush = null, mapRefined = true, viewKey, isDark = false, waitingLabel = "Waiting for /map", fitContainer = false, spots = [], selectedSpotId = "", activeWaypointId = "", missionFollowRobot = false, behaviorNodes = [], selectedBehaviorNodeId = "", behaviorPreviewNode = null, missionRouteOrder = [], missionRouteMode = false, selectedMissionRouteSourceId = "", mapAnnotations = [], selectedMapAnnotationId = "", btLayer = null, onBtLayerClose, onSpotClick, onBehaviorNodeClick, onMissionRouteSpotClick, onMissionRouteMapClick, onSpotPoseChange, onBehaviorNodePoseChange, onEditorMapPoint, onEditorMapArea, onMapClick, onMapPose, }) {
+export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, goalPose, footprint, tf, showMap, showGlobalCostmap, showLocalCostmap, showScan, showGlobalPlan, showGoalPose, showTf, showRobotModel, interactionDisabled, interactionMode, editorActive, editorPaintOnDrag = true, editorAreaSelection = false, editorBrush = null, mapRefined = true, viewKey, isDark = false, waitingLabel = "Waiting for /map", fitContainer = false, spots = [], selectedSpotId = "", activeWaypointId = "", missionFollowRobot = false, behaviorNodes = [], selectedBehaviorNodeId = "", behaviorPreviewNode = null, missionRouteOrder = [], missionRouteClosed = false, missionRouteMode = false, selectedMissionRouteSourceId = "", mapAnnotations = [], selectedMapAnnotationId = "", btLayer = null, onBtLayerClose, onSpotClick, onBehaviorNodeClick, onMissionRouteSpotClick, onMissionRouteMapClick, onSpotPoseChange, onBehaviorNodePoseChange, onEditorMapPoint, onEditorMapArea, onMapClick, onMapPose, }) {
     const containerRef = useRef(null);
     const sceneRef = useRef(null);
     const rendererRef = useRef(null);
@@ -1814,6 +1814,9 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, 
                 .map(({ id }) => spotById.get(id))
                 .filter((spot) => spot === null || spot === void 0 ? void 0 : spot.pose)
                 .map((spot) => new THREE.Vector3(Number(spot.pose.x ?? 0), Number(spot.pose.y ?? 0), 0.12));
+            if (missionRouteClosed && routePoints.length > 1) {
+                routePoints.push(routePoints[0].clone());
+            }
             const routeLine = makeLine(routePoints, markerPalette(isDark).idle, 2);
             if (routeLine) {
                 routeLine.material.transparent = true;
@@ -1856,6 +1859,7 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, 
         nodeDragPreview,
         interactionMode,
         missionRouteOrder,
+        missionRouteClosed,
         mapAnnotations,
         selectedMapAnnotationId,
         selectedMissionRouteSourceId,

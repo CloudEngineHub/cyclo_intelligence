@@ -552,6 +552,39 @@ test('loads a saved map into the design stage', async () => {
   await waitFor(() => expect(getNavigationSpots).toHaveBeenCalledWith('factory'));
 });
 
+test('prefers the active design mission when opening Run', async () => {
+  getPgmFiles.mockResolvedValue({
+    files: [{ path: 'floor.pgm', name: 'floor.pgm' }],
+  });
+  getNavigationMissions.mockResolvedValue({
+    map_name: 'floor',
+    missions: ['mission', 'High_Table_Recycling'],
+  });
+  getNavigationMission.mockImplementation((mapName, missionName) => Promise.resolve({
+    exists: true,
+    map_name: mapName,
+    mission_name: missionName || 'mission',
+    global_bt: 'global.xml',
+    waypoints: [],
+    metadata: {},
+  }));
+
+  render(<MissionCanvasPage />);
+
+  fireEvent.click(screen.getByRole('tab', { name: 'Design' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Load Mission' }));
+  const designMissionSelect = await screen.findByRole('combobox', { name: 'Design mission file' });
+  fireEvent.change(designMissionSelect, { target: { value: 'High_Table_Recycling' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Load' }));
+  await waitFor(() => expect(screen.getByRole('combobox', { name: 'Mission file' }))
+    .toHaveValue('High_Table_Recycling'));
+
+  fireEvent.click(screen.getByRole('tab', { name: 'Run' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Load Mission' }));
+  const runMissionSelect = await screen.findByRole('combobox', { name: 'Run mission file' });
+  await waitFor(() => expect(runMissionSelect).toHaveValue('High_Table_Recycling'));
+});
+
 test('restores mission manifest waypoints before legacy spots', async () => {
   const latestMapViewerProps = () => (
     mockMapViewer.mock.calls[mockMapViewer.mock.calls.length - 1][0]
@@ -1314,6 +1347,7 @@ test('edits the mission route directly on the map', async () => {
   expect(screen.getAllByText('Waypoint C').length).toBeGreaterThan(0);
   expect(screen.getAllByText('Waypoint D').length).toBeGreaterThan(0);
   expect(latestMapViewerProps().missionRouteOrder).toEqual([]);
+  expect(latestMapViewerProps().missionRouteClosed).toBe(false);
 
   fireEvent.click(screen.getByRole('button', { name: 'Edit On Map' }));
 
@@ -1333,6 +1367,7 @@ test('edits the mission route directly on the map', async () => {
     { id: 'spot_b', order: 1 },
     { id: 'spot_a', order: 2 },
   ]);
+  expect(latestMapViewerProps().missionRouteClosed).toBe(false);
 
   act(() => {
     latestMapViewerProps().onMissionRouteSpotClick('spot_b');
@@ -1342,6 +1377,24 @@ test('edits the mission route directly on the map', async () => {
     { id: 'spot_b', order: 1 },
     { id: 'spot_a', order: 2 },
   ]);
+  expect(latestMapViewerProps().missionRouteClosed).toBe(true);
+  expect(screen.getByText('closed loop')).toBeInTheDocument();
+  expect(screen.getByText('Return to Waypoint B')).toBeInTheDocument();
+
+  // Reordering a closed route must rotate the loop without dropping its
+  // last -> first edge.
+  fireEvent.click(screen.getByRole('button', { name: 'Move Waypoint B down' }));
+  await waitFor(() => expect(latestMapViewerProps().missionRouteOrder).toEqual([
+    { id: 'spot_a', order: 1 },
+    { id: 'spot_b', order: 2 },
+  ]));
+  expect(latestMapViewerProps().missionRouteClosed).toBe(true);
+  fireEvent.click(screen.getByRole('button', { name: 'Move Waypoint B up' }));
+  await waitFor(() => expect(latestMapViewerProps().missionRouteOrder).toEqual([
+    { id: 'spot_b', order: 1 },
+    { id: 'spot_a', order: 2 },
+  ]));
+  expect(latestMapViewerProps().missionRouteClosed).toBe(true);
 
   fireEvent.click(screen.getByRole('button', { name: 'Save Mission' }));
 
@@ -1387,6 +1440,7 @@ test('edits the mission route directly on the map', async () => {
     'spot_d',
   ]));
   expect(latestMapViewerProps().missionRouteOrder).toEqual([]);
+  expect(latestMapViewerProps().missionRouteClosed).toBe(false);
 });
 
 test('starts mapping mode from Mission Canvas', async () => {
@@ -2207,7 +2261,10 @@ test('lists the mission route waypoints in the run session panel', async () => {
         metadata: {
           mission_flow: {
             nodes: [{ id: 'wp1', position: { x: 80, y: 72 } }, { id: 'wp2', position: { x: 300, y: 72 } }],
-            edges: [{ id: 'e1', source: 'wp1', target: 'wp2' }],
+            edges: [
+              { id: 'e1', source: 'wp1', target: 'wp2' },
+              { id: 'e2', source: 'wp2', target: 'wp1' },
+            ],
           },
         },
       }
@@ -2228,6 +2285,7 @@ test('lists the mission route waypoints in the run session panel', async () => {
   const waypointList = await screen.findByRole('list', { name: 'Mission waypoints' });
   expect(within(waypointList).getByText('Kitchen')).toBeInTheDocument();
   expect(within(waypointList).getByText('Living Room')).toBeInTheDocument();
+  expect(within(waypointList).getByText('Return to Kitchen')).toBeInTheDocument();
 });
 
 test('hides run waypoints with the map after leaving and returning to Run', async () => {
@@ -2282,6 +2340,16 @@ test('gates the mission run on an initial robot pose', async () => {
   const latestMapViewerProps = () => (
     mockMapViewer.mock.calls[mockMapViewer.mock.calls.length - 1][0]
   );
+  sendNavigateThroughPosesGoalsAndWait.mockResolvedValue({
+    ok: true,
+    status: 'SUCCEEDED',
+    message: 'Goals succeeded',
+  });
+  sendNavigateToPoseGoalAndWait.mockResolvedValue({
+    ok: true,
+    status: 'SUCCEEDED',
+    message: 'Goal succeeded',
+  });
   getPgmFiles.mockResolvedValue({
     files: [{ path: 'factory.pgm', name: 'factory.pgm' }],
   });
@@ -2298,7 +2366,10 @@ test('gates the mission run on an initial robot pose', async () => {
         metadata: {
           mission_flow: {
             nodes: [{ id: 'wp1', position: { x: 80, y: 72 } }, { id: 'wp2', position: { x: 300, y: 72 } }],
-            edges: [{ id: 'e1', source: 'wp1', target: 'wp2' }],
+            edges: [
+              { id: 'e1', source: 'wp1', target: 'wp2' },
+              { id: 'e2', source: 'wp2', target: 'wp1' },
+            ],
           },
         },
       }
@@ -2343,7 +2414,10 @@ test('gates the mission run on an initial robot pose', async () => {
   await waitFor(() => expect(screen.getByText('Ready')).toBeInTheDocument(), { timeout: 6000 });
   expect(sendNavigateToPoseGoalAndWait).not.toHaveBeenCalled();
 
-  // Both saved waypoints have empty local BTs, so Run batches the route.
+  // Both saved waypoints have empty local BTs. Run batches the outward route,
+  // then sends the closing wp2 -> wp1 leg as the final navigation goal.
+  expect(latestMapViewerProps().missionRouteClosed).toBe(true);
+  expect(screen.getByText('Return to Kitchen')).toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: 'Run Mission' }));
   await waitFor(
     () => expect(sendNavigateThroughPosesGoalsAndWait).toHaveBeenCalled(),
@@ -2352,7 +2426,9 @@ test('gates the mission run on an initial robot pose', async () => {
   const goals = sendNavigateThroughPosesGoalsAndWait.mock.calls[0][0];
   expect(goals.poses).toHaveLength(2);
   expect(goals.poses[0].pose.position).toMatchObject({ x: 1, y: 0 });
-  expect(sendNavigateToPoseGoalAndWait).not.toHaveBeenCalled();
+  await waitFor(() => expect(sendNavigateToPoseGoalAndWait).toHaveBeenCalled());
+  const [closingRequest] = sendNavigateToPoseGoalAndWait.mock.calls.at(-1);
+  expect(closingRequest.pose.pose.position).toMatchObject({ x: 1, y: 0 });
 }, 20000);
 
 test('keeps Run localization active while the BT node is up', async () => {

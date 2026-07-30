@@ -1238,11 +1238,18 @@ function RunSessionPanel({
         <ol className="grid gap-1 mt-0.5 max-h-40 overflow-y-auto" role="list" aria-label="Mission waypoints">
           {runner.progress.map((entry, index) => {
             const meta = WAYPOINT_STATE_META[entry.state] || WAYPOINT_STATE_META.pending;
+            const returnsToStart = (
+              index === runner.progress.length - 1
+              && index > 0
+              && entry.id === runner.progress[0]?.id
+            );
             return (
-              <li key={entry.id} className="flex items-center gap-2 text-xs min-w-0">
+              <li key={`${entry.id}:${index}`} className="flex items-center gap-2 text-xs min-w-0">
                 <span className="shrink-0 font-mono" style={{ color: meta.color, width: 14 }}>{meta.mark}</span>
                 <span className="shrink-0 tabular-nums" style={{ color: MISSION_TEXT_MUTED, width: 18 }}>{index + 1}</span>
-                <span className="truncate flex-1" style={{ color: MISSION_TEXT }}>{entry.label}</span>
+                <span className="truncate flex-1" style={{ color: MISSION_TEXT }}>
+                  {returnsToStart ? `Return to ${entry.label}` : entry.label}
+                </span>
                 {meta.note && (
                   <span className="shrink-0 font-mono text-[10.5px]" style={{ color: meta.color }}>{meta.note}</span>
                 )}
@@ -2084,6 +2091,23 @@ export default function MissionCanvasPage() {
     },
     [activeMissionFlowNodes, missionRouteEdges, visibleSpots],
   );
+  const missionRouteExecutionSpots = useMemo(
+    () => {
+      if (missionRouteEdges.length === 0) return [];
+      return missionStepSpotsFromMissionFlow(
+        visibleSpots,
+        activeMissionFlowNodes,
+        missionRouteEdges,
+      );
+    },
+    [activeMissionFlowNodes, missionRouteEdges, visibleSpots],
+  );
+  const missionRouteClosed = (
+    missionRouteExecutionSpots.length > missionRouteOrderedSpots.length
+    && missionRouteExecutionSpots.length > 2
+    && missionRouteExecutionSpots[0]?.id
+      === missionRouteExecutionSpots[missionRouteExecutionSpots.length - 1]?.id
+  );
   const missionRouteOrder = useMemo(
     () => (
       missionRouteOrderedSpots.map((spot, index) => ({
@@ -2146,7 +2170,10 @@ export default function MissionCanvasPage() {
     [btNodeIsUp, running],
   );
   const missionRunner = useMissionRunner({
-    orderedSpots: missionRouteOrderedSpots,
+    // A closed route intentionally contains the start waypoint a second time
+    // as its final execution step. Keep the unique list for badges/editing,
+    // but give the runner the full traversal so last -> start is sent to Nav2.
+    orderedSpots: missionRouteExecutionSpots,
     resolveBtXml: resolveMissionBtXml,
     btStatusRef,
     callService,
@@ -3002,6 +3029,7 @@ export default function MissionCanvasPage() {
 
   const handleOpenRunMapDialog = useCallback(() => {
     const preferredRunMapName = runMapName || mapName || DEFAULT_MAP_NAME;
+    const preferredRunMissionName = runMapName ? runMissionName : missionName;
     setWorkspaceStage(STAGE_RUN);
     setShowPgmFix(false);
     setShowRunMapDialog(true);
@@ -3019,8 +3047,8 @@ export default function MissionCanvasPage() {
           const available = await fetchMissionNames(selectedMapName);
           setRunMissionNames(available);
           setPendingRunMissionName(
-            selectedMapName === preferredRunMapName && available.includes(runMissionName)
-              ? runMissionName
+            selectedMapName === preferredRunMapName && available.includes(preferredRunMissionName)
+              ? preferredRunMissionName
               : DEFAULT_MISSION_NAME,
           );
         } else {
@@ -3035,7 +3063,7 @@ export default function MissionCanvasPage() {
         setMessage(error instanceof Error ? error.message : "Failed to list PGM files");
       })
       .finally(() => setRunMapBusy(false));
-  }, [fetchMissionNames, mapName, runMapName, runMissionName]);
+  }, [fetchMissionNames, mapName, missionName, runMapName, runMissionName]);
 
   const handleRunMapChange = useCallback((nextPath) => {
     setRunMapPath(nextPath);
@@ -3293,7 +3321,7 @@ export default function MissionCanvasPage() {
       visibleSpots.some((spot) => spot.id === id) && orderedIds.indexOf(id) === index
     ));
     setMissionFlowNodes((current) => syncMissionFlowNodesWithSpots(current, visibleSpots));
-    setMissionFlowEdges(validIds.slice(0, -1).map((source, index) => {
+    const nextEdges = validIds.slice(0, -1).map((source, index) => {
       const target = validIds[index + 1];
       return {
         id: missionFlowEdgeId(source, target),
@@ -3302,9 +3330,23 @@ export default function MissionCanvasPage() {
         type: "smoothstep",
         animated: false,
       };
-    }));
-    setMissionRouteSourceId(validIds[validIds.length - 1] || "");
-  }, [visibleSpots]);
+    });
+    if (missionRouteClosed && validIds.length > 1) {
+      const source = validIds[validIds.length - 1];
+      const target = validIds[0];
+      nextEdges.push({
+        id: missionFlowEdgeId(source, target),
+        source,
+        target,
+        type: "smoothstep",
+        animated: false,
+      });
+    }
+    setMissionFlowEdges(nextEdges);
+    setMissionRouteSourceId(
+      missionRouteClosed ? "" : (validIds[validIds.length - 1] || ""),
+    );
+  }, [missionRouteClosed, visibleSpots]);
 
   const handleMoveRouteSpot = useCallback((spotId, direction) => {
     const currentIds = missionRouteTreeSpots.map((spot) => spot.id);
@@ -4006,6 +4048,7 @@ export default function MissionCanvasPage() {
             selectedBehaviorNodeId={missionOverlayActive ? selectedBehaviorNodeId : ""}
             behaviorPreviewNode={missionOverlayActive ? behaviorPreviewNode : null}
             missionRouteOrder={missionOverlayActive ? missionRouteOrder : []}
+            missionRouteClosed={missionOverlayActive && missionRouteClosed}
             missionRouteMode={workspaceStage === STAGE_AUTHORING && missionRouteMode && !btNodeIsUp}
             selectedMissionRouteSourceId={missionRouteSourceId}
             mapAnnotations={
@@ -4201,13 +4244,17 @@ export default function MissionCanvasPage() {
               <div className="h-full min-h-0 grid grid-rows-[auto_minmax(0,1fr)] gap-2.5">
                 <div className="flex items-center justify-between">
                   <span className="text-[13.5px] font-bold">Mission Route</span>
-                  {missionRouteMode && <span className="text-[10.5px] font-mono px-2 py-1" style={{ borderRadius: 6, backgroundColor: "var(--mc-accent-soft)", color: "var(--mc-accent-hover)" }}>editing on map</span>}
+                  <div className="flex items-center gap-1.5">
+                    {missionRouteClosed && <span className="text-[10.5px] font-mono px-2 py-1" style={{ borderRadius: 6, backgroundColor: "color-mix(in srgb, var(--mc-success) 14%, transparent)", color: "var(--mc-success)" }}>closed loop</span>}
+                    {missionRouteMode && <span className="text-[10.5px] font-mono px-2 py-1" style={{ borderRadius: 6, backgroundColor: "var(--mc-accent-soft)", color: "var(--mc-accent-hover)" }}>editing on map</span>}
+                  </div>
                 </div>
                 <div className="min-h-0 overflow-auto pr-1">
                   <div className="grid gap-0">
                     {missionRouteTreeSpots.map((spot, index) => {
                       const selected = spot.id === selectedSpotId;
-                      const last = index === missionRouteTreeSpots.length - 1;
+                      const routeEnd = index === missionRouteTreeSpots.length - 1;
+                      const last = routeEnd && !missionRouteClosed;
                       return (
                         <div key={spot.id} className="flex gap-3 items-stretch">
                           <div className="flex flex-col items-center" style={{ width: 26 }}>
@@ -4221,7 +4268,7 @@ export default function MissionCanvasPage() {
                             </button>
                             <div className="flex items-center gap-1">
                               <button type="button" aria-label={`Move ${spot.label || spot.id} up`} disabled={index === 0} onClick={() => handleMoveRouteSpot(spot.id, -1)} className="h-7 w-7 text-[12px] font-semibold disabled:opacity-40" style={{ borderRadius: 7, border: "1px solid var(--mc-border-strong)", backgroundColor: "var(--mc-surface)", color: "var(--mc-text-muted)" }}>↑</button>
-                              <button type="button" aria-label={`Move ${spot.label || spot.id} down`} disabled={last} onClick={() => handleMoveRouteSpot(spot.id, 1)} className="h-7 w-7 text-[12px] font-semibold disabled:opacity-40" style={{ borderRadius: 7, border: "1px solid var(--mc-border-strong)", backgroundColor: "var(--mc-surface)", color: "var(--mc-text-muted)" }}>↓</button>
+                              <button type="button" aria-label={`Move ${spot.label || spot.id} down`} disabled={routeEnd} onClick={() => handleMoveRouteSpot(spot.id, 1)} className="h-7 w-7 text-[12px] font-semibold disabled:opacity-40" style={{ borderRadius: 7, border: "1px solid var(--mc-border-strong)", backgroundColor: "var(--mc-surface)", color: "var(--mc-text-muted)" }}>↓</button>
                               <button type="button" aria-label={`Delete Waypoint ${spot.label || spot.id}`} title={`Delete ${spot.label || spot.id}`} onClick={() => { void handleDeleteSpot(spot); }}
                                 className="h-7 w-7 shrink-0 inline-flex items-center justify-center active:translate-y-px"
                                 style={{ borderRadius: 7, border: "1px solid var(--mc-border-strong)", backgroundColor: "var(--mc-surface)", color: "var(--mc-danger)" }}>
@@ -4232,6 +4279,19 @@ export default function MissionCanvasPage() {
                         </div>
                       );
                     })}
+                    {missionRouteClosed && missionRouteTreeSpots.length > 1 && (
+                      <div className="flex gap-3 items-stretch" aria-label={`Return to ${missionRouteTreeSpots[0].label || missionRouteTreeSpots[0].id}`}>
+                        <div className="flex flex-col items-center" style={{ width: 26 }}>
+                          <span className="h-[26px] w-[26px] shrink-0 rounded-full inline-flex items-center justify-center text-[13px] font-semibold" style={{ color: "var(--mc-success)", backgroundColor: "color-mix(in srgb, var(--mc-success) 14%, transparent)", border: "1px solid var(--mc-success)" }}>↻</span>
+                        </div>
+                        <div className="flex-1 mb-2 grid items-center min-w-0" style={{ padding: 10, borderRadius: 11, border: "1px solid var(--mc-success)", backgroundColor: "color-mix(in srgb, var(--mc-success) 10%, transparent)" }}>
+                          <span className="block truncate text-[12.5px] font-semibold" style={{ color: "var(--mc-success)" }}>
+                            Return to {missionRouteTreeSpots[0].label || missionRouteTreeSpots[0].id}
+                          </span>
+                          <span className="block truncate text-[10px] font-mono" style={{ color: "var(--mc-text-subtle)" }}>Loop closure</span>
+                        </div>
+                      </div>
+                    )}
                     {missionRouteTreeSpots.length === 0 && <div className="text-[12px]" style={{ color: "var(--mc-text-muted)" }}>Select a waypoint and add it to the route.</div>}
                   </div>
                 </div>
