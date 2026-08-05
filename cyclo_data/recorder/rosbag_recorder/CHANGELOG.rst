@@ -2,6 +2,11 @@
 Changelog for package rosbag_recorder
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+1.2.1 (2026-08-05)
+------------------
+* Updated Cyclo release metadata to 1.2.1.
+* Contributors: Taehyeong Kim
+
 1.2.0 (2026-07-10)
 ------------------
 * None

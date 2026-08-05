@@ -166,6 +166,7 @@ jobs:
         run: |
           set -euo pipefail
           python -m pytest \
+            cyclo_data/tests/reader/test_frame_timestamps.py \
             cyclo_data/tests/recorder/test_recording_service.py \
             cyclo_data/tests/recorder/test_session_archive.py \
             cyclo_data/tests/recorder/test_transcoder.py \
