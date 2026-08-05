@@ -27,9 +27,6 @@ import numpy as np
 import pyarrow.parquet as pq
 
 
-_TIMESTAMP_COLUMNS = ["frame_index", "header_stamp_ns", "recv_ns"]
-
-
 @dataclass
 class FrameTimestamps:
     """In-memory view of one camera's sidecar Parquet."""
@@ -217,7 +214,9 @@ def load_frame_timestamps(parquet_path: Path, camera: str) -> FrameTimestamps:
         raise FileNotFoundError(f"frame_timestamps not found: {parquet_path}")
     # This is always one sidecar file. Avoid pq.read_table(), which routes
     # through PyArrow's dataset layer and has crashed in aarch64 wheels.
-    table = pq.ParquetFile(parquet_path).read(columns=_TIMESTAMP_COLUMNS)
+    table = pq.ParquetFile(parquet_path).read(
+        columns=["frame_index", "header_stamp_ns", "recv_ns"],
+    )
     frame_index = table.column("frame_index").to_numpy().astype(np.int64)
     header_stamp_ns = table.column("header_stamp_ns").to_numpy().astype(np.int64)
     recv_ns = table.column("recv_ns").to_numpy().astype(np.int64)
