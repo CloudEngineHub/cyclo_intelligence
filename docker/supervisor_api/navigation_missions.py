@@ -36,7 +36,7 @@ NAVIGATION_DATA_ROOT = Path(
     os.environ.get("CYCLO_NAVIGATION_DATA_DIR", "/workspace/navigation")
 )
 MISSION_SCHEMA_VERSION = 1
-DEFAULT_MISSION_NAME = "peanutmix"
+DEFAULT_MISSION_NAME = "default"
 _SAFE_NAME = re.compile(r"^[A-Za-z0-9_.-]+$")
 _SAFE_RELATIVE_FILE = re.compile(r"^[A-Za-z0-9_./-]+$")
 
@@ -293,6 +293,27 @@ def load_mission(map_name: str, mission_name: str = DEFAULT_MISSION_NAME):
     return _read_manifest(map_name, mission_name)
 
 
+def _prune_orphan_local_bt_files(manifest: MissionLoadResponse) -> None:
+    """Delete locals/*.xml files no waypoint references anymore.
+
+    Clients only delete stale paths they touched in-session, so files left by
+    waypoint renames/deletions in earlier sessions would otherwise accumulate
+    forever. The manifest being saved is the authoritative reference list.
+    """
+    locals_dir = (
+        _mission_dir(manifest.map_name, manifest.mission_name) / "locals"
+    )
+    if not locals_dir.is_dir():
+        return
+    referenced = {waypoint.local_bt for waypoint in manifest.waypoints}
+    for path in locals_dir.glob("*.xml"):
+        if f"locals/{path.name}" not in referenced:
+            try:
+                path.unlink()
+            except OSError:
+                pass
+
+
 @router.post("/{map_name}", response_model=MissionLoadResponse)
 def save_mission(
     map_name: str,
@@ -308,6 +329,7 @@ def save_mission(
         exists=True,
     )
     _write_manifest(manifest)
+    _prune_orphan_local_bt_files(manifest)
     return manifest
 
 

@@ -55,7 +55,7 @@ import { FALLBACK_CATALOG } from "../constants/btNodeCatalogFallback";
 import { BT_SUPPORTED_ROBOT_TYPE } from "../constants/btSupport";
 
 const DEFAULT_MAP_NAME = "map";
-const DEFAULT_MISSION_NAME = "peanutmix";
+const DEFAULT_MISSION_NAME = "default";
 
 function missionRequestName(missionName) {
   return missionName === DEFAULT_MISSION_NAME ? "" : missionName;

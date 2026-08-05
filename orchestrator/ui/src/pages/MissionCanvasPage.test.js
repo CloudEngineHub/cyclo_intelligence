@@ -138,7 +138,7 @@ jest.mock('../utils/navigationMissionsApi', () => ({
   }),
   getNavigationMissions: jest.fn().mockResolvedValue({
     map_name: 'map',
-    missions: ['peanutmix'],
+    missions: ['default'],
   }),
   getNavigationMissionBtFile: jest.fn().mockResolvedValue({
     path: 'global.xml',
@@ -218,7 +218,7 @@ beforeEach(() => {
   });
   getNavigationMissions.mockResolvedValue({
     map_name: 'map',
-    missions: ['peanutmix'],
+    missions: ['default'],
   });
   getNavigationMissionBtFile.mockResolvedValue({
     path: 'global.xml',
@@ -506,7 +506,7 @@ test('loads a saved map into the design stage', async () => {
   });
   getNavigationMissions.mockResolvedValue({
     map_name: 'factory',
-    missions: ['chestnut', 'peanutmix'],
+    missions: ['chestnut', 'default'],
   });
 
   render(<MissionCanvasPage />);
@@ -517,7 +517,7 @@ test('loads a saved map into the design stage', async () => {
   const mapSelect = await screen.findByRole('combobox', { name: 'Design mission map file' });
   await waitFor(() => expect(mapSelect).toHaveValue('factory.pgm'));
   const missionSelect = screen.getByRole('combobox', { name: 'Design mission file' });
-  await waitFor(() => expect(missionSelect).toHaveValue('peanutmix'));
+  await waitFor(() => expect(missionSelect).toHaveValue('default'));
   fireEvent.change(missionSelect, { target: { value: 'chestnut' } });
 
   fireEvent.click(screen.getByRole('button', { name: 'Load' }));
@@ -540,9 +540,9 @@ test('loads a saved map into the design stage', async () => {
   expect(screen.getByText('Design Session')).toBeInTheDocument();
   const activeMissionSelect = screen.getByRole('combobox', { name: 'Mission file' });
   expect(activeMissionSelect).toHaveValue('chestnut');
-  fireEvent.change(activeMissionSelect, { target: { value: 'peanutmix' } });
+  fireEvent.change(activeMissionSelect, { target: { value: 'default' } });
   await waitFor(() => expect(getNavigationMission).toHaveBeenCalledWith('factory', ''));
-  await waitFor(() => expect(activeMissionSelect).toHaveValue('peanutmix'));
+  await waitFor(() => expect(activeMissionSelect).toHaveValue('default'));
   expect(screen.getByRole('button', { name: 'Create Waypoint' })).toBeEnabled();
   fireEvent.click(screen.getByRole('button', { name: 'Create Waypoint' }));
   expect(screen.getByRole('menu', { name: 'Waypoint creation options' })).toBeInTheDocument();

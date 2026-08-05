@@ -623,7 +623,7 @@ def test_navigation_mission_manifest_and_bt_files(monkeypatch, tmp_path):
     )
     assert saved.exists is True
     assert saved.map_name == "factory"
-    assert saved.mission_name == "peanutmix"
+    assert saved.mission_name == "default"
     assert not hasattr(saved, "compiled_bt")
     assert saved.waypoints[0].local_bt == "locals/table_a.xml"
 
@@ -652,7 +652,7 @@ def test_navigation_mission_manifest_and_bt_files(monkeypatch, tmp_path):
     )
     assert deleted_bt.exists is False
     assert not (
-        tmp_path / "missions" / "factory" / "peanutmix" / "locals" / "table_a.xml"
+        tmp_path / "missions" / "factory" / "default" / "locals" / "table_a.xml"
     ).exists()
 
 
@@ -667,9 +667,39 @@ def test_navigation_missions_migrates_legacy_artifacts(monkeypatch, tmp_path):
 
     missions = navigation_missions.list_missions("map_1floor")
 
-    assert missions.missions == ["peanutmix"]
+    assert missions.missions == ["default"]
     assert not (legacy_dir / "mission.json").exists()
-    assert (legacy_dir / "peanutmix" / "mission.json").exists()
+    assert (legacy_dir / "default" / "mission.json").exists()
+
+
+def test_navigation_mission_save_prunes_orphan_local_bt_files(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setattr(navigation_missions, "NAVIGATION_DATA_ROOT", tmp_path)
+    locals_dir = tmp_path / "missions" / "factory" / "default" / "locals"
+    locals_dir.mkdir(parents=True)
+    (locals_dir / "table_a.xml").write_text("<root/>", encoding="utf-8")
+    (locals_dir / "waypoint_2.xml").write_text("<root/>", encoding="utf-8")
+    (locals_dir / "waypoint_5.xml").write_text("<root/>", encoding="utf-8")
+
+    navigation_missions.save_mission(
+        "factory",
+        navigation_missions.MissionSaveRequest(
+            waypoints=[
+                navigation_missions.MissionWaypoint(
+                    id="table_a",
+                    label="Table A",
+                    pose=navigation_missions.SpotPose(x=1.0, y=2.0, yaw=0.5),
+                    local_bt="locals/table_a.xml",
+                )
+            ],
+        ),
+    )
+
+    # Referenced file survives; leftovers from deleted/renamed waypoints go.
+    assert (locals_dir / "table_a.xml").exists()
+    assert not (locals_dir / "waypoint_2.xml").exists()
+    assert not (locals_dir / "waypoint_5.xml").exists()
 
 
 def test_navigation_missions_reject_path_escape(monkeypatch, tmp_path):
