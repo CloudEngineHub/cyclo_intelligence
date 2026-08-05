@@ -4,7 +4,7 @@ Changelog for package cyclo_brain
 
 1.2.1 (2026-08-05)
 ------------------
-* Updated image support to ``robotis/cyclo-intelligence:1.2.1``.
+* None
 * Contributors: Taehyeong Kim
 
 1.2.0 (2026-07-10)
