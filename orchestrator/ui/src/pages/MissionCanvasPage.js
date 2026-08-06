@@ -6,7 +6,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { MdDelete, MdPowerSettingsNew, MdStop } from "react-icons/md";
+import { MdAdd, MdContentCopy, MdDelete, MdPowerSettingsNew, MdStop } from "react-icons/md";
 import {
   cancelNavigateToPoseGoal,
   configureDesignLocalizationAmcl,
@@ -27,7 +27,9 @@ import {
   updateNavigationSpot,
 } from "../utils/navigationSpotsApi";
 import {
+  deleteNavigationMission,
   deleteNavigationMissionBtFile,
+  duplicateNavigationMission,
   getNavigationMission,
   getNavigationMissionBtFile,
   getNavigationMissions,
@@ -59,6 +61,25 @@ const DEFAULT_MISSION_NAME = "default";
 
 function missionRequestName(missionName) {
   return missionName === DEFAULT_MISSION_NAME ? "" : missionName;
+}
+
+// Mirrors the server's _SAFE_NAME charset; invalid names would 400 on save.
+const MISSION_NAME_PATTERN = /^[A-Za-z0-9_.-]+$/;
+const MISSION_NAME_MAX_LENGTH = 128;
+
+function isValidMissionName(name) {
+  return (
+    name.length > 0 &&
+    name.length <= MISSION_NAME_MAX_LENGTH &&
+    MISSION_NAME_PATTERN.test(name)
+  );
+}
+
+function uniqueMissionName(base, existingNames) {
+  if (!existingNames.includes(base)) return base;
+  let index = 2;
+  while (existingNames.includes(`${base}-${index}`)) index += 1;
+  return `${base}-${index}`;
 }
 const STATUS_POLL_MS = 10000;
 const BT_NODE_STATUS_POLL_MS = 5000;
@@ -936,6 +957,138 @@ function SaveMapDialog({ open, value, busy, onChange, onCancel, onSubmit }) {
   );
 }
 
+// Save/duplicate a mission under a typed name: prefilled for one-Enter saves,
+// existing names offered as chips, overwrite called out inline.
+function SaveMissionDialog({
+  open,
+  title = "Save Mission",
+  fieldLabel = "Mission name",
+  inputAriaLabel = "Save mission name",
+  submitLabel = "Save",
+  value,
+  existingNames = [],
+  currentName = "",
+  disallowExisting = false,
+  hint = "",
+  busy,
+  onChange,
+  onCancel,
+  onSubmit,
+}) {
+  if (!open) return null;
+  const trimmed = value.trim();
+  const valid = isValidMissionName(trimmed);
+  const isExisting = existingNames.includes(trimmed);
+  const wouldOverwrite = valid && isExisting && trimmed !== currentName;
+  const blocked = busy || !valid || (disallowExisting && isExisting);
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center px-4" role="dialog" aria-modal="true" aria-labelledby="mission-save-mission-title"
+      style={{ backgroundColor: "rgba(28,26,23,0.45)", backdropFilter: "blur(3px)" }}>
+      <form
+        className="w-full max-w-sm grid gap-4 p-5"
+        style={{ color: "var(--mc-text)", backgroundColor: "var(--mc-surface)", border: "1px solid var(--mc-border)", borderRadius: 16, boxShadow: "var(--mc-shadow)" }}
+        onSubmit={(event) => { event.preventDefault(); if (!blocked) onSubmit(); }}
+      >
+        <div id="mission-save-mission-title" className="text-[15px] font-bold">{title}</div>
+        <label className="grid gap-1.5 text-xs">
+          <span style={{ color: "var(--mc-text-muted)" }}>{fieldLabel}</span>
+          <input
+            autoFocus aria-label={inputAriaLabel} value={value} disabled={busy}
+            onChange={(event) => onChange(event.currentTarget.value)}
+            className="h-9 px-3 text-sm"
+            style={{ color: "var(--mc-text)", backgroundColor: "var(--mc-surface-2)", border: "1px solid var(--mc-border-strong)", borderRadius: 10 }}
+          />
+        </label>
+        {existingNames.length > 0 && (
+          <div className="flex flex-wrap gap-1.5 max-h-20 overflow-y-auto">
+            {existingNames.map((name) => (
+              <button
+                key={name}
+                type="button"
+                disabled={busy}
+                onClick={() => onChange(name)}
+                className="px-2 py-0.5 text-[11px]"
+                style={{
+                  borderRadius: 8,
+                  border: "1px solid var(--mc-border-strong)",
+                  backgroundColor: trimmed === name ? "var(--mc-surface-hover)" : "var(--mc-surface-2)",
+                  color: "var(--mc-text-muted)",
+                }}
+              >
+                {name}
+              </button>
+            ))}
+          </div>
+        )}
+        {trimmed && !valid && (
+          <div className="text-[11px]" style={{ color: "var(--mc-text-subtle)" }}>
+            Only letters, numbers, '.', '_' and '-'
+          </div>
+        )}
+        {wouldOverwrite && !disallowExisting && (
+          <div className="text-[11px]" style={{ color: "var(--mc-warning)" }}>
+            A mission named "{trimmed}" already exists — saving will replace it.
+          </div>
+        )}
+        {disallowExisting && isExisting && (
+          <div className="text-[11px]" style={{ color: "var(--mc-warning)" }}>
+            A mission named "{trimmed}" already exists.
+          </div>
+        )}
+        {hint && (
+          <div className="text-[11px]" style={{ color: "var(--mc-text-subtle)" }}>{hint}</div>
+        )}
+        <div className="flex justify-end gap-2">
+          <ActionButton disabled={busy} onClick={onCancel} variant="secondary">Cancel</ActionButton>
+          <ActionButton disabled={blocked} type="submit">
+            {wouldOverwrite && !disallowExisting ? "Overwrite" : submitLabel}
+          </ActionButton>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+// Generic confirm with an optional middle action (e.g. Save & continue).
+function ConfirmDialog({
+  open,
+  title,
+  body,
+  confirmLabel,
+  confirmVariant = "danger",
+  altLabel = "",
+  cancelLabel = "Cancel",
+  hint = "",
+  busy,
+  onConfirm,
+  onAlt,
+  onCancel,
+}) {
+  if (!open) return null;
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center px-4" role="dialog" aria-modal="true" aria-labelledby="mission-confirm-title"
+      style={{ backgroundColor: "rgba(28,26,23,0.45)", backdropFilter: "blur(3px)" }}>
+      <div
+        className="w-full max-w-sm grid gap-4 p-5"
+        style={{ color: "var(--mc-text)", backgroundColor: "var(--mc-surface)", border: "1px solid var(--mc-border)", borderRadius: 16, boxShadow: "var(--mc-shadow)" }}
+      >
+        <div id="mission-confirm-title" className="text-[15px] font-bold">{title}</div>
+        <div className="text-[13px]" style={{ color: "var(--mc-text-muted)" }}>{body}</div>
+        {hint && (
+          <div className="text-[11px]" style={{ color: "var(--mc-text-subtle)" }}>{hint}</div>
+        )}
+        <div className="flex justify-end gap-2">
+          <ActionButton disabled={busy} onClick={onCancel} variant="secondary">{cancelLabel}</ActionButton>
+          {altLabel && (
+            <ActionButton disabled={busy} onClick={onAlt} variant="secondary">{altLabel}</ActionButton>
+          )}
+          <ActionButton disabled={busy} onClick={onConfirm} variant={confirmVariant}>{confirmLabel}</ActionButton>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function LoadMapDialog({
   open,
   files,
@@ -976,17 +1129,19 @@ function LoadMapDialog({
         </label>
         {missionNames !== null && (
           <label className="grid gap-1.5 text-xs">
-            <span style={{ color: "var(--mc-text-muted)" }}>Mission file</span>
+            <span style={{ color: "var(--mc-text-muted)" }}>Mission</span>
             <select
               aria-label={missionSelectAriaLabel}
               value={selectedMissionName}
-              disabled={busy || missionNames.length === 0}
+              disabled={busy}
               onChange={(event) => onMissionChange(event.currentTarget.value)}
               className="h-9 px-2.5 text-sm"
               style={{ color: "var(--mc-text)", backgroundColor: "var(--mc-surface-2)", border: "1px solid var(--mc-border-strong)", borderRadius: 10 }}
             >
               {missionNames.length === 0
-                ? (<option value="">No missions found</option>)
+                // A map with no missions yet: loading the default name starts a
+                // fresh mission (created on first save).
+                ? (<option value={DEFAULT_MISSION_NAME}>{DEFAULT_MISSION_NAME} (new)</option>)
                 : missionNames.map((name) => (<option key={name} value={name}>{name}</option>))}
             </select>
           </label>
@@ -1108,30 +1263,54 @@ function MappingSessionPanel({ mappingEditorActive, selectedPath, dirty }) {
   );
 }
 
-function DesignSessionPanel({
+// Left-rail SESSION card — the mission hub: shows the loaded map + active
+// mission and hosts the mission switcher (and, in Design, management actions).
+function MissionSessionCard({
   mapName,
+  running,
+  showMission,
   missionName,
   missionNames,
+  disabled,
   onMissionChange,
-  busy,
+  actions = null,
 }) {
+  const options = missionNames.includes(missionName) || !missionName
+    ? missionNames
+    : [...missionNames, missionName];
   return (
-    <Panel title="Design Session" compact className="grid gap-1 content-start overflow-auto">
-      <SessionRow label="Selected map" value={mapName || "Not selected"} />
-      <label className="flex items-center justify-between gap-2 text-xs min-w-0">
-        <span style={{ color: MISSION_TEXT_MUTED }}>Mission file</span>
-        <select
-          aria-label="Mission file"
-          value={missionName}
-          disabled={busy || !mapName || missionNames.length === 0}
-          onChange={(event) => onMissionChange(event.currentTarget.value)}
-          className="max-w-[11rem] rounded px-1.5 py-1 text-xs"
-          style={{ color: "var(--mc-text)", backgroundColor: "var(--mc-surface-2)", border: "1px solid var(--mc-border-strong)" }}
-        >
-          {missionNames.map((name) => <option key={name} value={name}>{name}</option>)}
-        </select>
-      </label>
-    </Panel>
+    <div className="p-3 border grid gap-2" style={{ borderRadius: 12, borderColor: MISSION_BORDER, backgroundColor: MISSION_STAGE_EMPTY }}>
+      <div className="flex items-center justify-between gap-2 min-w-0">
+        <div className="text-[12px] font-semibold truncate">{mapName || "No map"}</div>
+        <div className="text-[10px] font-mono shrink-0" style={{ color: "var(--mc-text-subtle)" }}>
+          {running ? "running" : "idle"}
+        </div>
+      </div>
+      {showMission && (
+        options.length === 0 ? (
+          <div className="text-[11px]" style={{ color: "var(--mc-text-subtle)" }}>No missions yet</div>
+        ) : (
+          <label className="grid gap-1 text-[10px] font-mono tracking-[0.08em]" style={{ color: "var(--mc-text-subtle)" }}>
+            MISSION
+            <select
+              aria-label="Active mission"
+              value={missionName}
+              disabled={disabled}
+              onChange={(event) => onMissionChange(event.currentTarget.value)}
+              className="w-full rounded px-1.5 py-1 text-xs font-sans tracking-normal"
+              style={{ color: "var(--mc-text)", backgroundColor: "var(--mc-surface-2)", border: "1px solid var(--mc-border-strong)" }}
+            >
+              {options.map((name) => (
+                <option key={name} value={name}>
+                  {missionNames.includes(name) ? name : `${name} (unsaved)`}
+                </option>
+              ))}
+            </select>
+          </label>
+        )
+      )}
+      {showMission && actions}
+    </div>
   );
 }
 
@@ -1166,9 +1345,6 @@ const WAYPOINT_STATE_META = {
 
 function RunSessionPanel({
   mapName,
-  missionName,
-  missionNames,
-  onMissionChange,
   running,
   runner,
   poseReady,
@@ -1181,19 +1357,6 @@ function RunSessionPanel({
     <Panel title="Run Session" className="grid gap-2">
       <SessionRow label="Runtime" value={running ? "Running" : "Idle"} />
       <SessionRow label="Selected map" value={mapName || "Not selected"} />
-      <label className="flex items-center justify-between gap-2 text-xs min-w-0">
-        <span style={{ color: MISSION_TEXT_MUTED }}>Mission file</span>
-        <select
-          aria-label="Mission file"
-          value={missionName}
-          disabled={running || missionNames.length === 0}
-          onChange={(event) => onMissionChange(event.currentTarget.value)}
-          className="max-w-[11rem] rounded px-1.5 py-1 text-xs"
-          style={{ color: "var(--mc-text)", backgroundColor: "var(--mc-surface-2)", border: "1px solid var(--mc-border-strong)" }}
-        >
-          {missionNames.map((name) => <option key={name} value={name}>{name}</option>)}
-        </select>
-      </label>
       {running && (
         <div className="flex items-center justify-between gap-2 text-xs min-w-0">
           <span style={{ color: MISSION_TEXT_MUTED }}>Localization</span>
@@ -1829,8 +1992,13 @@ export default function MissionCanvasPage() {
       ? initialSession.mapName
       : DEFAULT_MAP_NAME
   ));
-  const [missionName, setMissionName] = useState(DEFAULT_MISSION_NAME);
-  const [missionNames, setMissionNames] = useState([DEFAULT_MISSION_NAME]);
+  const [missionName, setMissionName] = useState(() => (
+    typeof initialSession.missionName === "string" && initialSession.missionName.trim()
+      ? initialSession.missionName.trim()
+      : DEFAULT_MISSION_NAME
+  ));
+  // Missions known to exist on the server for the loaded design map.
+  const [designCatalog, setDesignCatalog] = useState({ mapName: "", names: [] });
   const [status, setStatus] = useState(null);
   const [spots, setSpots] = useState([]);
   const [selectedSpotId, setSelectedSpotId] = useState("");
@@ -1846,8 +2014,12 @@ export default function MissionCanvasPage() {
   // Run is deliberately a separate, read-only mission session. Loading a
   // mission to execute must never replace the mission currently being edited.
   const [runMapName, setRunMapName] = useState("");
-  const [runMissionName, setRunMissionName] = useState(DEFAULT_MISSION_NAME);
-  const [runSessionMissionNames, setRunSessionMissionNames] = useState([DEFAULT_MISSION_NAME]);
+  const [runMissionName, setRunMissionName] = useState(() => (
+    typeof initialSession.runMissionName === "string" && initialSession.runMissionName.trim()
+      ? initialSession.runMissionName.trim()
+      : DEFAULT_MISSION_NAME
+  ));
+  const [runCatalog, setRunCatalog] = useState({ mapName: "", names: [] });
   const [runSpots, setRunSpots] = useState([]);
   const [runMissionBtFiles, setRunMissionBtFiles] = useState({});
   const [runMissionFlowNodes, setRunMissionFlowNodes] = useState([]);
@@ -1880,6 +2052,16 @@ export default function MissionCanvasPage() {
   const [showPgmFix, setShowPgmFix] = useState(false);
   const [showSaveMapDialog, setShowSaveMapDialog] = useState(false);
   const [saveMapName, setSaveMapName] = useState(DEFAULT_MAP_NAME);
+  const [showSaveMissionDialog, setShowSaveMissionDialog] = useState(false);
+  const [saveMissionName, setSaveMissionName] = useState("");
+  const [showDuplicateMissionDialog, setShowDuplicateMissionDialog] = useState(false);
+  const [duplicateMissionName, setDuplicateMissionName] = useState("");
+  const [showDeleteMissionDialog, setShowDeleteMissionDialog] = useState(false);
+  // Design edits not yet written to the mission manifest (BT/route/waypoints).
+  const [designDirty, setDesignDirty] = useState(false);
+  const designDirtyRef = useRef(false);
+  const [showUnsavedDialog, setShowUnsavedDialog] = useState(false);
+  const pendingGuardActionRef = useRef(null);
   const [showDesignMapDialog, setShowDesignMapDialog] = useState(false);
   const [designMapFiles, setDesignMapFiles] = useState([]);
   const [designMissionNames, setDesignMissionNames] = useState([]);
@@ -2198,10 +2380,19 @@ export default function MissionCanvasPage() {
       loading={missionBtLoadingPath === selectedBtLayerPath}
       activeNodeNames={btActiveNodeNames}
       onXmlChange={(nextXml) => {
-        setMissionBtFiles((current) => ({
-          ...current,
-          [selectedBtLayerPath]: nextXml,
-        }));
+        setMissionBtFiles((current) => {
+          if (
+            current[selectedBtLayerPath] !== undefined &&
+            current[selectedBtLayerPath] !== nextXml
+          ) {
+            designDirtyRef.current = true;
+            setDesignDirty(true);
+          }
+          return {
+            ...current,
+            [selectedBtLayerPath]: nextXml,
+          };
+        });
       }}
     />
   ) : null;
@@ -2521,8 +2712,10 @@ export default function MissionCanvasPage() {
       designMapPath,
       navigationRuntimeMode,
       designPoseInitialized,
+      missionName,
+      runMissionName,
     });
-  }, [designMapPath, designPoseInitialized, mapName, navigationRuntimeMode, workspaceStage]);
+  }, [designMapPath, designPoseInitialized, mapName, missionName, navigationRuntimeMode, runMissionName, workspaceStage]);
 
   useEffect(() => {
     const statusMode = navigationRuntimeModeFromStatus(status);
@@ -2681,10 +2874,11 @@ export default function MissionCanvasPage() {
     setDeletedMissionBtPaths([]);
   }, [loadMissionBtFileOrDefault]);
 
+  // Server truth only — no phantom "default" injection. An empty list means the
+  // map has no missions yet; dialogs then offer a "default (new)" starter.
   const fetchMissionNames = useCallback(async (targetMapName) => {
     const response = await getNavigationMissions(targetMapName);
-    const available = Array.isArray(response?.missions) ? response.missions : [];
-    return [...new Set([DEFAULT_MISSION_NAME, ...available])];
+    return Array.isArray(response?.missions) ? response.missions : [];
   }, []);
 
   const loadMissionForMap = useCallback(async (
@@ -2810,7 +3004,7 @@ export default function MissionCanvasPage() {
           setPendingDesignMissionName(
             selectedMapName === currentMapName && available.includes(missionName)
               ? missionName
-              : DEFAULT_MISSION_NAME,
+              : available[0] ?? DEFAULT_MISSION_NAME,
           );
         } else {
           setDesignMissionNames([]);
@@ -2838,7 +3032,7 @@ export default function MissionCanvasPage() {
     fetchMissionNames(selectedMapName)
       .then((available) => {
         setDesignMissionNames(available);
-        setPendingDesignMissionName(DEFAULT_MISSION_NAME);
+        setPendingDesignMissionName(available[0] ?? DEFAULT_MISSION_NAME);
       })
       .catch((error) => {
         setDesignMissionNames([]);
@@ -2871,7 +3065,7 @@ export default function MissionCanvasPage() {
     setInteractionMode("view");
     setDesignMapReloadToken((value) => value + 1);
     setMissionName(pendingDesignMissionName);
-    setMissionNames(designMissionNames);
+    setDesignCatalog({ mapName: selectedMapName, names: designMissionNames });
     saveMissionSession({
       mapName: selectedMapName,
       workspaceStage: STAGE_AUTHORING,
@@ -2879,17 +3073,19 @@ export default function MissionCanvasPage() {
       navigationRuntimeMode,
     });
     setDesignMapBusy(true);
+    designDirtyRef.current = false;
+    setDesignDirty(false);
     loadMissionForMap(selectedMapName, {
       loadLegacyDesign: true,
       targetMissionName: pendingDesignMissionName,
     })
       .then((result) => {
         if (result.exists) {
-          setMessage(`Loaded mission ${selectedMapName}`);
+          setMessage(`Loaded mission ${pendingDesignMissionName} for ${selectedMapName}`);
         } else {
           setMessage(result.loadedDesign
             ? `Loaded design for ${selectedMapName}`
-            : `Started new mission for ${selectedMapName}`);
+            : `Started new mission ${pendingDesignMissionName} for ${selectedMapName}`);
         }
       })
       .catch((error) => {
@@ -2904,7 +3100,7 @@ export default function MissionCanvasPage() {
     pendingDesignMissionName,
   ]);
 
-  const handleSaveDesign = useCallback(() => runCommand(
+  const saveDesignMission = useCallback((targetMissionName) => runCommand(
     "Save mission",
     async () => {
       saveBehaviorNodesForMap(currentMapName, activeBehaviorNodes);
@@ -2951,12 +3147,12 @@ export default function MissionCanvasPage() {
           behavior_node_count: activeBehaviorNodes.length,
           mission_flow: serializeMissionFlow(syncedMissionFlowNodes, syncedMissionFlowEdges),
         },
-      }, missionRequestName(missionName));
+      }, missionRequestName(targetMissionName));
       await Promise.all(Object.entries(nextBtFiles).map(([path, content]) => (
-        saveNavigationMissionBtFile(currentMapName, path, content, missionRequestName(missionName))
+        saveNavigationMissionBtFile(currentMapName, path, content, missionRequestName(targetMissionName))
       )));
       await Promise.all(uniqueStaleLocalBtPaths.map((path) => (
-        deleteNavigationMissionBtFile(currentMapName, path, missionRequestName(missionName))
+        deleteNavigationMissionBtFile(currentMapName, path, missionRequestName(targetMissionName))
       )));
       setMissionBtFiles(nextBtFiles);
       setDeletedMissionBtPaths((current) => current.filter((path) => (
@@ -2974,19 +3170,98 @@ export default function MissionCanvasPage() {
           },
         };
       }));
-      return `Saved mission for ${currentMapName}`;
+      setMissionName(targetMissionName);
+      designDirtyRef.current = false;
+      setDesignDirty(false);
+      try {
+        const available = await fetchMissionNames(currentMapName);
+        setDesignCatalog({ mapName: currentMapName, names: available });
+      } catch {
+        // Catalog refresh is best-effort; the save itself succeeded.
+      }
+      return `Saved ${targetMissionName} for ${currentMapName}`;
     },
   ), [
     activeBehaviorNodes,
     currentMapName,
     deletedMissionBtPaths,
+    fetchMissionNames,
     missionFlowEdges,
     missionFlowNodes,
     missionBtFiles,
-    missionName,
     runCommand,
     visibleSpots,
   ]);
+
+  const markDesignDirty = useCallback(() => {
+    designDirtyRef.current = true;
+    setDesignDirty(true);
+  }, []);
+
+  const clearDesignDirty = useCallback(() => {
+    designDirtyRef.current = false;
+    setDesignDirty(false);
+  }, []);
+
+  // Destructive design-session actions (switch/new/load) go through here so
+  // unsaved manifest edits are never silently discarded.
+  const runGuardedDesignAction = useCallback((action) => {
+    if (!designDirtyRef.current) {
+      action();
+      return;
+    }
+    pendingGuardActionRef.current = action;
+    setShowUnsavedDialog(true);
+  }, []);
+
+  const handleOpenSaveMissionDialog = useCallback(() => {
+    setSaveMissionName(missionName);
+    setShowSaveMissionDialog(true);
+  }, [missionName]);
+
+  const handleConfirmSaveMission = useCallback(() => {
+    const target = saveMissionName.trim();
+    if (!isValidMissionName(target)) return;
+    setShowSaveMissionDialog(false);
+    void saveDesignMission(target);
+  }, [saveMissionName, saveDesignMission]);
+
+  const startNewMission = useCallback(() => {
+    const name = uniqueMissionName("untitled", designCatalog.names);
+    setMissionName(name);
+    setPendingDesignMissionName(name);
+    // In-memory canvas reset only — server spots are shared per map and must
+    // survive; the manifest written on Save is what defines this mission.
+    applySpots([]);
+    setMissionFlowNodes([]);
+    setMissionFlowEdges([]);
+    setMissionBtFiles({ "global.xml": buildGlobalMissionXml([]) });
+    setDeletedMissionBtPaths([]);
+    setMissionRouteMode(false);
+    setMissionRouteSourceId("");
+    setEditingSpotId("");
+    setEditingSpotLabel("");
+    clearDesignDirty();
+    setMessage("Started new mission — Save Mission to name it");
+  }, [applySpots, clearDesignDirty, designCatalog.names]);
+
+  const resolveUnsavedDialog = useCallback(async (mode) => {
+    const action = pendingGuardActionRef.current;
+    pendingGuardActionRef.current = null;
+    setShowUnsavedDialog(false);
+    if (!action) return;
+    if (mode === "discard") {
+      clearDesignDirty();
+      action();
+      return;
+    }
+    if (mode === "save") {
+      await saveDesignMission(missionName);
+      // saveDesignMission clears the ref on success; a failed save keeps the
+      // edits (and the dirty flag) so the action does not proceed.
+      if (!designDirtyRef.current) action();
+    }
+  }, [clearDesignDirty, missionName, saveDesignMission]);
 
   // Step 1 of a run: bring the nav stack up (AMCL included) and enter pose-set
   // mode so the operator can tell AMCL where the robot actually is. Localization
@@ -3049,7 +3324,7 @@ export default function MissionCanvasPage() {
           setPendingRunMissionName(
             selectedMapName === preferredRunMapName && available.includes(preferredRunMissionName)
               ? preferredRunMissionName
-              : DEFAULT_MISSION_NAME,
+              : available[0] ?? DEFAULT_MISSION_NAME,
           );
         } else {
           setRunMissionNames([]);
@@ -3077,7 +3352,7 @@ export default function MissionCanvasPage() {
     fetchMissionNames(selectedMapName)
       .then((available) => {
         setRunMissionNames(available);
-        setPendingRunMissionName(DEFAULT_MISSION_NAME);
+        setPendingRunMissionName(available[0] ?? DEFAULT_MISSION_NAME);
       })
       .catch((error) => {
         setRunMissionNames([]);
@@ -3099,7 +3374,7 @@ export default function MissionCanvasPage() {
     }
     setRunMapName(selectedMapName);
     setRunMissionName(pendingRunMissionName);
-    setRunSessionMissionNames(runMissionNames);
+    setRunCatalog({ mapName: selectedMapName, names: runMissionNames });
     setMissionMapLoaded(true);
     setShowRunMapDialog(false);
     setWorkspaceStage(STAGE_RUN);
@@ -3108,7 +3383,7 @@ export default function MissionCanvasPage() {
     loadRunMissionForMap(selectedMapName, pendingRunMissionName)
       .then((result) => {
         setMessage(result.exists
-          ? `Loaded mission ${selectedMapName}`
+          ? `Loaded mission ${pendingRunMissionName} for ${selectedMapName}`
           : `Started new mission for ${selectedMapName}`);
       })
       .catch((error) => {
@@ -3148,6 +3423,8 @@ export default function MissionCanvasPage() {
     setSelectedBehaviorNodeId("");
     setBtLayerSpotId("");
     setMissionRouteMode(false);
+    designDirtyRef.current = false;
+    setDesignDirty(false);
     setDesignMapBusy(true);
     loadMissionForMap(currentMapName, {
       loadLegacyDesign: true,
@@ -3163,6 +3440,49 @@ export default function MissionCanvasPage() {
       })
       .finally(() => setDesignMapBusy(false));
   }, [currentMapName, loadMissionForMap, missionName]);
+
+  const handleOpenDuplicateMissionDialog = useCallback(() => {
+    setDuplicateMissionName(uniqueMissionName(`${missionName}-copy`, designCatalog.names));
+    setShowDuplicateMissionDialog(true);
+  }, [designCatalog.names, missionName]);
+
+  const handleConfirmDuplicateMission = useCallback(() => {
+    const target = duplicateMissionName.trim();
+    if (!isValidMissionName(target) || designCatalog.names.includes(target)) return;
+    setShowDuplicateMissionDialog(false);
+    void runCommand("Duplicate mission", async () => {
+      await duplicateNavigationMission(currentMapName, missionName, target);
+      const available = await fetchMissionNames(currentMapName);
+      setDesignCatalog({ mapName: currentMapName, names: available });
+      return `Duplicated ${missionName} as ${target}`;
+    });
+  }, [currentMapName, designCatalog.names, duplicateMissionName, fetchMissionNames, missionName, runCommand]);
+
+  const handleConfirmDeleteMission = useCallback(() => {
+    setShowDeleteMissionDialog(false);
+    const deletedName = missionName;
+    void runCommand("Delete mission", async () => {
+      await deleteNavigationMission(currentMapName, deletedName);
+      const available = await fetchMissionNames(currentMapName);
+      setDesignCatalog({ mapName: currentMapName, names: available });
+      // The deleted mission's unsaved edits are moot — no guard on the switch.
+      clearDesignDirty();
+      if (available.length > 0) {
+        handleDesignMissionChange(available[0]);
+      } else {
+        startNewMission();
+      }
+      return `Deleted mission ${deletedName}`;
+    });
+  }, [
+    clearDesignDirty,
+    currentMapName,
+    fetchMissionNames,
+    handleDesignMissionChange,
+    missionName,
+    runCommand,
+    startNewMission,
+  ]);
 
   const handleStartMapping = useCallback(() => runCommand(
     "Mapping",
@@ -3306,6 +3626,8 @@ export default function MissionCanvasPage() {
         setMissionRouteSourceId(spotId);
         setMessage(`Route: ${sourceSpot?.label || missionRouteSourceId} -> ${spot.label || spot.id}`);
       }
+      designDirtyRef.current = true;
+      setDesignDirty(true);
       return result.edges;
     });
   }, [btNodeIsUp, missionRouteMode, missionRouteSourceId, visibleSpots]);
@@ -3320,6 +3642,8 @@ export default function MissionCanvasPage() {
     const validIds = orderedIds.filter((id, index) => (
       visibleSpots.some((spot) => spot.id === id) && orderedIds.indexOf(id) === index
     ));
+    designDirtyRef.current = true;
+    setDesignDirty(true);
     setMissionFlowNodes((current) => syncMissionFlowNodesWithSpots(current, visibleSpots));
     const nextEdges = validIds.slice(0, -1).map((source, index) => {
       const target = validIds[index + 1];
@@ -3499,6 +3823,8 @@ export default function MissionCanvasPage() {
             pose: spotPoseFromMapPose(localizedX, localizedY, localizedYaw),
             metadata: { source: "mission_canvas", coordinate_space: "map" },
           });
+          designDirtyRef.current = true;
+          setDesignDirty(true);
           setSpots((current) => [...current, created]);
           setSelectedSpotId(created.id);
           setSelectedBehaviorNodeId("");
@@ -3530,6 +3856,8 @@ export default function MissionCanvasPage() {
         pose: spotPoseFromMapPose(x, y, yaw),
         metadata: { source: "mission_canvas" },
       };
+      designDirtyRef.current = true;
+      setDesignDirty(true);
       setBehaviorNodes((current) => [...current, node]);
       setSelectedBehaviorNodeId(node.id);
       setSelectedSpotId("");
@@ -3547,6 +3875,8 @@ export default function MissionCanvasPage() {
         pose: spotPoseFromMapPose(x, y, yaw),
         metadata: { source: "mission_canvas", coordinate_space: "map" },
       });
+      designDirtyRef.current = true;
+      setDesignDirty(true);
       setSpots((current) => [...current, created]);
       setSelectedSpotId(created.id);
       setSelectedBehaviorNodeId("");
@@ -3621,6 +3951,8 @@ export default function MissionCanvasPage() {
     const spot = spots.find((item) => item.id === spotId);
     if (!spot) return;
     const nextPose = spotPoseFromMapPose(x, y, yaw ?? spot.pose?.yaw ?? 0);
+    designDirtyRef.current = true;
+    setDesignDirty(true);
     setSpots((current) => current.map((item) => (
       item.id === spotId ? { ...item, pose: nextPose } : item
     )));
@@ -3646,6 +3978,8 @@ export default function MissionCanvasPage() {
   }, [btNodeIsUp, spots]);
 
   const handleMoveBehaviorNode = useCallback((nodeId, x, y, yaw) => {
+    designDirtyRef.current = true;
+    setDesignDirty(true);
     setBehaviorNodes((current) => current.map((node) => (
       node.id === nodeId
         ? {
@@ -3684,6 +4018,8 @@ export default function MissionCanvasPage() {
     const previousSpot = spot;
     const previousLocalBt = localBtPathForSpot(previousSpot);
     const nextLocalBt = localBtPathFromLabel(label, previousSpot.id || "waypoint");
+    designDirtyRef.current = true;
+    setDesignDirty(true);
     if (previousLocalBt !== nextLocalBt) {
       setDeletedMissionBtPaths((current) => (
         current.includes(previousLocalBt) ? current : [...current, previousLocalBt]
@@ -3759,6 +4095,8 @@ export default function MissionCanvasPage() {
     try {
       const localBt = localBtPathForSpot(spot);
       await deleteNavigationSpot(spot.id, spot.map_name);
+      designDirtyRef.current = true;
+      setDesignDirty(true);
       setSpots((current) => current.filter((item) => item.id !== spot.id));
       setDeletedMissionBtPaths((current) => (
         current.includes(localBt) ? current : [...current, localBt]
@@ -3775,6 +4113,8 @@ export default function MissionCanvasPage() {
 
   const handleDeleteBehaviorNode = useCallback((node) => {
     if (!node) return;
+    designDirtyRef.current = true;
+    setDesignDirty(true);
     setBehaviorNodes((current) => current.filter((item) => (
       item.id !== node.id
     )));
@@ -3795,6 +4135,58 @@ export default function MissionCanvasPage() {
         onCancel={() => setShowSaveMapDialog(false)}
         onSubmit={handleConfirmSaveMap}
       />
+      <SaveMissionDialog
+        open={showSaveMissionDialog}
+        value={saveMissionName}
+        existingNames={designCatalog.names}
+        currentName={missionName}
+        busy={!!busy}
+        onChange={setSaveMissionName}
+        onCancel={() => setShowSaveMissionDialog(false)}
+        onSubmit={handleConfirmSaveMission}
+      />
+      <SaveMissionDialog
+        open={showDuplicateMissionDialog}
+        title="Duplicate Mission"
+        fieldLabel="New mission name"
+        inputAriaLabel="Duplicate mission name"
+        submitLabel="Duplicate"
+        value={duplicateMissionName}
+        existingNames={designCatalog.names}
+        currentName=""
+        disallowExisting
+        hint="Duplicates the last saved state."
+        busy={!!busy}
+        onChange={setDuplicateMissionName}
+        onCancel={() => setShowDuplicateMissionDialog(false)}
+        onSubmit={handleConfirmDuplicateMission}
+      />
+      <ConfirmDialog
+        open={showDeleteMissionDialog}
+        title="Delete Mission"
+        body={`Delete mission "${missionName}"? This permanently removes its waypoints, route, and behavior trees.`}
+        confirmLabel="Delete"
+        busy={!!busy}
+        onConfirm={handleConfirmDeleteMission}
+        onCancel={() => setShowDeleteMissionDialog(false)}
+      />
+      <ConfirmDialog
+        open={showUnsavedDialog}
+        title="Unsaved changes"
+        body={`"${missionName}" has unsaved changes.`}
+        confirmLabel="Discard"
+        altLabel={designCatalog.names.includes(missionName) ? "Save & continue" : ""}
+        hint={designCatalog.names.includes(missionName)
+          ? ""
+          : "Use Save Mission to name this mission first."}
+        busy={!!busy}
+        onConfirm={() => resolveUnsavedDialog("discard")}
+        onAlt={() => resolveUnsavedDialog("save")}
+        onCancel={() => {
+          pendingGuardActionRef.current = null;
+          setShowUnsavedDialog(false);
+        }}
+      />
       <LoadMapDialog
         open={showDesignMapDialog}
         files={designMapFiles}
@@ -3802,8 +4194,8 @@ export default function MissionCanvasPage() {
         missionNames={designMissionNames}
         selectedMissionName={pendingDesignMissionName}
         busy={designMapBusy}
-        title="Load Mission"
-        fieldLabel="Mission map"
+        title="Load Map"
+        fieldLabel="Map"
         selectAriaLabel="Design mission map file"
         missionSelectAriaLabel="Design mission file"
         onChange={handleDesignMapChange}
@@ -3813,7 +4205,7 @@ export default function MissionCanvasPage() {
           setPendingDesignMissionName(missionName);
           setShowDesignMapDialog(false);
         }}
-        onSubmit={handleConfirmDesignMap}
+        onSubmit={() => runGuardedDesignAction(handleConfirmDesignMap)}
       />
       <LoadMapDialog
         open={showRunMapDialog}
@@ -3822,8 +4214,8 @@ export default function MissionCanvasPage() {
         missionNames={runMissionNames}
         selectedMissionName={pendingRunMissionName}
         busy={runMapBusy}
-        title="Load Mission"
-        fieldLabel="Mission map"
+        title="Load Map"
+        fieldLabel="Map"
         selectAriaLabel="Run mission map file"
         missionSelectAriaLabel="Run mission file"
         onChange={handleRunMapChange}
@@ -3896,12 +4288,88 @@ export default function MissionCanvasPage() {
         <div className="text-[10px] font-mono tracking-[0.12em] px-1 pb-2" style={{ color: "var(--mc-text-subtle)" }}>
           SESSION
         </div>
-        <div className="p-3 border" style={{ borderRadius: 12, borderColor: MISSION_BORDER, backgroundColor: MISSION_STAGE_EMPTY }}>
-          <div className="text-[12px] font-semibold truncate">{currentMapName || mapName || "No map"}</div>
-          <div className="text-[10px] font-mono mt-1" style={{ color: "var(--mc-text-subtle)" }}>
-            {running ? "running" : "idle"}
-          </div>
-        </div>
+        <MissionSessionCard
+          mapName={currentMapName || mapName || ""}
+          running={running}
+          showMission={
+            (workspaceStage === STAGE_AUTHORING && designMapActive) ||
+            (workspaceStage === STAGE_RUN && missionMapLoaded)
+          }
+          missionName={activeMissionName}
+          missionNames={workspaceStage === STAGE_RUN ? runCatalog.names : designCatalog.names}
+          disabled={workspaceStage === STAGE_RUN
+            ? (running || missionRunnerActive || runMapBusy)
+            : (designMapBusy || !!busy)}
+          onMissionChange={workspaceStage === STAGE_RUN
+            ? handleMissionChange
+            : (name) => runGuardedDesignAction(() => handleDesignMissionChange(name))}
+          actions={workspaceStage === STAGE_AUTHORING ? (
+            <div className="grid gap-1.5">
+              <button
+                type="button"
+                aria-label="Save Mission"
+                title="Save Mission"
+                disabled={!!busy || designMapBusy}
+                onClick={handleOpenSaveMissionDialog}
+                className="w-full h-7 text-[11px] font-semibold disabled:opacity-40"
+                style={{
+                  borderRadius: 8,
+                  border: "1px solid transparent",
+                  backgroundColor: "var(--mc-accent)",
+                  color: "var(--mc-bg)",
+                }}
+              >
+                Save
+              </button>
+              <div className="flex gap-1.5">
+                <button
+                  type="button"
+                  aria-label="New Mission"
+                  title="New Mission"
+                  disabled={!!busy || designMapBusy}
+                  onClick={() => runGuardedDesignAction(startNewMission)}
+                  className="flex-1 flex items-center justify-center gap-1 h-7 text-[11px] font-semibold disabled:opacity-40"
+                  style={{
+                    borderRadius: 8,
+                    border: "1px solid var(--mc-border-strong)",
+                    backgroundColor: "var(--mc-surface-2)",
+                    color: "var(--mc-text-muted)",
+                  }}
+                >
+                  <MdAdd size={13} />
+                  New
+                </button>
+                {[
+                  { label: "Duplicate mission", Icon: MdContentCopy, onClick: handleOpenDuplicateMissionDialog },
+                  { label: "Delete mission", Icon: MdDelete, onClick: () => setShowDeleteMissionDialog(true) },
+                ].map(({ label, Icon, onClick }) => (
+                  <button
+                    key={label}
+                    type="button"
+                    aria-label={label}
+                    title={label}
+                    disabled={
+                      !!busy ||
+                      designMapBusy ||
+                      missionRunnerActive ||
+                      !designCatalog.names.includes(missionName)
+                    }
+                    onClick={onClick}
+                    className="w-8 flex items-center justify-center h-7 disabled:opacity-40"
+                    style={{
+                      borderRadius: 8,
+                      border: "1px solid var(--mc-border-strong)",
+                      backgroundColor: "var(--mc-surface-2)",
+                      color: "var(--mc-text-muted)",
+                    }}
+                  >
+                    <Icon size={13} />
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : null}
+        />
       </aside>
 
       {/* WORKSPACE */}
@@ -3965,13 +4433,12 @@ export default function MissionCanvasPage() {
             )}
             {workspaceStage === STAGE_AUTHORING && (
               <>
-                <ActionButton active={showDesignMapDialog || designMapBusy} disabled={!!busy || designMapBusy} onClick={handleOpenDesignMapDialog} variant="secondary">Load Mission</ActionButton>
-                <ActionButton disabled={!!busy} onClick={handleSaveDesign} variant="primary">Save Mission</ActionButton>
+                <ActionButton active={showDesignMapDialog || designMapBusy} disabled={!!busy || designMapBusy} onClick={handleOpenDesignMapDialog} variant="secondary">Load Map</ActionButton>
               </>
             )}
             {workspaceStage === STAGE_RUN && (
               <>
-                <ActionButton active={showRunMapDialog || runMapBusy} disabled={!!busy || running || runMapBusy} onClick={handleOpenRunMapDialog} variant="secondary">Load Mission</ActionButton>
+                <ActionButton active={showRunMapDialog || runMapBusy} disabled={!!busy || running || runMapBusy} onClick={handleOpenRunMapDialog} variant="secondary">Load Map</ActionButton>
                 <ActionButton active={interactionMode === "initial" || busy === "Localize" || busy === "Set robot pose"} disabled={!!busy} onClick={handleLocalize} variant="secondary">Localize</ActionButton>
                 <ActionButton active={busy === "Run mission" || missionRunnerActive} disabled={!!busy || !runPoseInitialized || missionRunnerActive} onClick={handleRunMission} variant="primary">Run Mission</ActionButton>
                 <ActionButton active={busy === "Stop"} disabled={!!busy || (!running && !missionRunnerActive)} onClick={handleStopNavigation} variant="danger">Stop</ActionButton>
@@ -4167,14 +4634,7 @@ export default function MissionCanvasPage() {
         </section>
 
         {workspaceStage === STAGE_AUTHORING ? (
-          <aside className="min-h-0 grid grid-rows-[auto_auto_minmax(0,1fr)_minmax(220px,0.7fr)] gap-4 overflow-hidden p-4">
-            <DesignSessionPanel
-              mapName={designMapActive ? currentMapName : ""}
-              missionName={missionName}
-              missionNames={missionNames}
-              onMissionChange={handleDesignMissionChange}
-              busy={designMapBusy || !!busy}
-            />
+          <aside className="min-h-0 grid grid-rows-[auto_minmax(0,1fr)_minmax(220px,0.7fr)] gap-4 overflow-hidden p-4">
             <BtRuntimePanel
               nodeState={btNodeStatus.state}
               btStatus={btStatusText}
@@ -4317,9 +4777,6 @@ export default function MissionCanvasPage() {
               <>
                 <RunSessionPanel
                   mapName={currentMapName}
-                  missionName={activeMissionName}
-                  missionNames={runSessionMissionNames}
-                  onMissionChange={handleMissionChange}
                   running={running}
                   runner={missionRunner}
                   poseReady={runPoseInitialized}

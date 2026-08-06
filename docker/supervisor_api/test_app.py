@@ -556,6 +556,7 @@ def test_navigation_routes_are_registered():
     assert "/navigation/missions" in paths
     assert "/navigation/missions/{map_name}" in paths
     assert "/navigation/missions/{map_name}/bt" in paths
+    assert "/navigation/missions/{map_name}/duplicate" in paths
 
 
 def test_navigation_spots_crud(monkeypatch, tmp_path):
@@ -670,6 +671,116 @@ def test_navigation_missions_migrates_legacy_artifacts(monkeypatch, tmp_path):
     assert missions.missions == ["default"]
     assert not (legacy_dir / "mission.json").exists()
     assert (legacy_dir / "default" / "mission.json").exists()
+
+
+def test_navigation_mission_delete_removes_mission_dir(monkeypatch, tmp_path):
+    import pytest
+    from fastapi import HTTPException
+
+    monkeypatch.setattr(navigation_missions, "NAVIGATION_DATA_ROOT", tmp_path)
+    navigation_missions.save_mission(
+        "factory",
+        navigation_missions.MissionSaveRequest(
+            waypoints=[
+                navigation_missions.MissionWaypoint(
+                    id="table_a",
+                    label="Table A",
+                    pose=navigation_missions.SpotPose(x=1.0, y=2.0, yaw=0.5),
+                )
+            ],
+        ),
+        mission_name="picnic",
+    )
+    navigation_missions.save_bt_file(
+        "factory",
+        navigation_missions.MissionBtFileRequest(
+            path="locals/table_a.xml",
+            content="<root/>",
+        ),
+        mission_name="picnic",
+    )
+
+    result = navigation_missions.delete_mission("factory", mission_name="picnic")
+
+    assert result.deleted is True
+    assert result.mission_name == "picnic"
+    assert not (tmp_path / "missions" / "factory" / "picnic").exists()
+
+    with pytest.raises(HTTPException) as missing:
+        navigation_missions.delete_mission("factory", mission_name="picnic")
+    assert missing.value.status_code == 404
+
+    with pytest.raises(HTTPException):
+        navigation_missions.delete_mission("factory", mission_name="../escape")
+
+
+def test_navigation_mission_duplicate_copies_manifest_and_bt(
+    monkeypatch, tmp_path
+):
+    import pytest
+    from fastapi import HTTPException
+
+    monkeypatch.setattr(navigation_missions, "NAVIGATION_DATA_ROOT", tmp_path)
+    navigation_missions.save_mission(
+        "factory",
+        navigation_missions.MissionSaveRequest(
+            waypoints=[
+                navigation_missions.MissionWaypoint(
+                    id="table_a",
+                    label="Table A",
+                    pose=navigation_missions.SpotPose(x=1.0, y=2.0, yaw=0.5),
+                    local_bt="locals/table_a.xml",
+                )
+            ],
+        ),
+        mission_name="picnic",
+    )
+    navigation_missions.save_bt_file(
+        "factory",
+        navigation_missions.MissionBtFileRequest(
+            path="locals/table_a.xml",
+            content="<root/>",
+        ),
+        mission_name="picnic",
+    )
+
+    copy = navigation_missions.duplicate_mission(
+        "factory",
+        navigation_missions.MissionDuplicateRequest(
+            mission_name="picnic", new_name="picnic-copy"
+        ),
+    )
+
+    assert copy.exists is True
+    assert copy.mission_name == "picnic-copy"
+    assert copy.waypoints[0].label == "Table A"
+    copy_dir = tmp_path / "missions" / "factory" / "picnic-copy"
+    assert (copy_dir / "locals" / "table_a.xml").read_text() == "<root/>"
+    # The copied manifest stores the new name, not the source's.
+    stored = json.loads((copy_dir / "mission.json").read_text())
+    assert stored["mission_name"] == "picnic-copy"
+    # Source is untouched.
+    assert (
+        tmp_path / "missions" / "factory" / "picnic" / "mission.json"
+    ).exists()
+
+    with pytest.raises(HTTPException) as conflict:
+        navigation_missions.duplicate_mission(
+            "factory",
+            navigation_missions.MissionDuplicateRequest(
+                mission_name="picnic", new_name="picnic-copy"
+            ),
+        )
+    assert conflict.value.status_code == 409
+
+    with pytest.raises(HTTPException) as missing:
+        navigation_missions.duplicate_mission(
+            "factory",
+            navigation_missions.MissionDuplicateRequest(
+                mission_name="ghost", new_name="ghost-copy"
+            ),
+        )
+    assert missing.value.status_code == 404
 
 
 def test_navigation_mission_save_prunes_orphan_local_bt_files(

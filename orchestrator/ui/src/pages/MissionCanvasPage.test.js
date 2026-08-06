@@ -23,7 +23,9 @@ import {
   updateNavigationSpot,
 } from '../utils/navigationSpotsApi';
 import {
+  deleteNavigationMission,
   deleteNavigationMissionBtFile,
+  duplicateNavigationMission,
   getNavigationMission,
   getNavigationMissionBtFile,
   getNavigationMissions,
@@ -124,6 +126,19 @@ jest.mock('../utils/navigationSpotsApi', () => ({
 }));
 
 jest.mock('../utils/navigationMissionsApi', () => ({
+  deleteNavigationMission: jest.fn().mockResolvedValue({
+    map_name: 'map',
+    mission_name: 'default',
+    deleted: true,
+  }),
+  duplicateNavigationMission: jest.fn().mockResolvedValue({
+    exists: true,
+    map_name: 'map',
+    mission_name: 'default-copy',
+    global_bt: 'global.xml',
+    waypoints: [],
+    metadata: {},
+  }),
   deleteNavigationMissionBtFile: jest.fn().mockResolvedValue({
     path: 'locals/waypoint_a.xml',
     content: '',
@@ -361,8 +376,9 @@ test('shows Waypoint and BT authoring panels in the authoring stage', async () =
   expect(screen.queryByText('No behavior nodes placed yet.')).not.toBeInTheDocument();
   expect(screen.queryByText('Waypoints / Local BT')).not.toBeInTheDocument();
   expect(screen.getByText('Mission Route')).toBeInTheDocument();
-  expect(screen.getByRole('button', { name: 'Load Mission' })).toBeInTheDocument();
-  expect(screen.getByRole('button', { name: 'Save Mission' })).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Load Map' })).toBeInTheDocument();
+  // Mission actions live in the rail session card and appear once a map loads.
+  expect(screen.queryByRole('button', { name: 'Save Mission' })).not.toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Edit On Map' })).toBeDisabled();
   expect(screen.queryByRole('button', { name: 'Add Selected' })).not.toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Create Waypoint' })).toBeDisabled();
@@ -512,13 +528,13 @@ test('loads a saved map into the design stage', async () => {
   render(<MissionCanvasPage />);
 
   fireEvent.click(screen.getByRole('tab', { name: 'Design' }));
-  fireEvent.click(screen.getByRole('button', { name: 'Load Mission' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Load Map' }));
 
   const mapSelect = await screen.findByRole('combobox', { name: 'Design mission map file' });
   await waitFor(() => expect(mapSelect).toHaveValue('factory.pgm'));
   const missionSelect = screen.getByRole('combobox', { name: 'Design mission file' });
-  await waitFor(() => expect(missionSelect).toHaveValue('default'));
-  fireEvent.change(missionSelect, { target: { value: 'chestnut' } });
+  // No phantom "default": the first server-listed mission is preselected.
+  await waitFor(() => expect(missionSelect).toHaveValue('chestnut'));
 
   fireEvent.click(screen.getByRole('button', { name: 'Load' }));
 
@@ -537,8 +553,7 @@ test('loads a saved map into the design stage', async () => {
       }),
     }),
   ]));
-  expect(screen.getByText('Design Session')).toBeInTheDocument();
-  const activeMissionSelect = screen.getByRole('combobox', { name: 'Mission file' });
+  const activeMissionSelect = screen.getByRole('combobox', { name: 'Active mission' });
   expect(activeMissionSelect).toHaveValue('chestnut');
   fireEvent.change(activeMissionSelect, { target: { value: 'default' } });
   await waitFor(() => expect(getNavigationMission).toHaveBeenCalledWith('factory', ''));
@@ -572,17 +587,162 @@ test('prefers the active design mission when opening Run', async () => {
   render(<MissionCanvasPage />);
 
   fireEvent.click(screen.getByRole('tab', { name: 'Design' }));
-  fireEvent.click(screen.getByRole('button', { name: 'Load Mission' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Load Map' }));
   const designMissionSelect = await screen.findByRole('combobox', { name: 'Design mission file' });
   fireEvent.change(designMissionSelect, { target: { value: 'High_Table_Recycling' } });
   fireEvent.click(screen.getByRole('button', { name: 'Load' }));
-  await waitFor(() => expect(screen.getByRole('combobox', { name: 'Mission file' }))
+  await waitFor(() => expect(screen.getByRole('combobox', { name: 'Active mission' }))
     .toHaveValue('High_Table_Recycling'));
 
   fireEvent.click(screen.getByRole('tab', { name: 'Run' }));
-  fireEvent.click(screen.getByRole('button', { name: 'Load Mission' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Load Map' }));
   const runMissionSelect = await screen.findByRole('combobox', { name: 'Run mission file' });
   await waitFor(() => expect(runMissionSelect).toHaveValue('High_Table_Recycling'));
+});
+
+test('offers a fresh default mission for a map with no missions', async () => {
+  getPgmFiles.mockResolvedValue({
+    files: [{ path: 'factory.pgm', name: 'factory.pgm' }],
+  });
+  getNavigationMissions.mockResolvedValue({ map_name: 'factory', missions: [] });
+
+  render(<MissionCanvasPage />);
+
+  fireEvent.click(screen.getByRole('tab', { name: 'Design' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Load Map' }));
+  const missionSelect = await screen.findByRole('combobox', { name: 'Design mission file' });
+  await waitFor(() => expect(missionSelect).toHaveValue('default'));
+  expect(screen.getByRole('option', { name: 'default (new)' })).toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole('button', { name: 'Load' }));
+  await waitFor(() => expect(getNavigationMission).toHaveBeenCalledWith('factory', ''));
+  await waitFor(() => (
+    expect(screen.getByText('Started new mission default for factory')).toBeInTheDocument()
+  ));
+});
+
+test('saves the design as a new named mission from the save dialog', async () => {
+  getPgmFiles.mockResolvedValue({
+    files: [{ path: 'factory.pgm', name: 'factory.pgm' }],
+  });
+  getNavigationMissions
+    .mockResolvedValueOnce({ map_name: 'factory', missions: ['default'] })
+    .mockResolvedValue({ map_name: 'factory', missions: ['default', 'evening_route'] });
+
+  render(<MissionCanvasPage />);
+
+  fireEvent.click(screen.getByRole('tab', { name: 'Design' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Load Map' }));
+  await screen.findByRole('combobox', { name: 'Design mission map file' });
+  fireEvent.click(screen.getByRole('button', { name: 'Load' }));
+  await waitFor(() => expect(screen.getByText('Started new mission default for factory')).toBeInTheDocument());
+
+  fireEvent.click(screen.getByRole('button', { name: 'Save Mission' }));
+  const nameInput = screen.getByRole('textbox', { name: 'Save mission name' });
+  expect(nameInput).toHaveValue('default');
+  fireEvent.change(nameInput, { target: { value: 'evening_route' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Save', exact: true }));
+
+  await waitFor(() => expect(saveNavigationMission).toHaveBeenCalledWith(
+    'factory',
+    expect.anything(),
+    'evening_route',
+  ));
+  await waitFor(() => expect(screen.getByText('Saved evening_route for factory')).toBeInTheDocument());
+  // The catalog refetched and the rail now tracks the new mission.
+  const railSelect = screen.getByRole('combobox', { name: 'Active mission' });
+  await waitFor(() => expect(railSelect).toHaveValue('evening_route'));
+});
+
+test('starts a fresh mission and guards unsaved changes', async () => {
+  const latestMapViewerProps = () => (
+    mockMapViewer.mock.calls[mockMapViewer.mock.calls.length - 1][0]
+  );
+  getPgmFiles.mockResolvedValue({
+    files: [{ path: 'factory.pgm', name: 'factory.pgm' }],
+  });
+  getNavigationMission.mockResolvedValue({
+    exists: true,
+    map_name: 'factory',
+    global_bt: 'global.xml',
+    waypoints: [
+      { id: 'wp1', label: 'Kitchen', pose: { frame_id: 'map', x: 1, y: 0, yaw: 0 }, local_bt: 'locals/wp1.xml', metadata: {} },
+    ],
+    metadata: {},
+  });
+
+  render(<MissionCanvasPage />);
+
+  fireEvent.click(screen.getByRole('tab', { name: 'Design' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Load Map' }));
+  await screen.findByRole('combobox', { name: 'Design mission map file' });
+  fireEvent.click(screen.getByRole('button', { name: 'Load' }));
+  await waitFor(() => expect(latestMapViewerProps().spots).toHaveLength(1));
+
+  // Clean session: New Mission resets the canvas immediately.
+  fireEvent.click(screen.getByRole('button', { name: 'New Mission' }));
+  await waitFor(() => expect(latestMapViewerProps().spots).toEqual([]));
+  expect(deleteNavigationSpot).not.toHaveBeenCalled();
+  const railSelect = screen.getByRole('combobox', { name: 'Active mission' });
+  expect(railSelect).toHaveValue('untitled');
+  expect(screen.getByRole('option', { name: 'untitled (unsaved)' })).toBeInTheDocument();
+
+  // Dirty the session with a new waypoint, then New Mission must be guarded.
+  fireEvent.click(screen.getByRole('button', { name: 'Create Waypoint' }));
+  fireEvent.click(screen.getByRole('button', { name: 'On Map' }));
+  await act(async () => {
+    await latestMapViewerProps().onMapPose(1, 2, 0.25);
+  });
+  await waitFor(() => expect(latestMapViewerProps().spots).toHaveLength(1));
+
+  fireEvent.click(screen.getByRole('button', { name: 'New Mission' }));
+  expect(screen.getByText('Unsaved changes')).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+  expect(latestMapViewerProps().spots).toHaveLength(1);
+
+  fireEvent.click(screen.getByRole('button', { name: 'New Mission' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Discard' }));
+  await waitFor(() => expect(latestMapViewerProps().spots).toEqual([]));
+});
+
+test('duplicates and deletes the active mission from the rail', async () => {
+  getPgmFiles.mockResolvedValue({
+    files: [{ path: 'factory.pgm', name: 'factory.pgm' }],
+  });
+  getNavigationMissions
+    .mockResolvedValueOnce({ map_name: 'factory', missions: ['chestnut', 'default'] })
+    .mockResolvedValueOnce({ map_name: 'factory', missions: ['chestnut', 'chestnut-copy', 'default'] })
+    .mockResolvedValue({ map_name: 'factory', missions: ['chestnut-copy', 'default'] });
+
+  render(<MissionCanvasPage />);
+
+  fireEvent.click(screen.getByRole('tab', { name: 'Design' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Load Map' }));
+  await screen.findByRole('combobox', { name: 'Design mission map file' });
+  fireEvent.click(screen.getByRole('button', { name: 'Load' }));
+  await waitFor(() => expect(screen.getByText('Started new mission chestnut for factory')).toBeInTheDocument());
+
+  fireEvent.click(screen.getByRole('button', { name: 'Duplicate mission' }));
+  const dupInput = screen.getByRole('textbox', { name: 'Duplicate mission name' });
+  expect(dupInput).toHaveValue('chestnut-copy');
+  fireEvent.click(screen.getByRole('button', { name: 'Duplicate', exact: true }));
+
+  await waitFor(() => expect(duplicateNavigationMission).toHaveBeenCalledWith(
+    'factory',
+    'chestnut',
+    'chestnut-copy',
+  ));
+  await waitFor(() => expect(screen.getByText('Duplicated chestnut as chestnut-copy')).toBeInTheDocument());
+  // Active mission unchanged after duplicating.
+  expect(screen.getByRole('combobox', { name: 'Active mission' })).toHaveValue('chestnut');
+
+  fireEvent.click(screen.getByRole('button', { name: 'Delete mission' }));
+  expect(screen.getByText(/Delete mission "chestnut"\?/)).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'Delete', exact: true }));
+
+  await waitFor(() => expect(deleteNavigationMission).toHaveBeenCalledWith('factory', 'chestnut'));
+  // Switches to the first remaining mission from the refreshed catalog.
+  await waitFor(() => expect(getNavigationMission).toHaveBeenCalledWith('factory', 'chestnut-copy'));
 });
 
 test('restores mission manifest waypoints before legacy spots', async () => {
@@ -642,11 +802,11 @@ test('restores mission manifest waypoints before legacy spots', async () => {
   render(<MissionCanvasPage />);
 
   fireEvent.click(screen.getByRole('tab', { name: 'Design' }));
-  fireEvent.click(screen.getByRole('button', { name: 'Load Mission' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Load Map' }));
   await screen.findByRole('combobox', { name: 'Design mission map file' });
   fireEvent.click(screen.getByRole('button', { name: 'Load' }));
 
-  await waitFor(() => expect(screen.getByText('Loaded mission factory')).toBeInTheDocument());
+  await waitFor(() => expect(screen.getByText('Loaded mission default for factory')).toBeInTheDocument());
   await waitFor(() => expect(latestMapViewerProps().spots).toHaveLength(1));
   expect(latestMapViewerProps().spots[0]).toMatchObject({
     id: 'mission_pickup',
@@ -670,8 +830,8 @@ test('restores mission manifest waypoints before legacy spots', async () => {
   expect(latestMapViewerProps().missionRouteOrder).toEqual([]);
   expect(screen.queryByText('legacy.xml')).not.toBeInTheDocument();
   expect(getNavigationSpots.mock.calls.some(([mapName]) => mapName === 'factory')).toBe(false);
-  expect(getNavigationMissionBtFile).toHaveBeenCalledWith('factory', 'global.xml');
-  expect(getNavigationMissionBtFile).toHaveBeenCalledWith('factory', 'locals/mission_pickup.xml');
+  expect(getNavigationMissionBtFile).toHaveBeenCalledWith('factory', 'global.xml', '');
+  expect(getNavigationMissionBtFile).toHaveBeenCalledWith('factory', 'locals/mission_pickup.xml', '');
 });
 
 test('hides loaded design waypoints after returning to mapping stage', async () => {
@@ -703,7 +863,7 @@ test('hides loaded design waypoints after returning to mapping stage', async () 
   render(<MissionCanvasPage />);
 
   fireEvent.click(screen.getByRole('tab', { name: 'Design' }));
-  fireEvent.click(screen.getByRole('button', { name: 'Load Mission' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Load Map' }));
   await screen.findByRole('combobox', { name: 'Design mission map file' });
   fireEvent.click(screen.getByRole('button', { name: 'Load' }));
 
@@ -750,7 +910,7 @@ test('renders legacy pixel-coordinate waypoints in loaded map coordinates', asyn
   render(<MissionCanvasPage />);
 
   fireEvent.click(screen.getByRole('tab', { name: 'Design' }));
-  fireEvent.click(screen.getByRole('button', { name: 'Load Mission' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Load Map' }));
   await screen.findByRole('combobox', { name: 'Design mission map file' });
   fireEvent.click(screen.getByRole('button', { name: 'Load' }));
 
@@ -783,7 +943,7 @@ test('shows waypoint actions in Waypoints after placing a waypoint', async () =>
   render(<MissionCanvasPage />);
 
   fireEvent.click(screen.getByRole('tab', { name: 'Design' }));
-  fireEvent.click(screen.getByRole('button', { name: 'Load Mission' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Load Map' }));
   await screen.findByRole('combobox', { name: 'Design mission map file' });
   fireEvent.click(screen.getByRole('button', { name: 'Load' }));
   await waitFor(() => expect(latestMapViewerProps().map).toMatchObject({
@@ -828,6 +988,7 @@ test('shows waypoint actions in Waypoints after placing a waypoint', async () =>
   }));
 
   fireEvent.click(screen.getByRole('button', { name: 'Save Mission' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Save', exact: true }));
 
   await waitFor(() => expect(saveNavigationMission).toHaveBeenCalledWith(
     'factory',
@@ -854,11 +1015,13 @@ test('shows waypoint actions in Waypoints after placing a waypoint', async () =>
         }),
       }),
     }),
+    '',
   ));
   await waitFor(() => expect(saveNavigationMissionBtFile).toHaveBeenCalledWith(
     'factory',
     'global.xml',
     expect.stringContaining('<Sequence name="GlobalMission"/>'),
+    '',
   ));
   expect(saveNavigationMissionBtFile).not.toHaveBeenCalledWith(
     'factory',
@@ -869,8 +1032,9 @@ test('shows waypoint actions in Waypoints after placing a waypoint', async () =>
     'factory',
     'locals/waypoint_a.xml',
     expect.stringContaining('<BehaviorTree ID="MainTree"/>'),
+    '',
   );
-  await waitFor(() => expect(screen.getByText('Saved mission for factory')).toBeInTheDocument());
+  await waitFor(() => expect(screen.getByText('Saved default for factory')).toBeInTheDocument());
 
   await act(async () => {
     latestMapViewerProps().onMapClick(0, 0);
@@ -895,6 +1059,7 @@ test('shows waypoint actions in Waypoints after placing a waypoint', async () =>
   }));
   expect(screen.getByRole('button', { name: 'Pickup A' })).toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: 'Save Mission' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Save', exact: true }));
   await waitFor(() => expect(saveNavigationMission).toHaveBeenLastCalledWith(
     'factory',
     expect.objectContaining({
@@ -905,24 +1070,29 @@ test('shows waypoint actions in Waypoints after placing a waypoint', async () =>
         }),
       ],
     }),
+    '',
   ));
   expect(saveNavigationMissionBtFile).toHaveBeenCalledWith(
     'factory',
     'locals/pickup_a.xml',
     expect.any(String),
+    '',
   );
   await waitFor(() => expect(deleteNavigationMissionBtFile).toHaveBeenCalledWith(
     'factory',
     'locals/waypoint_a.xml',
+    '',
   ));
 
   fireEvent.click(screen.getByRole('button', { name: /Delete Waypoint Pickup A/ }));
   await waitFor(() => expect(deleteNavigationSpot).toHaveBeenCalledWith('spot_a', 'factory'));
   await waitFor(() => expect(screen.queryByRole('button', { name: 'Pickup A' })).not.toBeInTheDocument());
   fireEvent.click(screen.getByRole('button', { name: 'Save Mission' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Save', exact: true }));
   await waitFor(() => expect(deleteNavigationMissionBtFile).toHaveBeenCalledWith(
     'factory',
     'locals/pickup_a.xml',
+    '',
   ));
 });
 
@@ -960,7 +1130,7 @@ test('opens waypoint BT map layer when selecting a waypoint with BT active', asy
   render(<MissionCanvasPage />);
 
   fireEvent.click(screen.getByRole('tab', { name: 'Design' }));
-  fireEvent.click(screen.getByRole('button', { name: 'Load Mission' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Load Map' }));
   await screen.findByRole('combobox', { name: 'Design mission map file' });
   fireEvent.click(screen.getByRole('button', { name: 'Load' }));
 
@@ -1037,7 +1207,7 @@ test('creates a waypoint at robot with automatic localization from the waypoint 
   render(<MissionCanvasPage />);
 
   fireEvent.click(screen.getByRole('tab', { name: 'Design' }));
-  fireEvent.click(screen.getByRole('button', { name: 'Load Mission' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Load Map' }));
   await screen.findByRole('combobox', { name: 'Design mission map file' });
   fireEvent.click(screen.getByRole('button', { name: 'Load' }));
 
@@ -1135,7 +1305,7 @@ test('clears stale robot pose before a second at-robot waypoint attempt', async 
   render(<MissionCanvasPage />);
 
   fireEvent.click(screen.getByRole('tab', { name: 'Design' }));
-  fireEvent.click(screen.getByRole('button', { name: 'Load Mission' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Load Map' }));
   await screen.findByRole('combobox', { name: 'Design mission map file' });
   fireEvent.click(screen.getByRole('button', { name: 'Load' }));
 
@@ -1207,7 +1377,7 @@ test('syncs design localization state from navigation status mode', async () => 
 
   // The map must be loaded in-session (it is not auto-restored on refresh).
   fireEvent.click(screen.getByRole('tab', { name: 'Design' }));
-  fireEvent.click(screen.getByRole('button', { name: 'Load Mission' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Load Map' }));
   await screen.findByRole('combobox', { name: 'Design mission map file' });
   fireEvent.click(screen.getByRole('button', { name: 'Load' }));
 
@@ -1251,7 +1421,7 @@ test('creates a waypoint at the current robot pose from the design toolbar', asy
   render(<MissionCanvasPage />);
 
   fireEvent.click(screen.getByRole('tab', { name: 'Design' }));
-  fireEvent.click(screen.getByRole('button', { name: 'Load Mission' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Load Map' }));
   await screen.findByRole('combobox', { name: 'Design mission map file' });
   fireEvent.click(screen.getByRole('button', { name: 'Load' }));
 
@@ -1336,7 +1506,7 @@ test('edits the mission route directly on the map', async () => {
   render(<MissionCanvasPage />);
 
   fireEvent.click(screen.getByRole('tab', { name: 'Design' }));
-  fireEvent.click(screen.getByRole('button', { name: 'Load Mission' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Load Map' }));
   await screen.findByRole('combobox', { name: 'Design mission map file' });
   fireEvent.click(screen.getByRole('button', { name: 'Load' }));
   await waitFor(() => expect(latestMapViewerProps().map).not.toBeNull());
@@ -1397,6 +1567,7 @@ test('edits the mission route directly on the map', async () => {
   expect(latestMapViewerProps().missionRouteClosed).toBe(true);
 
   fireEvent.click(screen.getByRole('button', { name: 'Save Mission' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Save', exact: true }));
 
   await waitFor(() => expect(saveNavigationMission).toHaveBeenCalledWith(
     'map',
@@ -1416,6 +1587,7 @@ test('edits the mission route directly on the map', async () => {
         }),
       }),
     }),
+    '',
   ));
   await waitFor(() => {
     const globalSave = saveNavigationMissionBtFile.mock.calls.find(([mapName, path]) => (
@@ -2144,7 +2316,7 @@ test('enables navigation runtime layers in the run stage', async () => {
   expect(screen.getByText('Runtime')).toBeInTheDocument();
   await waitFor(() => expect(screen.getByText('Running')).toBeInTheDocument());
   expect(screen.queryByText('PID:')).not.toBeInTheDocument();
-  expect(screen.getByRole('button', { name: 'Load Mission' })).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Load Map' })).toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Run Mission' })).toBeInTheDocument();
   expect(screen.queryByRole('button', { name: 'Navigation' })).not.toBeInTheDocument();
   expect(screen.queryByRole('button', { name: 'Run BT' })).not.toBeInTheDocument();
@@ -2220,14 +2392,14 @@ test('loads a saved map for the run stage', async () => {
   render(<MissionCanvasPage />);
 
   fireEvent.click(screen.getByRole('tab', { name: 'Run' }));
-  fireEvent.click(screen.getByRole('button', { name: 'Load Mission' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Load Map' }));
 
   const mapSelect = await screen.findByRole('combobox', { name: 'Run mission map file' });
   await waitFor(() => expect(mapSelect).toHaveValue('factory.pgm'));
 
   fireEvent.click(screen.getByRole('button', { name: 'Load' }));
 
-  await waitFor(() => expect(screen.getByText('Loaded mission factory')).toBeInTheDocument());
+  await waitFor(() => expect(screen.getByText('Loaded mission default for factory')).toBeInTheDocument());
   // Map name now appears both in the left-rail mission summary and the Run Session panel.
   expect(screen.getAllByText('factory').length).toBeGreaterThan(0);
   await waitFor(() => expect(latestMapViewerProps().spots).toHaveLength(1));
@@ -2274,12 +2446,12 @@ test('lists the mission route waypoints in the run session panel', async () => {
   render(<MissionCanvasPage />);
 
   fireEvent.click(screen.getByRole('tab', { name: 'Run' }));
-  fireEvent.click(screen.getByRole('button', { name: 'Load Mission' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Load Map' }));
   const mapSelect = await screen.findByRole('combobox', { name: 'Run mission map file' });
   await waitFor(() => expect(mapSelect).toHaveValue('factory.pgm'));
   fireEvent.click(screen.getByRole('button', { name: 'Load' }));
 
-  await waitFor(() => expect(screen.getByText('Loaded mission factory')).toBeInTheDocument());
+  await waitFor(() => expect(screen.getByText('Loaded mission default for factory')).toBeInTheDocument());
 
   // The Run Session panel reflects the loaded route as an ordered checklist.
   const waypointList = await screen.findByRole('list', { name: 'Mission waypoints' });
@@ -2317,11 +2489,11 @@ test('hides run waypoints with the map after leaving and returning to Run', asyn
   expect(screen.getByText('BT Runtime')).toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Activate BT' })).toBeInTheDocument();
 
-  fireEvent.click(screen.getByRole('button', { name: 'Load Mission' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Load Map' }));
   const mapSelect = await screen.findByRole('combobox', { name: 'Run mission map file' });
   await waitFor(() => expect(mapSelect).toHaveValue('factory.pgm'));
   fireEvent.click(screen.getByRole('button', { name: 'Load' }));
-  await waitFor(() => expect(screen.getByText('Loaded mission factory')).toBeInTheDocument());
+  await waitFor(() => expect(screen.getByText('Loaded mission default for factory')).toBeInTheDocument());
   await waitFor(() => expect(latestMapViewerProps().spots).toHaveLength(2));
   // Run keeps the beautified floor-plan rendering.
   expect(latestMapViewerProps().mapRefined).toBe(true);
@@ -2384,11 +2556,11 @@ test('gates the mission run on an initial robot pose', async () => {
   render(<MissionCanvasPage />);
 
   fireEvent.click(screen.getByRole('tab', { name: 'Run' }));
-  fireEvent.click(screen.getByRole('button', { name: 'Load Mission' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Load Map' }));
   const mapSelect = await screen.findByRole('combobox', { name: 'Run mission map file' });
   await waitFor(() => expect(mapSelect).toHaveValue('factory.pgm'));
   fireEvent.click(screen.getByRole('button', { name: 'Load' }));
-  await waitFor(() => expect(screen.getByText('Loaded mission factory')).toBeInTheDocument());
+  await waitFor(() => expect(screen.getByText('Loaded mission default for factory')).toBeInTheDocument());
 
   // Run Mission is disabled until the robot is localized.
   getServiceStatus.mockResolvedValue({ is_up: true, mode: 'nav' });
@@ -2459,14 +2631,14 @@ test('keeps Run localization active while the BT node is up', async () => {
 
   // Establish that the BT node is up (observable in the design stage).
   fireEvent.click(screen.getByRole('tab', { name: 'Design' }));
-  fireEvent.click(screen.getByRole('button', { name: 'Load Mission' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Load Map' }));
   await screen.findByRole('combobox', { name: 'Design mission map file' });
   fireEvent.click(screen.getByRole('button', { name: 'Load' }));
   await waitFor(() => expect(screen.getByText('BT Node Active')).toBeInTheDocument());
 
   // Move to Run and localize; the BT node stays up throughout.
   fireEvent.click(screen.getByRole('tab', { name: 'Run' }));
-  fireEvent.click(screen.getByRole('button', { name: 'Load Mission' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Load Map' }));
   const mapSelect = await screen.findByRole('combobox', { name: 'Run mission map file' });
   await waitFor(() => expect(mapSelect).toHaveValue('factory.pgm'));
   fireEvent.click(screen.getByRole('button', { name: 'Load' }));

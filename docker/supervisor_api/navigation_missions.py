@@ -24,6 +24,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shutil
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
@@ -330,6 +331,63 @@ def save_mission(
     )
     _write_manifest(manifest)
     _prune_orphan_local_bt_files(manifest)
+    return manifest
+
+
+class MissionDeleteResponse(BaseModel):
+    map_name: str
+    mission_name: str
+    deleted: bool = True
+
+
+@router.delete("/{map_name}", response_model=MissionDeleteResponse)
+def delete_mission(
+    map_name: str,
+    mission_name: str = Query(min_length=1, max_length=128),
+):
+    mission_dir = _mission_dir(map_name, mission_name)
+    if not (mission_dir / "mission.json").is_file():
+        raise HTTPException(
+            404, f"Mission {mission_name} not found for {map_name}"
+        )
+    try:
+        shutil.rmtree(mission_dir)
+    except OSError as exc:
+        raise HTTPException(
+            500, f"Failed to delete mission {mission_name}: {exc}"
+        ) from exc
+    return MissionDeleteResponse(
+        map_name=_validate_map_name(map_name),
+        mission_name=_validate_mission_name(mission_name),
+    )
+
+
+class MissionDuplicateRequest(BaseModel):
+    mission_name: str = Field(min_length=1, max_length=128)
+    new_name: str = Field(min_length=1, max_length=128)
+
+
+@router.post("/{map_name}/duplicate", response_model=MissionLoadResponse)
+def duplicate_mission(map_name: str, request: MissionDuplicateRequest):
+    source_dir = _mission_dir(map_name, request.mission_name)
+    target_dir = _mission_dir(map_name, request.new_name)
+    if not (source_dir / "mission.json").is_file():
+        raise HTTPException(
+            404, f"Mission {request.mission_name} not found for {map_name}"
+        )
+    if target_dir.exists():
+        raise HTTPException(
+            409, f"Mission {request.new_name} already exists for {map_name}"
+        )
+    try:
+        shutil.copytree(source_dir, target_dir)
+    except OSError as exc:
+        raise HTTPException(
+            500, f"Failed to duplicate mission {request.mission_name}: {exc}"
+        ) from exc
+    # Rewrite the copied manifest so its stored mission_name matches the copy.
+    manifest = _read_manifest(map_name, request.new_name)
+    _write_manifest(manifest)
     return manifest
 
 

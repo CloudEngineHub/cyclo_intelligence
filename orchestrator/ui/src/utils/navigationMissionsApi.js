@@ -57,6 +57,20 @@ export function saveNavigationMission(mapName, mission, missionName = "") {
   });
 }
 
+export function deleteNavigationMission(mapName, missionName) {
+  return request(
+    `/${encodeURIComponent(mapName)}?mission_name=${encodeURIComponent(missionName)}`,
+    { method: 'DELETE' },
+  );
+}
+
+export function duplicateNavigationMission(mapName, missionName, newName) {
+  return request(`/${encodeURIComponent(mapName)}/duplicate`, {
+    method: 'POST',
+    body: JSON.stringify({ mission_name: missionName, new_name: newName }),
+  });
+}
+
 export function getNavigationMissionBtFile(mapName, path, missionName = "") {
   return request(
     `/${encodeURIComponent(mapName)}/bt?path=${encodeURIComponent(path)}${missionName ? `&mission_name=${encodeURIComponent(missionName)}` : ""}`,
