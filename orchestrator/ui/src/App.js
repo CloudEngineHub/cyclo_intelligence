@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 //
-// Author: Kiwoong Park
+// Author: Kiwoong Park, Seongwoo Kim
 
 import React, { useEffect, useRef } from 'react';
 import clsx from 'clsx';

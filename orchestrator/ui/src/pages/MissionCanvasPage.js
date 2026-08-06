@@ -49,7 +49,7 @@ import {
   saveNavigationMissionBtFile,
 } from "../utils/navigationMissionsApi";
 import { useNavigationRosPublisher, useNavigationRosTopic } from "../hooks/useNavigationRosTopic";
-import { MapEditorControls, useMapEditor } from "../components/navigation/MapEditor";
+import { MapEditorControls, SegButton, SegGroup, useMapEditor } from "../components/navigation/MapEditor";
 import { MapViewer } from "../components/navigation/MapViewer";
 import MissionBtEditor from "../components/navigation/MissionBtEditor";
 import MissionBtRunView from "../components/navigation/MissionBtRunView";
@@ -3532,13 +3532,16 @@ export default function MissionCanvasPage() {
     );
   }, [runCommand, saveMapName]);
 
-  const handleToggleMapEditor = useCallback(() => {
+  // Record ↔ Edit segment switch for the Mapping stage. Re-clicking the
+  // selected segment is a no-op (segmented-control semantics).
+  const handleSelectMappingMode = useCallback((editing) => {
+    if (editing === showPgmFix) return;
     setWorkspaceStage(STAGE_MAPPING);
     setInteractionMode("view");
-    if (!showPgmFix) {
+    if (editing) {
       setMessage("Loading saved maps");
     }
-    setShowPgmFix((value) => !value);
+    setShowPgmFix(editing);
   }, [showPgmFix]);
 
   const stopMissionRunner = missionRunner.stop;
@@ -4350,18 +4353,38 @@ export default function MissionCanvasPage() {
             <span className="text-[16px] font-bold tracking-tight" style={{ color: MISSION_TEXT }}>
               {WORKSPACE_STAGES.find((stage) => stage.id === workspaceStage)?.label}
             </span>
+            {/* Record ↔ Edit mode switch: recording drives SLAM (Start/Stop/
+                Save Map actions), editing opens the saved-map editor with its
+                own toolbar. Splitting the header per mode replaces the old
+                four-buttons-in-a-row layout. */}
+            {workspaceStage === STAGE_MAPPING && (
+              <div className="shrink-0">
+                <SegGroup ariaLabel="Mapping mode">
+                  <SegButton selected={!mappingEditorActive} disabled={!!busy} onClick={() => handleSelectMappingMode(false)}>
+                    Record Map
+                  </SegButton>
+                  <SegButton
+                    selected={mappingEditorActive}
+                    disabled={!!busy || mappingRuntimeActive || runRuntimeActive}
+                    title={mappingRuntimeActive || runRuntimeActive ? "Stop mapping before editing saved maps" : undefined}
+                    onClick={() => handleSelectMappingMode(true)}
+                  >
+                    Edit Map
+                  </SegButton>
+                </SegGroup>
+              </div>
+            )}
             <span className="text-[11px] font-mono truncate" style={{ color: "var(--mc-text-subtle)" }}>
               {message}
             </span>
           </div>
 
           <div className="flex items-center gap-2">
-            {workspaceStage === STAGE_MAPPING && (
+            {workspaceStage === STAGE_MAPPING && !mappingEditorActive && (
               <>
-                <ActionButton active={busy === "Mapping" || (mappingRuntimeActive && !mappingEditorActive)} disabled={!!busy || mappingRuntimeActive || runRuntimeActive} onClick={handleStartMapping} variant="primary">Start Mapping</ActionButton>
+                <ActionButton active={busy === "Mapping" || mappingRuntimeActive} disabled={!!busy || mappingRuntimeActive || runRuntimeActive} onClick={handleStartMapping} variant="primary">Start Mapping</ActionButton>
                 <ActionButton active={busy === "Stop"} disabled={!!busy || !mappingRuntimeActive} onClick={handleStopNavigation} variant="danger">Stop</ActionButton>
                 <ActionButton active={showSaveMapDialog || busy === "Save map"} disabled={!!busy || !mappingRuntimeActive} onClick={handleOpenSaveMapDialog} variant="secondary">Save Map</ActionButton>
-                <ActionButton active={mappingEditorActive} disabled={!!busy || mappingRuntimeActive || runRuntimeActive} onClick={handleToggleMapEditor} variant="secondary">Map Editor</ActionButton>
               </>
             )}
             {workspaceStage === STAGE_AUTHORING && (
@@ -4648,8 +4671,9 @@ export default function MissionCanvasPage() {
             </div>
           )}
 
-          {/* Layers popover — all stages, hidden during the BT split view */}
-          {!activeBtLayer && <LayersPopover layerToggles={layerToggles} />}
+          {/* Layers popover — hidden during the BT split view and in the map
+              editor, where every live layer is forced off anyway. */}
+          {!activeBtLayer && !mappingEditorActive && <LayersPopover layerToggles={layerToggles} />}
         </section>
 
         {workspaceStage === STAGE_AUTHORING ? (
@@ -4779,7 +4803,9 @@ export default function MissionCanvasPage() {
           </aside>
         ) : (
           <aside className="min-h-0 grid gap-4 overflow-auto p-4 content-start">
-            {workspaceStage === STAGE_MAPPING && (
+            {/* Teleop drives the robot while recording; it has no role in the
+                saved-map editor, so hide it there. */}
+            {workspaceStage === STAGE_MAPPING && !mappingEditorActive && (
               <MappingTeleopPanel
                 disabled={teleopDisabled}
                 onPublish={publishTeleopCommand}

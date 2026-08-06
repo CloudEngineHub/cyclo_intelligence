@@ -11,6 +11,8 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+//
+// Author: Seongwoo Kim
 
 // Read-only behavior-tree viewer for the Run stage: renders a waypoint's stored
 // BT XML and glows the node(s) currently ticking on the robot (from

@@ -2,13 +2,17 @@
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 //
 // Author: Seongwoo Kim
-//
-// WARM-MINIMAL REDESIGN: Control nodes read as ink-outline cards
-// (identity: "structure"), running state bubbles up as a clay pulse.
-// Drop-in replacement for orchestrator/ui/src/components/bt/BTControlNode.js
-// Uses Tailwind arbitrary color values (JIT) — same hexes as the --mc-* tokens.
 
 import React from 'react';
 import { Handle, Position } from '@xyflow/react';

@@ -301,11 +301,17 @@ test('renders Mission Canvas foundation', async () => {
   const startMappingButton = screen.getByRole('button', { name: 'Start Mapping' });
   const stopButton = screen.getByRole('button', { name: 'Stop' });
   const saveMapButton = screen.getByRole('button', { name: 'Save Map' });
-  const mapEditorButton = screen.getByRole('button', { name: 'Map Editor' });
   expect(startMappingButton).toHaveClass('rounded-md');
   expect(Boolean(startMappingButton.compareDocumentPosition(stopButton) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
   expect(Boolean(stopButton.compareDocumentPosition(saveMapButton) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
-  expect(Boolean(saveMapButton.compareDocumentPosition(mapEditorButton) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
+  // Record/Edit mode segments precede the record-mode action buttons.
+  expect(screen.getByRole('group', { name: 'Mapping mode' })).toBeInTheDocument();
+  const recordSegment = screen.getByRole('button', { name: 'Record Map' });
+  const editSegment = screen.getByRole('button', { name: 'Edit Map' });
+  expect(recordSegment).toHaveAttribute('aria-pressed', 'true');
+  expect(editSegment).toHaveAttribute('aria-pressed', 'false');
+  expect(Boolean(recordSegment.compareDocumentPosition(editSegment) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
+  expect(Boolean(editSegment.compareDocumentPosition(startMappingButton) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
   expect(screen.getByText('Mobile Teleop')).toBeInTheDocument();
   expect(screen.getByText('Mobile Teleop').parentElement).toHaveClass('overflow-auto');
   expect(screen.getByText('Mobile Teleop').parentElement).toHaveClass('rounded-md');
@@ -1675,13 +1681,14 @@ test('locks mapping controls while mapping is running', async () => {
   await waitFor(() => expect(screen.getByRole('button', { name: 'Stop' })).toBeEnabled());
   expect(screen.getByRole('button', { name: 'Save Map' })).toBeEnabled();
   expect(screen.getByRole('button', { name: 'Start Mapping' })).toBeDisabled();
-  expect(screen.getByRole('button', { name: 'Map Editor' })).toBeDisabled();
+  expect(screen.getByRole('button', { name: 'Edit Map' })).toBeDisabled();
+  expect(screen.getByRole('button', { name: 'Record Map' })).toBeEnabled();
 
   fireEvent.click(screen.getByRole('button', { name: 'Stop' }));
 
   await waitFor(() => expect(stopNavigation).toHaveBeenCalled());
   await waitFor(() => expect(screen.getByRole('button', { name: 'Start Mapping' })).toBeEnabled());
-  expect(screen.getByRole('button', { name: 'Map Editor' })).toBeEnabled();
+  expect(screen.getByRole('button', { name: 'Edit Map' })).toBeEnabled();
   expect(screen.getByRole('button', { name: 'Save Map' })).toBeDisabled();
   expect(screen.getByRole('button', { name: 'Stop' })).toBeDisabled();
 });
@@ -1764,7 +1771,7 @@ test('loads saved maps into the mapping fix editor', async () => {
 
   render(<MissionCanvasPage />);
 
-  fireEvent.click(screen.getByRole('button', { name: 'Map Editor' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Edit Map' }));
 
   await waitFor(() => expect(getPgmFiles).toHaveBeenCalled());
   await waitFor(() => expect(getPgmImage).toHaveBeenCalledWith('factory.pgm'));
@@ -1776,6 +1783,87 @@ test('loads saved maps into the mapping fix editor', async () => {
   expect(latestMapViewerProps().waitingLabel).toBe('Select a PGM');
   // The editor shows the raw grid; floor-plan refinement is viewer-only.
   expect(latestMapViewerProps().mapRefined).toBe(false);
+});
+
+test('switches the mapping header between record and edit modes', async () => {
+  getPgmFiles.mockResolvedValue({
+    files: [{ path: 'factory.pgm', name: 'factory.pgm' }],
+  });
+  getPgmImage.mockResolvedValue({
+    path: 'factory.pgm',
+    width: 1,
+    height: 1,
+    maxval: 255,
+    pixels_base64: 'AA==',
+  });
+
+  render(<MissionCanvasPage />);
+
+  // Record mode is the default: SLAM actions, teleop, and layers visible.
+  expect(screen.getByRole('button', { name: 'Record Map' })).toHaveAttribute('aria-pressed', 'true');
+  expect(screen.getByRole('button', { name: 'Edit Map' })).toHaveAttribute('aria-pressed', 'false');
+  expect(screen.getByRole('button', { name: 'Start Mapping' })).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Stop' })).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Save Map' })).toBeInTheDocument();
+  expect(screen.getByRole('group', { name: 'Mobile Teleop' })).toBeInTheDocument();
+  expect(screen.getByRole('switch', { name: 'Lidar' })).toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole('button', { name: 'Edit Map' }));
+
+  await waitFor(() => expect(getPgmFiles).toHaveBeenCalled());
+  expect(screen.getByRole('button', { name: 'Edit Map' })).toHaveAttribute('aria-pressed', 'true');
+  expect(screen.getByRole('button', { name: 'Record Map' })).toHaveAttribute('aria-pressed', 'false');
+  // Record-mode chrome is gone: SLAM actions, teleop, and the layers popover.
+  expect(screen.queryByRole('button', { name: 'Start Mapping' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Stop' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Save Map' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('group', { name: 'Mobile Teleop' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('switch', { name: 'Lidar' })).not.toBeInTheDocument();
+  expect(screen.getByText('Saved map')).toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole('button', { name: 'Record Map' }));
+
+  expect(screen.getByRole('button', { name: 'Record Map' })).toHaveAttribute('aria-pressed', 'true');
+  expect(screen.getByRole('button', { name: 'Edit Map' })).toHaveAttribute('aria-pressed', 'false');
+  expect(screen.getByRole('button', { name: 'Start Mapping' })).toBeEnabled();
+  expect(screen.getByText('Live mapping')).toBeInTheDocument();
+});
+
+test('keeps edit mode when the mapping runtime comes up', async () => {
+  getPgmFiles.mockResolvedValue({
+    files: [{ path: 'factory.pgm', name: 'factory.pgm' }],
+  });
+  getPgmImage.mockResolvedValue({
+    path: 'factory.pgm',
+    width: 1,
+    height: 1,
+    maxval: 255,
+    pixels_base64: 'AA==',
+  });
+
+  render(<MissionCanvasPage />);
+
+  fireEvent.click(screen.getByRole('button', { name: 'Edit Map' }));
+  await waitFor(() => expect(getPgmFiles).toHaveBeenCalled());
+
+  // The runtime comes up behind the editor (e.g. started elsewhere): the
+  // editor keeps the view, and Record is one click away from the Stop button.
+  getServiceStatus.mockResolvedValue({ is_up: true, mode: 'map' });
+  fireEvent(document, new Event('visibilitychange'));
+
+  await waitFor(() => expect(screen.getByText('Status: running')).toBeInTheDocument());
+  const editSegment = screen.getByRole('button', { name: 'Edit Map' });
+  expect(editSegment).toHaveAttribute('aria-pressed', 'true');
+  expect(editSegment).toBeDisabled();
+  expect(screen.getByRole('button', { name: 'Record Map' })).toBeEnabled();
+  expect(screen.queryByRole('button', { name: 'Stop' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Save Map' })).not.toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole('button', { name: 'Record Map' }));
+
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Stop' })).toBeEnabled());
+  expect(screen.getByRole('button', { name: 'Save Map' })).toBeEnabled();
+  expect(screen.getByRole('button', { name: 'Start Mapping' })).toBeDisabled();
 });
 
 test('edits and saves loaded map pixels from the fix editor', async () => {
@@ -1795,7 +1883,7 @@ test('edits and saves loaded map pixels from the fix editor', async () => {
 
   render(<MissionCanvasPage />);
 
-  fireEvent.click(screen.getByRole('button', { name: 'Map Editor' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Edit Map' }));
 
   await waitFor(() => expect(getPgmImage).toHaveBeenCalledWith('factory.pgm'));
   // Brush size is now a segmented S/M/L/XL group (XL = 10 cells) instead of a <select>.
@@ -1846,7 +1934,7 @@ test('paints continuous map pixel segments while dragging', async () => {
 
   render(<MissionCanvasPage />);
 
-  fireEvent.click(screen.getByRole('button', { name: 'Map Editor' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Edit Map' }));
 
   await waitFor(() => expect(getPgmImage).toHaveBeenCalledWith('factory.pgm'));
   fireEvent.click(screen.getByRole('button', { name: 'Add Obstacle' }));
@@ -1892,7 +1980,7 @@ test('marks free-space areas with automatic color and undo/redo support', async 
 
   render(<MissionCanvasPage />);
 
-  fireEvent.click(screen.getByRole('button', { name: 'Map Editor' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Edit Map' }));
 
   await waitFor(() => expect(getPgmImage).toHaveBeenCalledWith('factory.pgm'));
   await waitFor(() => expect(getMapAnnotations).toHaveBeenCalledWith('factory.pgm'));
@@ -1974,7 +2062,7 @@ test('auto-numbers and auto-selects areas created by rectangle drag', async () =
 
   render(<MissionCanvasPage />);
 
-  fireEvent.click(screen.getByRole('button', { name: 'Map Editor' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Edit Map' }));
   await waitFor(() => expect(getMapAnnotations).toHaveBeenCalledWith('factory.pgm'));
 
   fireEvent.click(screen.getByRole('button', { name: 'Area' }));
@@ -2028,7 +2116,7 @@ test('removes an area from the chip list', async () => {
 
   render(<MissionCanvasPage />);
 
-  fireEvent.click(screen.getByRole('button', { name: 'Map Editor' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Edit Map' }));
 
   await waitFor(() => expect(getMapAnnotations).toHaveBeenCalledWith('factory.pgm'));
   await waitFor(() => expect(latestMapViewerProps().mapAnnotations).toEqual([
@@ -2081,7 +2169,7 @@ test('renames a map area from the chip list', async () => {
 
   render(<MissionCanvasPage />);
 
-  fireEvent.click(screen.getByRole('button', { name: 'Map Editor' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Edit Map' }));
 
   await waitFor(() => expect(getMapAnnotations).toHaveBeenCalledWith('factory.pgm'));
   await waitFor(() => expect(screen.getByRole('button', { name: 'Dock' })).toBeInTheDocument());
@@ -2160,7 +2248,7 @@ test('freezes visible area cells when deleting an overlapping area', async () =>
 
   render(<MissionCanvasPage />);
 
-  fireEvent.click(screen.getByRole('button', { name: 'Map Editor' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Edit Map' }));
   await waitFor(() => expect(latestMapViewerProps().mapAnnotations).toEqual([
     expect.objectContaining({ label: 'Front' }),
     expect.objectContaining({ label: 'Back' }),
@@ -2216,7 +2304,7 @@ test('extends the selected area with the extend brush', async () => {
 
   render(<MissionCanvasPage />);
 
-  fireEvent.click(screen.getByRole('button', { name: 'Map Editor' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Edit Map' }));
   await waitFor(() => expect(getMapAnnotations).toHaveBeenCalledWith('factory.pgm'));
   await waitFor(() => expect(screen.getByRole('button', { name: 'Dock' })).toBeInTheDocument());
 
@@ -2301,7 +2389,7 @@ test('erases map area pixels with brush drag', async () => {
 
   render(<MissionCanvasPage />);
 
-  fireEvent.click(screen.getByRole('button', { name: 'Map Editor' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Edit Map' }));
 
   await waitFor(() => expect(latestMapViewerProps().mapAnnotations).toEqual([
     expect.objectContaining({ label: 'Dock' }),
@@ -2363,6 +2451,8 @@ test('enables navigation runtime layers in the run stage', async () => {
   expect(screen.queryByRole('button', { name: 'Navigation' })).not.toBeInTheDocument();
   expect(screen.queryByRole('button', { name: 'Run BT' })).not.toBeInTheDocument();
   expect(screen.queryByRole('button', { name: 'Save Map' })).not.toBeInTheDocument();
+  // The Record/Edit mode switch is Mapping-only.
+  expect(screen.queryByRole('button', { name: 'Edit Map' })).not.toBeInTheDocument();
   expect(screen.getByText('/global_costmap/costmap')).toBeInTheDocument();
   expect(screen.getByText('/local_costmap/costmap')).toBeInTheDocument();
   expect(screen.getByText('/plan')).toBeInTheDocument();

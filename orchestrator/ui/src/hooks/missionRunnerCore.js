@@ -11,6 +11,8 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+//
+// Author: Seongwoo Kim
 
 // Pure, side-effect-free core for the Mission Runner: empty-BT detection and
 // the reducer that publishes observable run progress. The async driver that

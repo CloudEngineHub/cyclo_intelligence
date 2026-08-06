@@ -1147,7 +1147,7 @@ const TOOL_ICONS = {
     ),
 };
 
-function SegGroup({ children, ariaLabel }) {
+export function SegGroup({ children, ariaLabel }) {
     return (
         <div
             role="group"
@@ -1160,7 +1160,7 @@ function SegGroup({ children, ariaLabel }) {
     );
 }
 
-function SegButton({ selected, disabled, onClick, title, ariaLabel, children, narrow = false }) {
+export function SegButton({ selected, disabled, onClick, title, ariaLabel, children, narrow = false }) {
     return (
         <button
             type="button"

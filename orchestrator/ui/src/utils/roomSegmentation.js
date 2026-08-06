@@ -11,6 +11,8 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+//
+// Author: Seongwoo Kim
 
 // Morphological room segmentation of an occupancy-grid free mask (the classic
 // robot-vacuum approach): erode free space until doorways pinch shut, take the
