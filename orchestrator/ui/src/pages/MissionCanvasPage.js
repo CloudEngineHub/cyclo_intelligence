@@ -4387,12 +4387,11 @@ export default function MissionCanvasPage() {
                 <span className="font-semibold truncate" style={{ color: MISSION_TEXT_MUTED }}>{waypointBtLayer.spot.label || waypointBtLayer.spot.id}</span>
                 <span className="text-[11px] font-mono shrink-0" style={{ color: "var(--mc-text-subtle)" }}>· Local BT</span>
               </div>
-              <div className="flex items-center gap-2.5">
-                <div className="flex items-center gap-2 px-3 py-1.5" style={{ borderRadius: 999, backgroundColor: "color-mix(in srgb, var(--mc-success) 14%, transparent)", border: "1px solid color-mix(in srgb, var(--mc-success) 35%, transparent)" }}>
-                  <span className="w-2 h-2 rounded-full" style={{ backgroundColor: "var(--mc-success)" }} />
-                  <span className="text-[12px] font-semibold" style={{ color: "var(--mc-success)" }}>BT Active · {waypointBtLayer.executionLabel}</span>
-                </div>
-                <ActionButton disabled={!!btNodeBusy} onClick={handleBtNodeDeactivate} variant="danger">Deactivate BT</ActionButton>
+              {/* BT lifecycle control lives in the BtRuntimePanel only — no
+                  duplicate Deactivate button up here. */}
+              <div className="flex items-center gap-2 px-3 py-1.5" style={{ borderRadius: 999, backgroundColor: "color-mix(in srgb, var(--mc-success) 14%, transparent)", border: "1px solid color-mix(in srgb, var(--mc-success) 35%, transparent)" }}>
+                <span className="w-2 h-2 rounded-full" style={{ backgroundColor: "var(--mc-success)" }} />
+                <span className="text-[12px] font-semibold" style={{ color: "var(--mc-success)" }}>BT Active · {waypointBtLayer.executionLabel}</span>
               </div>
             </>
           ) : workspaceStage === STAGE_RUN && runBtLayer ? (
