@@ -29,6 +29,7 @@ import {
   getNavigationMission,
   getNavigationMissionBtFile,
   getNavigationMissions,
+  renameNavigationMission,
   saveNavigationMission,
   saveNavigationMissionBtFile,
 } from '../utils/navigationMissionsApi';
@@ -130,6 +131,14 @@ jest.mock('../utils/navigationMissionsApi', () => ({
     map_name: 'map',
     mission_name: 'default',
     deleted: true,
+  }),
+  renameNavigationMission: jest.fn().mockResolvedValue({
+    exists: true,
+    map_name: 'map',
+    mission_name: 'renamed',
+    global_bt: 'global.xml',
+    waypoints: [],
+    metadata: {},
   }),
   duplicateNavigationMission: jest.fn().mockResolvedValue({
     exists: true,
@@ -703,6 +712,39 @@ test('starts a fresh mission and guards unsaved changes', async () => {
   fireEvent.click(screen.getByRole('button', { name: 'New Mission' }));
   fireEvent.click(screen.getByRole('button', { name: 'Discard' }));
   await waitFor(() => expect(latestMapViewerProps().spots).toEqual([]));
+});
+
+test('renames the active mission from the rail', async () => {
+  getPgmFiles.mockResolvedValue({
+    files: [{ path: 'factory.pgm', name: 'factory.pgm' }],
+  });
+  getNavigationMissions
+    .mockResolvedValueOnce({ map_name: 'factory', missions: ['picnic'] })
+    .mockResolvedValue({ map_name: 'factory', missions: ['evening'] });
+
+  render(<MissionCanvasPage />);
+
+  fireEvent.click(screen.getByRole('tab', { name: 'Design' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Load Map' }));
+  await screen.findByRole('combobox', { name: 'Design mission map file' });
+  fireEvent.click(screen.getByRole('button', { name: 'Load' }));
+  await waitFor(() => expect(screen.getByText('Started new mission picnic for factory')).toBeInTheDocument());
+
+  fireEvent.click(screen.getByRole('button', { name: 'Rename mission' }));
+  const renameInput = screen.getByRole('textbox', { name: 'Rename mission name' });
+  expect(renameInput).toHaveValue('picnic');
+  fireEvent.change(renameInput, { target: { value: 'evening' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Rename', exact: true }));
+
+  await waitFor(() => expect(renameNavigationMission).toHaveBeenCalledWith(
+    'factory',
+    'picnic',
+    'evening',
+  ));
+  await waitFor(() => expect(screen.getByText('Renamed picnic to evening')).toBeInTheDocument());
+  await waitFor(() => (
+    expect(screen.getByRole('combobox', { name: 'Active mission' })).toHaveValue('evening')
+  ));
 });
 
 test('duplicates and deletes the active mission from the rail', async () => {

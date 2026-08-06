@@ -557,6 +557,7 @@ def test_navigation_routes_are_registered():
     assert "/navigation/missions/{map_name}" in paths
     assert "/navigation/missions/{map_name}/bt" in paths
     assert "/navigation/missions/{map_name}/duplicate" in paths
+    assert "/navigation/missions/{map_name}/rename" in paths
 
 
 def test_navigation_spots_crud(monkeypatch, tmp_path):
@@ -712,6 +713,75 @@ def test_navigation_mission_delete_removes_mission_dir(monkeypatch, tmp_path):
 
     with pytest.raises(HTTPException):
         navigation_missions.delete_mission("factory", mission_name="../escape")
+
+
+def test_navigation_mission_rename_moves_dir_and_rewrites_name(
+    monkeypatch, tmp_path
+):
+    import pytest
+    from fastapi import HTTPException
+
+    monkeypatch.setattr(navigation_missions, "NAVIGATION_DATA_ROOT", tmp_path)
+    navigation_missions.save_mission(
+        "factory",
+        navigation_missions.MissionSaveRequest(
+            waypoints=[
+                navigation_missions.MissionWaypoint(
+                    id="table_a",
+                    label="Table A",
+                    pose=navigation_missions.SpotPose(x=1.0, y=2.0, yaw=0.5),
+                    local_bt="locals/table_a.xml",
+                )
+            ],
+        ),
+        mission_name="picnic",
+    )
+    navigation_missions.save_bt_file(
+        "factory",
+        navigation_missions.MissionBtFileRequest(
+            path="locals/table_a.xml",
+            content="<root/>",
+        ),
+        mission_name="picnic",
+    )
+
+    renamed = navigation_missions.rename_mission(
+        "factory",
+        navigation_missions.MissionRenameRequest(
+            mission_name="picnic", new_name="evening"
+        ),
+    )
+
+    assert renamed.exists is True
+    assert renamed.mission_name == "evening"
+    assert not (tmp_path / "missions" / "factory" / "picnic").exists()
+    new_dir = tmp_path / "missions" / "factory" / "evening"
+    assert (new_dir / "locals" / "table_a.xml").read_text() == "<root/>"
+    stored = json.loads((new_dir / "mission.json").read_text())
+    assert stored["mission_name"] == "evening"
+
+    with pytest.raises(HTTPException) as missing:
+        navigation_missions.rename_mission(
+            "factory",
+            navigation_missions.MissionRenameRequest(
+                mission_name="picnic", new_name="ghost"
+            ),
+        )
+    assert missing.value.status_code == 404
+
+    navigation_missions.save_mission(
+        "factory",
+        navigation_missions.MissionSaveRequest(waypoints=[]),
+        mission_name="other",
+    )
+    with pytest.raises(HTTPException) as conflict:
+        navigation_missions.rename_mission(
+            "factory",
+            navigation_missions.MissionRenameRequest(
+                mission_name="evening", new_name="other"
+            ),
+        )
+    assert conflict.value.status_code == 409
 
 
 def test_navigation_mission_duplicate_copies_manifest_and_bt(

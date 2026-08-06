@@ -64,6 +64,13 @@ export function deleteNavigationMission(mapName, missionName) {
   );
 }
 
+export function renameNavigationMission(mapName, missionName, newName) {
+  return request(`/${encodeURIComponent(mapName)}/rename`, {
+    method: 'POST',
+    body: JSON.stringify({ mission_name: missionName, new_name: newName }),
+  });
+}
+
 export function duplicateNavigationMission(mapName, missionName, newName) {
   return request(`/${encodeURIComponent(mapName)}/duplicate`, {
     method: 'POST',

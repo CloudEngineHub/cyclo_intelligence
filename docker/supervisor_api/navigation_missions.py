@@ -362,6 +362,35 @@ def delete_mission(
     )
 
 
+class MissionRenameRequest(BaseModel):
+    mission_name: str = Field(min_length=1, max_length=128)
+    new_name: str = Field(min_length=1, max_length=128)
+
+
+@router.post("/{map_name}/rename", response_model=MissionLoadResponse)
+def rename_mission(map_name: str, request: MissionRenameRequest):
+    source_dir = _mission_dir(map_name, request.mission_name)
+    target_dir = _mission_dir(map_name, request.new_name)
+    if not (source_dir / "mission.json").is_file():
+        raise HTTPException(
+            404, f"Mission {request.mission_name} not found for {map_name}"
+        )
+    if target_dir.exists():
+        raise HTTPException(
+            409, f"Mission {request.new_name} already exists for {map_name}"
+        )
+    try:
+        os.replace(source_dir, target_dir)
+    except OSError as exc:
+        raise HTTPException(
+            500, f"Failed to rename mission {request.mission_name}: {exc}"
+        ) from exc
+    # Rewrite the manifest so its stored mission_name matches the new name.
+    manifest = _read_manifest(map_name, request.new_name)
+    _write_manifest(manifest)
+    return manifest
+
+
 class MissionDuplicateRequest(BaseModel):
     mission_name: str = Field(min_length=1, max_length=128)
     new_name: str = Field(min_length=1, max_length=128)

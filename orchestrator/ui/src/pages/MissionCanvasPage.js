@@ -6,7 +6,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { MdAdd, MdContentCopy, MdDelete, MdPowerSettingsNew, MdStop } from "react-icons/md";
+import { MdAdd, MdContentCopy, MdDelete, MdEdit, MdPowerSettingsNew, MdStop } from "react-icons/md";
 import {
   cancelNavigateToPoseGoal,
   configureDesignLocalizationAmcl,
@@ -33,6 +33,7 @@ import {
   getNavigationMission,
   getNavigationMissionBtFile,
   getNavigationMissions,
+  renameNavigationMission,
   saveNavigationMission,
   saveNavigationMissionBtFile,
 } from "../utils/navigationMissionsApi";
@@ -2056,6 +2057,8 @@ export default function MissionCanvasPage() {
   const [saveMissionName, setSaveMissionName] = useState("");
   const [showDuplicateMissionDialog, setShowDuplicateMissionDialog] = useState(false);
   const [duplicateMissionName, setDuplicateMissionName] = useState("");
+  const [showRenameMissionDialog, setShowRenameMissionDialog] = useState(false);
+  const [renameMissionName, setRenameMissionName] = useState("");
   const [showDeleteMissionDialog, setShowDeleteMissionDialog] = useState(false);
   // Design edits not yet written to the mission manifest (BT/route/waypoints).
   const [designDirty, setDesignDirty] = useState(false);
@@ -3441,6 +3444,36 @@ export default function MissionCanvasPage() {
       .finally(() => setDesignMapBusy(false));
   }, [currentMapName, loadMissionForMap, missionName]);
 
+  const handleOpenRenameMissionDialog = useCallback(() => {
+    setRenameMissionName(missionName);
+    setShowRenameMissionDialog(true);
+  }, [missionName]);
+
+  const handleConfirmRenameMission = useCallback(() => {
+    const target = renameMissionName.trim();
+    if (!isValidMissionName(target)) return;
+    setShowRenameMissionDialog(false);
+    if (target === missionName) return;
+    if (designCatalog.names.includes(target)) return;
+    const previousName = missionName;
+    void runCommand("Rename mission", async () => {
+      await renameNavigationMission(currentMapName, previousName, target);
+      // Same mission, new identity — keep the canvas and any unsaved edits.
+      setMissionName(target);
+      setPendingDesignMissionName(target);
+      const available = await fetchMissionNames(currentMapName);
+      setDesignCatalog({ mapName: currentMapName, names: available });
+      return `Renamed ${previousName} to ${target}`;
+    });
+  }, [
+    currentMapName,
+    designCatalog.names,
+    fetchMissionNames,
+    missionName,
+    renameMissionName,
+    runCommand,
+  ]);
+
   const handleOpenDuplicateMissionDialog = useCallback(() => {
     setDuplicateMissionName(uniqueMissionName(`${missionName}-copy`, designCatalog.names));
     setShowDuplicateMissionDialog(true);
@@ -4146,6 +4179,21 @@ export default function MissionCanvasPage() {
         onSubmit={handleConfirmSaveMission}
       />
       <SaveMissionDialog
+        open={showRenameMissionDialog}
+        title="Rename Mission"
+        fieldLabel="New mission name"
+        inputAriaLabel="Rename mission name"
+        submitLabel="Rename"
+        value={renameMissionName}
+        existingNames={designCatalog.names.filter((name) => name !== missionName)}
+        currentName=""
+        disallowExisting
+        busy={!!busy}
+        onChange={setRenameMissionName}
+        onCancel={() => setShowRenameMissionDialog(false)}
+        onSubmit={handleConfirmRenameMission}
+      />
+      <SaveMissionDialog
         open={showDuplicateMissionDialog}
         title="Duplicate Mission"
         fieldLabel="New mission name"
@@ -4322,40 +4370,30 @@ export default function MissionCanvasPage() {
                 Save
               </button>
               <div className="flex gap-1.5">
-                <button
-                  type="button"
-                  aria-label="New Mission"
-                  title="New Mission"
-                  disabled={!!busy || designMapBusy}
-                  onClick={() => runGuardedDesignAction(startNewMission)}
-                  className="flex-1 flex items-center justify-center gap-1 h-7 text-[11px] font-semibold disabled:opacity-40"
-                  style={{
-                    borderRadius: 8,
-                    border: "1px solid var(--mc-border-strong)",
-                    backgroundColor: "var(--mc-surface-2)",
-                    color: "var(--mc-text-muted)",
-                  }}
-                >
-                  <MdAdd size={13} />
-                  New
-                </button>
                 {[
+                  {
+                    label: "New Mission",
+                    Icon: MdAdd,
+                    onClick: () => runGuardedDesignAction(startNewMission),
+                    disabled: !!busy || designMapBusy,
+                  },
+                  { label: "Rename mission", Icon: MdEdit, onClick: handleOpenRenameMissionDialog },
                   { label: "Duplicate mission", Icon: MdContentCopy, onClick: handleOpenDuplicateMissionDialog },
                   { label: "Delete mission", Icon: MdDelete, onClick: () => setShowDeleteMissionDialog(true) },
-                ].map(({ label, Icon, onClick }) => (
+                ].map(({ label, Icon, onClick, disabled }) => (
                   <button
                     key={label}
                     type="button"
                     aria-label={label}
                     title={label}
-                    disabled={
+                    disabled={disabled ?? (
                       !!busy ||
                       designMapBusy ||
                       missionRunnerActive ||
                       !designCatalog.names.includes(missionName)
-                    }
+                    )}
                     onClick={onClick}
-                    className="w-8 flex items-center justify-center h-7 disabled:opacity-40"
+                    className="flex-1 flex items-center justify-center h-7 disabled:opacity-40"
                     style={{
                       borderRadius: 8,
                       border: "1px solid var(--mc-border-strong)",
