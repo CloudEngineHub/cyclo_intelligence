@@ -1196,15 +1196,13 @@ function EditorSection({ label, children }) {
     );
 }
 
-export function MapEditorControls({ files, selectedPath, setSelectedPath, tool, setTool, brushSize, setBrushSize, busy, image, dirty, canUndo = false, canRedo = false, undo, redo, save, enableAnnotations = false, annotations = [], annotationLabel = "Area", setAnnotationLabel = () => { }, clearAnnotations = () => { }, selectedAnnotationId = "", setSelectedAnnotationId = () => { }, deleteAnnotationById = () => { }, renameAnnotation = () => { }, }) {
+export function MapEditorControls({ files, selectedPath, setSelectedPath, tool, setTool, brushSize, setBrushSize, busy, image, dirty, canUndo = false, canRedo = false, undo, redo, save, enableAnnotations = false, annotations = [], annotationLabel = "Area", setAnnotationLabel = () => { }, selectedAnnotationId = "", setSelectedAnnotationId = () => { }, deleteAnnotationById = () => { }, renameAnnotation = () => { }, }) {
     const [renamingId, setRenamingId] = useState("");
     const [renameDraft, setRenameDraft] = useState("");
     const [confirmDeleteId, setConfirmDeleteId] = useState("");
-    const [confirmClear, setConfirmClear] = useState(false);
     const confirmTimerRef = useRef(null);
     const disarmConfirms = useCallback(() => {
         setConfirmDeleteId("");
-        setConfirmClear(false);
     }, []);
     const armConfirmTimer = useCallback(() => {
         if (confirmTimerRef.current)
@@ -1243,9 +1241,25 @@ export function MapEditorControls({ files, selectedPath, setSelectedPath, tool, 
                     ))}
                 </select>
 
-                <SegButton selected={tool === "view"} disabled={busy} onClick={() => setTool("view")} title="View" ariaLabel="View">
+                {/* Standalone (no SegGroup pill around it), so it carries its own
+                    surface + border to read as a button rather than plain text. */}
+                <button
+                    type="button"
+                    disabled={busy}
+                    aria-pressed={tool === "view"}
+                    onClick={() => setTool("view")}
+                    title="View"
+                    aria-label="View"
+                    className="h-9 px-3 inline-flex items-center gap-1.5 text-[12.5px] font-semibold transition-colors disabled:opacity-50"
+                    style={{
+                        borderRadius: 9,
+                        border: "1px solid var(--mc-border-strong)",
+                        backgroundColor: tool === "view" ? "var(--mc-text)" : "var(--mc-surface)",
+                        color: tool === "view" ? "var(--mc-bg)" : "var(--mc-text)",
+                    }}
+                >
                     {TOOL_ICONS.view}View
-                </SegButton>
+                </button>
 
                 <EditorSection label="MAP EDIT">
                     <SegGroup ariaLabel="Map edit tools">
@@ -1320,32 +1334,6 @@ export function MapEditorControls({ files, selectedPath, setSelectedPath, tool, 
                     style={iconButtonStyle(canRedo)}>
                     <MdRedo size={17} />
                 </button>
-                {enableAnnotations && (
-                    <button
-                        type="button"
-                        disabled={busy || annotations.length === 0}
-                        aria-label={confirmClear ? "Confirm clear areas" : "Clear Areas"}
-                        onClick={() => {
-                            if (confirmClear) {
-                                clearAnnotations();
-                                disarmConfirms();
-                                return;
-                            }
-                            setConfirmDeleteId("");
-                            setConfirmClear(true);
-                            armConfirmTimer();
-                        }}
-                        className="h-9 px-3 text-[12px] font-semibold transition-all active:translate-y-px disabled:opacity-50 disabled:active:translate-y-0"
-                        style={{
-                            borderRadius: 9,
-                            border: "1px solid var(--mc-danger-border)",
-                            backgroundColor: confirmClear ? "var(--mc-danger)" : "var(--mc-surface)",
-                            color: confirmClear ? "var(--mc-accent-fg)" : "var(--mc-danger)",
-                        }}
-                    >
-                        {confirmClear ? "Confirm clear?" : "Clear Areas"}
-                    </button>
-                )}
                 <button type="button" disabled={busy || !dirty} onClick={save}
                     className="h-9 px-4 text-[12.5px] font-semibold transition-all active:translate-y-px disabled:opacity-50 disabled:active:translate-y-0"
                     style={{ borderRadius: 9, border: "none", backgroundColor: "var(--mc-accent)", color: "var(--mc-accent-fg)", boxShadow: dirty ? "var(--mc-shadow)" : "none" }}>
@@ -1429,7 +1417,6 @@ export function MapEditorControls({ files, selectedPath, setSelectedPath, tool, 
                                             disarmConfirms();
                                             return;
                                         }
-                                        setConfirmClear(false);
                                         setConfirmDeleteId(annotation.id);
                                         armConfirmTimer();
                                     }}

@@ -4417,7 +4417,6 @@ export default function MissionCanvasPage() {
               annotations={mapEditor.annotations}
               annotationLabel={mapEditor.annotationLabel}
               setAnnotationLabel={mapEditor.setAnnotationLabel}
-              clearAnnotations={mapEditor.clearAnnotations}
               selectedAnnotationId={mapEditor.selectedAnnotationId}
               setSelectedAnnotationId={mapEditor.setSelectedAnnotationId}
               deleteAnnotationById={mapEditor.deleteAnnotationById}
