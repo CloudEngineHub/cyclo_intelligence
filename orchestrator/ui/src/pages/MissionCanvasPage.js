@@ -2,6 +2,17 @@
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
+// Author: Seongwoo Kim
 
 "use client";
 
@@ -1264,57 +1275,6 @@ function MappingSessionPanel({ mappingEditorActive, selectedPath, dirty }) {
   );
 }
 
-// Left-rail SESSION card — the mission hub: shows the loaded map + active
-// mission and hosts the mission switcher (and, in Design, management actions).
-function MissionSessionCard({
-  mapName,
-  running,
-  showMission,
-  missionName,
-  missionNames,
-  disabled,
-  onMissionChange,
-  actions = null,
-}) {
-  const options = missionNames.includes(missionName) || !missionName
-    ? missionNames
-    : [...missionNames, missionName];
-  return (
-    <div className="p-3 border grid gap-2" style={{ borderRadius: 12, borderColor: MISSION_BORDER, backgroundColor: MISSION_STAGE_EMPTY }}>
-      <div className="flex items-center justify-between gap-2 min-w-0">
-        <div className="text-[12px] font-semibold truncate">{mapName || "No map"}</div>
-        <div className="text-[10px] font-mono shrink-0" style={{ color: "var(--mc-text-subtle)" }}>
-          {running ? "running" : "idle"}
-        </div>
-      </div>
-      {showMission && (
-        options.length === 0 ? (
-          <div className="text-[11px]" style={{ color: "var(--mc-text-subtle)" }}>No missions yet</div>
-        ) : (
-          <label className="grid gap-1 text-[10px] font-mono tracking-[0.08em]" style={{ color: "var(--mc-text-subtle)" }}>
-            MISSION
-            <select
-              aria-label="Active mission"
-              value={missionName}
-              disabled={disabled}
-              onChange={(event) => onMissionChange(event.currentTarget.value)}
-              className="w-full rounded px-1.5 py-1 text-xs font-sans tracking-normal"
-              style={{ color: "var(--mc-text)", backgroundColor: "var(--mc-surface-2)", border: "1px solid var(--mc-border-strong)" }}
-            >
-              {options.map((name) => (
-                <option key={name} value={name}>
-                  {missionNames.includes(name) ? name : `${name} (unsaved)`}
-                </option>
-              ))}
-            </select>
-          </label>
-        )
-      )}
-      {showMission && actions}
-    </div>
-  );
-}
-
 const RUNNER_STATUS_META = {
   idle: { label: "Idle", color: "var(--mc-text-subtle)" },
   starting: { label: "Starting", color: "var(--mc-warning)" },
@@ -1349,6 +1309,10 @@ function RunSessionPanel({
   running,
   runner,
   poseReady,
+  missionName,
+  missionNames,
+  missionSelectDisabled,
+  onMissionChange,
 }) {
   const statusMeta = RUNNER_STATUS_META[runner.status] || RUNNER_STATUS_META.idle;
   const showProgress = runner.total > 0;
@@ -1358,6 +1322,19 @@ function RunSessionPanel({
     <Panel title="Run Session" className="grid gap-2">
       <SessionRow label="Runtime" value={running ? "Running" : "Idle"} />
       <SessionRow label="Selected map" value={mapName || "Not selected"} />
+      <label className="flex items-center justify-between gap-2 text-xs min-w-0">
+        <span style={{ color: MISSION_TEXT_MUTED }}>Mission</span>
+        <select
+          aria-label="Active mission"
+          value={missionName}
+          disabled={missionSelectDisabled || missionNames.length === 0}
+          onChange={(event) => onMissionChange(event.currentTarget.value)}
+          className="max-w-[11rem] rounded px-1.5 py-1 text-xs"
+          style={{ color: "var(--mc-text)", backgroundColor: "var(--mc-surface-2)", border: "1px solid var(--mc-border-strong)" }}
+        >
+          {missionNames.map((name) => <option key={name} value={name}>{name}</option>)}
+        </select>
+      </label>
       {running && (
         <div className="flex items-center justify-between gap-2 text-xs min-w-0">
           <span style={{ color: MISSION_TEXT_MUTED }}>Localization</span>
@@ -2119,7 +2096,6 @@ export default function MissionCanvasPage() {
   const activeLayers = layersByStage[workspaceStage] || LAYER_PRESETS[workspaceStage];
   const runSessionActive = workspaceStage === STAGE_RUN;
   const currentMapName = (runSessionActive ? runMapName : mapName).trim() || DEFAULT_MAP_NAME;
-  const activeMissionName = runSessionActive ? runMissionName : missionName;
   const activeSpots = runSessionActive ? runSpots : spots;
   const activeMissionBtFiles = runSessionActive ? runMissionBtFiles : missionBtFiles;
   const activeMissionFlowNodes = runSessionActive ? runMissionFlowNodes : missionFlowNodes;
@@ -4331,83 +4307,6 @@ export default function MissionCanvasPage() {
             );
           })}
         </nav>
-
-        <div className="flex-1" />
-        <div className="text-[10px] font-mono tracking-[0.12em] px-1 pb-2" style={{ color: "var(--mc-text-subtle)" }}>
-          SESSION
-        </div>
-        <MissionSessionCard
-          mapName={currentMapName || mapName || ""}
-          running={running}
-          showMission={
-            (workspaceStage === STAGE_AUTHORING && designMapActive) ||
-            (workspaceStage === STAGE_RUN && missionMapLoaded)
-          }
-          missionName={activeMissionName}
-          missionNames={workspaceStage === STAGE_RUN ? runCatalog.names : designCatalog.names}
-          disabled={workspaceStage === STAGE_RUN
-            ? (running || missionRunnerActive || runMapBusy)
-            : (designMapBusy || !!busy)}
-          onMissionChange={workspaceStage === STAGE_RUN
-            ? handleMissionChange
-            : (name) => runGuardedDesignAction(() => handleDesignMissionChange(name))}
-          actions={workspaceStage === STAGE_AUTHORING ? (
-            <div className="grid gap-1.5">
-              <button
-                type="button"
-                aria-label="Save Mission"
-                title="Save Mission"
-                disabled={!!busy || designMapBusy}
-                onClick={handleOpenSaveMissionDialog}
-                className="w-full h-7 text-[11px] font-semibold disabled:opacity-40"
-                style={{
-                  borderRadius: 8,
-                  border: "1px solid transparent",
-                  backgroundColor: "var(--mc-accent)",
-                  color: "var(--mc-bg)",
-                }}
-              >
-                Save
-              </button>
-              <div className="flex gap-1.5">
-                {[
-                  {
-                    label: "New Mission",
-                    Icon: MdAdd,
-                    onClick: () => runGuardedDesignAction(startNewMission),
-                    disabled: !!busy || designMapBusy,
-                  },
-                  { label: "Rename mission", Icon: MdEdit, onClick: handleOpenRenameMissionDialog },
-                  { label: "Duplicate mission", Icon: MdContentCopy, onClick: handleOpenDuplicateMissionDialog },
-                  { label: "Delete mission", Icon: MdDelete, onClick: () => setShowDeleteMissionDialog(true) },
-                ].map(({ label, Icon, onClick, disabled }) => (
-                  <button
-                    key={label}
-                    type="button"
-                    aria-label={label}
-                    title={label}
-                    disabled={disabled ?? (
-                      !!busy ||
-                      designMapBusy ||
-                      missionRunnerActive ||
-                      !designCatalog.names.includes(missionName)
-                    )}
-                    onClick={onClick}
-                    className="flex-1 flex items-center justify-center h-7 disabled:opacity-40"
-                    style={{
-                      borderRadius: 8,
-                      border: "1px solid var(--mc-border-strong)",
-                      backgroundColor: "var(--mc-surface-2)",
-                      color: "var(--mc-text-muted)",
-                    }}
-                  >
-                    <Icon size={13} />
-                  </button>
-                ))}
-              </div>
-            </div>
-          ) : null}
-        />
       </aside>
 
       {/* WORKSPACE */}
@@ -4623,10 +4522,10 @@ export default function MissionCanvasPage() {
           />
 
           {workspaceStage === STAGE_AUTHORING && !waypointBtLayer && (
-            <>
+            <div className="absolute top-5 left-5 z-10 flex flex-col items-start gap-2">
               {/* HUD toolbar — top-left (glass): Create Waypoint + Edit Route */}
               <div
-                className="absolute top-5 left-5 z-10 flex items-center gap-2 p-2"
+                className="flex items-center gap-2 p-2"
                 style={{ borderRadius: 14, backgroundColor: "color-mix(in srgb, var(--mc-surface) 88%, transparent)", border: "1px solid var(--mc-border)", boxShadow: "var(--mc-shadow)", backdropFilter: "blur(8px)" }}
               >
                 <div className="relative">
@@ -4663,7 +4562,86 @@ export default function MissionCanvasPage() {
                   Edit Route
                 </button>
               </div>
-            </>
+
+              {/* Mission hub — create/save/rename/duplicate/delete, right under
+                  the authoring tools so mission management sits with editing. */}
+              {designMapActive && (
+                <div
+                  className="w-[210px] grid gap-1.5 p-2.5"
+                  style={{ borderRadius: 14, backgroundColor: "color-mix(in srgb, var(--mc-surface) 88%, transparent)", border: "1px solid var(--mc-border)", boxShadow: "var(--mc-shadow)", backdropFilter: "blur(8px)" }}
+                >
+                  {/* The rail session card is gone; the loaded map is named here. */}
+                  <div className="text-[11px] font-semibold truncate" style={{ color: "var(--mc-text-muted)" }}>
+                    {currentMapName}
+                  </div>
+                  <label className="grid gap-1 text-[10px] font-mono tracking-[0.08em]" style={{ color: "var(--mc-text-subtle)" }}>
+                    MISSION
+                    <select
+                      aria-label="Active mission"
+                      value={missionName}
+                      disabled={designMapBusy || !!busy}
+                      onChange={(event) => {
+                        const name = event.currentTarget.value;
+                        runGuardedDesignAction(() => handleDesignMissionChange(name));
+                      }}
+                      className="w-full rounded px-1.5 py-1 text-xs font-sans tracking-normal"
+                      style={{ color: "var(--mc-text)", backgroundColor: "var(--mc-surface-2)", border: "1px solid var(--mc-border-strong)" }}
+                    >
+                      {(designCatalog.names.includes(missionName)
+                        ? designCatalog.names
+                        : [...designCatalog.names, missionName]
+                      ).map((name) => (
+                        <option key={name} value={name}>
+                          {designCatalog.names.includes(name) ? name : `${name} (unsaved)`}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <button
+                    type="button"
+                    aria-label="Save Mission"
+                    title="Save Mission"
+                    disabled={!!busy || designMapBusy}
+                    onClick={handleOpenSaveMissionDialog}
+                    className="w-full h-7 text-[11px] font-semibold disabled:opacity-40"
+                    style={{ borderRadius: 8, border: "1px solid transparent", backgroundColor: "var(--mc-accent)", color: "var(--mc-bg)" }}
+                  >
+                    Save
+                  </button>
+                  <div className="flex gap-1.5">
+                    {[
+                      {
+                        label: "New Mission",
+                        Icon: MdAdd,
+                        onClick: () => runGuardedDesignAction(startNewMission),
+                        disabled: !!busy || designMapBusy,
+                      },
+                      { label: "Rename mission", Icon: MdEdit, onClick: handleOpenRenameMissionDialog },
+                      { label: "Duplicate mission", Icon: MdContentCopy, onClick: handleOpenDuplicateMissionDialog },
+                      { label: "Delete mission", Icon: MdDelete, onClick: () => setShowDeleteMissionDialog(true) },
+                    ].map(({ label, Icon, onClick, disabled }) => (
+                      <button
+                        key={label}
+                        type="button"
+                        aria-label={label}
+                        title={label}
+                        disabled={disabled ?? (
+                          !!busy ||
+                          designMapBusy ||
+                          missionRunnerActive ||
+                          !designCatalog.names.includes(missionName)
+                        )}
+                        onClick={onClick}
+                        className="flex-1 flex items-center justify-center h-7 disabled:opacity-40"
+                        style={{ borderRadius: 8, border: "1px solid var(--mc-border-strong)", backgroundColor: "var(--mc-surface-2)", color: "var(--mc-text-muted)" }}
+                      >
+                        <Icon size={13} />
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
           )}
 
           {/* Layers popover — all stages, hidden during the BT split view */}
@@ -4817,6 +4795,10 @@ export default function MissionCanvasPage() {
                   running={running}
                   runner={missionRunner}
                   poseReady={runPoseInitialized}
+                  missionName={runMissionName}
+                  missionNames={runCatalog.names}
+                  missionSelectDisabled={running || missionRunnerActive || runMapBusy || !missionMapLoaded}
+                  onMissionChange={handleMissionChange}
                 />
                 {/* The BT node executes each waypoint's tree during a run, so its
                     lifecycle control lives here too — not just in Design. */}
