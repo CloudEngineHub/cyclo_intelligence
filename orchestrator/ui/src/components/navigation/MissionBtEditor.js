@@ -59,7 +59,8 @@ export function buildBtTreeFileUrl(rosbridgeUrl, filePath) {
   } catch {
     // Keep the local-development fallback when ROS bridge configuration is absent.
   }
-  const authority = host.includes(":") ? `[${host}]` : host;
+  // URL.hostname already brackets IPv6 literals; only wrap bare ones.
+  const authority = host.includes(":") && !host.startsWith("[") ? `[${host}]` : host;
   const path = String(filePath || "");
   const normalizedPath = path.startsWith("/") ? path : `/${path}`;
   return `http://${authority}:${CYCLO_VIDEO_SERVER_PORT}${normalizedPath}`;

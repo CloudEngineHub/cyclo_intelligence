@@ -1275,17 +1275,6 @@ function MappingSessionPanel({ mappingEditorActive, selectedPath, dirty }) {
   );
 }
 
-const RUNNER_STATUS_META = {
-  idle: { label: "Idle", color: "var(--mc-text-subtle)" },
-  starting: { label: "Starting", color: "var(--mc-warning)" },
-  navigating: { label: "Running", color: "var(--mc-success)" },
-  "running-bt": { label: "Running", color: "var(--mc-success)" },
-  advancing: { label: "Running", color: "var(--mc-success)" },
-  done: { label: "Completed", color: "var(--mc-success)" },
-  failed: { label: "Failed", color: "var(--mc-danger)" },
-  cancelled: { label: "Stopped", color: "var(--mc-warning)" },
-};
-
 const RUNNER_PHASE_LABEL = {
   "nav-sent": "Navigating",
   "awaiting-nav-result": "Navigating",
@@ -1314,7 +1303,6 @@ function RunSessionPanel({
   missionSelectDisabled,
   onMissionChange,
 }) {
-  const statusMeta = RUNNER_STATUS_META[runner.status] || RUNNER_STATUS_META.idle;
   const showProgress = runner.total > 0;
   const showReason = (runner.status === "failed" || runner.status === "cancelled") && runner.reason;
   const phaseLabel = RUNNER_PHASE_LABEL[runner.phase];
@@ -1322,15 +1310,17 @@ function RunSessionPanel({
     <Panel title="Run Session" className="grid gap-2">
       <SessionRow label="Runtime" value={running ? "Running" : "Idle"} />
       <SessionRow label="Selected map" value={mapName || "Not selected"} />
+      {/* Run state already reads from Progress / the reason box, so the
+          mission row is just the selector — no separate status line. */}
       <label className="flex items-center justify-between gap-2 text-xs min-w-0">
-        <span style={{ color: MISSION_TEXT_MUTED }}>Mission</span>
+        <span className="shrink-0" style={{ color: MISSION_TEXT_MUTED }}>Mission</span>
         <select
           aria-label="Active mission"
           value={missionName}
           disabled={missionSelectDisabled || missionNames.length === 0}
           onChange={(event) => onMissionChange(event.currentTarget.value)}
-          className="max-w-[11rem] rounded px-1.5 py-1 text-xs"
-          style={{ color: "var(--mc-text)", backgroundColor: "var(--mc-surface-2)", border: "1px solid var(--mc-border-strong)" }}
+          className="min-w-0 max-w-[11rem] h-7 px-2 text-xs font-medium"
+          style={{ borderRadius: 8, color: "var(--mc-text)", backgroundColor: "var(--mc-surface-2)", border: "1px solid var(--mc-border-strong)" }}
         >
           {missionNames.map((name) => <option key={name} value={name}>{name}</option>)}
         </select>
@@ -1347,13 +1337,6 @@ function RunSessionPanel({
           </span>
         </div>
       )}
-      <div className="flex items-center justify-between gap-2 text-xs min-w-0">
-        <span style={{ color: MISSION_TEXT_MUTED }}>Mission</span>
-        <span className="flex items-center gap-1.5 font-mono">
-          <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: statusMeta.color }} />
-          {statusMeta.label}
-        </span>
-      </div>
       {showProgress && (
         <SessionRow
           label="Progress"
@@ -2360,10 +2343,12 @@ export default function MissionCanvasPage() {
       activeNodeNames={btActiveNodeNames}
       onXmlChange={(nextXml) => {
         setMissionBtFiles((current) => {
-          if (
-            current[selectedBtLayerPath] !== undefined &&
-            current[selectedBtLayerPath] !== nextXml
-          ) {
+          // Until the server fetch resolves this path, the editor only holds
+          // the fallback tree; its mount-time emit must not claim the slot —
+          // doing so cancels the in-flight fetch (the fetch effect keys on
+          // missionBtFiles) and strands the "Loading BT XML..." state.
+          if (current[selectedBtLayerPath] === undefined) return current;
+          if (current[selectedBtLayerPath] !== nextXml) {
             designDirtyRef.current = true;
             setDesignDirty(true);
           }
@@ -2646,6 +2631,10 @@ export default function MissionCanvasPage() {
       });
     return () => {
       cancelled = true;
+      // A cancelled fetch can no longer clear its own flag, and the re-run may
+      // early-return (content seeded by another writer) — clear it here so the
+      // editor can never be stranded on "Loading BT XML...".
+      setMissionBtLoadingPath((current) => (current === selectedBtLayerPath ? "" : current));
     };
   }, [currentMapName, missionBtFiles, missionName, selectedBtLayerPath, selectedBtLayerSpot]);
 
@@ -3193,10 +3182,18 @@ export default function MissionCanvasPage() {
     setShowUnsavedDialog(true);
   }, []);
 
-  const handleOpenSaveMissionDialog = useCallback(() => {
+  // Existing missions save in place — Rename/Duplicate cover name changes, so
+  // prompting on every save only added friction. Only a not-yet-saved mission
+  // opens the name dialog, mirroring the unsaved-changes guard's asymmetry
+  // ("Save & continue" for catalog missions, "name it first" otherwise).
+  const handleSaveMission = useCallback(() => {
+    if (designCatalog.names.includes(missionName)) {
+      void saveDesignMission(missionName);
+      return;
+    }
     setSaveMissionName(missionName);
     setShowSaveMissionDialog(true);
-  }, [missionName]);
+  }, [designCatalog.names, missionName, saveDesignMission]);
 
   const handleConfirmSaveMission = useCallback(() => {
     const target = saveMissionName.trim();
@@ -4523,9 +4520,12 @@ export default function MissionCanvasPage() {
 
           {workspaceStage === STAGE_AUTHORING && !waypointBtLayer && (
             <div className="absolute top-5 left-5 z-10 flex flex-col items-start gap-2">
-              {/* HUD toolbar — top-left (glass): Create Waypoint + Edit Route */}
+              {/* HUD toolbar — top-left (glass): Create Waypoint + Edit Route.
+                  z-20 keeps the waypoint options popover above the mission hub
+                  below (both blur → stacking contexts, so DOM order would
+                  otherwise paint the hub over the popover). */}
               <div
-                className="flex items-center gap-2 p-2"
+                className="relative z-20 flex items-center gap-2 p-2"
                 style={{ borderRadius: 14, backgroundColor: "color-mix(in srgb, var(--mc-surface) 88%, transparent)", border: "1px solid var(--mc-border)", boxShadow: "var(--mc-shadow)", backdropFilter: "blur(8px)" }}
               >
                 <div className="relative">
@@ -4570,12 +4570,17 @@ export default function MissionCanvasPage() {
                   className="w-[210px] grid gap-1.5 p-2.5"
                   style={{ borderRadius: 14, backgroundColor: "color-mix(in srgb, var(--mc-surface) 88%, transparent)", border: "1px solid var(--mc-border)", boxShadow: "var(--mc-shadow)", backdropFilter: "blur(8px)" }}
                 >
-                  {/* The rail session card is gone; the loaded map is named here. */}
-                  <div className="text-[11px] font-semibold truncate" style={{ color: "var(--mc-text-muted)" }}>
+                  {/* The rail session card is gone; the loaded map is named here.
+                      Mono per the page's data-typography rule (names/paths). */}
+                  <div className="text-[11px] font-mono truncate" style={{ color: "var(--mc-text-muted)" }}>
                     {currentMapName}
                   </div>
-                  <label className="grid gap-1 text-[10px] font-mono tracking-[0.08em]" style={{ color: "var(--mc-text-subtle)" }}>
-                    MISSION
+                  <label className="grid gap-1">
+                    {/* Mono styling stays on the caption span only, so the select
+                        inherits the page's Hanken Grotesk instead of fighting it. */}
+                    <span className="text-[10px] font-mono tracking-[0.12em]" style={{ color: "var(--mc-text-subtle)" }}>
+                      MISSION
+                    </span>
                     <select
                       aria-label="Active mission"
                       value={missionName}
@@ -4584,8 +4589,8 @@ export default function MissionCanvasPage() {
                         const name = event.currentTarget.value;
                         runGuardedDesignAction(() => handleDesignMissionChange(name));
                       }}
-                      className="w-full rounded px-1.5 py-1 text-xs font-sans tracking-normal"
-                      style={{ color: "var(--mc-text)", backgroundColor: "var(--mc-surface-2)", border: "1px solid var(--mc-border-strong)" }}
+                      className="w-full h-7 px-2 text-xs font-medium"
+                      style={{ borderRadius: 8, color: "var(--mc-text)", backgroundColor: "var(--mc-surface-2)", border: "1px solid var(--mc-border-strong)" }}
                     >
                       {(designCatalog.names.includes(missionName)
                         ? designCatalog.names
@@ -4602,9 +4607,9 @@ export default function MissionCanvasPage() {
                     aria-label="Save Mission"
                     title="Save Mission"
                     disabled={!!busy || designMapBusy}
-                    onClick={handleOpenSaveMissionDialog}
+                    onClick={handleSaveMission}
                     className="w-full h-7 text-[11px] font-semibold disabled:opacity-40"
-                    style={{ borderRadius: 8, border: "1px solid transparent", backgroundColor: "var(--mc-accent)", color: "var(--mc-bg)" }}
+                    style={{ borderRadius: 8, border: "1px solid transparent", backgroundColor: "var(--mc-accent)", color: "var(--mc-accent-fg)" }}
                   >
                     Save
                   </button>

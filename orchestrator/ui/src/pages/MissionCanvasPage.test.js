@@ -630,13 +630,15 @@ test('offers a fresh default mission for a map with no missions', async () => {
   ));
 });
 
-test('saves the design as a new named mission from the save dialog', async () => {
+// Only a not-yet-saved mission prompts for its name; existing missions save in
+// place (rename/duplicate are their own rail actions).
+test('names a not-yet-saved mission through the save dialog', async () => {
   getPgmFiles.mockResolvedValue({
     files: [{ path: 'factory.pgm', name: 'factory.pgm' }],
   });
   getNavigationMissions
-    .mockResolvedValueOnce({ map_name: 'factory', missions: ['default'] })
-    .mockResolvedValue({ map_name: 'factory', missions: ['default', 'evening_route'] });
+    .mockResolvedValueOnce({ map_name: 'factory', missions: [] })
+    .mockResolvedValue({ map_name: 'factory', missions: ['evening_route'] });
 
   render(<MissionCanvasPage />);
 
@@ -1030,7 +1032,8 @@ test('shows waypoint actions in Waypoints after placing a waypoint', async () =>
   }));
 
   fireEvent.click(screen.getByRole('button', { name: 'Save Mission' }));
-  fireEvent.click(screen.getByRole('button', { name: 'Save', exact: true }));
+  // "default" already exists in the catalog, so Save writes in place — no dialog.
+  expect(screen.queryByRole('textbox', { name: 'Save mission name' })).not.toBeInTheDocument();
 
   await waitFor(() => expect(saveNavigationMission).toHaveBeenCalledWith(
     'factory',
@@ -1101,7 +1104,6 @@ test('shows waypoint actions in Waypoints after placing a waypoint', async () =>
   }));
   expect(screen.getByRole('button', { name: 'Pickup A' })).toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: 'Save Mission' }));
-  fireEvent.click(screen.getByRole('button', { name: 'Save', exact: true }));
   await waitFor(() => expect(saveNavigationMission).toHaveBeenLastCalledWith(
     'factory',
     expect.objectContaining({
@@ -1130,7 +1132,6 @@ test('shows waypoint actions in Waypoints after placing a waypoint', async () =>
   await waitFor(() => expect(deleteNavigationSpot).toHaveBeenCalledWith('spot_a', 'factory'));
   await waitFor(() => expect(screen.queryByRole('button', { name: 'Pickup A' })).not.toBeInTheDocument());
   fireEvent.click(screen.getByRole('button', { name: 'Save Mission' }));
-  fireEvent.click(screen.getByRole('button', { name: 'Save', exact: true }));
   await waitFor(() => expect(deleteNavigationMissionBtFile).toHaveBeenCalledWith(
     'factory',
     'locals/pickup_a.xml',
@@ -1609,7 +1610,6 @@ test('edits the mission route directly on the map', async () => {
   expect(latestMapViewerProps().missionRouteClosed).toBe(true);
 
   fireEvent.click(screen.getByRole('button', { name: 'Save Mission' }));
-  fireEvent.click(screen.getByRole('button', { name: 'Save', exact: true }));
 
   await waitFor(() => expect(saveNavigationMission).toHaveBeenCalledWith(
     'map',
