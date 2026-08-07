@@ -2562,8 +2562,10 @@ test('loads a saved map for the run stage', async () => {
   await waitFor(() => expect(latestMapViewerProps().mapAnnotations).toEqual([
     expect.objectContaining({ label: 'Dock', color: '#3B241F' }),
   ]));
-  // Run waypoints are display-only: no drag handler, so a drag never starts.
+  // Run waypoints are display-only: no drag or selection handlers at all.
   expect(latestMapViewerProps().onSpotPoseChange).toBeUndefined();
+  expect(latestMapViewerProps().onSpotClick).toBeUndefined();
+  expect(latestMapViewerProps().selectedSpotId).toBe('');
 
   // Localize brings the nav stack up (Run Mission runs the route afterwards).
   fireEvent.click(screen.getByRole('button', { name: 'Localize' }));

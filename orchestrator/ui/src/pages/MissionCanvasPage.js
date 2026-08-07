@@ -4508,7 +4508,7 @@ export default function MissionCanvasPage() {
             footprint={mappingEditorActive ? null : needsRobotModel ? footprint : null}
             tf={mappingEditorActive ? null : needsTf ? bufferedTf : null}
             spots={missionOverlayActive ? visibleSpots : []}
-            selectedSpotId={missionOverlayActive ? selectedSpotId : ""}
+            selectedSpotId={missionOverlayActive && workspaceStage === STAGE_AUTHORING ? selectedSpotId : ""}
             activeWaypointId={workspaceStage === STAGE_RUN ? missionRunner.activeSpotId : ""}
             missionFollowRobot={missionFollowRobot}
             behaviorNodes={missionOverlayActive ? activeBehaviorNodes : []}
@@ -4572,7 +4572,8 @@ export default function MissionCanvasPage() {
                 : running
                   ? "Waiting for /map"
                   : runDisplayMapEditor.busy ? "Loading map" : "Load a mission to view the map"}
-            onSpotClick={missionRouteMode ? handleMissionRouteSpotClick : handleSelectSpot}
+            /* Selection is an authoring gesture; Run waypoints ignore clicks. */
+            onSpotClick={workspaceStage === STAGE_AUTHORING ? (missionRouteMode ? handleMissionRouteSpotClick : handleSelectSpot) : undefined}
             onBehaviorNodeClick={handleSelectBehaviorNode}
             onMissionRouteSpotClick={handleMissionRouteSpotClick}
             onMissionRouteMapClick={handleMissionRouteMapClick}
