@@ -233,8 +233,8 @@ const MISSION_GLASS = "color-mix(in srgb, var(--mc-surface) 88%, transparent)";
 // Editor brush-ring colors per tool (matches the warm OCC/MARKER palettes):
 // ink/cream for obstacles, paper for clearing, sage for extend, danger for erase.
 const EDITOR_BRUSH_RING_COLORS = {
-  light: { draw_black: "#2A2620", erase_black: "#FAF8F3", extend_area: "#5B8266", erase_area: "#C14E34" },
-  dark: { draw_black: "#D8D2C4", erase_black: "#2B2823", extend_area: "#6F9A74", erase_area: "#D15A3E" },
+  light: { draw_black: "#2A2620", erase_black: "#FAF8F3", draw_unknown: "#8C8677", extend_area: "#5B8266", erase_area: "#C14E34" },
+  dark: { draw_black: "#D8D2C4", erase_black: "#2B2823", draw_unknown: "#8C8677", extend_area: "#6F9A74", erase_area: "#D15A3E" },
 };
 const MISSION_DESIGN_STORAGE_KEY = "mission_canvas_designs";
 const MISSION_SESSION_STORAGE_KEY = "mission_canvas_session";

@@ -1917,6 +1917,39 @@ test('edits and saves loaded map pixels from the fix editor', async () => {
   ));
 });
 
+test('marks unknown map pixels from the fix editor', async () => {
+  const latestMapViewerProps = () => (
+    mockMapViewer.mock.calls[mockMapViewer.mock.calls.length - 1][0]
+  );
+  getPgmFiles.mockResolvedValue({
+    files: [{ path: 'factory.pgm', name: 'factory.pgm' }],
+  });
+  getPgmImage.mockResolvedValue({
+    path: 'factory.pgm',
+    width: 1,
+    height: 1,
+    maxval: 255,
+    pixels_base64: '/g==',
+  });
+
+  render(<MissionCanvasPage />);
+
+  fireEvent.click(screen.getByRole('button', { name: 'Edit Map' }));
+  await waitFor(() => expect(getPgmImage).toHaveBeenCalledWith('factory.pgm'));
+
+  fireEvent.click(screen.getByRole('button', { name: 'Mark Unknown' }));
+  await waitFor(() => expect(latestMapViewerProps().editorActive).toBe(true));
+  await act(async () => {
+    latestMapViewerProps().onEditorMapPoint(0, 0);
+  });
+
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Save' })).toBeEnabled());
+  fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+  // 0xCD == 205, the map_server "unknown" gray.
+  await waitFor(() => expect(savePgmImage).toHaveBeenCalledWith('factory.pgm', 1, 1, 255, 'zQ=='));
+});
+
 test('paints continuous map pixel segments while dragging', async () => {
   const latestMapViewerProps = () => (
     mockMapViewer.mock.calls[mockMapViewer.mock.calls.length - 1][0]

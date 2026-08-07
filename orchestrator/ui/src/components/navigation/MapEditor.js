@@ -21,6 +21,7 @@ import { getMapAnnotations, getPgmFiles, getPgmImage, saveMapAnnotations, savePg
 import { yawFromPose } from "../../utils/navigationTf";
 const FREE_VALUE = 254;
 const OCCUPIED_VALUE = 0;
+const UNKNOWN_VALUE = 205; // ROS map_server convention for unexplored cells
 const FREE_THRESHOLD = 250;
 const OCCUPIED_THRESHOLD = 50;
 const DEFAULT_BRUSH_SIZE_CELLS = 1;
@@ -34,7 +35,9 @@ const BRUSH_SIZE_OPTIONS = [
 const EDIT_TOOLS = [
     { id: "erase_black", label: "Clear Space" },
     { id: "draw_black", label: "Add Obstacle" },
+    { id: "draw_unknown", label: "Mark Unknown" },
 ];
+const PIXEL_TOOL_IDS = new Set(EDIT_TOOLS.map((tool) => tool.id));
 const ANNOTATION_TOOL = { id: "label_marker", label: "Area" };
 const ANNOTATION_EXTEND_TOOL = { id: "extend_area", label: "Extend" };
 const ANNOTATION_ERASE_TOOL = { id: "erase_area", label: "Erase Area" };
@@ -69,7 +72,11 @@ function encodePgmPixels(pixels) {
     return window.btoa(binary);
 }
 function applyPgmBrush(pixels, width, height, pixelX, pixelY, operation, brushSizeCells) {
-    const value = operation === "erase_black" ? FREE_VALUE : OCCUPIED_VALUE;
+    const value = operation === "erase_black"
+        ? FREE_VALUE
+        : operation === "draw_unknown"
+            ? UNKNOWN_VALUE
+            : OCCUPIED_VALUE;
     const offset = Math.floor(brushSizeCells / 2);
     const startX = pixelX - offset;
     const startY = pixelY - offset;
@@ -746,7 +753,7 @@ export function useMapEditor({ open, mapName, onMessage, reloadToken = 0 }) {
             lastPaintPixelRef.current = null;
             return;
         }
-        if (!open || !image || busy || (tool !== "erase_black" && tool !== "draw_black"))
+        if (!open || !image || busy || !PIXEL_TOOL_IDS.has(tool))
             return;
         const pixel = mapPointToPgmPixel(image, x, y);
         if (!pixel) {
@@ -777,7 +784,7 @@ export function useMapEditor({ open, mapName, onMessage, reloadToken = 0 }) {
         setRedoStack([]);
         setPixels(nextPixels);
         setDirty(true);
-        const action = tool === "erase_black" ? "Removed" : "Added";
+        const action = tool === "erase_black" ? "Removed" : tool === "draw_unknown" ? "Marked" : "Added";
         onMessage(`${action} ${editedPixels} pixels locally`);
     }, [brushSize, busy, image, onMessage, open, tool]);
     const applyAnnotationsSnapshot = useCallback((nextAnnotations, successMessage) => {
@@ -1126,6 +1133,13 @@ const TOOL_ICONS = {
     draw_black: (
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
             <path d="M12 19c-4 1.5-8-1-8-5 0-6 8-11 8-11s8 5 8 11c0 4-4 6.5-8 5z" />
+        </svg>
+    ),
+    draw_unknown: (
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="12" cy="12" r="9" />
+            <path d="M9.6 9.2a2.5 2.5 0 1 1 3.5 2.4c-.8.4-1.1 1-1.1 1.9" />
+            <path d="M12 16.8h.01" />
         </svg>
     ),
     label_marker: (
