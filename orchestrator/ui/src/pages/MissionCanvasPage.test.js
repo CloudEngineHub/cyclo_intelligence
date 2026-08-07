@@ -2497,6 +2497,22 @@ test('loads a saved map for the run stage', async () => {
   getPgmFiles.mockResolvedValue({
     files: [{ path: 'factory.pgm', name: 'factory.pgm' }],
   });
+  getMapAnnotations.mockResolvedValue({
+    path: 'factory.pgm',
+    annotations: [{
+      id: 'area_dock',
+      label: 'Dock',
+      color: '#3B241F',
+      pose: { frame_id: 'map', x: 0.5, y: 0.5, yaw: 0 },
+      region: {
+        seed_cell: { x: 0, y: 0 },
+        bounds: { x_min: 0, y_min: 0, x_max: 0, y_max: 0 },
+        cell_count: 1,
+        width: 1,
+        height: 1,
+      },
+    }],
+  });
   getNavigationMission.mockImplementation((mapName) => Promise.resolve(
     mapName === 'factory'
       ? {
@@ -2541,6 +2557,11 @@ test('loads a saved map for the run stage', async () => {
     linked_bt_tree: 'locals/run_waypoint.xml',
   });
   expect(getNavigationSpots.mock.calls.some(([mapName]) => mapName === 'factory')).toBe(false);
+  // Labeled map areas from Edit Map render in Run too.
+  await waitFor(() => expect(getMapAnnotations).toHaveBeenCalledWith('factory.pgm'));
+  await waitFor(() => expect(latestMapViewerProps().mapAnnotations).toEqual([
+    expect.objectContaining({ label: 'Dock', color: '#3B241F' }),
+  ]));
 
   // Localize brings the nav stack up (Run Mission runs the route afterwards).
   fireEvent.click(screen.getByRole('button', { name: 'Localize' }));
@@ -2627,8 +2648,8 @@ test('hides run waypoints with the map after leaving and returning to Run', asyn
   fireEvent.click(screen.getByRole('button', { name: 'Load' }));
   await waitFor(() => expect(screen.getByText('Loaded mission default for factory')).toBeInTheDocument());
   await waitFor(() => expect(latestMapViewerProps().spots).toHaveLength(2));
-  // Run keeps the beautified floor-plan rendering.
-  expect(latestMapViewerProps().mapRefined).toBe(true);
+  // Run shows the same raw map the mission was designed on (no beautification).
+  expect(latestMapViewerProps().mapRefined).toBe(false);
 
   // Leave to Design and come back: the ephemeral map is dropped, and the
   // waypoints must vanish with it (without a map they would render at raw

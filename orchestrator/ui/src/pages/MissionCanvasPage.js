@@ -4523,10 +4523,14 @@ export default function MissionCanvasPage() {
                 ? mapEditor.annotations
                 : workspaceStage === STAGE_AUTHORING && designMapActive
                   ? designMapEditor.annotations
-                  : []
+                  : workspaceStage === STAGE_RUN && missionMapLoaded
+                    ? runDisplayMapEditor.annotations
+                    : []
             }
             selectedMapAnnotationId={mappingEditorActive ? mapEditor.selectedAnnotationId : ""}
-            mapRefined={!mappingEditorActive && workspaceStage !== STAGE_AUTHORING}
+            /* Every stage shows the raw occupancy grid — the beautified
+               floor-plan rendering is disabled across Mission Canvas. */
+            mapRefined={false}
             editorBrush={
               mappingEditorActive && mapEditor.map && EDITOR_BRUSH_RING_COLORS.light[mapEditor.tool]
                 ? {
