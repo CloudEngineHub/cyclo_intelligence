@@ -72,6 +72,8 @@ export function useMissionRunner({
   sendGoals,
   cancelGoal,
   stopBt,
+  ensureBtActive,
+  releaseBt,
   getFlags,
   onMessage,
   config: configOverride,
@@ -91,6 +93,8 @@ export function useMissionRunner({
   const sendGoalsRef = useRef(sendGoals);
   const cancelGoalRef = useRef(cancelGoal);
   const stopBtRef = useRef(stopBt);
+  const ensureBtActiveRef = useRef(ensureBtActive);
+  const releaseBtRef = useRef(releaseBt);
   const getFlagsRef = useRef(getFlags);
   const onMessageRef = useRef(onMessage);
   const configRef = useRef(config);
@@ -113,6 +117,8 @@ export function useMissionRunner({
   useEffect(() => { sendGoalsRef.current = sendGoals; }, [sendGoals]);
   useEffect(() => { cancelGoalRef.current = cancelGoal; }, [cancelGoal]);
   useEffect(() => { stopBtRef.current = stopBt; }, [stopBt]);
+  useEffect(() => { ensureBtActiveRef.current = ensureBtActive; }, [ensureBtActive]);
+  useEffect(() => { releaseBtRef.current = releaseBt; }, [releaseBt]);
   useEffect(() => { getFlagsRef.current = getFlags; }, [getFlags]);
   useEffect(() => { onMessageRef.current = onMessage; }, [onMessage]);
   useEffect(() => { configRef.current = config; }, [config]);
@@ -283,7 +289,9 @@ export function useMissionRunner({
       return;
     }
     const needsBt = spots.some((spot) => !isEmptyBt(resolveBtXmlRef.current ? resolveBtXmlRef.current(spot) : ""));
-    if (needsBt && !flags.btNodeIsUp) {
+    // Without an activation callback the caller owns the BT lifecycle
+    // (legacy behavior): refuse to start while the node is down.
+    if (needsBt && !flags.btNodeIsUp && !ensureBtActiveRef.current) {
       emit("Activate the BT node before running the mission");
       return;
     }
@@ -295,6 +303,20 @@ export function useMissionRunner({
 
     (async () => {
       try {
+        if (needsBt && !flags.btNodeIsUp && ensureBtActiveRef.current) {
+          emit("Activating BT node");
+          let activated = false;
+          try {
+            activated = !!(await ensureBtActiveRef.current());
+          } catch {
+            activated = false;
+          }
+          if (controller.signal.aborted) return;
+          if (!activated) {
+            dispatch({ type: "fail", reason: "BT node failed to activate", index: -1 });
+            return;
+          }
+        }
         let index = 0;
         while (index < spotsRef.current.length) {
           if (controller.signal.aborted) return;
@@ -312,6 +334,11 @@ export function useMissionRunner({
       } finally {
         isRunningRef.current = false;
         if (abortRef.current === controller) abortRef.current = null;
+        // The run owns the BT node lifecycle: whenever this mission used
+        // behaviors, release the node on any exit (done, failed, stopped).
+        if (needsBt && releaseBtRef.current) {
+          Promise.resolve().then(releaseBtRef.current).catch(() => {});
+        }
       }
     })();
   }, [emit, runNavigationBatch]);

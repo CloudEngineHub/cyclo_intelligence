@@ -2617,9 +2617,9 @@ test('hides run waypoints with the map after leaving and returning to Run', asyn
   render(<MissionCanvasPage />);
 
   fireEvent.click(screen.getByRole('tab', { name: 'Run' }));
-  // The BT node lifecycle control is available in the Run inspector too.
-  expect(screen.getByText('BT Runtime')).toBeInTheDocument();
-  expect(screen.getByRole('button', { name: 'Activate BT' })).toBeInTheDocument();
+  // The BT lifecycle is run-owned (auto activate/release) — no manual panel here.
+  expect(screen.queryByText('BT Runtime')).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Activate BT' })).not.toBeInTheDocument();
 
   fireEvent.click(screen.getByRole('button', { name: 'Load Map' }));
   const mapSelect = await screen.findByRole('combobox', { name: 'Run mission map file' });
@@ -2733,6 +2733,103 @@ test('gates the mission run on an initial robot pose', async () => {
   await waitFor(() => expect(sendNavigateToPoseGoalAndWait).toHaveBeenCalled());
   const [closingRequest] = sendNavigateToPoseGoalAndWait.mock.calls.at(-1);
   expect(closingRequest.pose.pose.position).toMatchObject({ x: 1, y: 0 });
+}, 20000);
+
+test('run mission activates the BT node on demand and releases it on stop', async () => {
+  const latestMapViewerProps = () => (
+    mockMapViewer.mock.calls[mockMapViewer.mock.calls.length - 1][0]
+  );
+  const filledBt = [
+    '<root BTCPP_format="4" main_tree_to_execute="MainTree">',
+    '  <BehaviorTree ID="MainTree"><Wait duration="0.1"/></BehaviorTree>',
+    '</root>',
+  ].join('\n');
+  // Supervisor mock with real node state: status reflects start/stop calls.
+  let btUp = false;
+  global.fetch.mockImplementation((url) => {
+    const target = String(url);
+    if (target.includes('/services/bt_node/start')) {
+      btUp = true;
+      return Promise.resolve(mockJsonResponse({ ok: true }));
+    }
+    if (target.includes('/services/bt_node/stop')) {
+      btUp = false;
+      return Promise.resolve(mockJsonResponse({ ok: true }));
+    }
+    return Promise.resolve(mockJsonResponse({ name: 'bt_node', state: btUp ? 'up' : 'inactive', raw: '' }));
+  });
+  // Navigation hangs until aborted, so the run is still in flight at Stop.
+  sendNavigateToPoseGoalAndWait.mockImplementation((goal, signal) => new Promise((resolve, reject) => {
+    signal.addEventListener('abort', () => {
+      reject(new DOMException('Aborted', 'AbortError'));
+    }, { once: true });
+  }));
+  getPgmFiles.mockResolvedValue({
+    files: [{ path: 'factory.pgm', name: 'factory.pgm' }],
+  });
+  getNavigationMission.mockImplementation((mapName) => Promise.resolve(
+    mapName === 'factory'
+      ? {
+        exists: true,
+        map_name: 'factory',
+        global_bt: 'global.xml',
+        waypoints: [
+          { id: 'wp1', label: 'Kitchen', pose: { frame_id: 'map', x: 1, y: 0, yaw: 0 }, local_bt: 'locals/wp1.xml', metadata: {} },
+          { id: 'wp2', label: 'Living Room', pose: { frame_id: 'map', x: 4, y: 0, yaw: 0 }, local_bt: 'locals/wp2.xml', metadata: {} },
+        ],
+        metadata: {
+          mission_flow: {
+            nodes: [{ id: 'wp1', position: { x: 80, y: 72 } }, { id: 'wp2', position: { x: 300, y: 72 } }],
+            edges: [{ id: 'e1', source: 'wp1', target: 'wp2' }],
+          },
+        },
+      }
+      : { exists: false, map_name: mapName, global_bt: 'global.xml', waypoints: [], metadata: {} },
+  ));
+  // wp1 carries a real behavior, so the mission needs the BT node.
+  getNavigationMissionBtFile.mockImplementation((mapName, path) => Promise.resolve(
+    path === 'locals/wp1.xml'
+      ? { path, content: filledBt, exists: true }
+      : { path, content: '', exists: false },
+  ));
+  sendInitialPoseEstimate.mockImplementation(async () => {
+    mockTopicDataByName['/amcl_pose'] = amclPoseMessage(0.6, 0.4, 0.1);
+    return { ok: true };
+  });
+
+  render(<MissionCanvasPage />);
+
+  fireEvent.click(screen.getByRole('tab', { name: 'Run' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Load Map' }));
+  const mapSelect = await screen.findByRole('combobox', { name: 'Run mission map file' });
+  await waitFor(() => expect(mapSelect).toHaveValue('factory.pgm'));
+  fireEvent.click(screen.getByRole('button', { name: 'Load' }));
+  await waitFor(() => expect(screen.getByText('Loaded mission default for factory')).toBeInTheDocument());
+
+  getServiceStatus.mockResolvedValue({ is_up: true, mode: 'nav' });
+  fireEvent.click(screen.getByRole('button', { name: 'Localize' }));
+  await waitFor(() => expect(startNavigation).toHaveBeenCalledWith('nav', 'factory'));
+  await waitFor(() => expect(latestMapViewerProps().interactionMode).toBe('initial'));
+  await act(async () => {
+    latestMapViewerProps().onMapPose(0.6, 0.4, 0.1);
+  });
+  await waitFor(() => expect(screen.getByText('Ready')).toBeInTheDocument(), { timeout: 6000 });
+
+  // Run Mission with the node down: activation happens before navigation.
+  expect(global.fetch).not.toHaveBeenCalledWith('/api/services/bt_node/start', expect.anything());
+  fireEvent.click(screen.getByRole('button', { name: 'Run Mission' }));
+  await waitFor(() => expect(global.fetch).toHaveBeenCalledWith(
+    '/api/services/bt_node/start',
+    expect.objectContaining({ method: 'POST' }),
+  ));
+  await waitFor(() => expect(sendNavigateToPoseGoalAndWait).toHaveBeenCalled());
+
+  // Stopping the run releases the node again.
+  fireEvent.click(screen.getByRole('button', { name: 'Stop' }));
+  await waitFor(() => expect(global.fetch).toHaveBeenCalledWith(
+    '/api/services/bt_node/stop',
+    expect.objectContaining({ method: 'POST' }),
+  ));
 }, 20000);
 
 test('keeps Run localization active while the BT node is up', async () => {

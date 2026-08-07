@@ -12,7 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 //
-// Author: Howon Kim
+// Author: Howon Kim, Seongwoo Kim
+
 export function yawFromPose(pose) {
     var _a, _b, _c, _d;
     const q = pose === null || pose === void 0 ? void 0 : pose.orientation;

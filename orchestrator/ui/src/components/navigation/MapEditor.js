@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 //
-// Author: Howon Kim
+// Author: Howon Kim, Seongwoo Kim
 
 "use client";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";

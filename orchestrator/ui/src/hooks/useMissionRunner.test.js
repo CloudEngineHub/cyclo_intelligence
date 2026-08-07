@@ -347,8 +347,91 @@ test("start is a no-op when there is no route", () => {
 });
 
 test("start fails fast when a BT is present but the BT node is down", () => {
+  // Legacy contract: with no ensureBtActive callback, the caller owns the
+  // BT lifecycle and the runner refuses to start with the node down.
   const h = makeHarness({ getFlags: () => ({ navRunning: true, btNodeIsUp: false }) });
   act(() => { h.view.result.current.start(); });
   expect(h.sendGoal).not.toHaveBeenCalled();
   expect(h.onMessage).toHaveBeenCalledWith(expect.stringMatching(/Activate the BT node/));
+});
+
+test("activates the BT node on demand and releases it when the run ends", async () => {
+  const ensureBtActive = jest.fn().mockResolvedValue(true);
+  const releaseBt = jest.fn().mockResolvedValue(undefined);
+  const h = makeHarness({
+    orderedSpots: [SPOTS[0]],
+    getFlags: () => ({ navRunning: true, btNodeIsUp: false }),
+    ensureBtActive,
+    releaseBt,
+  });
+  act(() => { h.view.result.current.start(); });
+
+  await waitFor(() => expect(h.sendGoal).toHaveBeenCalledTimes(1));
+  // Activation strictly precedes the first navigation goal.
+  expect(ensureBtActive).toHaveBeenCalledTimes(1);
+  expect(ensureBtActive.mock.invocationCallOrder[0])
+    .toBeLessThan(h.sendGoal.mock.invocationCallOrder[0]);
+  await waitFor(() => expect(h.callService).toHaveBeenCalledTimes(1));
+  await completeBt(h.btStatusRef);
+  await waitFor(() => expect(h.view.result.current.status).toBe(RunnerStatus.DONE));
+  await waitFor(() => expect(releaseBt).toHaveBeenCalledTimes(1));
+});
+
+test("skips activation when the node is already up but still releases it", async () => {
+  const ensureBtActive = jest.fn().mockResolvedValue(true);
+  const releaseBt = jest.fn().mockResolvedValue(undefined);
+  const h = makeHarness({ orderedSpots: [SPOTS[0]], ensureBtActive, releaseBt });
+  act(() => { h.view.result.current.start(); });
+
+  await waitFor(() => expect(h.callService).toHaveBeenCalledTimes(1));
+  await completeBt(h.btStatusRef);
+  await waitFor(() => expect(h.view.result.current.status).toBe(RunnerStatus.DONE));
+  expect(ensureBtActive).not.toHaveBeenCalled();
+  await waitFor(() => expect(releaseBt).toHaveBeenCalledTimes(1));
+});
+
+test("fails the run when BT activation fails", async () => {
+  const ensureBtActive = jest.fn().mockResolvedValue(false);
+  const h = makeHarness({
+    getFlags: () => ({ navRunning: true, btNodeIsUp: false }),
+    ensureBtActive,
+  });
+  act(() => { h.view.result.current.start(); });
+
+  await waitFor(() => expect(h.view.result.current.status).toBe(RunnerStatus.FAILED));
+  expect(h.view.result.current.reason).toMatch(/activate/i);
+  expect(h.sendGoal).not.toHaveBeenCalled();
+});
+
+test("leaves the BT node alone for nav-only missions", async () => {
+  const ensureBtActive = jest.fn().mockResolvedValue(true);
+  const releaseBt = jest.fn().mockResolvedValue(undefined);
+  const h = makeHarness({ resolveBtXml: () => emptyBt, ensureBtActive, releaseBt });
+  act(() => { h.view.result.current.start(); });
+
+  await waitFor(() => expect(h.view.result.current.status).toBe(RunnerStatus.DONE));
+  // Let the finally-path microtask run before asserting nothing fired.
+  await act(async () => { await Promise.resolve(); });
+  expect(ensureBtActive).not.toHaveBeenCalled();
+  expect(releaseBt).not.toHaveBeenCalled();
+});
+
+test("releases the BT node when the run is stopped", async () => {
+  const releaseBt = jest.fn().mockResolvedValue(undefined);
+  const sendGoal = jest.fn((x, y, yaw, signal) => new Promise((resolve, reject) => {
+    signal.addEventListener("abort", () => {
+      reject(new DOMException("Aborted", "AbortError"));
+    }, { once: true });
+  }));
+  const h = makeHarness({ sendGoal, releaseBt });
+  act(() => { h.view.result.current.start(); });
+  await waitFor(() => expect(sendGoal).toHaveBeenCalledTimes(1));
+
+  await act(async () => {
+    h.view.result.current.stop();
+    await Promise.resolve();
+  });
+
+  await waitFor(() => expect(h.view.result.current.status).toBe(RunnerStatus.CANCELLED));
+  await waitFor(() => expect(releaseBt).toHaveBeenCalledTimes(1));
 });

@@ -95,6 +95,9 @@ function uniqueMissionName(base, existingNames) {
 }
 const STATUS_POLL_MS = 10000;
 const BT_NODE_STATUS_POLL_MS = 5000;
+// Run Mission activates the BT node on demand; poll until it reports up.
+const BT_NODE_ACTIVATION_POLL_MS = 500;
+const BT_NODE_ACTIVATION_POLL_ATTEMPTS = 10;
 const NOMOTION_UPDATE_INTERVAL_MS = 1000;
 const AUTO_LOCALIZE_MAX_UPDATES = 10;
 const AUTO_LOCALIZE_MIN_UPDATES = 3;
@@ -2313,6 +2316,46 @@ export default function MissionCanvasPage() {
     () => ({ navRunning: running, btNodeIsUp }),
     [btNodeIsUp, running],
   );
+  // Run owns the BT node lifecycle: Run Mission brings the node up on demand
+  // and the runner releases it when the mission ends, so the Run stage has no
+  // manual Activate/Deactivate panel.
+  const ensureMissionBtActive = useCallback(async () => {
+    const readState = async () => {
+      try {
+        const status = await getBtNodeServiceStatus();
+        setBtNodeStatus(status);
+        return status.state;
+      } catch {
+        return "unknown";
+      }
+    };
+    if ((await readState()) === "up") return true;
+    setBtNodeBusy("activate");
+    try {
+      await setBtNodeServiceActive(true);
+      for (let attempt = 0; attempt < BT_NODE_ACTIVATION_POLL_ATTEMPTS; attempt += 1) {
+        if ((await readState()) === "up") return true;
+        await delay(BT_NODE_ACTIVATION_POLL_MS);
+      }
+      return false;
+    } catch {
+      return false;
+    } finally {
+      setBtNodeBusy("");
+    }
+  }, []);
+  const releaseMissionBt = useCallback(async () => {
+    try {
+      await setBtNodeServiceActive(false);
+    } catch {
+      // Best-effort — the node may already be down.
+    }
+    try {
+      setBtNodeStatus(await getBtNodeServiceStatus());
+    } catch {
+      setBtNodeStatus({ state: "unknown", raw: "status failed" });
+    }
+  }, []);
   const missionRunner = useMissionRunner({
     // A closed route intentionally contains the start waypoint a second time
     // as its final execution step. Keep the unique list for badges/editing,
@@ -2325,6 +2368,8 @@ export default function MissionCanvasPage() {
     sendGoals: sendMissionGoals,
     cancelGoal: cancelNavigateToPoseGoal,
     stopBt: stopMissionBt,
+    ensureBtActive: ensureMissionBtActive,
+    releaseBt: releaseMissionBt,
     getFlags: missionRunnerFlags,
     onMessage: setMessage,
   });
@@ -4819,28 +4864,20 @@ export default function MissionCanvasPage() {
                 dirty={mapEditor.dirty}
               />
             ) : (
-              <>
-                <RunSessionPanel
-                  mapName={currentMapName}
-                  running={running}
-                  runner={missionRunner}
-                  poseReady={runPoseInitialized}
-                  missionName={runMissionName}
-                  missionNames={runCatalog.names}
-                  missionSelectDisabled={running || missionRunnerActive || runMapBusy || !missionMapLoaded}
-                  onMissionChange={handleMissionChange}
-                />
-                {/* The BT node executes each waypoint's tree during a run, so its
-                    lifecycle control lives here too — not just in Design. */}
-                <BtRuntimePanel
-                  nodeState={btNodeStatus.state}
-                  btStatus={btStatusText}
-                  activeNodes={btActiveNodesText}
-                  busy={!!btNodeBusy}
-                  onActivate={handleBtNodeActivate}
-                  onDeactivate={handleBtNodeDeactivate}
-                />
-              </>
+              // The BT node lifecycle is run-owned (Run Mission activates it on
+              // demand and the runner releases it afterwards), so Run carries
+              // no manual Activate/Deactivate panel — Design keeps one because
+              // waypoint BT editing needs the node up.
+              <RunSessionPanel
+                mapName={currentMapName}
+                running={running}
+                runner={missionRunner}
+                poseReady={runPoseInitialized}
+                missionName={runMissionName}
+                missionNames={runCatalog.names}
+                missionSelectDisabled={running || missionRunnerActive || runMapBusy || !missionMapLoaded}
+                onMissionChange={handleMissionChange}
+              />
             )}
             <TopicStatusPanel topicRows={topicRows} />
           </aside>
