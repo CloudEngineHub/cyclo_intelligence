@@ -4576,7 +4576,9 @@ export default function MissionCanvasPage() {
             onBehaviorNodeClick={handleSelectBehaviorNode}
             onMissionRouteSpotClick={handleMissionRouteSpotClick}
             onMissionRouteMapClick={handleMissionRouteMapClick}
-            onSpotPoseChange={btNodeIsUp || missionRouteMode ? undefined : handleMoveSpot}
+            /* Waypoints are editable in Design only — Run must not even start
+               a drag (a Run drag would just snap back, but shouldn't begin). */
+            onSpotPoseChange={workspaceStage === STAGE_AUTHORING && !btNodeIsUp && !missionRouteMode ? handleMoveSpot : undefined}
             onBehaviorNodePoseChange={handleMoveBehaviorNode}
             onEditorMapPoint={
               mapEditor.tool === "extend_area" || mapEditor.tool === "erase_area"
