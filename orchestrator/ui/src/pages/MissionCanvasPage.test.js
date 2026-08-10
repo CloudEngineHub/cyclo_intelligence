@@ -795,7 +795,7 @@ test('duplicates and deletes the active mission from the rail', async () => {
   await waitFor(() => expect(getNavigationMission).toHaveBeenCalledWith('factory', 'chestnut-copy'));
 });
 
-test('restores mission manifest waypoints before legacy spots', async () => {
+test('edits mission manifest waypoints without legacy spot persistence', async () => {
   const latestMapViewerProps = () => (
     mockMapViewer.mock.calls[mockMapViewer.mock.calls.length - 1][0]
   );
@@ -882,6 +882,41 @@ test('restores mission manifest waypoints before legacy spots', async () => {
   expect(getNavigationSpots.mock.calls.some(([mapName]) => mapName === 'factory')).toBe(false);
   expect(getNavigationMissionBtFile).toHaveBeenCalledWith('factory', 'global.xml', '');
   expect(getNavigationMissionBtFile).toHaveBeenCalledWith('factory', 'locals/mission_pickup.xml', '');
+
+  await act(async () => {
+    await latestMapViewerProps().onSpotPoseChange('mission_pickup', 4, 5, 0.25);
+  });
+
+  expect(updateNavigationSpot).not.toHaveBeenCalled();
+  await waitFor(() => expect(latestMapViewerProps().spots[0].pose).toMatchObject({
+    x: 4,
+    y: 5,
+    yaw: 0.25,
+  }));
+
+  fireEvent.click(screen.getByRole('button', { name: 'Save Mission' }));
+  await waitFor(() => expect(saveNavigationMission).toHaveBeenCalledWith(
+    'factory',
+    expect.objectContaining({
+      waypoints: [expect.objectContaining({
+        id: 'mission_pickup',
+        pose: expect.objectContaining({ x: 4, y: 5, yaw: 0.25 }),
+      })],
+    }),
+    '',
+  ));
+
+  fireEvent.doubleClick(screen.getByRole('button', { name: 'Mission Pickup' }));
+  const waypointNameInput = screen.getByRole('textbox', { name: 'Waypoint name' });
+  fireEvent.change(waypointNameInput, { target: { value: 'Mission Dropoff' } });
+  fireEvent.keyDown(waypointNameInput, { key: 'Enter' });
+
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Mission Dropoff' })).toBeInTheDocument());
+  expect(updateNavigationSpot).not.toHaveBeenCalled();
+
+  fireEvent.click(screen.getByRole('button', { name: /Delete Waypoint Mission Dropoff/ }));
+  await waitFor(() => expect(screen.queryByRole('button', { name: 'Mission Dropoff' })).not.toBeInTheDocument());
+  expect(deleteNavigationSpot).not.toHaveBeenCalled();
 });
 
 test('hides loaded design waypoints after returning to mapping stage', async () => {

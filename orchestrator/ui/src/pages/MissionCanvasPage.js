@@ -829,6 +829,7 @@ function spotsFromMissionWaypoints(mapName, waypoints) {
       id,
       map_name: mapName,
       label: String(waypoint.label || id).trim() || id,
+      _missionManifest: true,
       pose: {
         frame_id: pose.frame_id || "map",
         x: Number(pose.x ?? 0),
@@ -844,6 +845,10 @@ function spotsFromMissionWaypoints(mapName, waypoints) {
       },
     };
   }).filter(Boolean);
+}
+
+function isMissionManifestSpot(spot) {
+  return spot?._missionManifest === true;
 }
 
 function readMissionSession() {
@@ -4010,6 +4015,10 @@ export default function MissionCanvasPage() {
     setSpots((current) => current.map((item) => (
       item.id === spotId ? { ...item, pose: nextPose } : item
     )));
+    if (isMissionManifestSpot(spot)) {
+      setMessage(`Moved ${spot.label || spot.id}`);
+      return;
+    }
     try {
       const updated = await updateNavigationSpot(spotId, {
         map_name: spot.map_name,
@@ -4106,6 +4115,10 @@ export default function MissionCanvasPage() {
       delete nextFiles[previousLocalBt];
       return nextFiles;
     });
+    if (isMissionManifestSpot(previousSpot)) {
+      setMessage(`Renamed ${label}`);
+      return;
+    }
     try {
       const updated = await updateNavigationSpot(previousSpot.id, {
         map_name: previousSpot.map_name,
@@ -4148,7 +4161,9 @@ export default function MissionCanvasPage() {
     if (!spot) return;
     try {
       const localBt = localBtPathForSpot(spot);
-      await deleteNavigationSpot(spot.id, spot.map_name);
+      if (!isMissionManifestSpot(spot)) {
+        await deleteNavigationSpot(spot.id, spot.map_name);
+      }
       designDirtyRef.current = true;
       setDesignDirty(true);
       setSpots((current) => current.filter((item) => item.id !== spot.id));
