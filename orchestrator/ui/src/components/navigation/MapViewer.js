@@ -962,7 +962,10 @@ function makeSpotMarker(spot, selected = false, scale = 1, isDark = false, activ
     const pal = markerPalette(isDark);
     const color = active ? pal.selected : (selected ? pal.selected : pal.idle);
     const group = new THREE.Group();
-    group.position.set(x, y, 0.24);
+    // Flush with the map plane: just enough lift to avoid z-fighting, so the
+    // marker never parallax-floats off its true position under the
+    // perspective camera.
+    group.position.set(x, y, 0.01);
     group.scale.setScalar(scale);
     group.userData = { spotId: spot.id, dragAction: "move" };
     const marker = new THREE.Group();
@@ -1060,7 +1063,7 @@ function makeMissionRouteBadge(spot, order, selected = false, scale = 1, isDark 
     const sprite = makeRouteBadgeSprite(order, selected, isDark);
     const size = Math.max(0.34, WAYPOINT_RING_OUTER_RADIUS * scale * 2.2);
     const offset = WAYPOINT_RING_OUTER_RADIUS * scale * 2.25;
-    sprite.position.set(x - offset, y, 0.62);
+    sprite.position.set(x - offset, y, 0.05);
     sprite.scale.set(size, size, 1);
     sprite.userData = { spotId: spot.id, dragAction: "move" };
     return sprite;
@@ -1813,7 +1816,7 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, 
                 .sort((a, b) => a.order - b.order)
                 .map(({ id }) => spotById.get(id))
                 .filter((spot) => spot === null || spot === void 0 ? void 0 : spot.pose)
-                .map((spot) => new THREE.Vector3(Number(spot.pose.x ?? 0), Number(spot.pose.y ?? 0), 0.12));
+                .map((spot) => new THREE.Vector3(Number(spot.pose.x ?? 0), Number(spot.pose.y ?? 0), 0.02));
             if (missionRouteClosed && routePoints.length > 1) {
                 routePoints.push(routePoints[0].clone());
             }
