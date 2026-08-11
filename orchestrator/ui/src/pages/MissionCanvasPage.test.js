@@ -2182,7 +2182,7 @@ test('marks free-space areas with automatic color and undo/redo support', async 
   await waitFor(() => expect(latestMapViewerProps().mapAnnotations).toEqual([
     expect.objectContaining({
       label: 'Dock',
-      color: '#3B241F',
+      color: '#CBB9A4',
       pose: expect.objectContaining({ x: 0.5, y: 0.5 }),
       region: expect.objectContaining({
         seed_cell: { x: 0, y: 0 },
@@ -2210,7 +2210,7 @@ test('marks free-space areas with automatic color and undo/redo support', async 
   await waitFor(() => expect(screen.getByRole('button', { name: 'Redo' })).toBeEnabled());
   fireEvent.click(screen.getByRole('button', { name: 'Redo' }));
   await waitFor(() => expect(latestMapViewerProps().mapAnnotations).toEqual([
-    expect.objectContaining({ label: 'Dock', color: '#3B241F' }),
+    expect.objectContaining({ label: 'Dock', color: '#CBB9A4' }),
   ]));
   await waitFor(() => expect(screen.getByRole('button', { name: 'Save' })).toBeEnabled());
   fireEvent.click(screen.getByRole('button', { name: 'Save' }));
@@ -2218,7 +2218,7 @@ test('marks free-space areas with automatic color and undo/redo support', async 
     'factory.pgm',
     [expect.objectContaining({
       label: 'Dock',
-      color: '#3B241F',
+      color: '#CBB9A4',
       region: expect.objectContaining({ cell_count: 1 }),
     })],
   ));

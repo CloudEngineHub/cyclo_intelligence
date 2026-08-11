@@ -830,6 +830,17 @@ function hexColorString(color, fallback = "#C96442") {
     const match = String(color || "").trim().match(/^#?([0-9A-Fa-f]{6})$/);
     return match ? `#${match[1].toUpperCase()}` : fallback;
 }
+// Mix a hex color toward white so any stored area color renders as a pastel
+// wash. Already-pastel palette entries only get slightly lighter; the legacy
+// deep palette (navy, wine, ...) lands in the same family.
+function pastelizeHexColor(hex, mix = 0.45) {
+    const num = parseInt(hex.slice(1), 16);
+    const lift = (channel) => Math.round(channel + (255 - channel) * mix);
+    const r = lift((num >> 16) & 255);
+    const g = lift((num >> 8) & 255);
+    const b = lift(num & 255);
+    return `#${((r << 16) | (g << 8) | b).toString(16).padStart(6, "0").toUpperCase()}`;
+}
 function makeAnnotationLabelSprite(text, color, isDark = false) {
     const label = String(text || "Area");
     const fontSize = 21;
@@ -1103,7 +1114,11 @@ function makeMapAnnotationRegion(annotation, grid, isDark = false, coveredCells 
     const region = boundedFreeRegion(grid, regionSpec, coveredCells);
     if (!region)
         return null;
-    const colorString = hexColorString(annotation === null || annotation === void 0 ? void 0 : annotation.color, isDark ? "#6D1F2A" : "#6D1F2A");
+    // Pastelize whatever color is stored: legacy annotations carry the old
+    // deep palette, and areas must stay a light background wash either way.
+    const colorString = pastelizeHexColor(
+        hexColorString(annotation === null || annotation === void 0 ? void 0 : annotation.color, "#6D1F2A"),
+    );
     const texture = cachedAnnotationRegionTexture(annotation, grid, region, colorString, isDark, selected);
     // Flush with the map, and strictly BELOW the waypoint/route layer
     // (0.01-0.05) so labeled areas never cover mission markers.

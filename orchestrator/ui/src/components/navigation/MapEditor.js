@@ -42,17 +42,19 @@ const ANNOTATION_TOOL = { id: "label_marker", label: "Area" };
 const ANNOTATION_EXTEND_TOOL = { id: "extend_area", label: "Extend" };
 const ANNOTATION_ERASE_TOOL = { id: "erase_area", label: "Erase Area" };
 // Area colors deliberately avoid green and orange/amber hues — those belong to
-// the marker language (sage = waypoints/actions, amber = decorators, clay =
-// selection) and areas must not read as markers.
+// the marker language (sage = waypoints/actions, amber = decorators + local
+// costmap, clay = selection) and areas must not read as markers. Pastel base
+// tones keep areas as a quiet background wash under mission markers; the
+// viewer additionally pastelizes stored colors so legacy dark areas match.
 const ANNOTATION_COLORS = [
-    { id: "dark_brown", label: "Dark brown", value: "#3B241F" },
-    { id: "red_wine", label: "Red wine", value: "#6D1F2A" },
-    { id: "navy", label: "Navy", value: "#203A63" },
-    { id: "gray", label: "Gray", value: "#5C6670" },
-    { id: "plum", label: "Plum", value: "#57406F" },
-    { id: "teal", label: "Teal", value: "#1F6B73" },
-    { id: "indigo", label: "Indigo", value: "#34327D" },
-    { id: "berry", label: "Berry", value: "#7C2D55" },
+    { id: "dark_brown", label: "Warm sand", value: "#CBB9A4" },
+    { id: "red_wine", label: "Rose", value: "#D9A4AB" },
+    { id: "navy", label: "Powder blue", value: "#A9BFD9" },
+    { id: "gray", label: "Silver gray", value: "#BFC3C9" },
+    { id: "plum", label: "Lavender", value: "#C0ABD6" },
+    { id: "teal", label: "Soft teal", value: "#9CC5C7" },
+    { id: "indigo", label: "Periwinkle", value: "#A9AEDB" },
+    { id: "berry", label: "Dusty berry", value: "#CFA3BE" },
 ];
 function decodePgmPixels(image) {
     const binary = window.atob(image.pixels_base64);
