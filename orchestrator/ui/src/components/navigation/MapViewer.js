@@ -111,15 +111,18 @@ const OCC_COLORS = {
         unknown: [227, 221, 207, 220], // #E3DDCF, blends into paper scene bg
         free: [250, 248, 243, 255],    // #FAF8F3
         wall: [42, 38, 32, 255],       // #2A2620 warm ink
-        lethal: [193, 78, 52, 215],    // #C14E34
-        inflate: [217, 130, 43, 235],  // #D9822B
+        // Local costmap in muted sand-amber (the UI's warning family) at low
+        // opacity: semantically "caution zone", warm enough to sit apart from
+        // the neutral-gray global costmap, quiet enough to stay under markers.
+        lethal: [172, 116, 58, 100],   // desaturated --mc-warning
+        inflate: [188, 148, 96, 70],   // lighter sand
     },
     dark: {
         unknown: [30, 28, 24, 220],    // #1E1C18
         free: [43, 40, 35, 255],       // #2B2823
         wall: [216, 210, 196, 255],    // #D8D2C4 cream walls (blueprint invert)
-        lethal: [209, 90, 62, 215],    // #D15A3E
-        inflate: [224, 154, 69, 235],  // #E09A45
+        lethal: [211, 158, 94, 100],   // desaturated --mc-warning (dark theme)
+        inflate: [214, 178, 128, 70],  // lighter sand
     },
 };
 // Rounded occupancy rendering keeps the exact cells, then only shaves exposed
@@ -464,10 +467,12 @@ function makeOccupancyTexture(grid, alpha, mode, highlightedCells = null, isDark
             if (mode === "globalCostmap") {
                 if (value <= 0) { r = 0; g = 0; b = 0; a = 0; }
                 else {
+                    // Neutral gray at ~1/3 the old opacity — a hint under the
+                    // mission markers rather than a poster over the map.
                     const normalized = Math.min(Math.max(value, 0), 100) / 100;
-                    const gray = Math.round(220 - normalized * 205);
-                    r = gray; g = Math.round(gray * 0.97); b = Math.round(gray * 0.90);
-                    a = Math.round(95 + normalized * 150);
+                    const gray = Math.round(200 - normalized * 130);
+                    r = gray; g = gray; b = gray;
+                    a = Math.round(40 + normalized * 70);
                 }
             }
             else if (mode === "localCostmap") {
