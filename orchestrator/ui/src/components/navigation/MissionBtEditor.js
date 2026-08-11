@@ -115,13 +115,16 @@ function computeHiddenIds(nodes, edges) {
   return hidden;
 }
 
-function layoutVisibleOnly(nodes, edges) {
+function layoutVisibleOnly(nodes, edges, { anchorNodeId = null } = {}) {
   const hidden = computeHiddenIds(nodes, edges);
   const visibleNodes = nodes.filter((node) => !hidden.has(node.id));
   const visibleEdges = edges.filter((edge) => (
     !hidden.has(edge.source) && !hidden.has(edge.target)
   ));
-  const laidOut = applyDagreLayout(visibleNodes, visibleEdges, { respectStored: false });
+  const laidOut = applyDagreLayout(visibleNodes, visibleEdges, {
+    respectStored: false,
+    anchorNodeId,
+  });
   const byId = new Map(laidOut.nodes.map((node) => [node.id, node]));
   return nodes.map((node) => byId.get(node.id) || node);
 }
@@ -316,7 +319,9 @@ export default function MissionBtEditor({
       edgesRef.current,
     );
     setEdges(nextEdges);
-    setNodes(layoutVisibleOnly(nodesRef.current, nextEdges));
+    setNodes(layoutVisibleOnly(nodesRef.current, nextEdges, {
+      anchorNodeId: connection.source,
+    }));
   }, [captureHistory, setEdges, setNodes]);
 
   const handleAutoLayout = useCallback(() => {
@@ -595,6 +600,7 @@ export default function MissionBtEditor({
               panOnScroll={false}
               zoomOnPinch
               zoomActivationKeyCode={null}
+              autoPanOnConnect={false}
               proOptions={reactFlowProOptions}
             >
               <Controls showInteractive={false} />

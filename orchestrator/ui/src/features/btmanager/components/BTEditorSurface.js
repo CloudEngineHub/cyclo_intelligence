@@ -102,13 +102,16 @@ function computeHiddenIds(nodes, edges) {
 // resulting positions back into the full nodes array. Hidden nodes keep
 // their old coords so they sit ready underneath the collapsed parent for
 // when the user expands it again.
-function layoutVisibleOnly(nodes, edges) {
+function layoutVisibleOnly(nodes, edges, { anchorNodeId = null } = {}) {
   const hidden = computeHiddenIds(nodes, edges);
   const visibleNodes = nodes.filter((n) => !hidden.has(n.id));
   const visibleEdges = edges.filter(
     (e) => !hidden.has(e.source) && !hidden.has(e.target)
   );
-  const laid = applyDagreLayout(visibleNodes, visibleEdges, { respectStored: false });
+  const laid = applyDagreLayout(visibleNodes, visibleEdges, {
+    respectStored: false,
+    anchorNodeId,
+  });
   const byId = new Map(laid.nodes.map((n) => [n.id, n]));
   return nodes.map((n) => (byId.has(n.id) ? byId.get(n.id) : n));
 }
@@ -395,9 +398,13 @@ export default function BTEditorSurface({
       { ...connection, type: 'smoothstep', animated: false },
       edgesRef.current
     );
-    // After the new edge lands the topology changed, so re-flow nodes
-    // around it using the same edge list that will be committed.
-    const laidOut = layoutVisibleOnly(nodesRef.current, nextEdges);
+    // After the new edge lands the topology changed, so re-flow nodes around
+    // it using the same edge list that will be committed. Keep the source in
+    // place: dagre otherwise resets the graph near (0, 0), making the nodes
+    // disappear from the user's current viewport.
+    const laidOut = layoutVisibleOnly(nodesRef.current, nextEdges, {
+      anchorNodeId: connection.source,
+    });
     setEdges(nextEdges);
     setNodes(laidOut);
   }, [captureHistory, setEdges, setNodes]);
@@ -982,6 +989,7 @@ export default function BTEditorSurface({
               panOnScroll={true}
               zoomOnPinch={true}
               zoomActivationKeyCode="Control"
+              autoPanOnConnect={false}
             >
               <Controls showInteractive={false} />
               <Background color="#e5e7eb" gap={16} />

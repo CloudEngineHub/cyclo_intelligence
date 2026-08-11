@@ -136,8 +136,18 @@ export function parseBTXml(xmlString) {
  * survive a reload. With `respectStored: false` (in-app re-layout after
  * a structural change) the stored hints are ignored so dagre is the sole
  * source of truth and the graph stays tidy.
+ *
+ * `anchorNodeId` keeps that node at its pre-layout canvas coordinates by
+ * translating the whole result. This is useful for automatic layout during
+ * edge creation: dagre normally starts every layout near (0, 0), which can
+ * move the graph outside the viewport even though the viewport itself did
+ * not change.
  */
-export function applyDagreLayout(nodes, edges, { respectStored = true } = {}) {
+export function applyDagreLayout(
+  nodes,
+  edges,
+  { respectStored = true, anchorNodeId = null } = {},
+) {
   const g = new dagre.graphlib.Graph();
   g.setDefaultEdgeLabel(() => ({}));
   g.setGraph({ rankdir: 'TB', nodesep: 40, ranksep: 60 });
@@ -174,7 +184,7 @@ export function applyDagreLayout(nodes, edges, { respectStored = true } = {}) {
 
   dagre.layout(g);
 
-  const layoutNodes = nodes.map(({ _storedX, _storedY, ...node }) => {
+  let layoutNodes = nodes.map(({ _storedX, _storedY, ...node }) => {
     if (
       respectStored &&
       _storedX !== null && _storedX !== undefined && _storedX !== '' &&
@@ -192,6 +202,29 @@ export function applyDagreLayout(nodes, edges, { respectStored = true } = {}) {
       },
     };
   });
+
+  const anchorBefore = anchorNodeId
+    ? nodes.find((node) => node.id === anchorNodeId)
+    : null;
+  const anchorAfter = anchorNodeId
+    ? layoutNodes.find((node) => node.id === anchorNodeId)
+    : null;
+  if (
+    Number.isFinite(anchorBefore?.position?.x) &&
+    Number.isFinite(anchorBefore?.position?.y) &&
+    Number.isFinite(anchorAfter?.position?.x) &&
+    Number.isFinite(anchorAfter?.position?.y)
+  ) {
+    const offsetX = anchorBefore.position.x - anchorAfter.position.x;
+    const offsetY = anchorBefore.position.y - anchorAfter.position.y;
+    layoutNodes = layoutNodes.map((node) => ({
+      ...node,
+      position: {
+        x: node.position.x + offsetX,
+        y: node.position.y + offsetY,
+      },
+    }));
+  }
 
   return { nodes: layoutNodes, edges };
 }
