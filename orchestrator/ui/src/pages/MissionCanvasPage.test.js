@@ -1728,9 +1728,11 @@ test('edits the mission route directly on the map', async () => {
   expect(screen.queryByRole('button', { name: 'Create BT' })).not.toBeInTheDocument();
   expect(screen.queryByRole('button', { name: 'Edit BT' })).not.toBeInTheDocument();
 
-  const deleteWaypointAButtons = screen.getAllByRole('button', { name: 'Delete Waypoint Waypoint A' });
-  expect(deleteWaypointAButtons).toHaveLength(2);
-  fireEvent.click(deleteWaypointAButtons[1]);
+  // The route row only removes from the route; actual spot deletion lives in
+  // the Waypoints panel alone.
+  expect(screen.getByRole('button', { name: 'Remove Waypoint A from route' })).toBeInTheDocument();
+  expect(screen.getAllByRole('button', { name: 'Delete Waypoint Waypoint A' })).toHaveLength(1);
+  fireEvent.click(screen.getByRole('button', { name: 'Delete Waypoint Waypoint A' }));
 
   await waitFor(() => expect(deleteNavigationSpot).toHaveBeenCalledWith('spot_a', 'map'));
   await waitFor(() => expect(latestMapViewerProps().spots.map((spot) => spot.id)).toEqual([
@@ -1792,6 +1794,16 @@ test('opens a closed loop and clears the route without deleting waypoints', asyn
     { id: 'spot_b', order: 2 },
     { id: 'spot_c', order: 3 },
   ]));
+
+  // The route row's × takes the waypoint out of the route and stitches its
+  // neighbors — without deleting the spot.
+  fireEvent.click(screen.getByRole('button', { name: 'Remove Waypoint B from route' }));
+  await waitFor(() => expect(latestMapViewerProps().missionRouteOrder).toEqual([
+    { id: 'spot_a', order: 1 },
+    { id: 'spot_c', order: 2 },
+  ]));
+  expect(deleteNavigationSpot).not.toHaveBeenCalled();
+  expect(latestMapViewerProps().spots).toHaveLength(3);
 
   // Clear Route discards every edge but keeps the waypoints.
   fireEvent.click(screen.getByRole('button', { name: 'Clear Route' }));

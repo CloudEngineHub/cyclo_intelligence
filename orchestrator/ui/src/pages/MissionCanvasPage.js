@@ -3873,6 +3873,16 @@ export default function MissionCanvasPage() {
     handleSetMissionRouteOrder(nextIds);
   }, [handleSetMissionRouteOrder, missionRouteTreeSpots]);
 
+  // Take a waypoint out of the route only — the spot itself stays. Neighbors
+  // are stitched back together (and a closed loop stays closed).
+  const handleRemoveRouteSpot = useCallback((spotId) => {
+    const currentIds = missionRouteTreeSpots.map((spot) => spot.id);
+    if (!currentIds.includes(spotId)) return;
+    const spot = missionRouteTreeSpots.find((item) => item.id === spotId);
+    handleSetMissionRouteOrder(currentIds.filter((id) => id !== spotId));
+    setMessage(`${spot?.label || spotId} removed from route`);
+  }, [handleSetMissionRouteOrder, missionRouteTreeSpots]);
+
   const handleClearMapSelection = useCallback(() => {
     if (btLayerSpotId) {
       setBtLayerSpotId("");
@@ -4835,22 +4845,6 @@ export default function MissionCanvasPage() {
                 >
                   Edit Route
                 </button>
-                {/* Only while a route exists — map clicks can only ADD edges,
-                    so this is the sole way to discard a route (or a closed
-                    loop) without deleting waypoints. */}
-                {missionFlowEdges.length > 0 && (
-                  <button
-                    type="button"
-                    onClick={handleClearMissionRoute}
-                    disabled={!!busy || !designMapAvailable || btNodeIsUp}
-                    aria-label="Clear Route"
-                    title={btNodeIsUp ? "Deactivate BT before editing mission route" : "Remove all route connections (waypoints stay)"}
-                    className="h-8 px-3 text-[12.5px] font-semibold disabled:opacity-45"
-                    style={{ borderRadius: 9, border: "1px solid var(--mc-border-strong)", backgroundColor: "var(--mc-surface)", color: "var(--mc-danger)" }}
-                  >
-                    Clear Route
-                  </button>
-                )}
               </div>
 
               {/* Mission hub — create/save/rename/duplicate/delete, right under
@@ -5018,6 +5012,22 @@ export default function MissionCanvasPage() {
                   <div className="flex items-center gap-1.5">
                     {missionRouteClosed && <span className="text-[10.5px] font-mono px-2 py-1" style={{ borderRadius: 6, backgroundColor: "color-mix(in srgb, var(--mc-success) 14%, transparent)", color: "var(--mc-success)" }}>closed loop</span>}
                     {missionRouteMode && <span className="text-[10.5px] font-mono px-2 py-1" style={{ borderRadius: 6, backgroundColor: "var(--mc-accent-soft)", color: "var(--mc-accent-hover)" }}>editing on map</span>}
+                    {/* Only while a route exists — map clicks can only ADD
+                        edges, so this is the sole way to discard a route (or a
+                        closed loop) without deleting waypoints. */}
+                    {missionFlowEdges.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={handleClearMissionRoute}
+                        disabled={!!busy || btNodeIsUp}
+                        aria-label="Clear Route"
+                        title={btNodeIsUp ? "Deactivate BT before editing mission route" : "Remove all route connections (waypoints stay)"}
+                        className="h-7 px-2.5 text-[11px] font-semibold disabled:opacity-45 active:translate-y-px"
+                        style={{ borderRadius: 7, border: "1px solid var(--mc-border-strong)", backgroundColor: "var(--mc-surface)", color: "var(--mc-danger)" }}
+                      >
+                        Clear Route
+                      </button>
+                    )}
                   </div>
                 </div>
                 <div className="min-h-0 overflow-auto pr-1">
@@ -5040,10 +5050,12 @@ export default function MissionCanvasPage() {
                             <div className="flex items-center gap-1">
                               <button type="button" aria-label={`Move ${spot.label || spot.id} up`} disabled={index === 0} onClick={() => handleMoveRouteSpot(spot.id, -1)} className="h-7 w-7 text-[12px] font-semibold disabled:opacity-40" style={{ borderRadius: 7, border: "1px solid var(--mc-border-strong)", backgroundColor: "var(--mc-surface)", color: "var(--mc-text-muted)" }}>↑</button>
                               <button type="button" aria-label={`Move ${spot.label || spot.id} down`} disabled={routeEnd} onClick={() => handleMoveRouteSpot(spot.id, 1)} className="h-7 w-7 text-[12px] font-semibold disabled:opacity-40" style={{ borderRadius: 7, border: "1px solid var(--mc-border-strong)", backgroundColor: "var(--mc-surface)", color: "var(--mc-text-muted)" }}>↓</button>
-                              <button type="button" aria-label={`Delete Waypoint ${spot.label || spot.id}`} title={`Delete ${spot.label || spot.id}`} onClick={() => { void handleDeleteSpot(spot); }}
-                                className="h-7 w-7 shrink-0 inline-flex items-center justify-center active:translate-y-px"
+                              {/* Route membership only — deleting the spot
+                                  itself lives in the Waypoints panel. */}
+                              <button type="button" aria-label={`Remove ${spot.label || spot.id} from route`} title="Remove from route (waypoint stays)" onClick={() => handleRemoveRouteSpot(spot.id)}
+                                className="h-7 w-7 shrink-0 inline-flex items-center justify-center text-[13px] leading-none active:translate-y-px"
                                 style={{ borderRadius: 7, border: "1px solid var(--mc-border-strong)", backgroundColor: "var(--mc-surface)", color: "var(--mc-danger)" }}>
-                                <MdDelete size={14} />
+                                ×
                               </button>
                             </div>
                           </div>
