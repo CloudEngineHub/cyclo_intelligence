@@ -1180,6 +1180,50 @@ test('shows waypoint actions in Waypoints after placing a waypoint', async () =>
   ));
 });
 
+test('undoes and redoes Design waypoint edits from buttons and shortcuts', async () => {
+  const latestMapViewerProps = () => (
+    mockMapViewer.mock.calls[mockMapViewer.mock.calls.length - 1][0]
+  );
+  getPgmFiles.mockResolvedValue({
+    files: [{ path: 'factory.pgm', name: 'factory.pgm' }],
+  });
+
+  render(<MissionCanvasPage />);
+
+  fireEvent.click(screen.getByRole('tab', { name: 'Design' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Load Map' }));
+  await screen.findByRole('combobox', { name: 'Design mission map file' });
+  fireEvent.click(screen.getByRole('button', { name: 'Load' }));
+  await waitFor(() => expect(latestMapViewerProps().map).not.toBeNull());
+
+  const undo = screen.getByRole('button', { name: 'Undo' });
+  const redo = screen.getByRole('button', { name: 'Redo' });
+  expect(undo).toBeDisabled();
+  expect(redo).toBeDisabled();
+
+  fireEvent.click(screen.getByRole('button', { name: 'Create Waypoint' }));
+  fireEvent.click(screen.getByRole('button', { name: 'On Map' }));
+  await act(async () => {
+    await latestMapViewerProps().onMapPose(1, 2, 0.25);
+  });
+  await waitFor(() => expect(latestMapViewerProps().spots).toHaveLength(1));
+  expect(undo).toBeEnabled();
+  expect(redo).toBeDisabled();
+
+  fireEvent.click(undo);
+  await waitFor(() => expect(latestMapViewerProps().spots).toEqual([]));
+  expect(redo).toBeEnabled();
+
+  fireEvent.click(redo);
+  await waitFor(() => expect(latestMapViewerProps().spots).toHaveLength(1));
+
+  fireEvent.keyDown(document, { key: 'z', ctrlKey: true });
+  await waitFor(() => expect(latestMapViewerProps().spots).toEqual([]));
+
+  fireEvent.keyDown(document, { key: 'y', ctrlKey: true });
+  await waitFor(() => expect(latestMapViewerProps().spots).toHaveLength(1));
+});
+
 test('opens waypoint BT map layer when selecting a waypoint with BT active', async () => {
   const latestMapViewerProps = () => (
     mockMapViewer.mock.calls[mockMapViewer.mock.calls.length - 1][0]

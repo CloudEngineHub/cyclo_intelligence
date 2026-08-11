@@ -17,7 +17,16 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { MdAdd, MdContentCopy, MdDelete, MdEdit, MdPowerSettingsNew, MdStop } from "react-icons/md";
+import {
+  MdAdd,
+  MdContentCopy,
+  MdDelete,
+  MdEdit,
+  MdPowerSettingsNew,
+  MdRedo,
+  MdStop,
+  MdUndo,
+} from "react-icons/md";
 import {
   cancelNavigateToPoseGoal,
   configureDesignLocalizationAmcl,
@@ -64,6 +73,7 @@ import {
 import { rosTimestampNow } from "../utils/rosTime";
 import { useRosServiceCaller } from "../hooks/useRosServiceCaller";
 import { useMissionRunner } from "../hooks/useMissionRunner";
+import { useBTHistory } from "../hooks/useBTHistory";
 import { RunnerStatus } from "../hooks/missionRunnerCore";
 import { FALLBACK_CATALOG } from "../constants/btNodeCatalogFallback";
 import { BT_SUPPORTED_ROBOT_TYPE } from "../constants/btSupport";
@@ -2060,6 +2070,89 @@ export default function MissionCanvasPage() {
   }));
   const publishRosTopic = useNavigationRosPublisher();
 
+  const getDesignHistorySnapshot = useCallback(() => JSON.stringify({
+    spots,
+    behaviorNodes,
+    missionBtFiles,
+    deletedMissionBtPaths,
+    missionFlowNodes,
+    missionFlowEdges,
+    selectedSpotId,
+    selectedBehaviorNodeId,
+    designDirty,
+  }), [
+    behaviorNodes,
+    deletedMissionBtPaths,
+    designDirty,
+    missionBtFiles,
+    missionFlowEdges,
+    missionFlowNodes,
+    selectedBehaviorNodeId,
+    selectedSpotId,
+    spots,
+  ]);
+
+  const applyDesignHistorySnapshot = useCallback((snapshot) => {
+    try {
+      const restored = JSON.parse(snapshot);
+      const restoredSpots = Array.isArray(restored.spots) ? restored.spots : [];
+      const restoredBehaviorNodes = Array.isArray(restored.behaviorNodes)
+        ? restored.behaviorNodes
+        : [];
+      const restoredDirty = restored.designDirty === true;
+
+      setSpots(restoredSpots);
+      setBehaviorNodes(restoredBehaviorNodes);
+      setMissionBtFiles(restored.missionBtFiles || {});
+      setDeletedMissionBtPaths(
+        Array.isArray(restored.deletedMissionBtPaths) ? restored.deletedMissionBtPaths : [],
+      );
+      setMissionFlowNodes(
+        Array.isArray(restored.missionFlowNodes) ? restored.missionFlowNodes : [],
+      );
+      setMissionFlowEdges(
+        Array.isArray(restored.missionFlowEdges) ? restored.missionFlowEdges : [],
+      );
+      setSelectedSpotId(
+        restoredSpots.some((spot) => spot.id === restored.selectedSpotId)
+          ? restored.selectedSpotId
+          : "",
+      );
+      setSelectedBehaviorNodeId(
+        restoredBehaviorNodes.some((node) => node.id === restored.selectedBehaviorNodeId)
+          ? restored.selectedBehaviorNodeId
+          : "",
+      );
+      setMissionRouteSourceId("");
+      setEditingSpotId("");
+      setEditingSpotLabel("");
+      setBtLayerSpotId("");
+      setInteractionMode("view");
+      setShowWaypointOptions(false);
+      behaviorNodeSerialRef.current = Math.max(
+        behaviorNodeSerialRef.current,
+        behaviorNodeSerialFromNodes(restoredBehaviorNodes),
+      );
+      designDirtyRef.current = restoredDirty;
+      setDesignDirty(restoredDirty);
+      setMessage("Design history restored");
+    } catch {
+      setMessage("Failed to restore design history");
+    }
+  }, []);
+
+  const {
+    capture: captureDesignHistory,
+    undo: undoDesignHistory,
+    redo: redoDesignHistory,
+    reset: resetDesignHistory,
+    canUndo: canUndoDesign,
+    canRedo: canRedoDesign,
+  } = useBTHistory({
+    getSnapshot: getDesignHistorySnapshot,
+    applySnapshot: applyDesignHistorySnapshot,
+  });
+
   const running = status?.is_up ?? false;
   const mappingEditorActive = workspaceStage === STAGE_MAPPING && showPgmFix;
   const designMapActive = workspaceStage === STAGE_AUTHORING && !!designMapPath && missionMapLoaded;
@@ -2140,6 +2233,12 @@ export default function MissionCanvasPage() {
     () => behaviorNodes.filter((node) => node.map_name === currentMapName),
     [behaviorNodes, currentMapName],
   );
+
+  // A loaded map/mission is a new authoring document. History must never leak
+  // across documents, including an explicit reload of the same map/mission.
+  useEffect(() => {
+    resetDesignHistory();
+  }, [designMapReloadToken, mapName, missionName, resetDesignHistory]);
   const behaviorPreviewNode = useMemo(() => (
     pendingBehaviorNodeTag ? behaviorNodeDefinition(pendingBehaviorNodeTag) : null
   ), [pendingBehaviorNodeTag]);
@@ -2392,6 +2491,10 @@ export default function MissionCanvasPage() {
       loading={missionBtLoadingPath === selectedBtLayerPath}
       activeNodeNames={btActiveNodeNames}
       onXmlChange={(nextXml) => {
+        const currentXml = missionBtFiles[selectedBtLayerPath];
+        if (currentXml !== undefined && currentXml !== nextXml) {
+          captureDesignHistory();
+        }
         setMissionBtFiles((current) => {
           // Until the server fetch resolves this path, the editor only holds
           // the fallback tree; its mount-time emit must not claim the slot —
@@ -3212,9 +3315,10 @@ export default function MissionCanvasPage() {
   ]);
 
   const markDesignDirty = useCallback(() => {
+    captureDesignHistory();
     designDirtyRef.current = true;
     setDesignDirty(true);
-  }, []);
+  }, [captureDesignHistory]);
 
   const clearDesignDirty = useCallback(() => {
     designDirtyRef.current = false;
@@ -3670,26 +3774,30 @@ export default function MissionCanvasPage() {
       return;
     }
     const sourceSpot = visibleSpots.find((item) => item.id === missionRouteSourceId);
-    setMissionFlowEdges((current) => {
-      const result = connectMissionFlowEdge(current, missionRouteSourceId, spotId);
-      if (!result.changed) {
-        setMessage(result.reason === "cycle"
-          ? "Route can only loop back to its start waypoint"
-          : "Select a different waypoint");
-        return current;
-      }
-      if (result.closesLoop) {
-        setMissionRouteSourceId("");
-        setMessage(`Route closed: ${sourceSpot?.label || missionRouteSourceId} -> ${spot.label || spot.id}`);
-      } else {
-        setMissionRouteSourceId(spotId);
-        setMessage(`Route: ${sourceSpot?.label || missionRouteSourceId} -> ${spot.label || spot.id}`);
-      }
-      designDirtyRef.current = true;
-      setDesignDirty(true);
-      return result.edges;
-    });
-  }, [btNodeIsUp, missionRouteMode, missionRouteSourceId, visibleSpots]);
+    const result = connectMissionFlowEdge(missionFlowEdges, missionRouteSourceId, spotId);
+    if (!result.changed) {
+      setMessage(result.reason === "cycle"
+        ? "Route can only loop back to its start waypoint"
+        : "Select a different waypoint");
+      return;
+    }
+    markDesignDirty();
+    setMissionFlowEdges(result.edges);
+    if (result.closesLoop) {
+      setMissionRouteSourceId("");
+      setMessage(`Route closed: ${sourceSpot?.label || missionRouteSourceId} -> ${spot.label || spot.id}`);
+    } else {
+      setMissionRouteSourceId(spotId);
+      setMessage(`Route: ${sourceSpot?.label || missionRouteSourceId} -> ${spot.label || spot.id}`);
+    }
+  }, [
+    btNodeIsUp,
+    markDesignDirty,
+    missionFlowEdges,
+    missionRouteMode,
+    missionRouteSourceId,
+    visibleSpots,
+  ]);
 
   const handleMissionRouteMapClick = useCallback(() => {
     if (!missionRouteMode) return;
@@ -3701,8 +3809,7 @@ export default function MissionCanvasPage() {
     const validIds = orderedIds.filter((id, index) => (
       visibleSpots.some((spot) => spot.id === id) && orderedIds.indexOf(id) === index
     ));
-    designDirtyRef.current = true;
-    setDesignDirty(true);
+    markDesignDirty();
     setMissionFlowNodes((current) => syncMissionFlowNodesWithSpots(current, visibleSpots));
     const nextEdges = validIds.slice(0, -1).map((source, index) => {
       const target = validIds[index + 1];
@@ -3729,7 +3836,7 @@ export default function MissionCanvasPage() {
     setMissionRouteSourceId(
       missionRouteClosed ? "" : (validIds[validIds.length - 1] || ""),
     );
-  }, [missionRouteClosed, visibleSpots]);
+  }, [markDesignDirty, missionRouteClosed, visibleSpots]);
 
   const handleMoveRouteSpot = useCallback((spotId, direction) => {
     const currentIds = missionRouteTreeSpots.map((spot) => spot.id);
@@ -3882,8 +3989,7 @@ export default function MissionCanvasPage() {
             pose: spotPoseFromMapPose(localizedX, localizedY, localizedYaw),
             metadata: { source: "mission_canvas", coordinate_space: "map" },
           });
-          designDirtyRef.current = true;
-          setDesignDirty(true);
+          markDesignDirty();
           setSpots((current) => [...current, created]);
           setSelectedSpotId(created.id);
           setSelectedBehaviorNodeId("");
@@ -3915,8 +4021,7 @@ export default function MissionCanvasPage() {
         pose: spotPoseFromMapPose(x, y, yaw),
         metadata: { source: "mission_canvas" },
       };
-      designDirtyRef.current = true;
-      setDesignDirty(true);
+      markDesignDirty();
       setBehaviorNodes((current) => [...current, node]);
       setSelectedBehaviorNodeId(node.id);
       setSelectedSpotId("");
@@ -3934,8 +4039,7 @@ export default function MissionCanvasPage() {
         pose: spotPoseFromMapPose(x, y, yaw),
         metadata: { source: "mission_canvas", coordinate_space: "map" },
       });
-      designDirtyRef.current = true;
-      setDesignDirty(true);
+      markDesignDirty();
       setSpots((current) => [...current, created]);
       setSelectedSpotId(created.id);
       setSelectedBehaviorNodeId("");
@@ -3952,6 +4056,7 @@ export default function MissionCanvasPage() {
     designMapPath,
     handleRunPoseEstimate,
     interactionMode,
+    markDesignDirty,
     pendingBehaviorNodeTag,
     runCommand,
     spots.length,
@@ -4010,8 +4115,7 @@ export default function MissionCanvasPage() {
     const spot = spots.find((item) => item.id === spotId);
     if (!spot) return;
     const nextPose = spotPoseFromMapPose(x, y, yaw ?? spot.pose?.yaw ?? 0);
-    designDirtyRef.current = true;
-    setDesignDirty(true);
+    markDesignDirty();
     setSpots((current) => current.map((item) => (
       item.id === spotId ? { ...item, pose: nextPose } : item
     )));
@@ -4038,11 +4142,10 @@ export default function MissionCanvasPage() {
       )));
       setMessage(error instanceof Error ? error.message : "Failed to move waypoint");
     }
-  }, [btNodeIsUp, spots]);
+  }, [btNodeIsUp, markDesignDirty, spots]);
 
   const handleMoveBehaviorNode = useCallback((nodeId, x, y, yaw) => {
-    designDirtyRef.current = true;
-    setDesignDirty(true);
+    markDesignDirty();
     setBehaviorNodes((current) => current.map((node) => (
       node.id === nodeId
         ? {
@@ -4053,7 +4156,7 @@ export default function MissionCanvasPage() {
     )));
     const node = behaviorNodes.find((item) => item.id === nodeId);
     setMessage(`Moved ${node?.tag || "node"}`);
-  }, [behaviorNodes]);
+  }, [behaviorNodes, markDesignDirty]);
 
   const handleStartRenameSpot = useCallback((spot) => {
     if (!spot) return;
@@ -4081,8 +4184,7 @@ export default function MissionCanvasPage() {
     const previousSpot = spot;
     const previousLocalBt = localBtPathForSpot(previousSpot);
     const nextLocalBt = localBtPathFromLabel(label, previousSpot.id || "waypoint");
-    designDirtyRef.current = true;
-    setDesignDirty(true);
+    markDesignDirty();
     if (previousLocalBt !== nextLocalBt) {
       setDeletedMissionBtPaths((current) => (
         current.includes(previousLocalBt) ? current : [...current, previousLocalBt]
@@ -4155,7 +4257,7 @@ export default function MissionCanvasPage() {
       setDeletedMissionBtPaths((current) => current.filter((path) => path !== previousLocalBt));
       setMessage(error instanceof Error ? error.message : "Failed to update waypoint");
     }
-  }, [editingSpotLabel]);
+  }, [editingSpotLabel, markDesignDirty]);
 
   const handleDeleteSpot = useCallback(async (spot) => {
     if (!spot) return;
@@ -4164,8 +4266,7 @@ export default function MissionCanvasPage() {
       if (!isMissionManifestSpot(spot)) {
         await deleteNavigationSpot(spot.id, spot.map_name);
       }
-      designDirtyRef.current = true;
-      setDesignDirty(true);
+      markDesignDirty();
       setSpots((current) => current.filter((item) => item.id !== spot.id));
       setDeletedMissionBtPaths((current) => (
         current.includes(localBt) ? current : [...current, localBt]
@@ -4178,18 +4279,57 @@ export default function MissionCanvasPage() {
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Failed to delete waypoint");
     }
-  }, [editingSpotId]);
+  }, [editingSpotId, markDesignDirty]);
 
   const handleDeleteBehaviorNode = useCallback((node) => {
     if (!node) return;
-    designDirtyRef.current = true;
-    setDesignDirty(true);
+    markDesignDirty();
     setBehaviorNodes((current) => current.filter((item) => (
       item.id !== node.id
     )));
     setSelectedBehaviorNodeId((current) => (current === node.id ? "" : current));
     setMessage(`Deleted ${node.tag}`);
-  }, []);
+  }, [markDesignDirty]);
+
+  const waypointBtLayerOpen = !!waypointBtLayer;
+  const designHistoryLocked = (
+    workspaceStage !== STAGE_AUTHORING ||
+    !designMapAvailable ||
+    !!busy ||
+    designMapBusy ||
+    btNodeIsUp ||
+    waypointBtLayerOpen
+  );
+
+  const handleUndoDesign = useCallback(() => {
+    if (designHistoryLocked || !canUndoDesign) return;
+    undoDesignHistory();
+    setMessage("Undid design change");
+  }, [canUndoDesign, designHistoryLocked, undoDesignHistory]);
+
+  const handleRedoDesign = useCallback(() => {
+    if (designHistoryLocked || !canRedoDesign) return;
+    redoDesignHistory();
+    setMessage("Redid design change");
+  }, [canRedoDesign, designHistoryLocked, redoDesignHistory]);
+
+  useEffect(() => {
+    if (workspaceStage !== STAGE_AUTHORING || waypointBtLayerOpen) return undefined;
+    const handleKeyDown = (event) => {
+      if (!(event.ctrlKey || event.metaKey) || isTextInputTarget(event.target)) return;
+      const key = event.key.toLowerCase();
+      if (key === "z") {
+        event.preventDefault();
+        if (event.shiftKey) handleRedoDesign();
+        else handleUndoDesign();
+      } else if (key === "y" && !event.shiftKey) {
+        event.preventDefault();
+        handleRedoDesign();
+      }
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [handleRedoDesign, handleUndoDesign, waypointBtLayerOpen, workspaceStage]);
 
   return (
     <div
@@ -4449,6 +4589,26 @@ export default function MissionCanvasPage() {
             )}
             {workspaceStage === STAGE_AUTHORING && (
               <>
+                <ActionButton
+                  className="!w-9 !px-0"
+                  disabled={designHistoryLocked || !canUndoDesign}
+                  onClick={handleUndoDesign}
+                  title="Undo (Ctrl+Z)"
+                  variant="secondary"
+                >
+                  <MdUndo size={18} aria-hidden="true" />
+                  <span className="sr-only">Undo</span>
+                </ActionButton>
+                <ActionButton
+                  className="!w-9 !px-0"
+                  disabled={designHistoryLocked || !canRedoDesign}
+                  onClick={handleRedoDesign}
+                  title="Redo (Ctrl+Shift+Z)"
+                  variant="secondary"
+                >
+                  <MdRedo size={18} aria-hidden="true" />
+                  <span className="sr-only">Redo</span>
+                </ActionButton>
                 <ActionButton active={showDesignMapDialog || designMapBusy} disabled={!!busy || designMapBusy} onClick={handleOpenDesignMapDialog} variant="secondary">Load Map</ActionButton>
               </>
             )}
