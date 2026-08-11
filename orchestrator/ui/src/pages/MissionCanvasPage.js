@@ -5057,7 +5057,7 @@ export default function MissionCanvasPage() {
                 poseReady={runPoseInitialized}
                 missionName={runMissionName}
                 missionNames={runCatalog.names}
-                missionSelectDisabled={running || missionRunnerActive || runMapBusy || !missionMapLoaded}
+                missionSelectDisabled={!!busy || missionRunnerActive || runMapBusy || !missionMapLoaded}
                 onMissionChange={handleMissionChange}
               />
             )}

@@ -2685,6 +2685,56 @@ test('loads a saved map for the run stage', async () => {
   await waitFor(() => expect(startNavigation).toHaveBeenCalledWith('nav', 'factory'));
 });
 
+test('allows changing the Run mission while navigation stays active between runs', async () => {
+  const latestMapViewerProps = () => (
+    mockMapViewer.mock.calls[mockMapViewer.mock.calls.length - 1][0]
+  );
+  getServiceStatus.mockResolvedValue({ is_up: true, mode: 'run' });
+  getPgmFiles.mockResolvedValue({
+    files: [{ path: 'factory.pgm', name: 'factory.pgm' }],
+  });
+  getNavigationMissions.mockResolvedValue({
+    map_name: 'factory',
+    missions: ['morning', 'evening'],
+  });
+  getNavigationMission.mockImplementation((mapName, missionName) => Promise.resolve({
+    exists: true,
+    map_name: mapName,
+    mission_name: missionName,
+    global_bt: 'global.xml',
+    waypoints: [{
+      id: `${missionName}_waypoint`,
+      label: `${missionName} waypoint`,
+      pose: { frame_id: 'map', x: 1, y: 2, yaw: 0 },
+      local_bt: `locals/${missionName}.xml`,
+      metadata: {},
+    }],
+    metadata: {},
+  }));
+
+  render(<MissionCanvasPage />);
+
+  fireEvent.click(screen.getByRole('tab', { name: 'Run' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Load Map' }));
+  await screen.findByRole('combobox', { name: 'Run mission map file' });
+  fireEvent.click(screen.getByRole('button', { name: 'Load' }));
+
+  const missionSelect = await screen.findByRole('combobox', { name: 'Active mission' });
+  await waitFor(() => expect(missionSelect).toHaveValue('morning'));
+  expect((await screen.findAllByText('Running')).length).toBeGreaterThan(0);
+  expect(missionSelect).toBeEnabled();
+
+  fireEvent.change(missionSelect, { target: { value: 'evening' } });
+
+  await waitFor(() => expect(getNavigationMission).toHaveBeenCalledWith('factory', 'evening'));
+  await waitFor(() => expect(missionSelect).toHaveValue('evening'));
+  expect(await screen.findByText('Loaded mission evening')).toBeInTheDocument();
+  await waitFor(() => expect(latestMapViewerProps().spots[0]).toMatchObject({
+    id: 'evening_waypoint',
+    label: 'evening waypoint',
+  }));
+});
+
 test('lists the mission route waypoints in the run session panel', async () => {
   getPgmFiles.mockResolvedValue({
     files: [{ path: 'factory.pgm', name: 'factory.pgm' }],
