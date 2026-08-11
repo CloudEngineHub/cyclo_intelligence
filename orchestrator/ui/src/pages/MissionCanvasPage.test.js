@@ -1742,6 +1742,64 @@ test('edits the mission route directly on the map', async () => {
   expect(latestMapViewerProps().missionRouteClosed).toBe(false);
 });
 
+test('opens a closed loop and clears the route without deleting waypoints', async () => {
+  const latestMapViewerProps = () => (
+    mockMapViewer.mock.calls[mockMapViewer.mock.calls.length - 1][0]
+  );
+  getPgmFiles.mockResolvedValue({
+    files: [{ path: 'map.pgm', name: 'map.pgm' }],
+  });
+  getNavigationSpots.mockImplementation((mapName) => Promise.resolve({
+    map_name: mapName,
+    spots: mapName === 'map' ? [
+      { id: 'spot_a', map_name: 'map', label: 'Waypoint A', pose: { frame_id: 'map', x: 1, y: 2, yaw: 0 }, linked_bt_tree: 'waypoint_a.xml', metadata: {} },
+      { id: 'spot_b', map_name: 'map', label: 'Waypoint B', pose: { frame_id: 'map', x: 3, y: 4, yaw: 0.5 }, linked_bt_tree: 'waypoint_b.xml', metadata: {} },
+      { id: 'spot_c', map_name: 'map', label: 'Waypoint C', pose: { frame_id: 'map', x: 5, y: 6, yaw: 0.75 }, linked_bt_tree: 'waypoint_c.xml', metadata: {} },
+    ] : [],
+  }));
+
+  render(<MissionCanvasPage />);
+
+  fireEvent.click(screen.getByRole('tab', { name: 'Design' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Load Map' }));
+  await screen.findByRole('combobox', { name: 'Design mission map file' });
+  fireEvent.click(screen.getByRole('button', { name: 'Load' }));
+  await waitFor(() => expect(latestMapViewerProps().spots).toHaveLength(3));
+
+  fireEvent.click(screen.getByRole('button', { name: 'Edit On Map' }));
+  await waitFor(() => expect(latestMapViewerProps().missionRouteMode).toBe(true));
+
+  // Build A -> B and close the loop back to A.
+  act(() => { latestMapViewerProps().onMissionRouteSpotClick('spot_a'); });
+  act(() => { latestMapViewerProps().onMissionRouteSpotClick('spot_b'); });
+  act(() => { latestMapViewerProps().onMissionRouteSpotClick('spot_a'); });
+  await waitFor(() => expect(latestMapViewerProps().missionRouteClosed).toBe(true));
+
+  // The closure row's remove button re-opens the loop...
+  fireEvent.click(screen.getByRole('button', { name: 'Open loop' }));
+  await waitFor(() => expect(latestMapViewerProps().missionRouteClosed).toBe(false));
+  expect(screen.queryByText(/Return to /)).not.toBeInTheDocument();
+  expect(latestMapViewerProps().missionRouteOrder).toEqual([
+    { id: 'spot_a', order: 1 },
+    { id: 'spot_b', order: 2 },
+  ]);
+
+  // ...and the open route is editable again: extend it to Waypoint C.
+  act(() => { latestMapViewerProps().onMissionRouteSpotClick('spot_b'); });
+  act(() => { latestMapViewerProps().onMissionRouteSpotClick('spot_c'); });
+  await waitFor(() => expect(latestMapViewerProps().missionRouteOrder).toEqual([
+    { id: 'spot_a', order: 1 },
+    { id: 'spot_b', order: 2 },
+    { id: 'spot_c', order: 3 },
+  ]));
+
+  // Clear Route discards every edge but keeps the waypoints.
+  fireEvent.click(screen.getByRole('button', { name: 'Clear Route' }));
+  await waitFor(() => expect(latestMapViewerProps().missionRouteOrder).toEqual([]));
+  expect(latestMapViewerProps().spots).toHaveLength(3);
+  expect(screen.queryByRole('button', { name: 'Clear Route' })).not.toBeInTheDocument();
+});
+
 test('starts mapping mode from Mission Canvas', async () => {
   render(<MissionCanvasPage />);
 

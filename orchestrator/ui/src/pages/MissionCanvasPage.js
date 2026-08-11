@@ -3805,6 +3805,31 @@ export default function MissionCanvasPage() {
     setMessage("Route source cleared");
   }, [missionRouteMode]);
 
+  // Remove every route edge (waypoints stay). The map-click gestures can only
+  // ever ADD edges, so without this a finished route cannot be discarded.
+  const handleClearMissionRoute = useCallback(() => {
+    if (!missionFlowEdges.length) return;
+    markDesignDirty();
+    setMissionFlowEdges([]);
+    setMissionRouteSourceId("");
+    setMessage("Route cleared");
+  }, [markDesignDirty, missionFlowEdges.length]);
+
+  // Drop only the closing edge: a closed loop rejects every add-edge gesture,
+  // so opening it back up is the only way to keep editing the route.
+  const handleOpenMissionRouteLoop = useCallback(() => {
+    if (!missionRouteClosed) return;
+    const startId = missionRouteExecutionSpots[0]?.id;
+    const endId = missionRouteExecutionSpots[missionRouteExecutionSpots.length - 2]?.id;
+    if (!startId || !endId) return;
+    markDesignDirty();
+    setMissionFlowEdges((current) => current.filter((edge) => (
+      !(edge.source === endId && edge.target === startId)
+    )));
+    setMissionRouteSourceId("");
+    setMessage("Loop opened");
+  }, [markDesignDirty, missionRouteClosed, missionRouteExecutionSpots]);
+
   const handleSetMissionRouteOrder = useCallback((orderedIds) => {
     const validIds = orderedIds.filter((id, index) => (
       visibleSpots.some((spot) => spot.id === id) && orderedIds.indexOf(id) === index
@@ -4810,6 +4835,22 @@ export default function MissionCanvasPage() {
                 >
                   Edit Route
                 </button>
+                {/* Only while a route exists — map clicks can only ADD edges,
+                    so this is the sole way to discard a route (or a closed
+                    loop) without deleting waypoints. */}
+                {missionFlowEdges.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={handleClearMissionRoute}
+                    disabled={!!busy || !designMapAvailable || btNodeIsUp}
+                    aria-label="Clear Route"
+                    title={btNodeIsUp ? "Deactivate BT before editing mission route" : "Remove all route connections (waypoints stay)"}
+                    className="h-8 px-3 text-[12.5px] font-semibold disabled:opacity-45"
+                    style={{ borderRadius: 9, border: "1px solid var(--mc-border-strong)", backgroundColor: "var(--mc-surface)", color: "var(--mc-danger)" }}
+                  >
+                    Clear Route
+                  </button>
+                )}
               </div>
 
               {/* Mission hub — create/save/rename/duplicate/delete, right under
@@ -5014,11 +5055,22 @@ export default function MissionCanvasPage() {
                         <div className="flex flex-col items-center" style={{ width: 26 }}>
                           <span className="h-[26px] w-[26px] shrink-0 rounded-full inline-flex items-center justify-center text-[13px] font-semibold" style={{ color: "var(--mc-success)", backgroundColor: "color-mix(in srgb, var(--mc-success) 14%, transparent)", border: "1px solid var(--mc-success)" }}>↻</span>
                         </div>
-                        <div className="flex-1 mb-2 grid items-center min-w-0" style={{ padding: 10, borderRadius: 11, border: "1px solid var(--mc-success)", backgroundColor: "color-mix(in srgb, var(--mc-success) 10%, transparent)" }}>
-                          <span className="block truncate text-[12.5px] font-semibold" style={{ color: "var(--mc-success)" }}>
-                            Return to {missionRouteTreeSpots[0].label || missionRouteTreeSpots[0].id}
-                          </span>
-                          <span className="block truncate text-[10px] font-mono" style={{ color: "var(--mc-text-subtle)" }}>Loop closure</span>
+                        <div className="flex-1 mb-2 grid grid-cols-[1fr_auto] items-center gap-2 min-w-0" style={{ padding: 10, borderRadius: 11, border: "1px solid var(--mc-success)", backgroundColor: "color-mix(in srgb, var(--mc-success) 10%, transparent)" }}>
+                          <div className="min-w-0">
+                            <span className="block truncate text-[12.5px] font-semibold" style={{ color: "var(--mc-success)" }}>
+                              Return to {missionRouteTreeSpots[0].label || missionRouteTreeSpots[0].id}
+                            </span>
+                            <span className="block truncate text-[10px] font-mono" style={{ color: "var(--mc-text-subtle)" }}>Loop closure</span>
+                          </div>
+                          {/* A closed loop rejects every map-click edit, so the
+                              closure row carries its own remove affordance. */}
+                          <button type="button" aria-label="Open loop" title="Remove the loop closure so the route can be edited again"
+                            disabled={btNodeIsUp}
+                            onClick={handleOpenMissionRouteLoop}
+                            className="h-7 w-7 shrink-0 inline-flex items-center justify-center text-[13px] leading-none active:translate-y-px disabled:opacity-40"
+                            style={{ borderRadius: 7, border: "1px solid var(--mc-border-strong)", backgroundColor: "var(--mc-surface)", color: "var(--mc-danger)" }}>
+                            ×
+                          </button>
                         </div>
                       </div>
                     )}
