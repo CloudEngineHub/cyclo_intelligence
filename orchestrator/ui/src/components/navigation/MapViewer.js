@@ -1100,7 +1100,9 @@ function makeMapAnnotationRegion(annotation, grid, isDark = false, coveredCells 
         return null;
     const colorString = hexColorString(annotation === null || annotation === void 0 ? void 0 : annotation.color, isDark ? "#6D1F2A" : "#6D1F2A");
     const texture = cachedAnnotationRegionTexture(annotation, grid, region, colorString, isDark, selected);
-    const plane = makeGridTexturePlane(grid, texture, 0.065);
+    // Flush with the map, and strictly BELOW the waypoint/route layer
+    // (0.01-0.05) so labeled areas never cover mission markers.
+    const plane = makeGridTexturePlane(grid, texture, 0.004);
     if (!plane)
         return null;
     const group = new THREE.Group();
@@ -1113,7 +1115,7 @@ function makeMapAnnotationRegion(annotation, grid, isDark = false, coveredCells 
         const { sprite, aspect } = makeAnnotationLabelSprite(label, colorString, isDark);
         const center = gridCellToMapPoint(meta, region.centroid.x, region.centroid.y);
         const labelHeight = Math.max(0.24, Math.min(0.72, meta.resolution * 11));
-        sprite.position.set(center.x, center.y, 0.78);
+        sprite.position.set(center.x, center.y, 0.008);
         sprite.scale.set(labelHeight * aspect, labelHeight, 1);
         group.add(sprite);
     }
