@@ -40,7 +40,11 @@ import BTNodePalette, { PALETTE_DRAG_MIME } from "../bt/BTNodePalette";
 import BTParamPanel from "../bt/BTParamPanel";
 import { useBTHistory } from "../../hooks/useBTHistory";
 import { useBTNodeCatalog } from "../../hooks/useBTNodeCatalog";
-import { parseBTXml, applyDagreLayout } from "../../utils/btTreeParser";
+import {
+  parseBTXml,
+  applyDagreLayout,
+  findDeletionLayoutAnchor,
+} from "../../utils/btTreeParser";
 import { serializeFromGraph } from "../../utils/btXmlSerializer";
 import TreeListModal from "../../features/btmanager/components/TreeListModal";
 import { CYCLO_VIDEO_SERVER_PORT } from "../../config/runtimeConfig";
@@ -443,7 +447,13 @@ export default function MissionBtEditor({
         !selectedNodeIds.has(edge.source) &&
         !selectedNodeIds.has(edge.target)
       ));
-      setNodes(layoutVisibleOnly(remainingNodes, remainingEdges));
+      const anchorNodeId = findDeletionLayoutAnchor(
+        nodesRef.current,
+        edgesRef.current,
+        selectedNodeIds,
+        selectedEdgeIds,
+      );
+      setNodes(layoutVisibleOnly(remainingNodes, remainingEdges, { anchorNodeId }));
       setEdges(remainingEdges);
       setNodeDataMap((current) => {
         const next = new Map(current);

@@ -228,3 +228,39 @@ export function applyDagreLayout(
 
   return { nodes: layoutNodes, edges };
 }
+
+/**
+ * Choose a surviving node whose canvas position should remain fixed while
+ * re-laying out a graph after deletion. Prefer a node adjacent to the deleted
+ * node/edge, then fall back to the first remaining node for disconnected
+ * deletions.
+ */
+export function findDeletionLayoutAnchor(
+  nodes,
+  edges,
+  deletedNodeIds,
+  deletedEdgeIds,
+) {
+  const removedNodes = deletedNodeIds instanceof Set
+    ? deletedNodeIds
+    : new Set(deletedNodeIds || []);
+  const removedEdges = deletedEdgeIds instanceof Set
+    ? deletedEdgeIds
+    : new Set(deletedEdgeIds || []);
+  const remainingNodeIds = new Set(
+    nodes.filter((node) => !removedNodes.has(node.id)).map((node) => node.id),
+  );
+
+  if (remainingNodeIds.size === 0) return null;
+
+  for (const edge of edges) {
+    const touchesDeletion = removedEdges.has(edge.id)
+      || removedNodes.has(edge.source)
+      || removedNodes.has(edge.target);
+    if (!touchesDeletion) continue;
+    if (remainingNodeIds.has(edge.source)) return edge.source;
+    if (remainingNodeIds.has(edge.target)) return edge.target;
+  }
+
+  return nodes.find((node) => remainingNodeIds.has(node.id))?.id || null;
+}

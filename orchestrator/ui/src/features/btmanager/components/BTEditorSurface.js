@@ -43,7 +43,11 @@ import BTActionNode from '../../../components/bt/BTActionNode';
 import BTParamPanel from '../../../components/bt/BTParamPanel';
 import BTNodePalette, { PALETTE_DRAG_MIME } from '../../../components/bt/BTNodePalette';
 import TreeListModal from './TreeListModal';
-import { parseBTXml, applyDagreLayout } from '../../../utils/btTreeParser';
+import {
+  parseBTXml,
+  applyDagreLayout,
+  findDeletionLayoutAnchor,
+} from '../../../utils/btTreeParser';
 import { serializeFromGraph } from '../../../utils/btXmlSerializer';
 import { setTreeXml, setTreeFileName, setBtStatus, setActiveNodeNames, setSelectedNodeId } from '../btmanagerSlice';
 import { useRosServiceCaller } from '../../../hooks/useRosServiceCaller';
@@ -517,8 +521,16 @@ export default function BTEditorSurface({
           !selectedNodeIds.has(eg.target)
       );
       // Re-flow what's left so the deleted node/edge's old slot doesn't
-      // leave a visible gap in the tree.
-      setNodes(layoutVisibleOnly(remainingNodes, remainingEdges));
+      // leave a visible gap in the tree. Keep a surviving neighbor (or the
+      // first remaining node for a disconnected deletion) at its old canvas
+      // coordinates so dagre cannot move the graph back near (0, 0).
+      const anchorNodeId = findDeletionLayoutAnchor(
+        currentNodes,
+        currentEdges,
+        selectedNodeIds,
+        selectedEdgeIds,
+      );
+      setNodes(layoutVisibleOnly(remainingNodes, remainingEdges, { anchorNodeId }));
       setEdges(remainingEdges);
       if (selectedNodeIds.size > 0) {
         setNodeDataMap((prev) => {

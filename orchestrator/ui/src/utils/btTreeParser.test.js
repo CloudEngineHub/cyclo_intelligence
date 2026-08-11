@@ -1,4 +1,4 @@
-import { applyDagreLayout } from './btTreeParser';
+import { applyDagreLayout, findDeletionLayoutAnchor } from './btTreeParser';
 
 describe('applyDagreLayout', () => {
   const nodes = [
@@ -38,5 +38,34 @@ describe('applyDagreLayout', () => {
     const sequence = result.nodes.find((node) => node.id === 'sequence');
 
     expect(sequence.position).not.toEqual(nodes[0].position);
+  });
+});
+
+describe('findDeletionLayoutAnchor', () => {
+  const nodes = [
+    { id: 'sequence', position: { x: 900, y: 700 } },
+    { id: 'command', position: { x: 900, y: 840 } },
+    { id: 'new_node', position: { x: 1300, y: 900 } },
+  ];
+  const edges = [
+    { id: 'e_sequence_command', source: 'sequence', target: 'command' },
+  ];
+
+  it('anchors a surviving neighbor when deleting a connected node', () => {
+    expect(findDeletionLayoutAnchor(
+      nodes,
+      edges,
+      new Set(['command']),
+      new Set(),
+    )).toBe('sequence');
+  });
+
+  it('anchors the existing graph when deleting a disconnected node', () => {
+    expect(findDeletionLayoutAnchor(
+      nodes,
+      edges,
+      new Set(['new_node']),
+      new Set(),
+    )).toBe('sequence');
   });
 });
