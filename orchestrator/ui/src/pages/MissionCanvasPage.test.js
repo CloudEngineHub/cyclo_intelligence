@@ -2744,6 +2744,13 @@ test('loads a saved map for the run stage', async () => {
   await waitFor(() => expect(latestMapViewerProps().mapAnnotations).toEqual([
     expect.objectContaining({ label: 'Dock', color: '#3B241F' }),
   ]));
+  // ...and viewers who don't want them can hide the layer.
+  const areasSwitch = screen.getByRole('switch', { name: 'Map areas' });
+  expect(areasSwitch).toHaveAttribute('aria-checked', 'true');
+  fireEvent.click(areasSwitch);
+  await waitFor(() => expect(latestMapViewerProps().mapAnnotations).toEqual([]));
+  fireEvent.click(areasSwitch);
+  await waitFor(() => expect(latestMapViewerProps().mapAnnotations).toHaveLength(1));
   // Run waypoints are display-only: no drag or selection handlers at all.
   expect(latestMapViewerProps().onSpotPoseChange).toBeUndefined();
   expect(latestMapViewerProps().onSpotClick).toBeUndefined();

@@ -136,6 +136,7 @@ const LAYER_DEFINITIONS = {
   localCostmap: "Local costmap",
   globalPlan: "Global plan",
   goalPose: "Goal pose",
+  mapAreas: "Map areas",
 };
 
 const STAGE_LAYER_IDS = {
@@ -143,6 +144,7 @@ const STAGE_LAYER_IDS = {
   [STAGE_AUTHORING]: ["map", "scan", "robotModel", "tf"],
   [STAGE_RUN]: [
     "map",
+    "mapAreas",
     "scan",
     "robotModel",
     "globalCostmap",
@@ -163,6 +165,7 @@ const LAYER_PRESETS = {
     localCostmap: false,
     globalPlan: false,
     goalPose: false,
+    mapAreas: false,
   },
   [STAGE_AUTHORING]: {
     map: true,
@@ -173,6 +176,7 @@ const LAYER_PRESETS = {
     localCostmap: false,
     globalPlan: false,
     goalPose: false,
+    mapAreas: false,
   },
   [STAGE_RUN]: {
     map: true,
@@ -183,6 +187,7 @@ const LAYER_PRESETS = {
     localCostmap: true,
     globalPlan: true,
     goalPose: true,
+    mapAreas: true,
   },
 };
 
@@ -4733,7 +4738,7 @@ export default function MissionCanvasPage() {
                 ? mapEditor.annotations
                 : workspaceStage === STAGE_AUTHORING && designMapActive
                   ? designMapEditor.annotations
-                  : workspaceStage === STAGE_RUN && missionMapLoaded
+                  : workspaceStage === STAGE_RUN && missionMapLoaded && activeLayers.mapAreas
                     ? runDisplayMapEditor.annotations
                     : []
             }
