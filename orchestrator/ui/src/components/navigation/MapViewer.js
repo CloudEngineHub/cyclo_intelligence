@@ -760,6 +760,55 @@ function makeLine(points, color, lineWidth = 2) {
     const material = new THREE.LineBasicMaterial({ color, linewidth: lineWidth });
     return new THREE.Line(geometry, material);
 }
+// Mission route rendering: dashed legs plus a mid-segment arrowhead per leg,
+// so the travel direction reads at a glance. Sizes follow the waypoint
+// marker scale (map resolution) like every other route element.
+function makeMissionRouteLine(points, color, scale) {
+    if (points.length < 2)
+        return null;
+    const group = new THREE.Group();
+    const geometry = new THREE.BufferGeometry().setFromPoints(points);
+    const material = new THREE.LineDashedMaterial({
+        color,
+        dashSize: 3 * scale,
+        gapSize: 2 * scale,
+        transparent: true,
+        opacity: 0.72,
+    });
+    const line = new THREE.Line(geometry, material);
+    // LineDashedMaterial renders solid until per-vertex distances exist.
+    line.computeLineDistances();
+    group.add(line);
+
+    const arrowLength = 3.2 * scale;
+    const arrowHalfWidth = 1.8 * scale;
+    const arrowShape = new THREE.Shape();
+    arrowShape.moveTo(arrowLength / 2, 0);
+    arrowShape.lineTo(-arrowLength / 2, arrowHalfWidth);
+    arrowShape.lineTo(-arrowLength / 2, -arrowHalfWidth);
+    arrowShape.closePath();
+    const arrowGeometry = new THREE.ShapeGeometry(arrowShape);
+    for (let i = 0; i < points.length - 1; i += 1) {
+        const a = points[i];
+        const b = points[i + 1];
+        const dx = b.x - a.x;
+        const dy = b.y - a.y;
+        // Legs too short to fit an arrowhead between the endpoint markers
+        // stay dash-only.
+        if (Math.hypot(dx, dy) < arrowLength * 2.5)
+            continue;
+        const arrow = new THREE.Mesh(arrowGeometry, new THREE.MeshBasicMaterial({
+            color,
+            transparent: true,
+            opacity: 0.9,
+            side: THREE.DoubleSide,
+        }));
+        arrow.position.set((a.x + b.x) / 2, (a.y + b.y) / 2, 0.025);
+        arrow.rotation.z = Math.atan2(dy, dx);
+        group.add(arrow);
+    }
+    return group;
+}
 // Warm, theme-aware marker palette (turn 9 shapes + 11b colors + 12 labels).
 const MARKER_COLORS = {
     light: {
@@ -1842,12 +1891,9 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, 
             if (missionRouteClosed && routePoints.length > 1) {
                 routePoints.push(routePoints[0].clone());
             }
-            const routeLine = makeLine(routePoints, markerPalette(isDark).idle, 2);
-            if (routeLine) {
-                routeLine.material.transparent = true;
-                routeLine.material.opacity = 0.72;
+            const routeLine = makeMissionRouteLine(routePoints, markerPalette(isDark).idle, waypointScale);
+            if (routeLine)
                 layers.add(routeLine);
-            }
         }
         missionRouteOrder.forEach(({ id, order }) => {
             const spot = spotById.get(id);
