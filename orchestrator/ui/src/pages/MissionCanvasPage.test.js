@@ -2672,6 +2672,41 @@ test('enables navigation runtime layers in the run stage', async () => {
   ))).toBe(true);
 });
 
+test('prefers the AMCL pose over a stale TF pose in the run stage', async () => {
+  const latestMapViewerProps = () => (
+    mockMapViewer.mock.calls[mockMapViewer.mock.calls.length - 1][0]
+  );
+  getServiceStatus.mockResolvedValue({ is_up: true, mode: 'run' });
+  mockTopicDataByName['/tf'] = {
+    transforms: [
+      {
+        header: { frame_id: 'map' },
+        child_frame_id: 'odom',
+        transform: {
+          translation: { x: 50, y: 50, z: 0 },
+          rotation: { x: 0, y: 0, z: 0, w: 1 },
+        },
+      },
+      {
+        header: { frame_id: 'odom' },
+        child_frame_id: 'base_link',
+        transform: {
+          translation: { x: 2, y: 3, z: 0 },
+          rotation: { x: 0, y: 0, z: 0, w: 1 },
+        },
+      },
+    ],
+  };
+  mockTopicDataByName['/amcl_pose'] = amclPoseMessage(1.25, -0.5, 0.75);
+
+  render(<MissionCanvasPage />);
+  fireEvent.click(screen.getByRole('tab', { name: 'Run' }));
+
+  await waitFor(() => expect(latestMapViewerProps().pose).toMatchObject({
+    position: { x: 1.25, y: -0.5 },
+  }));
+});
+
 test('loads a saved map for the run stage', async () => {
   const latestMapViewerProps = () => (
     mockMapViewer.mock.calls[mockMapViewer.mock.calls.length - 1][0]

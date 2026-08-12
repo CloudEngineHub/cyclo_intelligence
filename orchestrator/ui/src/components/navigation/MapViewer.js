@@ -19,7 +19,7 @@ import { useEffect, useRef, useState } from "react";
 import * as THREE from "three";
 // @ts-ignore
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
-import { buildTfFramePoses, normalizeFrameId, orientationFromYaw, yawFromPose, } from "../../utils/navigationTf";
+import { buildTfFramePoses, normalizeFrameId, orientationFromYaw, poseForScanFrame, yawFromPose, } from "../../utils/navigationTf";
 import { roomSegmentationParams, segmentFreeRooms } from "../../utils/roomSegmentation";
 const CAMERA_NEAR = 0.05;
 const CAMERA_FAR = 2000;
@@ -1993,7 +1993,7 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, 
     // TF axes, and the (small) local costmap. Rebuilding this group is cheap;
     // everything expensive lives in the groups above and is untouched by TF.
     useEffect(() => {
-        var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p, _q, _r, _s, _t, _u;
+        var _a, _b, _c, _d, _e, _f, _g, _j, _k, _l, _o, _p, _q, _r, _s, _t, _u;
         const group = liveLayerRef.current;
         if (!group)
             return;
@@ -2012,7 +2012,7 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, 
                 ? (_f = tfFramePoseByName.get(localFrame)) !== null && _f !== void 0 ? _f : null
                 : null;
             const scanFrame = normalizeFrameId((_g = scan === null || scan === void 0 ? void 0 : scan.header) === null || _g === void 0 ? void 0 : _g.frame_id) || "base_link";
-            const scanPose = (_h = tfFramePoseByName.get(scanFrame)) !== null && _h !== void 0 ? _h : pose;
+            const scanPose = poseForScanFrame(scanFrame, tfFramePoseByName, pose);
             const scanCells = scanCellsForGrid(localCostmap, scan, scanPose, localFramePose);
             const plane = makeGridPlane(localCostmap, "localCostmap", 0.1, localFramePose, scanCells, isDark);
             if (plane)
@@ -2024,7 +2024,7 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, 
                 : null;
             if (!points) {
                 const scanFrame = normalizeFrameId((_l = scan.header) === null || _l === void 0 ? void 0 : _l.frame_id) || "base_link";
-                const scanPose = (_m = tfFramePoseByName.get(scanFrame)) !== null && _m !== void 0 ? _m : pose;
+                const scanPose = poseForScanFrame(scanFrame, tfFramePoseByName, pose);
                 const scanX = Number((_p = (_o = scanPose === null || scanPose === void 0 ? void 0 : scanPose.position) === null || _o === void 0 ? void 0 : _o.x) !== null && _p !== void 0 ? _p : robotX);
                 const scanY = Number((_r = (_q = scanPose === null || scanPose === void 0 ? void 0 : scanPose.position) === null || _q === void 0 ? void 0 : _q.y) !== null && _r !== void 0 ? _r : robotY);
                 const scanYaw = yawFromPose(scanPose);

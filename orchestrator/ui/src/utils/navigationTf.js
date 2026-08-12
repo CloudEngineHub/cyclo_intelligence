@@ -35,6 +35,13 @@ export function poseFromBaseLinkTf(tf) {
 export function normalizeFrameId(frameId) {
     return (frameId !== null && frameId !== void 0 ? frameId : "").replace(/^\//, "");
 }
+export function poseForScanFrame(frameId, framePosesByName, robotPose) {
+    const frame = normalizeFrameId(frameId);
+    if (frame === "base_link" && robotPose)
+        return robotPose;
+    const framePose = framePosesByName.get(frame);
+    return framePose !== null && framePose !== void 0 ? framePose : robotPose;
+}
 function poseFromTransform(transform) {
     var _a, _b;
     return {

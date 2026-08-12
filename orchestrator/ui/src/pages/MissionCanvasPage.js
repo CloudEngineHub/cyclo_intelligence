@@ -2312,7 +2312,15 @@ export default function MissionCanvasPage() {
   void tfBufferRevision;
   const bufferedTf = tfMessageFromBuffer(tfBufferRef.current) ?? latestTf;
   const fallbackPose = amclPose?.pose?.pose ?? null;
-  const currentPose = poseFromBaseLinkTf(bufferedTf) ?? fallbackPose;
+  const tfPose = poseFromBaseLinkTf(bufferedTf);
+  // In Run, AMCL is the authoritative map-frame localization estimate. The
+  // rosbridge-throttled /tf stream can miss low-rate map -> odom updates while
+  // still receiving odom -> base_link, leaving this browser's composed TF pose
+  // stale even though Nav2's internal TF buffer is current. Retain TF as a
+  // startup fallback until the first AMCL pose arrives.
+  const currentPose = runSessionActive
+    ? fallbackPose ?? tfPose
+    : tfPose ?? fallbackPose;
   const displayedMap = mappingEditorActive
     ? mapEditor.map
     : workspaceStage === STAGE_AUTHORING
