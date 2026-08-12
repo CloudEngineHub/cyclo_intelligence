@@ -1547,9 +1547,17 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, 
                 window.addEventListener("resize", resize);
             }
             const pulseStart = performance.now();
+            // Cap the render loop at ~30fps: a full-scene render at 60fps kept
+            // one browser core saturated (measured 2026-08-12) and made every
+            // mount (e.g. the waypoint BT split view) visibly hitch. 30fps is
+            // indistinguishable for a robot dashboard and halves the cost.
+            let lastFrameAt = 0;
             const animate = () => {
                 animationFrameRef.current = requestAnimationFrame(animate);
-                const elapsed = (performance.now() - pulseStart) / 1000;
+                const now = performance.now();
+                if (now - lastFrameAt < 33) return;
+                lastFrameAt = now;
+                const elapsed = (now - pulseStart) / 1000;
                 // Pulse the active-waypoint halo (userData.pulse), and smoothly pan
                 // the camera to keep the robot centered while it navigates.
                 const wave = 0.5 + 0.5 * Math.sin(elapsed * 3.2);

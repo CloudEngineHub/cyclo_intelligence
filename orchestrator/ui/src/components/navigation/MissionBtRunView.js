@@ -22,7 +22,7 @@
 // parses the same XML string sent to /bt/load_and_run, the parser's bt_N ids
 // line up with the backend's active-node ids — no name matching needed.
 
-import { useEffect, useMemo, useState } from "react";
+import { memo, useEffect, useMemo, useState } from "react";
 import { ReactFlow, Controls, Background } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 
@@ -54,7 +54,11 @@ function useIsDark() {
   return isDark;
 }
 
-export default function MissionBtRunView({ xml, activeNodeNames = [], loading = false }) {
+// Memoized: the parent page re-renders at pose rate (5-10 Hz) during a run,
+// and reconciling the whole ReactFlow tree each time is what made the split
+// view hitch. Props are stable between actual BT changes (xml string,
+// memoized activeNodeNames array), so memo skips nearly all of those renders.
+function MissionBtRunView({ xml, activeNodeNames = [], loading = false }) {
   const isDark = useIsDark();
   const [graph, setGraph] = useState({ nodes: [], edges: [] });
   const [parseError, setParseError] = useState(null);
@@ -149,3 +153,5 @@ export default function MissionBtRunView({ xml, activeNodeNames = [], loading = 
     </div>
   );
 }
+
+export default memo(MissionBtRunView);
