@@ -19,7 +19,7 @@ import { useEffect, useRef, useState } from "react";
 import * as THREE from "three";
 // @ts-ignore
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
-import { buildTfFramePoses, normalizeFrameId, orientationFromYaw, poseForScanFrame, yawFromPose, } from "../../utils/navigationTf";
+import { buildTfFramePoses, normalizeFrameId, orientationFromYaw, poseForScanFrame, poseForTfAxesFrame, yawFromPose, } from "../../utils/navigationTf";
 import { roomSegmentationParams, segmentFreeRooms } from "../../utils/roomSegmentation";
 const CAMERA_NEAR = 0.05;
 const CAMERA_FAR = 2000;
@@ -2051,7 +2051,11 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, pose, plan, 
             const framePoses = tfFramePoses.slice(0, 80);
             if (framePoses.length > 0) {
                 framePoses.forEach(({ frame, pose: framePose }) => {
-                    group.add(makeTfAxes(framePose, frame, isDark));
+                    group.add(makeTfAxes(
+                        poseForTfAxesFrame(frame, framePose, pose),
+                        frame,
+                        isDark,
+                    ));
                 });
             }
             else {

@@ -42,6 +42,11 @@ export function poseForScanFrame(frameId, framePosesByName, robotPose) {
     const framePose = framePosesByName.get(frame);
     return framePose !== null && framePose !== void 0 ? framePose : robotPose;
 }
+export function poseForTfAxesFrame(frameId, tfPose, robotPose) {
+    return normalizeFrameId(frameId) === "base_link" && robotPose
+        ? robotPose
+        : tfPose;
+}
 function poseFromTransform(transform) {
     var _a, _b;
     return {
