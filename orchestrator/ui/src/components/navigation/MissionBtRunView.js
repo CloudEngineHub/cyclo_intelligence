@@ -60,17 +60,21 @@ function useIsDark() {
 // memoized activeNodeNames array), so memo skips nearly all of those renders.
 function MissionBtRunView({ xml, activeNodeNames = [], loading = false }) {
   const isDark = useIsDark();
-  const [graph, setGraph] = useState({ nodes: [], edges: [] });
-  const [parseError, setParseError] = useState(null);
-
-  useEffect(() => {
+  // Build the graph during the same render that receives the waypoint XML.
+  // Parsing in an effect committed an empty/stale graph first, so short BTs
+  // could finish before ReactFlow ever displayed their nodes.
+  const { graph, parseError } = useMemo(() => {
     try {
       const parsed = parseBTXml(xml || "");
-      setGraph({ nodes: parsed.nodes || [], edges: parsed.edges || [] });
-      setParseError(null);
+      return {
+        graph: { nodes: parsed.nodes || [], edges: parsed.edges || [] },
+        parseError: null,
+      };
     } catch (error) {
-      setGraph({ nodes: [], edges: [] });
-      setParseError(error instanceof Error ? error.message : "Failed to parse BT XML");
+      return {
+        graph: { nodes: [], edges: [] },
+        parseError: error instanceof Error ? error.message : "Failed to parse BT XML",
+      };
     }
   }, [xml]);
 
