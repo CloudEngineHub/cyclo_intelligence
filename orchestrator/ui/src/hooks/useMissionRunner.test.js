@@ -281,6 +281,7 @@ test("stop while awaiting navigation cancels without becoming failed", async () 
   });
 
   await waitFor(() => expect(h.view.result.current.status).toBe(RunnerStatus.CANCELLED));
+  expect(h.view.result.current.activeSpotId).toBe("");
   expect(h.cancelGoal).toHaveBeenCalledTimes(1);
   expect(h.stopBt).toHaveBeenCalledTimes(1);
   expect(h.callService).not.toHaveBeenCalled();
@@ -377,7 +378,7 @@ test("activates the BT node on demand and releases it when the run ends", async 
   await waitFor(() => expect(releaseBt).toHaveBeenCalledTimes(1));
 });
 
-test("skips activation when the node is already up but still releases it", async () => {
+test("checks BT readiness when the node is already up and still releases it", async () => {
   const ensureBtActive = jest.fn().mockResolvedValue(true);
   const releaseBt = jest.fn().mockResolvedValue(undefined);
   const h = makeHarness({ orderedSpots: [SPOTS[0]], ensureBtActive, releaseBt });
@@ -386,7 +387,7 @@ test("skips activation when the node is already up but still releases it", async
   await waitFor(() => expect(h.callService).toHaveBeenCalledTimes(1));
   await completeBt(h.btStatusRef);
   await waitFor(() => expect(h.view.result.current.status).toBe(RunnerStatus.DONE));
-  expect(ensureBtActive).not.toHaveBeenCalled();
+  expect(ensureBtActive).toHaveBeenCalledTimes(1);
   await waitFor(() => expect(releaseBt).toHaveBeenCalledTimes(1));
 });
 
@@ -434,4 +435,52 @@ test("releases the BT node when the run is stopped", async () => {
 
   await waitFor(() => expect(h.view.result.current.status).toBe(RunnerStatus.CANCELLED));
   await waitFor(() => expect(releaseBt).toHaveBeenCalledTimes(1));
+});
+
+test("blocks a restart until the previous run has released the BT node", async () => {
+  let resolveFirstRelease;
+  const ensureBtActive = jest.fn().mockResolvedValue(true);
+  const releaseBt = jest.fn()
+    .mockImplementationOnce(() => new Promise((resolve) => {
+      resolveFirstRelease = resolve;
+    }))
+    .mockResolvedValue(undefined);
+  const sendGoal = jest.fn((x, y, yaw, signal) => new Promise((resolve, reject) => {
+    signal.addEventListener("abort", () => {
+      reject(new DOMException("Aborted", "AbortError"));
+    }, { once: true });
+  }));
+  const h = makeHarness({
+    orderedSpots: [SPOTS[0]],
+    ensureBtActive,
+    releaseBt,
+    sendGoal,
+  });
+
+  act(() => { h.view.result.current.start(); });
+  await waitFor(() => expect(sendGoal).toHaveBeenCalledTimes(1));
+
+  act(() => { h.view.result.current.stop(); });
+  await waitFor(() => expect(releaseBt).toHaveBeenCalledTimes(1));
+  expect(h.view.result.current.isRunning).toBe(true);
+
+  // This is the click that used to start run two while run one's release was
+  // still pending. The internal lifecycle lock must make it a no-op.
+  act(() => { h.view.result.current.start(); });
+  expect(ensureBtActive).toHaveBeenCalledTimes(1);
+  expect(sendGoal).toHaveBeenCalledTimes(1);
+
+  await act(async () => {
+    resolveFirstRelease();
+    await Promise.resolve();
+  });
+  await waitFor(() => expect(h.view.result.current.isRunning).toBe(false));
+
+  act(() => { h.view.result.current.start(); });
+  await waitFor(() => expect(ensureBtActive).toHaveBeenCalledTimes(2));
+  await waitFor(() => expect(sendGoal).toHaveBeenCalledTimes(2));
+
+  act(() => { h.view.result.current.stop(); });
+  await waitFor(() => expect(releaseBt).toHaveBeenCalledTimes(2));
+  await waitFor(() => expect(h.view.result.current.isRunning).toBe(false));
 });

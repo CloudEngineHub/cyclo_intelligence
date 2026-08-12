@@ -241,6 +241,7 @@ export function missionRunnerReducer(state, action) {
       return {
         ...state,
         status: RunnerStatus.CANCELLED,
+        currentIndex: -1,
         phase: RunnerPhase.NONE,
         reason: action.reason || "Cancelled",
         activeIndices: [],

@@ -36,6 +36,7 @@ import {
 
 const mockMapViewer = jest.fn(() => <div>Mission Canvas Map</div>);
 const mockPublishRosTopic = jest.fn();
+const mockCallService = jest.fn();
 const mockTopicDataByName = {};
 
 function amclPoseMessage(x, y, yaw, covarianceValue = 0.05) {
@@ -102,7 +103,7 @@ jest.mock('../utils/navigationApi', () => ({
 }));
 
 jest.mock('../hooks/useRosServiceCaller', () => ({
-  useRosServiceCaller: () => ({ callService: jest.fn().mockResolvedValue({ success: true }) }),
+  useRosServiceCaller: () => ({ callService: mockCallService }),
 }));
 
 jest.mock('../utils/navigationSpotsApi', () => ({
@@ -204,6 +205,7 @@ beforeEach(() => {
     raw: 'down',
   }));
   mockPublishRosTopic.mockResolvedValue(undefined);
+  mockCallService.mockResolvedValue({ success: true });
   createNavigationSpot.mockResolvedValue({
     id: 'spot_a',
     map_name: 'factory',
@@ -3096,6 +3098,17 @@ test('run mission activates the BT node on demand and releases it on stop', asyn
     return { ok: true };
   });
 
+  // s6 can already report up while the ROS services are still being created.
+  // Hold the read-only catalog probe to prove navigation cannot start in that
+  // window; once it resolves, /bt/load_and_run is known to be registered too.
+  let resolveBtReady;
+  mockCallService.mockImplementation((serviceName) => {
+    if (serviceName === '/bt/nodes/catalog') {
+      return new Promise((resolve) => { resolveBtReady = resolve; });
+    }
+    return Promise.resolve({ success: true });
+  });
+
   render(<MissionCanvasPage />);
 
   fireEvent.click(screen.getByRole('tab', { name: 'Run' }));
@@ -3121,14 +3134,38 @@ test('run mission activates the BT node on demand and releases it on stop', asyn
     '/api/services/bt_node/start',
     expect.objectContaining({ method: 'POST' }),
   ));
+  await waitFor(() => expect(mockCallService).toHaveBeenCalledWith(
+    '/bt/nodes/catalog',
+    'interfaces/srv/GetNodeCatalog',
+    {},
+    1000,
+  ));
+  expect(sendNavigateToPoseGoalAndWait).not.toHaveBeenCalled();
+  await act(async () => {
+    resolveBtReady({ success: true, catalog_json: '[]' });
+    await Promise.resolve();
+  });
   await waitFor(() => expect(sendNavigateToPoseGoalAndWait).toHaveBeenCalled());
+  await waitFor(() => expect(latestMapViewerProps().activeWaypointId).toBe('wp1'));
 
-  // Stopping the run releases the node again.
+  // Stopping the run releases the node and clears the active waypoint before
+  // the same map is loaded again. A stale currentIndex used to recreate an
+  // orange pulsing marker as soon as the map layer returned.
+  getServiceStatus.mockResolvedValue({ is_up: false, mode: 'idle' });
   fireEvent.click(screen.getByRole('button', { name: 'Stop' }));
+  await waitFor(() => expect(latestMapViewerProps().activeWaypointId).toBe(''));
   await waitFor(() => expect(global.fetch).toHaveBeenCalledWith(
     '/api/services/bt_node/stop',
     expect.objectContaining({ method: 'POST' }),
   ));
+  const reloadMapButton = screen.getByRole('button', { name: 'Load Map' });
+  await waitFor(() => expect(reloadMapButton).toBeEnabled());
+  fireEvent.click(reloadMapButton);
+  const reloadMapSelect = await screen.findByRole('combobox', { name: 'Run mission map file' });
+  await waitFor(() => expect(reloadMapSelect).toHaveValue('factory.pgm'));
+  fireEvent.click(screen.getByRole('button', { name: 'Load' }));
+  await waitFor(() => expect(latestMapViewerProps().spots).toHaveLength(2));
+  expect(latestMapViewerProps().activeWaypointId).toBe('');
 }, 20000);
 
 test('keeps Run localization active while the BT node is up', async () => {

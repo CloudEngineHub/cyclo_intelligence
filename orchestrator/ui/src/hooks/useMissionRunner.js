@@ -20,7 +20,7 @@
 // async loop never sees stale React values. Cancellation aborts the loop and
 // best-effort stops the robot.
 
-import { useCallback, useEffect, useMemo, useReducer, useRef } from "react";
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import {
   DEFAULT_RUNNER_CONFIG,
   RunnerPhase,
@@ -84,6 +84,7 @@ export function useMissionRunner({
   );
 
   const [state, dispatch] = useReducer(missionRunnerReducer, orderedSpots || [], initialRunnerState);
+  const [lifecycleBusy, setLifecycleBusy] = useState(false);
 
   // Everything the loop needs, read live through refs (no stale closures).
   const spotsRef = useRef(orderedSpots || []);
@@ -100,6 +101,7 @@ export function useMissionRunner({
   const configRef = useRef(config);
   const abortRef = useRef(null);
   const isRunningRef = useRef(false);
+  const stopCleanupRef = useRef(Promise.resolve());
 
   useEffect(() => { spotsRef.current = orderedSpots || []; }, [orderedSpots]);
 
@@ -299,12 +301,17 @@ export function useMissionRunner({
     const controller = new AbortController();
     abortRef.current = controller;
     isRunningRef.current = true;
+    stopCleanupRef.current = Promise.resolve();
+    setLifecycleBusy(true);
     dispatch({ type: "start" });
 
     (async () => {
       try {
-        if (needsBt && !flags.btNodeIsUp && ensureBtActiveRef.current) {
-          emit("Activating BT node");
+        // Supervisor "up" only means the launcher process exists. Always let
+        // the owner verify ROS service readiness when a mission uses BTs;
+        // ensureBtActive remains responsible for avoiding a redundant start.
+        if (needsBt && ensureBtActiveRef.current) {
+          emit(flags.btNodeIsUp ? "Checking BT node" : "Activating BT node");
           let activated = false;
           try {
             activated = !!(await ensureBtActiveRef.current());
@@ -332,12 +339,21 @@ export function useMissionRunner({
           dispatch({ type: "fail", reason: error.message || "Mission error", index: -1 });
         }
       } finally {
-        isRunningRef.current = false;
-        if (abortRef.current === controller) abortRef.current = null;
-        // The run owns the BT node lifecycle: whenever this mission used
-        // behaviors, release the node on any exit (done, failed, stopped).
-        if (needsBt && releaseBtRef.current) {
-          Promise.resolve().then(releaseBtRef.current).catch(() => {});
+        // A Stop may still be cancelling Nav2 or stopping the current tree.
+        // Finish those calls, then release the process, before admitting the
+        // next run. Otherwise late cleanup from this controller can cancel or
+        // shut down resources already acquired by a newer run.
+        try {
+          await stopCleanupRef.current;
+          if (needsBt && releaseBtRef.current) {
+            await Promise.resolve().then(releaseBtRef.current).catch(() => {});
+          }
+        } finally {
+          if (abortRef.current === controller) {
+            abortRef.current = null;
+            isRunningRef.current = false;
+            setLifecycleBusy(false);
+          }
         }
       }
     })();
@@ -346,12 +362,13 @@ export function useMissionRunner({
   const stop = useCallback(() => {
     const controller = abortRef.current;
     if (controller) controller.abort();
-    isRunningRef.current = false;
     dispatch({ type: "cancel" });
-    Promise.allSettled([
+    const cleanup = Promise.allSettled([
       Promise.resolve().then(() => (cancelGoalRef.current ? cancelGoalRef.current() : null)),
       Promise.resolve().then(() => (stopBtRef.current ? stopBtRef.current() : null)),
-    ]).then((results) => {
+    ]);
+    stopCleanupRef.current = cleanup;
+    cleanup.then((results) => {
       if (results.some((r) => r.status === "rejected")) {
         emit("Stop sent, but the robot may still be executing");
       }
@@ -369,7 +386,11 @@ export function useMissionRunner({
     }
   }, []);
 
-  const activeSpotId = state.currentIndex >= 0 && state.progress[state.currentIndex]
+  const activeSpotId = (
+    state.currentIndex >= 0
+    && state.activeIndices.includes(state.currentIndex)
+    && state.progress[state.currentIndex]
+  )
     ? state.progress[state.currentIndex].id
     : "";
 
@@ -380,7 +401,7 @@ export function useMissionRunner({
     total: state.total,
     progress: state.progress,
     reason: state.reason,
-    isRunning: isRunnerActive(state.status),
+    isRunning: isRunnerActive(state.status) || lifecycleBusy,
     activeSpotId,
     start,
     stop,

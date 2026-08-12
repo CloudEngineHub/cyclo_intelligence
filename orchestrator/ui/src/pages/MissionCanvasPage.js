@@ -105,9 +105,12 @@ function uniqueMissionName(base, existingNames) {
 }
 const STATUS_POLL_MS = 10000;
 const BT_NODE_STATUS_POLL_MS = 5000;
-// Run Mission activates the BT node on demand; poll until it reports up.
+// s6 reports "up" as soon as the launcher process exists, before ROS has
+// necessarily registered /bt/load_and_run. Run Mission therefore waits for a
+// read-only service on the same node before treating activation as complete.
 const BT_NODE_ACTIVATION_POLL_MS = 500;
 const BT_NODE_ACTIVATION_POLL_ATTEMPTS = 10;
+const BT_NODE_READY_PROBE_TIMEOUT_MS = 1000;
 const NOMOTION_UPDATE_INTERVAL_MS = 1000;
 const AUTO_LOCALIZE_MAX_UPDATES = 10;
 const AUTO_LOCALIZE_MIN_UPDATES = 3;
@@ -1967,6 +1970,7 @@ export default function MissionCanvasPage() {
   const currentPoseRef = useRef(null);
   const amclPoseRef = useRef(null);
   const btStatusRef = useRef("stopped");
+  const btNodeReleaseRef = useRef(Promise.resolve());
   const behaviorNodeSerialRef = useRef(0);
   const skipNextSpotLoadForMapRef = useRef("");
   const legacySpotLoadGenerationRef = useRef(0);
@@ -2437,6 +2441,9 @@ export default function MissionCanvasPage() {
   // and the runner releases it when the mission ends, so the Run stage has no
   // manual Activate/Deactivate panel.
   const ensureMissionBtActive = useCallback(async () => {
+    // A completed/failed mission releases bt_node asynchronously. Serialize a
+    // quick retry behind that shutdown so an old stop cannot kill the new node.
+    await btNodeReleaseRef.current;
     const readState = async () => {
       try {
         const status = await getBtNodeServiceStatus();
@@ -2446,12 +2453,30 @@ export default function MissionCanvasPage() {
         return "unknown";
       }
     };
-    if ((await readState()) === "up") return true;
+    const servicesAreReady = async () => {
+      try {
+        // /bt/nodes/catalog is created after /bt/load_and_run in bt_node's
+        // constructor. A successful response is therefore a readiness barrier
+        // for the mutating service used immediately after navigation arrives.
+        const result = await callService(
+          "/bt/nodes/catalog",
+          "interfaces/srv/GetNodeCatalog",
+          {},
+          BT_NODE_READY_PROBE_TIMEOUT_MS,
+        );
+        return result?.success !== false;
+      } catch {
+        return false;
+      }
+    };
+
     setBtNodeBusy("activate");
     try {
-      await setBtNodeServiceActive(true);
+      if ((await readState()) !== "up") {
+        await setBtNodeServiceActive(true);
+      }
       for (let attempt = 0; attempt < BT_NODE_ACTIVATION_POLL_ATTEMPTS; attempt += 1) {
-        if ((await readState()) === "up") return true;
+        if ((await readState()) === "up" && await servicesAreReady()) return true;
         await delay(BT_NODE_ACTIVATION_POLL_MS);
       }
       return false;
@@ -2460,18 +2485,25 @@ export default function MissionCanvasPage() {
     } finally {
       setBtNodeBusy("");
     }
-  }, []);
+  }, [callService]);
   const releaseMissionBt = useCallback(async () => {
-    try {
-      await setBtNodeServiceActive(false);
-    } catch {
-      // Best-effort — the node may already be down.
-    }
-    try {
-      setBtNodeStatus(await getBtNodeServiceStatus());
-    } catch {
-      setBtNodeStatus({ state: "unknown", raw: "status failed" });
-    }
+    const release = (async () => {
+      setBtNodeBusy("deactivate");
+      try {
+        await setBtNodeServiceActive(false);
+      } catch {
+        // Best-effort — the node may already be down.
+      }
+      try {
+        setBtNodeStatus(await getBtNodeServiceStatus());
+      } catch {
+        setBtNodeStatus({ state: "unknown", raw: "status failed" });
+      } finally {
+        setBtNodeBusy("");
+      }
+    })();
+    btNodeReleaseRef.current = release;
+    await release;
   }, []);
   const missionRunner = useMissionRunner({
     // A closed route intentionally contains the start waypoint a second time
@@ -4662,9 +4694,9 @@ export default function MissionCanvasPage() {
             )}
             {workspaceStage === STAGE_RUN && (
               <>
-                <ActionButton active={showRunMapDialog || runMapBusy} disabled={!!busy || running || runMapBusy} onClick={handleOpenRunMapDialog} variant="secondary">Load Map</ActionButton>
+                <ActionButton active={showRunMapDialog || runMapBusy} disabled={!!busy || running || missionRunnerActive || !!btNodeBusy || runMapBusy} onClick={handleOpenRunMapDialog} variant="secondary">Load Map</ActionButton>
                 <ActionButton active={interactionMode === "initial" || busy === "Localize" || busy === "Set robot pose"} disabled={!!busy} onClick={handleLocalize} variant="secondary">Localize</ActionButton>
-                <ActionButton active={busy === "Run mission" || missionRunnerActive} disabled={!!busy || !runPoseInitialized || missionRunnerActive} onClick={handleRunMission} variant="primary">Run Mission</ActionButton>
+                <ActionButton active={busy === "Run mission" || missionRunnerActive} disabled={!!busy || !!btNodeBusy || !runPoseInitialized || missionRunnerActive} onClick={handleRunMission} variant="primary">Run Mission</ActionButton>
                 <ActionButton active={busy === "Stop"} disabled={!!busy || (!running && !missionRunnerActive)} onClick={handleStopNavigation} variant="danger">Stop</ActionButton>
               </>
             )}

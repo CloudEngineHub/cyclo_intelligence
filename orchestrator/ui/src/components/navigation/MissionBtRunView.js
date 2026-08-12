@@ -22,8 +22,8 @@
 // parses the same XML string sent to /bt/load_and_run, the parser's bt_N ids
 // line up with the backend's active-node ids — no name matching needed.
 
-import { memo, useEffect, useMemo, useState } from "react";
-import { ReactFlow, Controls, Background } from "@xyflow/react";
+import { memo, useEffect, useLayoutEffect, useMemo, useState } from "react";
+import { ReactFlow, Controls, Background, useNodesState } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 
 import BTActionNode from "../bt/BTActionNode";
@@ -36,6 +36,75 @@ const nodeTypes = {
 };
 
 const reactFlowProOptions = { hideAttribution: true };
+
+function ReadOnlyBtFlow({ nodes, edges, isDark }) {
+  // Keep ReactFlow's measured dimensions in controlled state. Replacing the
+  // parsed nodes directly whenever /bt/active_nodes changed discarded those
+  // measurements, which makes XYFlow hide every node until ResizeObserver runs
+  // again. Merge only the presentation fields so the measured geometry stays
+  // attached while the orange running highlight moves through the tree.
+  const [flowNodes, setFlowNodes, onNodesChange] = useNodesState(nodes);
+
+  useLayoutEffect(() => {
+    setFlowNodes((currentNodes) => {
+      const nextById = new Map(nodes.map((node) => [node.id, node]));
+      if (
+        currentNodes.length !== nodes.length
+        || currentNodes.some((node) => !nextById.has(node.id))
+      ) {
+        return nodes;
+      }
+
+      let changed = false;
+      const merged = currentNodes.map((node) => {
+        const nextNode = nextById.get(node.id);
+        if (
+          node.data.isActive === nextNode.data.isActive
+          && node.data.isSelected === nextNode.data.isSelected
+          && node.data.childCount === nextNode.data.childCount
+        ) {
+          return node;
+        }
+        changed = true;
+        return {
+          ...node,
+          data: {
+            ...node.data,
+            isActive: nextNode.data.isActive,
+            isSelected: nextNode.data.isSelected,
+            childCount: nextNode.data.childCount,
+          },
+        };
+      });
+      return changed ? merged : currentNodes;
+    });
+  }, [nodes, setFlowNodes]);
+
+  return (
+    <ReactFlow
+      nodes={flowNodes}
+      edges={edges}
+      onNodesChange={onNodesChange}
+      nodeTypes={nodeTypes}
+      fitView
+      fitViewOptions={{ padding: 0.18 }}
+      nodesDraggable={false}
+      nodesConnectable={false}
+      elementsSelectable={false}
+      deleteKeyCode={null}
+      minZoom={0.3}
+      maxZoom={2}
+      zoomOnScroll
+      panOnScroll={false}
+      zoomOnPinch
+      zoomActivationKeyCode={null}
+      proOptions={reactFlowProOptions}
+    >
+      <Controls showInteractive={false} />
+      <Background color={isDark ? "#3a352e" : "#dcd7ca"} gap={16} />
+    </ReactFlow>
+  );
+}
 
 function useIsDark() {
   const [isDark, setIsDark] = useState(() => (
@@ -132,27 +201,12 @@ function MissionBtRunView({ xml, activeNodeNames = [], loading = false }) {
           </div>
         </div>
       ) : (
-        <ReactFlow
+        <ReadOnlyBtFlow
+          key={xml}
           nodes={annotatedNodes}
           edges={graph.edges}
-          nodeTypes={nodeTypes}
-          fitView
-          fitViewOptions={{ padding: 0.18 }}
-          nodesDraggable={false}
-          nodesConnectable={false}
-          elementsSelectable={false}
-          deleteKeyCode={null}
-          minZoom={0.3}
-          maxZoom={2}
-          zoomOnScroll
-          panOnScroll={false}
-          zoomOnPinch
-          zoomActivationKeyCode={null}
-          proOptions={reactFlowProOptions}
-        >
-          <Controls showInteractive={false} />
-          <Background color={isDark ? "#3a352e" : "#dcd7ca"} gap={16} />
-        </ReactFlow>
+          isDark={isDark}
+        />
       )}
     </div>
   );

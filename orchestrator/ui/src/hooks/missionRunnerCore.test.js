@@ -177,6 +177,8 @@ describe("missionRunnerReducer", () => {
     state = missionRunnerReducer(state, { type: "navigate", index: 0 });
     state = missionRunnerReducer(state, { type: "cancel" });
     expect(state.status).toBe(RunnerStatus.CANCELLED);
+    expect(state.currentIndex).toBe(-1);
+    expect(state.activeIndices).toEqual([]);
     expect(state.progress[0].state).toBe(WaypointState.PENDING);
   });
 

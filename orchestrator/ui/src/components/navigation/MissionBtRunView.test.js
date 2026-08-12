@@ -15,18 +15,40 @@
 // Author: Seongwoo Kim
 
 import { useLayoutEffect, useRef } from "react";
-import { render, screen } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import MissionBtRunView from "./MissionBtRunView";
 
+const reactFlowNodeSnapshots = [];
+let reactFlowOnNodesChange;
+
 jest.mock("@xyflow/react", () => ({
-  ReactFlow: ({ nodes, children }) => (
-    <div data-testid="react-flow">
-      {nodes.map((node) => <span key={node.id}>{node.data.label}</span>)}
-      {children}
-    </div>
-  ),
+  ReactFlow: ({ nodes, onNodesChange, children }) => {
+    reactFlowNodeSnapshots.push(nodes);
+    reactFlowOnNodesChange = onNodesChange;
+    return (
+      <div data-testid="react-flow">
+        {nodes.map((node) => <span key={node.id}>{node.data.label}</span>)}
+        {children}
+      </div>
+    );
+  },
   Controls: () => null,
   Background: () => null,
+  useNodesState: (initialNodes) => {
+    const React = require("react");
+    const [nodes, setNodes] = React.useState(initialNodes);
+    const onNodesChange = React.useCallback((changes) => {
+      setNodes((current) => current.map((node) => {
+        const dimensions = changes.find((change) => (
+          change.id === node.id && change.type === "dimensions"
+        ));
+        return dimensions
+          ? { ...node, measured: { ...dimensions.dimensions } }
+          : node;
+      }));
+    }, []);
+    return [nodes, setNodes, onNodesChange];
+  },
 }));
 
 const EMPTY_TREE = [
@@ -42,6 +64,7 @@ const POPULATED_TREE = [
   '  <BehaviorTree ID="MainTree">',
   '    <Sequence name="Sequence A">',
   '      <Wait name="Wait A" msec="1000"/>',
+  '      <Wait name="Wait B" msec="1000"/>',
   '    </Sequence>',
   '  </BehaviorTree>',
   '</root>',
@@ -80,5 +103,39 @@ test("renders waypoint nodes in the first committed frame", () => {
 
   expect(commits[0]).toContain("Sequence A");
   expect(commits[0]).toContain("Wait A");
+  expect(commits[0]).toContain("Wait B");
   expect(commits[0]).not.toContain("Navigate only");
+});
+
+test("preserves measured node dimensions when the active node changes", () => {
+  reactFlowNodeSnapshots.length = 0;
+  reactFlowOnNodesChange = undefined;
+  const { rerender } = render(
+    <MissionBtRunView xml={POPULATED_TREE} activeNodeNames={[]} />,
+  );
+  const unmeasuredNodes = reactFlowNodeSnapshots.at(-1);
+
+  expect(reactFlowOnNodesChange).toEqual(expect.any(Function));
+  act(() => {
+    reactFlowOnNodesChange(unmeasuredNodes.map((node) => ({
+      id: node.id,
+      type: "dimensions",
+      dimensions: { width: 200, height: 80 },
+    })));
+  });
+  const measuredNodes = reactFlowNodeSnapshots.at(-1);
+
+  rerender(
+    <MissionBtRunView xml={POPULATED_TREE} activeNodeNames={["bt_1"]} />,
+  );
+  const activeNodes = reactFlowNodeSnapshots.at(-1);
+
+  expect(activeNodes).toHaveLength(measuredNodes.length);
+  expect(activeNodes.find((node) => node.id === "bt_1")?.data.isActive).toBe(true);
+  measuredNodes.forEach((node, index) => {
+    expect(activeNodes[index].measured).toEqual({ width: 200, height: 80 });
+    if (activeNodes[index].data.isActive === node.data.isActive) {
+      expect(activeNodes[index]).toBe(node);
+    }
+  });
 });
