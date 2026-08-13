@@ -79,6 +79,14 @@ class LoadingMixin:
         # config, then loads safetensors. We don't pass ``config=`` — the
         # saved config is already what we want.
         policy = PolicyClass.from_pretrained(model_path)
+
+        # MolmoAct2 errors out unless the action mode is set. We run the
+        # continuous (flow matching) head; a checkpoint that names one keeps it.
+        if policy_type == "molmoact2" and not getattr(
+            policy.config, "inference_action_mode", None
+        ):
+            policy.config.inference_action_mode = "continuous"
+
         policy = policy.to(device).eval()
         logger.info("Policy weights loaded on %s", device)
 
