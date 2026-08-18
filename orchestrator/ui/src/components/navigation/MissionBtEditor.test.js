@@ -76,6 +76,28 @@ test("hydrates a loaded tree without emitting an initial empty graph", async () 
   expect(onXmlChange).not.toHaveBeenCalled();
 });
 
+test("keeps file actions clear of the node parameter panel without a file banner", async () => {
+  render(
+    <MissionBtEditor
+      title="init Local BT"
+      filePath="locals/init.xml"
+      defaultFilePath="locals/init.xml"
+      xml={treeXml("StepA")}
+      onXmlChange={jest.fn()}
+    />,
+  );
+
+  const step = await screen.findByText("StepA");
+  const actions = screen.getByLabelText("Local BT file actions");
+  expect(actions).toHaveStyle({ right: "12px" });
+  expect(screen.queryByText("init Local BT")).not.toBeInTheDocument();
+  expect(screen.queryByText("init.xml")).not.toBeInTheDocument();
+  expect(screen.queryByText("Run BT")).not.toBeInTheDocument();
+
+  fireEvent.click(step);
+  expect(actions).toHaveStyle({ right: "332px" });
+});
+
 test("does not emit the previous graph while hydrating a new waypoint path", async () => {
   const onXmlChange = jest.fn();
   const { rerender } = render(
@@ -213,7 +235,7 @@ test("saves the latest graph as another XML in the same waypoint", async () => {
   expect(onFilePathChange).toHaveBeenCalledWith("locals/spot_a/alternate.xml");
 });
 
-test("changes the runtime default only through Set Default", async () => {
+test("changes the runtime default only through Set as Run BT", async () => {
   const onSetDefaultXml = jest.fn().mockResolvedValue(undefined);
   render(
     <MissionBtEditor
@@ -227,6 +249,6 @@ test("changes the runtime default only through Set Default", async () => {
     />,
   );
   await screen.findByText("StepB");
-  fireEvent.click(screen.getByRole("button", { name: "Set default BT" }));
+  fireEvent.click(screen.getByRole("button", { name: "Set as Run BT" }));
   await waitFor(() => expect(onSetDefaultXml).toHaveBeenCalledWith("locals/b.xml"));
 });

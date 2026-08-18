@@ -1183,7 +1183,7 @@ test('shows waypoint actions in Waypoints after placing a waypoint', async () =>
         expect.objectContaining({
           id: 'spot_a',
           label: 'Waypoint A',
-          local_bt: 'locals/waypoint_a.xml',
+          local_bt: 'locals/spot_a/main.xml',
           pose: expect.objectContaining({
             frame_id: 'map',
             x: 4,
@@ -1216,7 +1216,7 @@ test('shows waypoint actions in Waypoints after placing a waypoint', async () =>
   );
   expect(saveNavigationMissionBtFile).toHaveBeenCalledWith(
     'factory',
-    'locals/waypoint_a.xml',
+    'locals/spot_a/main.xml',
     expect.stringContaining('<BehaviorTree ID="MainTree"/>'),
     '',
     { expectedRevision: 0 },
@@ -1252,8 +1252,8 @@ test('shows waypoint actions in Waypoints after placing a waypoint', async () =>
       waypoints: [
         expect.objectContaining({
           label: 'Pickup A',
-          local_bt: 'locals/waypoint_a.xml',
-          local_bt_files: ['locals/waypoint_a.xml'],
+          local_bt: 'locals/spot_a/main.xml',
+          local_bt_files: ['locals/spot_a/main.xml'],
         }),
       ],
     }),
@@ -1261,14 +1261,14 @@ test('shows waypoint actions in Waypoints after placing a waypoint', async () =>
   ));
   expect(saveNavigationMissionBtFile).toHaveBeenCalledWith(
     'factory',
-    'locals/waypoint_a.xml',
+    'locals/spot_a/main.xml',
     expect.any(String),
     '',
     { waypointId: 'spot_a', expectedRevision: 1 },
   );
   expect(deleteNavigationMissionBtFile).not.toHaveBeenCalledWith(
     'factory',
-    'locals/waypoint_a.xml',
+    'locals/spot_a/main.xml',
     '',
     expect.anything(),
   );
@@ -1279,7 +1279,7 @@ test('shows waypoint actions in Waypoints after placing a waypoint', async () =>
   fireEvent.click(screen.getByRole('button', { name: 'Save Mission' }));
   await waitFor(() => expect(deleteNavigationMissionBtFile).toHaveBeenCalledWith(
     'factory',
-    'locals/waypoint_a.xml',
+    'locals/spot_a/main.xml',
     '',
     { expectedRevision: expect.any(Number) },
   ));
@@ -1386,6 +1386,33 @@ test('opens waypoint BT map layer when selecting a waypoint with BT active', asy
     executionLabel: 'Ready',
     activeNodesLabel: 'Waiting for run',
   }));
+  expect(latestMapViewerProps().btLayer.editor.props.fileActionsDisabled).toBe(false);
+
+  const draftXml = [
+    '<root BTCPP_format="4" main_tree_to_execute="MainTree">',
+    '  <BehaviorTree ID="MainTree"><Wait name="DraftStep" duration="1.0"/></BehaviorTree>',
+    '</root>',
+  ].join('\n');
+  await act(async () => {
+    const editor = latestMapViewerProps().btLayer.editor;
+    await editor.props.onSaveXml(editor.props.filePath, draftXml);
+  });
+  await waitFor(() => expect(saveNavigationMission).toHaveBeenCalledWith(
+    'factory',
+    expect.objectContaining({
+      waypoints: [expect.objectContaining({ id: 'spot_factory' })],
+    }),
+    '',
+  ));
+  expect(saveNavigationMissionBtFile.mock.calls.some(([
+    mapName,
+    path,
+    content,
+  ]) => (
+    mapName === 'factory'
+    && path.startsWith('locals/')
+    && content.includes('DraftStep')
+  ))).toBe(true);
   expect(screen.queryByRole('dialog', { name: 'Waypoint BT' })).not.toBeInTheDocument();
   expect(screen.getAllByText('Waypoint Factory').length).toBeGreaterThan(0);
   expect(screen.queryByText('factory_waypoint.xml')).not.toBeInTheDocument();
@@ -1727,24 +1754,28 @@ test('keeps a waypoint XML library separate from its changeable runtime default'
         local_bt: 'locals/wp_a/third.xml',
         local_bt_files: [
           'locals/wp_a/third.xml',
-          'locals/a.xml',
-          'locals/a_alt.xml',
+          'locals/wp_a/a.xml',
+          'locals/wp_a/a_alt.xml',
         ],
       })],
     }),
     'inspection',
   ));
-  expect(deleteNavigationMissionBtFile).not.toHaveBeenCalledWith(
-    'factory',
-    expect.stringMatching(/^locals\/(a|a_alt|wp_a\/third)\.xml$/),
-    'inspection',
-    expect.anything(),
-  );
+  await waitFor(() => {
+    ['locals/a.xml', 'locals/a_alt.xml'].forEach((path) => {
+      expect(deleteNavigationMissionBtFile).toHaveBeenCalledWith(
+        'factory',
+        path,
+        'inspection',
+        { expectedRevision: expect.any(Number) },
+      );
+    });
+  });
 
   fireEvent.click(screen.getByRole('button', { name: /Delete Waypoint A/ }));
   fireEvent.click(screen.getByRole('button', { name: 'Save Mission' }));
   await waitFor(() => {
-    ['locals/a.xml', 'locals/a_alt.xml', 'locals/wp_a/third.xml'].forEach((path) => {
+    ['locals/wp_a/a.xml', 'locals/wp_a/a_alt.xml', 'locals/wp_a/third.xml'].forEach((path) => {
       expect(deleteNavigationMissionBtFile).toHaveBeenCalledWith(
         'factory',
         path,
@@ -1811,10 +1842,10 @@ test('saves the latest local BT snapshot after closing the editor', async () => 
 
   await waitFor(() => expect(saveNavigationMissionBtFile).toHaveBeenCalledWith(
     'factory',
-    'locals/wp1.xml',
+    'locals/wp1/main.xml',
     editedXml,
     '',
-    { waypointId: 'wp1', expectedRevision: 0 },
+    { expectedRevision: 0 },
   ));
   expect(Math.max(...saveNavigationMissionBtFile.mock.invocationCallOrder))
     .toBeLessThan(saveNavigationMission.mock.invocationCallOrder[0]);
@@ -1885,10 +1916,10 @@ test('saves the local BT restored by Design undo', async () => {
 
   await waitFor(() => expect(saveNavigationMissionBtFile).toHaveBeenCalledWith(
     'factory',
-    'locals/wp1.xml',
+    'locals/wp1/main.xml',
     originalXml,
     '',
-    { waypointId: 'wp1', expectedRevision: 0 },
+    { expectedRevision: 0 },
   ));
   await screen.findByText('Saved default for factory');
   expect(screen.getByRole('button', { name: 'Undo' })).toBeDisabled();
@@ -1992,7 +2023,7 @@ test('keeps edits made while a mission save is in flight', async () => {
   });
   fireEvent.click(screen.getByRole('button', { name: 'Save Mission' }));
   await waitFor(() => expect(finishLocalSave).toEqual(expect.any(Function)));
-  expect(canonicalPath).toMatch(/^locals\/wp1_[a-z0-9]+\.xml$/);
+  expect(canonicalPath).toBe('locals/wp1/main.xml');
   expect(saveNavigationMissionBtFile).toHaveBeenCalledWith(
     'factory',
     canonicalPath,
@@ -2071,7 +2102,7 @@ test('retries a partially completed mission save from the latest server revision
       return Promise.resolve({ path, content, exists: true, revision: 6 });
     }
     localUploads += 1;
-    expect(options).toEqual({ waypointId: 'wp1', expectedRevision: 6 });
+    expect(options).toEqual({ expectedRevision: 6 });
     if (localUploads === 1) return Promise.reject(new Error('Local upload interrupted'));
     return Promise.resolve({ path, content, exists: true, revision: 7 });
   });
@@ -4331,7 +4362,7 @@ describe('assembleMissionBtFilesForSave', () => {
     '</root>',
   ].join('\n');
 
-  test('preserves the waypoint BT path as stable identity', () => {
+  test('moves a flat waypoint BT into its stable waypoint directory', () => {
     const spot = {
       id: 'spot_a',
       label: 'Bay',
@@ -4345,22 +4376,26 @@ describe('assembleMissionBtFilesForSave', () => {
       'global.xml',
       '<global/>',
     );
-    expect(files['locals/dock.xml']).toBe(EDITED);
-    expect(files['locals/bay.xml']).toBeUndefined();
+    expect(files['locals/spot_a/main.xml']).toBe(EDITED);
+    expect(files['locals/dock.xml']).toBeUndefined();
     expect(files['global.xml']).toBe('<global/>');
-    expect(stalePaths).toEqual([]);
+    expect(stalePaths).toEqual(['locals/dock.xml']);
   });
 
-  test('preserves edited content when the stored path already matches', () => {
-    const spot = { id: 'spot_a', label: 'Dock', metadata: { local_bt: 'locals/dock.xml' } };
+  test('preserves names and edited content already stored in the waypoint directory', () => {
+    const spot = {
+      id: 'spot_a',
+      label: 'Dock',
+      metadata: { local_bt: 'locals/spot_a/run.xml' },
+    };
     const { files, stalePaths } = assembleMissionBtFilesForSave(
       [spot],
-      { 'locals/dock.xml': EDITED },
+      { 'locals/spot_a/run.xml': EDITED },
       [],
       'global.xml',
       '<global/>',
     );
-    expect(files['locals/dock.xml']).toBe(EDITED);
+    expect(files['locals/spot_a/run.xml']).toBe(EDITED);
     expect(stalePaths).toEqual([]);
   });
 
@@ -4369,30 +4404,81 @@ describe('assembleMissionBtFilesForSave', () => {
     const spot = {
       id: 'spot_a',
       label: 'Dock',
-      linked_bt_tree: 'locals/alternate.xml',
-      local_bt_files: ['locals/alternate.xml', 'locals/default.xml'],
+      linked_bt_tree: 'locals/spot_a/alternate.xml',
+      local_bt_files: ['locals/spot_a/alternate.xml', 'locals/spot_a/default.xml'],
       metadata: {
-        local_bt: 'locals/alternate.xml',
-        local_bt_files: ['locals/alternate.xml', 'locals/default.xml'],
+        local_bt: 'locals/spot_a/alternate.xml',
+        local_bt_files: ['locals/spot_a/alternate.xml', 'locals/spot_a/default.xml'],
       },
     };
     const { files, stalePaths } = assembleMissionBtFilesForSave(
       [spot],
       {
-        'locals/default.xml': EDITED,
-        'locals/alternate.xml': alternate,
+        'locals/spot_a/default.xml': EDITED,
+        'locals/spot_a/alternate.xml': alternate,
       },
       [],
       'global.xml',
       '<global/>',
     );
 
-    expect(files['locals/default.xml']).toBe(EDITED);
-    expect(files['locals/alternate.xml']).toBe(alternate);
+    expect(files['locals/spot_a/default.xml']).toBe(EDITED);
+    expect(files['locals/spot_a/alternate.xml']).toBe(alternate);
     expect(stalePaths).toEqual([]);
   });
 
-  test('migrates a legacy root-level BT file into collision-safe local storage', () => {
+  test('collects a mixed flat and nested library into one waypoint directory', () => {
+    const alternate = EDITED.replace('2.0', '4.0');
+    const spot = {
+      id: 'Waypoint_1_ee992021',
+      label: 'Waypoint 1',
+      linked_bt_tree: 'locals/waypoint_1.xml',
+      local_bt_files: [
+        'locals/waypoint_1.xml',
+        'locals/waypoint_1_ee992021/test.xml',
+      ],
+      metadata: { local_bt: 'locals/waypoint_1.xml' },
+    };
+    const { files, stalePaths } = assembleMissionBtFilesForSave(
+      [spot],
+      {
+        'locals/waypoint_1.xml': EDITED,
+        'locals/waypoint_1_ee992021/test.xml': alternate,
+      },
+      [],
+      'global.xml',
+      '<global/>',
+    );
+
+    expect(files['locals/waypoint_1/main.xml']).toBe(EDITED);
+    expect(files['locals/waypoint_1/test.xml']).toBe(alternate);
+    expect(stalePaths).toEqual([
+      'locals/waypoint_1.xml',
+      'locals/waypoint_1_ee992021/test.xml',
+    ]);
+  });
+
+  test('removes the waypoint token without renaming an existing XML file', () => {
+    const spot = {
+      id: 'Waypoint_1_ee992021',
+      label: 'Waypoint 1',
+      linked_bt_tree: 'locals/waypoint_1_ee992021/test.xml',
+      local_bt_files: ['locals/waypoint_1_ee992021/test.xml'],
+      metadata: { local_bt: 'locals/waypoint_1_ee992021/test.xml' },
+    };
+    const { files, stalePaths } = assembleMissionBtFilesForSave(
+      [spot],
+      { 'locals/waypoint_1_ee992021/test.xml': EDITED },
+      [],
+      'global.xml',
+      '<global/>',
+    );
+
+    expect(files['locals/waypoint_1/test.xml']).toBe(EDITED);
+    expect(stalePaths).toEqual(['locals/waypoint_1_ee992021/test.xml']);
+  });
+
+  test('migrates a legacy root-level BT file into the waypoint main XML', () => {
     const spot = {
       id: 'spot_legacy',
       label: 'Prep table',
@@ -4409,7 +4495,7 @@ describe('assembleMissionBtFilesForSave', () => {
     const localEntries = Object.entries(files).filter(([path]) => path.startsWith('locals/'));
 
     expect(localEntries).toHaveLength(1);
-    expect(localEntries[0][0]).toMatch(/^locals\/spot_legacy_[a-z0-9]+\.xml$/);
+    expect(localEntries[0][0]).toBe('locals/spot_legacy/main.xml');
     expect(localEntries[0][1]).toBe(EDITED);
     expect(files['prep_table.xml']).toBeUndefined();
     expect(stalePaths).toEqual(['prep_table.xml']);
@@ -4418,7 +4504,7 @@ describe('assembleMissionBtFilesForSave', () => {
   test('writes an empty default for an unedited waypoint', () => {
     const spot = { id: 'spot_a', label: 'Dock', metadata: {} };
     const { files } = assembleMissionBtFilesForSave([spot], {}, [], 'global.xml', '<global/>');
-    expect(files['locals/dock.xml']).toContain('<BehaviorTree ID="MainTree"/>');
+    expect(files['locals/spot_a/main.xml']).toContain('<BehaviorTree ID="MainTree"/>');
   });
 
   test('keeps distinct BT files when labels normalize to the same slug', () => {
@@ -4446,22 +4532,25 @@ describe('assembleMissionBtFilesForSave', () => {
       '<global/>',
     );
 
-    expect(files['locals/pickup_a.xml']).toBe(EDITED);
-    expect(files['locals/dropoff_b.xml']).toBe(second);
+    expect(files['locals/spot_a/main.xml']).toBe(EDITED);
+    expect(files['locals/spot_b/main.xml']).toBe(second);
   });
 
-  test('rejects duplicate BT paths instead of silently overwriting one tree', () => {
+  test('uses readable numeric suffixes when token-free waypoint folders collide', () => {
     const spots = [
-      { id: 'spot_a', label: 'A', metadata: { local_bt: 'locals/shared.xml' } },
-      { id: 'spot_b', label: 'B', metadata: { local_bt: 'locals/shared.xml' } },
+      { id: 'Spot_A', label: 'A', metadata: { local_bt: 'locals/a.xml' } },
+      { id: 'spot_a', label: 'B', metadata: { local_bt: 'locals/b.xml' } },
     ];
 
-    expect(() => assembleMissionBtFilesForSave(
+    const { files } = assembleMissionBtFilesForSave(
       spots,
-      { 'locals/shared.xml': EDITED },
+      { 'locals/a.xml': EDITED, 'locals/b.xml': EDITED },
       [],
       'global.xml',
       '<global/>',
-    )).toThrow('Multiple waypoints reference the same local BT path');
+    );
+
+    expect(files['locals/spot_a/main.xml']).toBe(EDITED);
+    expect(files['locals/spot_a_2/main.xml']).toBe(EDITED);
   });
 });

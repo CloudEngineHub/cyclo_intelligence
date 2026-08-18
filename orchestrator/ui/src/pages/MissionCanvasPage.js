@@ -462,7 +462,75 @@ function btXmlName(value, fallback = "Node") {
   return cleaned || fallback;
 }
 
-function localBtSaveAsPath(spot, fileName) {
+function localBtDirectoryBaseForSpot(spot) {
+  const waypointId = btXmlName(spot?.id, "waypoint")
+    .replace(/_[0-9a-f]{8}$/i, "")
+    .toLowerCase();
+  return `locals/${waypointId || "waypoint"}`;
+}
+
+function storedLocalBtPathsForSpot(spot) {
+  const defaultPath = existingLocalBtPathForSpot(spot);
+  const configured = Array.isArray(spot?.local_bt_files)
+    ? spot.local_bt_files
+    : Array.isArray(spot?.metadata?.local_bt_files)
+      ? spot.metadata.local_bt_files
+      : [];
+  return [defaultPath, ...configured]
+    .map((path) => String(path || "").trim())
+    .filter((path, index, paths) => path && paths.indexOf(path) === index);
+}
+
+function storedTokenFreeLocalBtDirectory(spot) {
+  const directories = storedLocalBtPathsForSpot(spot)
+    .map((path) => path.match(/^(locals\/[^/]+)\/[^/]+\.xml$/i)?.[1] || "")
+    .filter(Boolean);
+  const unique = [...new Set(directories.map((path) => path.toLowerCase()))];
+  if (unique.length !== 1) return "";
+  const directory = directories[0];
+  const name = directory.split("/").pop() || "";
+  return /_[0-9a-f]{8}$/i.test(name) ? "" : directory;
+}
+
+function localBtDirectoryForSpot(spot) {
+  return storedTokenFreeLocalBtDirectory(spot) || localBtDirectoryBaseForSpot(spot);
+}
+
+function localBtDirectoriesForSpots(spots) {
+  const directories = new Map();
+  const used = new Set();
+  // Preserve folders that have already been committed under the token-free
+  // layout. They take priority over yet-to-be-migrated waypoint IDs.
+  (spots || []).forEach((spot) => {
+    const stored = storedTokenFreeLocalBtDirectory(spot);
+    if (!stored) return;
+    const key = stored.toLowerCase();
+    if (used.has(key)) {
+      throw new Error(`Multiple waypoints reference the same local BT directory: ${stored}`);
+    }
+    used.add(key);
+    directories.set(spot.id, stored);
+  });
+  (spots || []).forEach((spot) => {
+    if (directories.has(spot.id)) return;
+    const base = localBtDirectoryBaseForSpot(spot);
+    let directory = base;
+    let suffix = 1;
+    while (used.has(directory.toLowerCase())) {
+      suffix += 1;
+      directory = `${base}_${suffix}`;
+    }
+    used.add(directory.toLowerCase());
+    directories.set(spot.id, directory);
+  });
+  return directories;
+}
+
+function initialLocalBtPathForSpot(spot) {
+  return `${localBtDirectoryForSpot(spot)}/main.xml`;
+}
+
+function localBtSaveAsPath(spot, fileName, directory = localBtDirectoryForSpot(spot)) {
   const rawName = String(fileName || "").trim();
   const stem = rawName.toLowerCase().endsWith(".xml")
     ? rawName.slice(0, -4)
@@ -471,12 +539,7 @@ function localBtSaveAsPath(spot, fileName) {
     throw new Error("XML name may contain only letters, numbers, '.', '_' and '-'");
   }
   const normalizedName = `${stem}.xml`;
-  const waypointDirectory = btXmlName(spot?.id, "waypoint").toLowerCase();
-  return `locals/${waypointDirectory}/${normalizedName}`;
-}
-
-function localBtPathFromLabel(label, fallback = "waypoint") {
-  return `locals/${btXmlName(label, fallback).toLowerCase()}.xml`;
+  return `${directory}/${normalizedName}`;
 }
 
 function existingLocalBtPathForSpot(spot) {
@@ -491,7 +554,7 @@ function existingLocalBtPathForSpot(spot) {
 function localBtPathForSpot(spot) {
   const existing = existingLocalBtPathForSpot(spot);
   if (existing) return existing;
-  return localBtPathFromLabel(spot?.label || spot?.id, "waypoint");
+  return initialLocalBtPathForSpot(spot);
 }
 
 function localBtPathsForSpot(spot) {
@@ -506,52 +569,79 @@ function localBtPathsForSpot(spot) {
     .filter((path, index, paths) => path && paths.indexOf(path) === index);
 }
 
-function stableBtPathSuffix(value) {
-  let hash = 2166136261;
-  const source = String(value || "waypoint");
-  for (let index = 0; index < source.length; index += 1) {
-    hash = Math.imul(hash ^ source.charCodeAt(index), 16777619);
+function uniqueLocalBtTargetPath(directory, preferredName, usedPaths) {
+  const rawName = String(preferredName || "bt.xml").split("/").filter(Boolean).pop() || "bt.xml";
+  const rawStem = rawName.replace(/\.xml$/i, "");
+  const stem = rawStem && /^[A-Za-z0-9_.-]+$/.test(rawStem)
+    ? rawStem
+    : btXmlName(rawStem, "bt").toLowerCase();
+  let suffix = 1;
+  let target = `${directory}/${stem}.xml`;
+  while (usedPaths.has(target.toLowerCase())) {
+    suffix += 1;
+    target = `${directory}/${stem}_${suffix}.xml`;
   }
-  return (hash >>> 0).toString(36);
+  usedPaths.add(target.toLowerCase());
+  return target;
 }
 
-function canonicalLocalBtPathForSpot(spot) {
-  // A BT path is persistent identity, not display metadata. Re-deriving it on
-  // every Save makes labels that normalize to the same ASCII slug (for example
-  // two Korean labels, case-only differences, or "Pick up"/"Pick-up") silently
-  // overwrite one another. Renames explicitly migrate the path below; normal
-  // saves preserve the path already assigned to the waypoint.
-  const existing = existingLocalBtPathForSpot(spot);
-  if (!existing) return localBtPathForSpot(spot);
-  if (existing.startsWith("locals/")) return existing;
-
-  // Older manifests may point at a root-level XML name. Migrate those trees
-  // into mission-local storage on the next full Save while keeping the source
-  // filename available long enough for assembleMissionBtFilesForSave() to copy
-  // its in-memory content. The stable suffix prevents sanitized IDs colliding.
-  const identity = String(spot?.id || spot?.label || existing || "waypoint");
-  const slug = btXmlName(identity, "waypoint").toLowerCase().slice(0, 120);
-  return `locals/${slug}_${stableBtPathSuffix(identity)}.xml`;
-}
-
-function canonicalLocalBtPathsForSpot(spot) {
+function canonicalLocalBtPathMappingsForSpot(
+  spot,
+  directory = localBtDirectoryForSpot(spot),
+) {
+  // Every waypoint owns one directory. A new or legacy default becomes
+  // main.xml; alternate filenames are preserved whenever possible. Once a
+  // file is inside that directory, changing the Run BT pointer does not rename
+  // the file on the next Save Mission.
   const sourceDefault = localBtPathForSpot(spot);
-  const targetDefault = canonicalLocalBtPathForSpot(spot);
-  return localBtPathsForSpot(spot)
-    .map((path) => (path === sourceDefault ? targetDefault : path))
-    .filter((path, index, paths) => paths.indexOf(path) === index);
+  const directoryPrefix = `${directory}/`;
+  const usedPaths = new Set();
+  return localBtPathsForSpot(spot).map((sourcePath, index) => {
+    const isAlreadyOwned = sourcePath.startsWith(directoryPrefix)
+      && !sourcePath.slice(directoryPrefix.length).includes("/");
+    const isNestedLocalBt = /^locals\/[^/]+\/[^/]+\.xml$/i.test(sourcePath);
+    const preferredName = isAlreadyOwned
+      ? sourcePath.slice(directoryPrefix.length)
+      : isNestedLocalBt
+        ? sourcePath.split("/").pop()
+      : index === 0 && sourcePath === sourceDefault
+        ? "main.xml"
+        : sourcePath.split("/").filter(Boolean).pop() || `bt_${index + 1}.xml`;
+    return {
+      sourcePath,
+      targetPath: uniqueLocalBtTargetPath(directory, preferredName, usedPaths),
+    };
+  });
+}
+
+function canonicalLocalBtPathForSpot(spot, directory = localBtDirectoryForSpot(spot)) {
+  const sourceDefault = localBtPathForSpot(spot);
+  return canonicalLocalBtPathMappingsForSpot(spot, directory)
+    .find(({ sourcePath }) => sourcePath === sourceDefault)?.targetPath
+    || `${directory}/main.xml`;
+}
+
+function canonicalLocalBtPathsForSpot(spot, directory = localBtDirectoryForSpot(spot)) {
+  return canonicalLocalBtPathMappingsForSpot(spot, directory)
+    .map(({ targetPath }) => targetPath);
 }
 
 function migrateCanonicalLocalBtFileKeys(spots, files) {
   const next = { ...(files || {}) };
-  (spots || []).forEach((spot) => {
-    const sourcePath = localBtPathForSpot(spot);
-    const targetPath = canonicalLocalBtPathForSpot(spot);
-    if (sourcePath === targetPath || next[sourcePath] === undefined) return;
-    // Preserve the newest in-memory edit when a legacy root-level path is
-    // migrated while a full Save is still in flight.
-    next[targetPath] = next[sourcePath];
-    delete next[sourcePath];
+  const original = { ...(files || {}) };
+  const directories = localBtDirectoriesForSpots(spots);
+  const mappings = (spots || []).flatMap((spot) => (
+    canonicalLocalBtPathMappingsForSpot(spot, directories.get(spot.id))
+  ));
+  const targetPaths = new Set(mappings.map(({ targetPath }) => targetPath));
+  mappings.forEach(({ sourcePath, targetPath }) => {
+    if (sourcePath === targetPath || original[sourcePath] === undefined) return;
+    // Preserve the newest in-memory edit when a legacy path is migrated while
+    // a full Save is in flight.
+    next[targetPath] = original[sourcePath];
+  });
+  mappings.forEach(({ sourcePath, targetPath }) => {
+    if (sourcePath !== targetPath && !targetPaths.has(sourcePath)) delete next[sourcePath];
   });
   return next;
 }
@@ -933,29 +1023,31 @@ function missionBtFileDefaultsForRunSpots(spots) {
 // Returns the files to write plus the now-orphaned local paths to delete.
 export function assembleMissionBtFilesForSave(spots, missionBtFiles, deletedPaths, globalPath, globalXml) {
   const files = { [globalPath]: globalXml };
-  const activePaths = new Set();
+  const activePaths = new Map();
+  const directories = localBtDirectoriesForSpots(spots);
   spots.forEach((spot) => {
-    const sourceDefault = localBtPathForSpot(spot);
-    const targetDefault = canonicalLocalBtPathForSpot(spot);
-    localBtPathsForSpot(spot).forEach((fromPath) => {
-      const toPath = fromPath === sourceDefault ? targetDefault : fromPath;
-      if (activePaths.has(toPath)) {
-        throw new Error(`Multiple waypoints reference the same local BT path: ${toPath}`);
+    canonicalLocalBtPathMappingsForSpot(
+      spot,
+      directories.get(spot.id),
+    ).forEach(({ sourcePath, targetPath }) => {
+      const ownershipKey = targetPath.toLowerCase();
+      if (activePaths.has(ownershipKey)) {
+        throw new Error(`Multiple waypoints reference the same local BT path: ${targetPath}`);
       }
-      activePaths.add(toPath);
-      const content = missionBtFiles[fromPath] !== undefined
-        ? missionBtFiles[fromPath]
-        : missionBtFiles[toPath] !== undefined
-          ? missionBtFiles[toPath]
+      activePaths.set(ownershipKey, spot.id);
+      const content = missionBtFiles[sourcePath] !== undefined
+        ? missionBtFiles[sourcePath]
+        : missionBtFiles[targetPath] !== undefined
+          ? missionBtFiles[targetPath]
           : defaultLocalBtXml(spot);
-      files[toPath] = content;
+      files[targetPath] = content;
     });
   });
   const stale = new Set();
   const considerStale = (path) => {
     const isLocalBt = path.startsWith("locals/")
       || (/^[^/]+\.xml$/.test(path) && path !== globalPath);
-    if (isLocalBt && !activePaths.has(path)) stale.add(path);
+    if (isLocalBt && !activePaths.has(path.toLowerCase())) stale.add(path);
   };
   Object.keys(missionBtFiles).forEach(considerStale);
   (deletedPaths || []).forEach(considerStale);
@@ -970,7 +1062,7 @@ function spotsFromMissionWaypoints(mapName, waypoints) {
     const localBt = String(
       waypoint.local_bt
         || waypoint.metadata?.linked_bt_tree
-        || `locals/${id}.xml`,
+        || initialLocalBtPathForSpot({ id }),
     ).trim();
     const pose = waypoint.pose || {};
     const metadata = waypoint.metadata && typeof waypoint.metadata === "object"
@@ -2185,6 +2277,7 @@ export default function MissionCanvasPage() {
   const persistedMissionRevisionRef = useRef(0);
   const dirtyLocalBtPathsRef = useRef(new Set());
   const localBtFileOperationRef = useRef(0);
+  const saveDesignMissionRef = useRef(null);
   const [deletedMissionBtPaths, setDeletedMissionBtPaths] = useState([]);
   const [missionFlowNodes, setMissionFlowNodes] = useState([]);
   const [missionFlowEdges, setMissionFlowEdges] = useState([]);
@@ -2619,6 +2712,14 @@ export default function MissionCanvasPage() {
     () => visibleSpots.find((spot) => spot.id === btLayerSpotId) || null,
     [btLayerSpotId, visibleSpots],
   );
+  const localBtDirectoryBySpotId = useMemo(
+    () => localBtDirectoriesForSpots(visibleSpots),
+    [visibleSpots],
+  );
+  const selectedBtLayerDirectory = selectedBtLayerSpot
+    ? localBtDirectoryBySpotId.get(selectedBtLayerSpot.id)
+      || localBtDirectoryForSpot(selectedBtLayerSpot)
+    : "";
   const selectedBtLayerDefaultPath = selectedBtLayerSpot
     ? localBtPathForSpot(selectedBtLayerSpot)
     : "";
@@ -2636,15 +2737,10 @@ export default function MissionCanvasPage() {
     designCatalog.mapName === mapName
     && designCatalog.names.includes(missionName)
   );
-  const selectedLocalBtIsStored = (
-    designMissionIsStored
-    && persistedLocalBtPathsRef.current.has(selectedBtLayerPath)
-  );
   const localBtFileActionsDisabled = (
     Boolean(busy)
     || designMapBusy
     || Boolean(designMissionLoadError)
-    || !selectedLocalBtIsStored
   );
   const loadMissionLocalBtXml = useCallback(async (path) => {
     if (!selectedBtLayerSpot || !selectedBtLayerPaths.includes(path)) {
@@ -2652,7 +2748,16 @@ export default function MissionCanvasPage() {
     }
     if (busy) throw new Error(`${busy} is already in progress`);
     if (!persistedLocalBtPathsRef.current.has(path)) {
-      throw new Error("Save Mission before loading this local BT");
+      const content = missionBtFilesRef.current[path];
+      if (typeof content !== "string") {
+        throw new Error("No local BT XML is available at this path");
+      }
+      return {
+        path,
+        content,
+        exists: true,
+        revision: persistedMissionRevisionRef.current,
+      };
     }
     const targetMapName = String(mapName || "").trim() || DEFAULT_MAP_NAME;
     const targetMissionName = String(missionName || "").trim() || DEFAULT_MISSION_NAME;
@@ -2738,15 +2843,6 @@ export default function MissionCanvasPage() {
     if (designMissionLoadError) {
       throw new Error("Reload the mission before saving its local BT");
     }
-    if (
-      designCatalog.mapName !== mapName
-      || !designCatalog.names.includes(missionName)
-    ) {
-      throw new Error("Save Mission before saving an individual local BT");
-    }
-    if (!persistedLocalBtPathsRef.current.has(path)) {
-      throw new Error("Save Mission before saving this new local BT");
-    }
     const current = missionBtFilesRef.current;
     if (current[path] !== content) {
       captureDesignHistory();
@@ -2758,6 +2854,29 @@ export default function MissionCanvasPage() {
       designDirtyRef.current = true;
       setDesignDirty(true);
       setMissionBtFiles(next);
+    }
+    if (!persistedLocalBtPathsRef.current.has(path)) {
+      const saveMission = saveDesignMissionRef.current;
+      if (typeof saveMission !== "function") {
+        throw new Error("Mission save is not ready yet");
+      }
+      await saveMission(missionName);
+      const canonicalPath = canonicalLocalBtPathForSpot(
+        selectedBtLayerSpot,
+        selectedBtLayerDirectory,
+      );
+      const savedPath = persistedLocalBtPathsRef.current.has(path)
+        ? path
+        : canonicalPath;
+      if (!persistedLocalBtPathsRef.current.has(savedPath)) {
+        throw new Error("Failed to register this waypoint BT. Reload the mission and retry.");
+      }
+      return {
+        path: savedPath,
+        content,
+        exists: true,
+        revision: persistedMissionRevisionRef.current,
+      };
     }
     const targetMapName = String(mapName || "").trim() || DEFAULT_MAP_NAME;
     const targetMissionName = String(missionName || "").trim() || DEFAULT_MISSION_NAME;
@@ -2808,11 +2927,10 @@ export default function MissionCanvasPage() {
   }, [
     busy,
     captureDesignHistory,
-    designCatalog.mapName,
-    designCatalog.names,
     designMissionLoadError,
     mapName,
     missionName,
+    selectedBtLayerDirectory,
     selectedBtLayerPaths,
     selectedBtLayerSpot,
   ]);
@@ -2831,11 +2949,29 @@ export default function MissionCanvasPage() {
       throw new Error("Reload the mission before saving its local BT");
     }
     if (!selectedBtLayerSpot) throw new Error("Select a waypoint first");
-    if (!designMissionIsStored) {
-      throw new Error("Save Mission before adding another local BT");
+    if (
+      !designMissionIsStored
+      || !persistedLocalBtPathsRef.current.has(selectedBtLayerDefaultPath)
+    ) {
+      const saveMission = saveDesignMissionRef.current;
+      if (typeof saveMission !== "function") {
+        throw new Error("Mission save is not ready yet");
+      }
+      await saveMission(missionName);
+      const canonicalPath = canonicalLocalBtPathForSpot(
+        selectedBtLayerSpot,
+        selectedBtLayerDirectory,
+      );
+      if (!persistedLocalBtPathsRef.current.has(canonicalPath)) {
+        throw new Error("Failed to register this waypoint BT. Reload the mission and retry.");
+      }
     }
 
-    const targetPath = localBtSaveAsPath(selectedBtLayerSpot, fileName);
+    const targetPath = localBtSaveAsPath(
+      selectedBtLayerSpot,
+      fileName,
+      selectedBtLayerDirectory,
+    );
     const occupiedPaths = new Set([
       ...visibleSpots.flatMap((spot) => localBtPathsForSpot(spot)),
       ...Object.keys(missionBtFilesRef.current),
@@ -2924,6 +3060,8 @@ export default function MissionCanvasPage() {
     designMissionLoadError,
     mapName,
     missionName,
+    selectedBtLayerDirectory,
+    selectedBtLayerDefaultPath,
     selectedBtLayerSpot,
     visibleSpots,
   ]);
@@ -4083,10 +4221,11 @@ export default function MissionCanvasPage() {
         persistedMissionRevisionRef.current = savedManifestRevision;
       }
       saveBehaviorNodesForMap(currentMapName, activeBehaviorNodes);
+      const canonicalDirectories = localBtDirectoriesForSpots(visibleSpots);
       const canonicalMissionSpots = visibleSpots.map((spot) => withLocalBtLibrary(
         spot,
-        canonicalLocalBtPathForSpot(spot),
-        canonicalLocalBtPathsForSpot(spot),
+        canonicalLocalBtPathForSpot(spot, canonicalDirectories.get(spot.id)),
+        canonicalLocalBtPathsForSpot(spot, canonicalDirectories.get(spot.id)),
       ));
       const syncedMissionFlowNodes = syncMissionFlowNodesWithSpots(
         missionFlowNodes,
@@ -4218,11 +4357,20 @@ export default function MissionCanvasPage() {
         !uniqueStaleLocalBtPaths.includes(path)
       )));
       setSpots((current) => current.map((spot) => {
-        const defaultPath = canonicalLocalBtPathForSpot(spot);
+        const savedSpot = canonicalMissionSpots.find(({ id }) => id === spot.id);
+        if (savedSpot) {
+          return withLocalBtLibrary(
+            spot,
+            localBtPathForSpot(savedSpot),
+            localBtPathsForSpot(savedSpot),
+          );
+        }
+        const directory = canonicalDirectories.get(spot.id);
+        const defaultPath = canonicalLocalBtPathForSpot(spot, directory);
         return withLocalBtLibrary(
           spot,
           defaultPath,
-          canonicalLocalBtPathsForSpot(spot),
+          canonicalLocalBtPathsForSpot(spot, directory),
         );
       }));
       setMissionName(targetMissionName);
@@ -4264,6 +4412,10 @@ export default function MissionCanvasPage() {
     runCommand,
     visibleSpots,
   ]);
+
+  useEffect(() => {
+    saveDesignMissionRef.current = saveDesignMission;
+  }, [saveDesignMission]);
 
   const markDesignDirty = useCallback(() => {
     captureDesignHistory();

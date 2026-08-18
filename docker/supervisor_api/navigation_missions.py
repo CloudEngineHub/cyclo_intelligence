@@ -658,6 +658,23 @@ def _prune_orphan_local_bt_files(manifest: MissionLoadResponse) -> None:
                 path.unlink()
             except OSError:
                 pass
+    # A layout migration can leave the old waypoint directory empty after its
+    # XML files move under locals/<waypoint-id>/. Remove empty descendants so
+    # the on-disk tree mirrors the manifest instead of accumulating dead dirs.
+    directories = sorted(
+        (
+            path
+            for path in locals_dir.rglob("*")
+            if path.is_dir() and not path.is_symlink()
+        ),
+        key=lambda path: len(path.parts),
+        reverse=True,
+    )
+    for directory in directories:
+        try:
+            directory.rmdir()
+        except OSError:
+            pass
 
 
 @router.post("/{map_name}", response_model=MissionLoadResponse)

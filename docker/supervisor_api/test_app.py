@@ -1307,6 +1307,9 @@ def test_navigation_mission_save_prunes_orphan_local_bt_files(
     nested_dir.mkdir()
     (nested_dir / "alternate.xml").write_text("<root/>", encoding="utf-8")
     (nested_dir / "orphan.xml").write_text("<root/>", encoding="utf-8")
+    orphan_dir = locals_dir / "removed_waypoint"
+    orphan_dir.mkdir()
+    (orphan_dir / "main.xml").write_text("<root/>", encoding="utf-8")
 
     navigation_missions.save_mission(
         "factory",
@@ -1330,6 +1333,7 @@ def test_navigation_mission_save_prunes_orphan_local_bt_files(
     assert (locals_dir / "table_a.xml").exists()
     assert (nested_dir / "alternate.xml").exists()
     assert not (nested_dir / "orphan.xml").exists()
+    assert not orphan_dir.exists()
     assert not (locals_dir / "waypoint_2.xml").exists()
     assert not (locals_dir / "waypoint_5.xml").exists()
 

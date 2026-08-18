@@ -150,7 +150,6 @@ function layoutVisibleOnly(nodes, edges, { anchorNodeId = null } = {}) {
 }
 
 export default function MissionBtEditor({
-  title,
   filePath,
   fileOptions = [],
   defaultFilePath = "",
@@ -484,10 +483,10 @@ export default function MissionBtEditor({
     try {
       await onSetDefaultXml(filePath);
       if (fileActionRequestRef.current !== requestId) return;
-      toast.success(`Default BT: ${filePath}`);
+      toast.success(`Run BT: ${filePath}`);
     } catch (error) {
       if (fileActionRequestRef.current !== requestId) return;
-      toast.error(`Failed to set default ${filePath}: ${error instanceof Error ? error.message : String(error)}`);
+      toast.error(`Failed to set Run BT ${filePath}: ${error instanceof Error ? error.message : String(error)}`);
     } finally {
       if (fileActionRequestRef.current === requestId) setFileAction("");
     }
@@ -634,25 +633,11 @@ export default function MissionBtEditor({
 
   return (
     <div className="h-full min-h-0 relative flex bg-[var(--mc-bg)] text-[var(--mc-text)]">
-      <div className="absolute top-3 right-3 z-20 flex items-center gap-1 rounded-[10px] border border-[var(--mc-border)] bg-[var(--mc-surface)]/95 p-1 shadow-sm">
-          <div
-            className="min-w-0 max-w-36 px-2 text-right"
-            title={`${title || "Local BT"} · ${filePath || "No XML selected"}`}
-          >
-            <div className="truncate text-[10px] text-[var(--mc-text-subtle)]">
-              {title || "Local BT"}
-            </div>
-            <div className="flex items-center justify-end gap-1">
-              <span className="truncate text-xs font-semibold text-[var(--mc-text-muted)]">
-                {filePath?.split("/").pop() || "No XML"}
-              </span>
-              {filePath && filePath === defaultFilePath && (
-                <span className="rounded bg-orange-500/15 px-1 py-0.5 text-[9px] font-semibold text-orange-500">
-                  Default
-                </span>
-              )}
-            </div>
-          </div>
+      <div
+        aria-label="Local BT file actions"
+        className="absolute top-3 z-20 flex items-center gap-1 rounded-[10px] border border-[var(--mc-border)] bg-[var(--mc-surface)]/95 p-1 shadow-sm transition-[right]"
+        style={{ right: selectedNodeId ? 332 : 12 }}
+      >
           <button
             type="button"
             onClick={undoHistory}
@@ -780,9 +765,9 @@ export default function MissionBtEditor({
               || !onSetDefaultXml
             )}
             title={filePath === defaultFilePath
-              ? "This XML is already the default"
+              ? "This XML is already used when running the mission"
               : "Use this XML when the mission runs"}
-            aria-label="Set default BT"
+            aria-label="Set as Run BT"
             className={clsx(
               "h-8 flex items-center gap-1.5 rounded-lg bg-[var(--mc-surface-2)] px-2.5 text-xs font-medium text-[var(--mc-text-muted)] transition-colors hover:bg-[var(--mc-surface-hover)]",
               (
@@ -796,7 +781,7 @@ export default function MissionBtEditor({
             )}
           >
             <MdStar size={18} />
-            {fileAction === "set-default" ? "Setting..." : "Set Default"}
+            {fileAction === "set-default" ? "Setting Run BT..." : "Set as Run BT"}
           </button>
       </div>
 
@@ -883,7 +868,7 @@ export default function MissionBtEditor({
             >
               <div className="text-sm font-semibold">Load waypoint XML</div>
               <div className="mt-1 text-xs text-[var(--mc-text-subtle)]">
-                Loading another XML changes the editor only. Use Set Default to change Run behavior.
+                Loading another XML changes the editor only. Use Set as Run BT to change Run behavior.
               </div>
               <div className="mt-3 max-h-64 space-y-2 overflow-auto">
                 {availableFileOptions.map((path) => (
@@ -892,7 +877,7 @@ export default function MissionBtEditor({
                     className={clsx(
                       "flex cursor-pointer items-start gap-2 rounded-lg border p-2.5",
                       pendingLoadPath === path
-                        ? "border-orange-500 bg-orange-500/10"
+                        ? "border-[var(--mc-accent-hover)] bg-[var(--mc-accent-soft)]"
                         : "border-[var(--mc-border)] bg-[var(--mc-surface-2)]",
                     )}
                   >
@@ -902,14 +887,14 @@ export default function MissionBtEditor({
                       value={path}
                       checked={pendingLoadPath === path}
                       onChange={() => setPendingLoadPath(path)}
-                      className="mt-0.5"
+                      className="mt-0.5 accent-[var(--mc-accent-hover)]"
                     />
                     <span className="min-w-0 flex-1">
                       <span className="flex items-center gap-1 text-xs font-semibold">
                         <span className="truncate">{path.split("/").pop()}</span>
                         {path === defaultFilePath && (
-                          <span className="rounded bg-orange-500/15 px-1 py-0.5 text-[9px] text-orange-500">
-                            Default
+                          <span className="rounded bg-[var(--mc-accent-soft)] px-1 py-0.5 text-[9px] text-[var(--mc-accent-hover)]">
+                            Run BT
                           </span>
                         )}
                       </span>
@@ -931,7 +916,7 @@ export default function MissionBtEditor({
                 <button
                   type="submit"
                   disabled={!pendingLoadPath || Boolean(fileAction)}
-                  className="rounded-lg bg-orange-500 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50"
+                  className="rounded-lg bg-[var(--mc-accent-hover)] px-3 py-2 text-xs font-semibold text-[var(--mc-accent-fg)] hover:brightness-90 disabled:opacity-50"
                 >
                   {fileAction === "load" ? "Loading..." : "Load Selected"}
                 </button>
@@ -963,7 +948,7 @@ export default function MissionBtEditor({
                 value={saveAsName}
                 onChange={(event) => setSaveAsName(event.target.value)}
                 placeholder="alternate.xml"
-                className="mt-1 w-full rounded-lg border border-[var(--mc-border)] bg-[var(--mc-surface-2)] px-3 py-2 text-sm outline-none focus:border-orange-500"
+                className="mt-1 w-full rounded-lg border border-[var(--mc-border)] bg-[var(--mc-surface-2)] px-3 py-2 text-sm outline-none focus:border-[var(--mc-accent-hover)]"
                 autoFocus
               />
               <div className="mt-1 text-[10px] text-[var(--mc-text-subtle)]">
@@ -980,7 +965,7 @@ export default function MissionBtEditor({
                 <button
                   type="submit"
                   disabled={!saveAsName.trim() || Boolean(fileAction)}
-                  className="rounded-lg bg-orange-500 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50"
+                  className="rounded-lg bg-[var(--mc-accent-hover)] px-3 py-2 text-xs font-semibold text-[var(--mc-accent-fg)] hover:brightness-90 disabled:opacity-50"
                 >
                   {fileAction === "save-as" ? "Saving..." : "Save As"}
                 </button>
