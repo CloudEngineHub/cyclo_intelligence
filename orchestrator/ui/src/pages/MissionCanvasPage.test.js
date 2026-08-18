@@ -354,6 +354,8 @@ test('renders Mission Canvas foundation', async () => {
   expect(screen.getByText('Topics')).toBeInTheDocument();
   expect(screen.getByText('/map')).toBeInTheDocument();
   expect(screen.getByText('/scan')).toBeInTheDocument();
+  expect(screen.getByText('/pose')).toBeInTheDocument();
+  expect(screen.getByText('/odom')).toBeInTheDocument();
   expect(screen.getByText('/tf')).toBeInTheDocument();
   expect(screen.queryByText('/amcl_pose')).not.toBeInTheDocument();
   expect(screen.queryByText('/global_costmap/costmap')).not.toBeInTheDocument();
@@ -366,6 +368,8 @@ test('updates mapping topics when layer toggles change', async () => {
   render(<MissionCanvasPage />);
 
   expect(screen.getByText('/scan')).toBeInTheDocument();
+  expect(screen.getByText('/pose')).toBeInTheDocument();
+  expect(screen.getByText('/odom')).toBeInTheDocument();
   expect(screen.queryByText('/amcl_pose')).not.toBeInTheDocument();
   expect(screen.getByText('/tf')).toBeInTheDocument();
   expect(screen.getByText('/tf_static')).toBeInTheDocument();
@@ -382,18 +386,26 @@ test('updates mapping topics when layer toggles change', async () => {
   expect(lidarSwitch).toHaveAttribute('aria-checked', 'false');
   expect(lidarSwitch).toHaveStyle({ backgroundColor: '#dcd7ca' });
   expect(screen.queryByText('/scan')).not.toBeInTheDocument();
+  expect(screen.getByText('/pose')).toBeInTheDocument();
+  expect(screen.getByText('/odom')).toBeInTheDocument();
   expect(screen.queryByText('/amcl_pose')).not.toBeInTheDocument();
 
   fireEvent.click(screen.getByRole('switch', { name: 'Robot Model' }));
   expect(screen.queryByText('/amcl_pose')).not.toBeInTheDocument();
   expect(screen.queryByText('/local_costmap/published_footprint')).not.toBeInTheDocument();
+  expect(screen.getByText('/pose')).toBeInTheDocument();
+  expect(screen.getByText('/odom')).toBeInTheDocument();
 
   fireEvent.click(screen.getByRole('switch', { name: 'TF' }));
   expect(screen.queryByText('/tf')).not.toBeInTheDocument();
   expect(screen.queryByText('/tf_static')).not.toBeInTheDocument();
+  expect(screen.queryByText('/pose')).not.toBeInTheDocument();
+  expect(screen.queryByText('/odom')).not.toBeInTheDocument();
 
   fireEvent.click(lidarSwitch);
   expect(screen.getByText('/scan')).toBeInTheDocument();
+  expect(screen.getByText('/pose')).toBeInTheDocument();
+  expect(screen.getByText('/odom')).toBeInTheDocument();
   expect(screen.queryByText('/amcl_pose')).not.toBeInTheDocument();
 
   await waitFor(() => expect(getServiceStatus).toHaveBeenCalled());
@@ -3494,6 +3506,72 @@ test('enables live robot and lidar layers while navigation runtime is active', a
   });
 });
 
+test('anchors Mapping robot, lidar, and TF to the scan-matched SLAM pose', async () => {
+  const latestMapViewerProps = () => (
+    mockMapViewer.mock.calls[mockMapViewer.mock.calls.length - 1][0]
+  );
+  getServiceStatus.mockResolvedValue({ is_up: true, mode: 'map' });
+  mockTopicDataByName['/tf'] = {
+    transforms: [
+      {
+        header: { frame_id: 'map', stamp: { sec: 10, nanosec: 0 } },
+        child_frame_id: 'odom',
+        transform: {
+          translation: { x: 50, y: 50, z: 0 },
+          rotation: { x: 0, y: 0, z: 0, w: 1 },
+        },
+      },
+      {
+        header: { frame_id: 'odom', stamp: { sec: 10, nanosec: 0 } },
+        child_frame_id: 'base_link',
+        transform: {
+          translation: { x: 99, y: 0, z: 0 },
+          rotation: { x: 0, y: 0, z: 0, w: 1 },
+        },
+      },
+    ],
+  };
+  mockTopicDataByName['/scan'] = {
+    header: { frame_id: 'base_link', stamp: { sec: 10, nanosec: 0 } },
+    ranges: [1],
+    range_min: 0.02,
+    range_max: 20,
+    angle_min: 0,
+    angle_increment: 0,
+  };
+  mockTopicDataByName['/pose'] = {
+    header: { frame_id: 'map', stamp: { sec: 10, nanosec: 0 } },
+    pose: { pose: { position: { x: 1.25, y: -0.5, z: 0 }, orientation: { x: 0, y: 0, z: 0, w: 1 } } },
+  };
+  mockTopicDataByName['/odom'] = {
+    header: { frame_id: 'odom', stamp: { sec: 10, nanosec: 0 } },
+    child_frame_id: 'base_link',
+    pose: { pose: { position: { x: 2, y: 0, z: 0 }, orientation: { x: 0, y: 0, z: 0, w: 1 } } },
+  };
+
+  render(<MissionCanvasPage />);
+
+  await waitFor(() => expect(latestMapViewerProps().pose).toMatchObject({
+    position: { x: 1.25, y: -0.5 },
+  }));
+  expect(latestMapViewerProps().scanPose).toMatchObject({
+    position: { x: 1.25, y: -0.5 },
+  });
+  expect(latestMapViewerProps().tf.transforms.find((transform) => (
+    transform.header.frame_id === 'map' && transform.child_frame_id === 'odom'
+  ))).toMatchObject({
+    transform: { translation: { x: -0.75, y: -0.5 } },
+  });
+  expect(latestMapViewerProps().tf.transforms.find((transform) => (
+    transform.header.frame_id === 'odom' && transform.child_frame_id === 'base_link'
+  ))).toMatchObject({
+    transform: { translation: { x: 2, y: 0 } },
+  });
+  expect(screen.getByText('/pose')).toBeInTheDocument();
+  expect(screen.getByText('/odom')).toBeInTheDocument();
+  expect(screen.queryByText('/amcl_pose')).not.toBeInTheDocument();
+});
+
 test('enables navigation runtime layers in the run stage', async () => {
   getServiceStatus.mockResolvedValueOnce({ is_up: true, mode: 'run' });
 
@@ -3582,6 +3660,15 @@ test('prefers the AMCL pose over a stale TF pose in the run stage', async () => 
   await waitFor(() => expect(latestMapViewerProps().pose).toMatchObject({
     position: { x: 1.25, y: -0.5 },
   }));
+
+  fireEvent.click(screen.getByRole('switch', { name: 'Lidar' }));
+  fireEvent.click(screen.getByRole('switch', { name: 'Robot Model' }));
+  fireEvent.click(screen.getByRole('switch', { name: 'TF' }));
+
+  await waitFor(() => expect(latestMapViewerProps().pose).toMatchObject({
+    position: { x: 1.25, y: -0.5 },
+  }));
+  expect(topicRow('/amcl_pose')).toHaveTextContent('live');
 });
 
 test('loads a saved map for the run stage', async () => {

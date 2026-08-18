@@ -57,6 +57,7 @@ import {
   setNavigationMissionDefaultBtFile,
 } from "../utils/navigationMissionsApi";
 import { useNavigationRosPublisher, useNavigationRosTopic } from "../hooks/useNavigationRosTopic";
+import { useMappingPoseSync } from "../hooks/useMappingPoseSync";
 import { MapEditorControls, SegButton, SegGroup, useMapEditor } from "../components/navigation/MapEditor";
 import { MapViewer } from "../components/navigation/MapViewer";
 import MissionBtEditor from "../components/navigation/MissionBtEditor";
@@ -65,6 +66,7 @@ import {
   mergeTfMessages,
   orientationFromYaw,
   poseFromBaseLinkTf,
+  replaceTfFramePose,
   tfMessageFromBuffer,
   updateTfBuffer,
   yawFromPose,
@@ -118,6 +120,7 @@ const AUTO_LOCALIZE_UPDATE_DELAY_MS = 700;
 const AUTO_LOCALIZE_XY_COVARIANCE_MAX = 0.6;
 const AUTO_LOCALIZE_YAW_COVARIANCE_MAX = 0.5;
 const ROS2_WS_FAST_TOPIC_OPTIONS = { throttleMs: 100 };
+const ROS2_WS_ODOM_TOPIC_OPTIONS = { throttleMs: 50, staleMs: 1000 };
 const BT_TOPIC_OPTIONS = { staleMs: 3000 };
 const SUPERVISOR_API_BASE = "/api";
 const STAGE_MAPPING = "mapping";
@@ -197,8 +200,8 @@ const LAYER_PRESETS = {
 
 const LAYER_TOPIC_IDS = {
   map: ["/map"],
-  scan: ["/scan", "/amcl_pose"],
-  robotModel: ["/amcl_pose", "/local_costmap/published_footprint"],
+  scan: ["/scan"],
+  robotModel: ["/local_costmap/published_footprint"],
   tf: ["/tf", "/tf_static"],
   globalCostmap: ["/global_costmap/costmap"],
   localCostmap: ["/local_costmap/costmap"],
@@ -215,6 +218,8 @@ const STAGE_EXTRA_TOPIC_IDS = {
 const TOPIC_ORDER = [
   "/map",
   "/scan",
+  "/pose",
+  "/odom",
   "/amcl_pose",
   "/tf",
   "/tf_static",
@@ -2404,6 +2409,11 @@ export default function MissionCanvasPage() {
     busy !== "Stop" &&
     !mappingEditorActive
   );
+  const mappingPoseSubscriptionActive = (
+    workspaceStage === STAGE_MAPPING &&
+    !mappingEditorActive &&
+    busy !== "Stop"
+  );
   const runTopicsActive = (
     workspaceStage === STAGE_RUN &&
     runRuntimeActive &&
@@ -2444,9 +2454,11 @@ export default function MissionCanvasPage() {
   const needsRobotModel = designLocalizationActive || (
     stageNavigationTopicsActive && activeLayers.robotModel
   );
-  const needsAmclPose = robotPoseCaptureActive || (
-    stageNavigationTopicsActive && (needsRobotModel || needsScan)
-  );
+  // Keep the SLAM/odometry anchor warm for the whole Mapping session. If all
+  // pose-dependent layers are toggled off while the robot is stationary,
+  // slam_toolbox may not publish another /pose when a layer is re-enabled.
+  const needsMappingPose = mappingPoseSubscriptionActive;
+  const needsAmclPose = robotPoseCaptureActive || runTopicsActive;
   const needsTf = robotPoseCaptureActive || (
     stageNavigationTopicsActive && (
       activeLayers.tf ||
@@ -2489,6 +2501,14 @@ export default function MissionCanvasPage() {
     needsScan ? "/scan" : null,
     ROS2_WS_FAST_TOPIC_OPTIONS,
   );
+  const { topicData: slamPoseData } = useNavigationRosTopic(
+    needsMappingPose ? "/pose" : null,
+    ROS2_WS_FAST_TOPIC_OPTIONS,
+  );
+  const { topicData: odometryData } = useNavigationRosTopic(
+    needsMappingPose ? "/odom" : null,
+    ROS2_WS_ODOM_TOPIC_OPTIONS,
+  );
   const { topicData: amclData } = useNavigationRosTopic(
     needsAmclPose ? "/amcl_pose" : null,
     ROS2_WS_FAST_TOPIC_OPTIONS,
@@ -2519,6 +2539,8 @@ export default function MissionCanvasPage() {
   const localCostmap = useMemo(() => messageData(localCostmapData), [localCostmapData]);
   const footprint = useMemo(() => messageData(footprintData), [footprintData]);
   const scan = useMemo(() => messageData(scanData), [scanData]);
+  const slamPose = useMemo(() => messageData(slamPoseData), [slamPoseData]);
+  const odometry = useMemo(() => messageData(odometryData), [odometryData]);
   const amclPose = useMemo(() => messageData(amclData), [amclData]);
   const plan = useMemo(() => messageData(planData), [planData]);
   const goalPose = useMemo(() => messageData(goalPoseData), [goalPoseData]);
@@ -2538,6 +2560,39 @@ export default function MissionCanvasPage() {
   const bufferedTf = tfMessageFromBuffer(tfBufferRef.current) ?? latestTf;
   const fallbackPose = amclPose?.pose?.pose ?? null;
   const tfPose = poseFromBaseLinkTf(bufferedTf);
+  const mappingPoseSync = useMappingPoseSync({
+    active: mappingPoseSubscriptionActive && !!odometry,
+    slamPose,
+    odometry,
+    scanStamp: scan?.header?.stamp ?? null,
+  });
+  const resetMappingPoseSync = mappingPoseSync.reset;
+  const mappingTf = useMemo(() => {
+    if (!mappingTopicsActive || !mappingPoseSync.mapToOdomPose) return bufferedTf;
+    const mapCorrectedTf = replaceTfFramePose(
+      bufferedTf,
+      "map",
+      "odom",
+      mappingPoseSync.mapToOdomPose,
+      mappingPoseSync.anchorStamp,
+    );
+    return mappingPoseSync.odomPose
+      ? replaceTfFramePose(
+          mapCorrectedTf,
+          "odom",
+          "base_link",
+          mappingPoseSync.odomPose,
+          mappingPoseSync.odomStamp,
+        )
+      : mapCorrectedTf;
+  }, [
+    bufferedTf,
+    mappingPoseSync.anchorStamp,
+    mappingPoseSync.mapToOdomPose,
+    mappingPoseSync.odomPose,
+    mappingPoseSync.odomStamp,
+    mappingTopicsActive,
+  ]);
   // In Run, AMCL is the authoritative map-frame localization estimate. The
   // rosbridge-throttled /tf stream can miss low-rate map -> odom updates while
   // still receiving odom -> base_link, leaving this browser's composed TF pose
@@ -2545,7 +2600,9 @@ export default function MissionCanvasPage() {
   // startup fallback until the first AMCL pose arrives.
   const currentPose = runSessionActive
     ? fallbackPose ?? tfPose
-    : tfPose ?? fallbackPose;
+    : mappingTopicsActive
+      ? mappingPoseSync.pose ?? tfPose
+      : tfPose ?? fallbackPose;
   const displayedMap = mappingEditorActive
     ? mapEditor.map
     : workspaceStage === STAGE_AUTHORING
@@ -3278,6 +3335,8 @@ export default function MissionCanvasPage() {
     const liveByTopic = {
       "/map": !!map,
       "/scan": !!scan,
+      "/pose": !!slamPose,
+      "/odom": !!odometry,
       "/amcl_pose": !!amclPose,
       "/tf": !!(tf?.transforms?.length),
       "/tf_static": !!(tfStatic?.transforms?.length),
@@ -3294,6 +3353,16 @@ export default function MissionCanvasPage() {
       if (!activeLayers[layerId]) return;
       (LAYER_TOPIC_IDS[layerId] || []).forEach((topic) => selectedTopics.add(topic));
     });
+    const robotPoseLayerActive = (
+      !!activeLayers.scan || !!activeLayers.robotModel || !!activeLayers.tf
+    );
+    if (workspaceStage === STAGE_MAPPING && robotPoseLayerActive) {
+      selectedTopics.add("/pose");
+      selectedTopics.add("/odom");
+    }
+    if (workspaceStage === STAGE_RUN && robotPoseLayerActive) {
+      selectedTopics.add("/amcl_pose");
+    }
     if (workspaceStage === STAGE_AUTHORING && !designLocalizationActive) {
       selectedTopics.delete("/map");
       selectedTopics.delete("/scan");
@@ -3306,9 +3375,6 @@ export default function MissionCanvasPage() {
       ["/scan", "/amcl_pose", "/tf", "/tf_static", "/local_costmap/published_footprint"].forEach((topic) => {
         selectedTopics.add(topic);
       });
-    }
-    if (workspaceStage === STAGE_MAPPING) {
-      selectedTopics.delete("/amcl_pose");
     }
     return TOPIC_ORDER.filter((topic) => selectedTopics.has(topic)).map((topic) => ({
       topic,
@@ -3325,8 +3391,10 @@ export default function MissionCanvasPage() {
     goalPose,
     localCostmap,
     map,
+    odometry,
     plan,
     scan,
+    slamPose,
     tf,
     tfStatic,
     workspaceStage,
@@ -4726,6 +4794,8 @@ export default function MissionCanvasPage() {
     async () => {
       setWorkspaceStage(STAGE_MAPPING);
       setShowPgmFix(false);
+      clearLocalizationPoseCache();
+      resetMappingPoseSync();
       await startNavigation("map", mapName.trim() || DEFAULT_MAP_NAME);
       setNavigationRuntimeMode("mapping");
       setDesignPoseInitialized(false);
@@ -4741,7 +4811,7 @@ export default function MissionCanvasPage() {
         runShutdownRequestedAt: null,
       });
     },
-  ), [mapName, runCommand]);
+  ), [clearLocalizationPoseCache, mapName, resetMappingPoseSync, runCommand]);
 
   const handleOpenSaveMapDialog = useCallback(() => {
     setSaveMapName(currentMapName);
@@ -4787,6 +4857,8 @@ export default function MissionCanvasPage() {
       stopMissionRunner();
       setInteractionMode("view");
       const result = await stopNavigation();
+      clearLocalizationPoseCache();
+      resetMappingPoseSync();
       setStatus({ is_up: false, mode: "idle" });
       setNavigationRuntimeMode("idle");
       setDesignPoseInitialized(false);
@@ -4802,7 +4874,7 @@ export default function MissionCanvasPage() {
       });
       return result;
     },
-  ), [runCommand, stopMissionRunner]);
+  ), [clearLocalizationPoseCache, resetMappingPoseSync, runCommand, stopMissionRunner]);
 
   const cancelPendingDesignLocalization = useCallback(() => {
     if (
@@ -5812,11 +5884,12 @@ export default function MissionCanvasPage() {
             globalCostmap={mappingEditorActive ? null : needsGlobalCostmap ? globalCostmap : null}
             localCostmap={mappingEditorActive ? null : needsLocalCostmap ? localCostmap : null}
             scan={mappingEditorActive ? null : needsScan ? scan : null}
+            scanPose={mappingEditorActive || !mappingTopicsActive ? null : mappingPoseSync.scanPose}
             pose={mappingEditorActive ? null : (designLocalizationActive || stageNavigationTopicsActive) ? currentPose : null}
             plan={mappingEditorActive ? null : needsPlan ? plan : null}
             goalPose={mappingEditorActive ? null : needsGoalPose ? goalPose : null}
             footprint={mappingEditorActive ? null : needsRobotModel ? footprint : null}
-            tf={mappingEditorActive ? null : needsTf ? bufferedTf : null}
+            tf={mappingEditorActive ? null : needsTf ? mappingTf : null}
             spots={missionOverlayActive ? visibleSpots : []}
             selectedSpotId={missionOverlayActive && workspaceStage === STAGE_AUTHORING ? selectedSpotId : ""}
             activeWaypointId={workspaceStage === STAGE_RUN ? missionRunner.activeSpotId : ""}

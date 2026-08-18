@@ -25,6 +25,8 @@ const TOPIC_TYPES = {
   '/local_costmap/costmap': 'nav_msgs/msg/OccupancyGrid',
   '/local_costmap/published_footprint': 'geometry_msgs/msg/PolygonStamped',
   '/scan': 'sensor_msgs/msg/LaserScan',
+  '/pose': 'geometry_msgs/msg/PoseWithCovarianceStamped',
+  '/odom': 'nav_msgs/msg/Odometry',
   '/amcl_pose': 'geometry_msgs/msg/PoseWithCovarianceStamped',
   '/plan': 'nav_msgs/msg/Path',
   '/goal_pose': 'geometry_msgs/msg/PoseStamped',
