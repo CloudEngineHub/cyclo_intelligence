@@ -1390,9 +1390,15 @@ function WaypointBtFocusLayer({ layer, onClose }) {
     if (!spot)
         return null;
     return (<section className="absolute inset-0 z-20 pointer-events-none" role="region" aria-label="Waypoint BT focus canvas">
-      <div className="absolute inset-y-0 left-0 w-[25%] pointer-events-none" style={{
+      {onClose ? (<button type="button" className="absolute inset-y-0 left-0 w-[25%] pointer-events-auto cursor-pointer border-0 p-0 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px]" style={{
             background: "linear-gradient(90deg, rgba(28,26,23,0.08), rgba(28,26,23,0))",
-        }}/>
+            outlineColor: "var(--mc-accent)",
+        }} aria-label="Back to Map from waypoint context" title="Back to Map" onClick={(event) => {
+            event.stopPropagation();
+            onClose();
+        }}/>) : (<div className="absolute inset-y-0 left-0 w-[25%] pointer-events-none" style={{
+            background: "linear-gradient(90deg, rgba(28,26,23,0.08), rgba(28,26,23,0))",
+        }}/>)}
       <div className="absolute inset-y-0 right-0 w-[75%] pointer-events-auto overflow-hidden" style={{
             color: "var(--mc-text)",
             backgroundColor: "var(--mc-surface)",

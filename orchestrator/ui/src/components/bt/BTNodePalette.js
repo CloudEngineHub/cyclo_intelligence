@@ -24,9 +24,7 @@ export default function BTNodePalette({ canUpdateCatalog = true }) {
   const { catalog, source, refreshCatalog } = useBTNodeCatalog();
   const isUpdating = source === 'loading';
   const isUpdateDisabled = !canUpdateCatalog || isUpdating;
-  const updateTitle = canUpdateCatalog
-    ? 'Update node list from /bt/nodes/catalog'
-    : 'Start BT Node to update the node list';
+  const updateTitle = 'Update node list from /bt/nodes/catalog';
 
   const grouped = useMemo(() => ({
     control: catalog.filter((n) => n.category === 'control'),
@@ -41,7 +39,7 @@ export default function BTNodePalette({ canUpdateCatalog = true }) {
 
   return (
     <div className="w-[180px] shrink-0 bg-[var(--mc-surface-2)] border-r border-[var(--mc-border)] flex flex-col">
-      <div className="px-3 py-3 border-b border-[var(--mc-border)]">
+      {canUpdateCatalog && <div className="px-3 py-3 border-b border-[var(--mc-border)]">
         <button
           type="button"
           onClick={() => refreshCatalog({ force: true })}
@@ -64,7 +62,7 @@ export default function BTNodePalette({ canUpdateCatalog = true }) {
             </span>
           )}
         </button>
-      </div>
+      </div>}
 
       <div className="flex-1 overflow-y-auto py-2">
         <Section

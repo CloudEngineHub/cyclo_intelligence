@@ -22,9 +22,7 @@ import {
   MdContentCopy,
   MdDelete,
   MdEdit,
-  MdPowerSettingsNew,
   MdRedo,
-  MdStop,
   MdUndo,
 } from "react-icons/md";
 import {
@@ -210,7 +208,7 @@ const LAYER_TOPIC_IDS = {
 
 const STAGE_EXTRA_TOPIC_IDS = {
   [STAGE_MAPPING]: [],
-  [STAGE_AUTHORING]: ["/bt/status", "/bt/active_nodes"],
+  [STAGE_AUTHORING]: [],
   [STAGE_RUN]: ["/bt/status", "/bt/active_nodes"],
 };
 
@@ -1679,92 +1677,6 @@ function RunSessionPanel({
   );
 }
 
-function btNodeStateLabel(state) {
-  if (state === "up") return "Active";
-  if (state === "down") return "Inactive";
-  return "Unknown";
-}
-
-function btNodeStateColor(state) {
-  if (state === "up") return "#5b8266";
-  if (state === "down") return "var(--mc-text-subtle)";
-  return "var(--mc-warning)";
-}
-
-function btExecutionLabel(status, nodeActive) {
-  const normalized = String(status || "").trim().toLowerCase();
-  if (!nodeActive) return "wait";
-  if (!normalized || normalized === "stopped") return "Ready";
-  if (normalized === "running") return "Running";
-  if (normalized === "completed") return "Completed";
-  if (normalized === "failed" || normalized === "failure") return "Failed";
-  if (normalized === "stopping") return "Stopping";
-  return status;
-}
-
-function btActiveNodesLabel(activeNodes, nodeActive, executionLabel) {
-  if (!nodeActive) return "wait";
-  if (activeNodes) return activeNodes;
-  return executionLabel === "Running" ? "None" : "Waiting for run";
-}
-
-function BtRuntimePanel({
-  nodeState,
-  btStatus,
-  activeNodes,
-  busy,
-  onActivate,
-  onDeactivate,
-}) {
-  const isActive = nodeState === "up";
-  const executionLabel = btExecutionLabel(btStatus, isActive);
-  const activeNodesLabel = btActiveNodesLabel(activeNodes, isActive, executionLabel);
-
-  return (
-    <div
-      className="min-h-0"
-      style={{
-        backgroundColor: "var(--mc-surface)",
-        border: "1px solid var(--mc-border)",
-        borderRadius: 16,
-        boxShadow: "var(--mc-shadow)",
-        padding: 18,
-      }}
-    >
-      <div className="flex items-center justify-between mb-3.5">
-        <div className="flex items-center gap-2.5 min-w-0">
-          <span
-            className="w-2.5 h-2.5 rounded-full shrink-0"
-            style={{ backgroundColor: btNodeStateColor(nodeState) }}
-            aria-label={`BT node ${btNodeStateLabel(nodeState)}`}
-            title={`BT node ${btNodeStateLabel(nodeState)}`}
-          />
-          <span className="text-[13.5px] font-bold truncate">BT Runtime</span>
-        </div>
-        <span className="text-[11px] font-mono" style={{ color: "var(--mc-text-subtle)" }}>
-          BT Node {btNodeStateLabel(nodeState)}
-        </span>
-      </div>
-      <div className="flex justify-between text-[12.5px] py-1.5" style={{ borderTop: "1px solid var(--mc-border)" }}>
-        <span style={{ color: "var(--mc-text-muted)" }}>Execution</span>
-        <span className="font-medium">{executionLabel}</span>
-      </div>
-      <div className="flex justify-between text-[12.5px] py-1.5" style={{ borderTop: "1px solid var(--mc-border)" }}>
-        <span style={{ color: "var(--mc-text-muted)" }}>Active nodes</span>
-        <span className="font-medium truncate ml-3 text-right">{activeNodesLabel}</span>
-      </div>
-      <div className="flex gap-2 mt-3.5">
-        <ActionButton className="flex-1" disabled={busy || isActive} onClick={onActivate} title="Start BT node" variant="secondary">
-          <span className="w-full inline-flex items-center justify-center gap-1.5"><MdPowerSettingsNew size={16} />Activate BT</span>
-        </ActionButton>
-        <ActionButton className="flex-1" disabled={busy || !isActive} onClick={onDeactivate} title="Stop BT node" variant="danger">
-          <span className="w-full inline-flex items-center justify-center gap-1.5"><MdStop size={16} />Deactivate BT</span>
-        </ActionButton>
-      </div>
-    </div>
-  );
-}
-
 function clampNumber(value, min, max) {
   const number = Number(value);
   if (!Number.isFinite(number)) return min;
@@ -2241,7 +2153,6 @@ export default function MissionCanvasPage() {
   const btStatusRef = useRef("stopped");
   const btNodeReleaseRef = useRef(Promise.resolve());
   const behaviorNodeSerialRef = useRef(0);
-  const skipNextSpotLoadForMapRef = useRef("");
   const legacySpotLoadGenerationRef = useRef(0);
   const designMissionLoadGenerationRef = useRef(0);
   const runMissionLoadGenerationRef = useRef(0);
@@ -2547,10 +2458,7 @@ export default function MissionCanvasPage() {
     stageNavigationTopicsActive ||
     designLocalizationActive
   ) && activeLayers.map;
-  const needsBtTopics = (
-    workspaceStage === STAGE_AUTHORING ||
-    workspaceStage === STAGE_RUN
-  );
+  const needsBtTopics = workspaceStage === STAGE_RUN;
   const activeBehaviorNodes = useMemo(
     () => behaviorNodes.filter((node) => node.map_name === currentMapName),
     [behaviorNodes, currentMapName],
@@ -2625,10 +2533,6 @@ export default function MissionCanvasPage() {
     return names.join(", ");
   }, [btActiveNodesData]);
   const btNodeIsUp = btNodeStatus.state === "up";
-  const btNodeEditingAvailable = (
-    btNodeIsUp
-    || (Boolean(btLayerSpotId) && btNodeStatus.state === "unknown")
-  );
   const latestTf = useMemo(() => mergeTfMessages(tfStatic, tf), [tf, tfStatic]);
   void tfBufferRevision;
   const bufferedTf = tfMessageFromBuffer(tfBufferRef.current) ?? latestTf;
@@ -2650,12 +2554,20 @@ export default function MissionCanvasPage() {
         ? (map || runDisplayMapEditor.map)
         : map;
   const designMapAvailable = designMapActive && !!designMapEditor.map;
+  // A restored map/mission name is only a picker default. Do not expose any
+  // in-memory Design document until the explicit map+mission load has fully
+  // completed; otherwise a previous map's legacy spots can flash in the rail.
+  const designDocumentReady = (
+    designMapAvailable
+    && !designMapBusy
+    && !designMissionLoadError
+  );
   // Waypoints/route only render on top of a loaded map: marker size and
   // placement derive from the map's resolution, so without a map they would
   // draw at raw scale — huge, overlapping, and floating in empty space.
   const missionOverlayActive = (
     (workspaceStage === STAGE_RUN && !!displayedMap) ||
-    (workspaceStage === STAGE_AUTHORING && designMapAvailable)
+    (workspaceStage === STAGE_AUTHORING && designDocumentReady)
   );
   const visibleSpots = useMemo(
     () => activeSpots.map((spot) => spotForMapDisplay(spot, displayedMap)),
@@ -2708,6 +2620,10 @@ export default function MissionCanvasPage() {
     const sourceSpot = visibleSpots.find((spot) => spot.id === missionRouteSourceId);
     return sourceSpot ? [sourceSpot] : [];
   }, [missionRouteOrderedSpots, missionRouteSourceId, visibleSpots]);
+  const designPanelSpots = designDocumentReady ? spots : [];
+  const designPanelBehaviorNodes = designDocumentReady ? activeBehaviorNodes : [];
+  const designPanelRouteSpots = designDocumentReady ? missionRouteTreeSpots : [];
+  const designPanelRouteClosed = designDocumentReady && missionRouteClosed;
   const selectedBtLayerSpot = useMemo(
     () => visibleSpots.find((spot) => spot.id === btLayerSpotId) || null,
     [btLayerSpotId, visibleSpots],
@@ -3137,12 +3053,6 @@ export default function MissionCanvasPage() {
     selectedBtLayerPaths,
     selectedBtLayerSpot,
   ]);
-  const btLayerExecutionLabel = btExecutionLabel(btStatusText, btNodeIsUp);
-  const btLayerActiveNodesLabel = btActiveNodesLabel(
-    btActiveNodesText,
-    btNodeIsUp,
-    btLayerExecutionLabel,
-  );
   const btActiveNodeNames = useMemo(() => (
     btActiveNodesText
       .split(",")
@@ -3277,7 +3187,7 @@ export default function MissionCanvasPage() {
       defaultFilePath={selectedBtLayerDefaultPath}
       xml={missionBtFiles[selectedBtLayerPath] || defaultLocalBtXml(selectedBtLayerSpot)}
       loading={missionBtLoadingPath === selectedBtLayerPath}
-      activeNodeNames={btActiveNodeNames}
+      activeNodeNames={[]}
       onLoadXml={loadMissionLocalBtXml}
       onSaveXml={saveMissionLocalBtXml}
       onFilePathChange={selectMissionLocalBtXml}
@@ -3308,13 +3218,9 @@ export default function MissionCanvasPage() {
   ) : null;
   const waypointBtLayer = (
     workspaceStage === STAGE_AUTHORING &&
-    btNodeEditingAvailable &&
     selectedBtLayerSpot
   ) ? {
       spot: selectedBtLayerSpot,
-      nodeLabel: btNodeStateLabel(btNodeStatus.state),
-      executionLabel: btLayerExecutionLabel,
-      activeNodesLabel: btLayerActiveNodesLabel,
       editor: waypointBtEditor,
     }
     : null;
@@ -3329,9 +3235,6 @@ export default function MissionCanvasPage() {
     : null;
   const runBtLayer = runActiveSpot ? {
     spot: runActiveSpot,
-    nodeLabel: btNodeStateLabel(btNodeStatus.state),
-    executionLabel: btLayerExecutionLabel,
-    activeNodesLabel: btLayerActiveNodesLabel,
     editor: (
       <MissionBtRunView
         xml={runMissionBtFiles[localBtPathForSpot(runActiveSpot)] || defaultLocalBtXml(runActiveSpot)}
@@ -3347,26 +3250,13 @@ export default function MissionCanvasPage() {
     setMissionFlowEdges((current) => filterMissionFlowEdges(current, visibleSpots));
   }, [setMissionFlowEdges, setMissionFlowNodes, visibleSpots, workspaceStage]);
 
-  // Design: an active BT node blocks waypoint editing, so drop spot/initial
-  // modes. Run is exempt — it needs the BT node up AND uses "initial" for the
-  // localization pose-set gesture, so this must not fire there.
   useEffect(() => {
-    if (!btNodeIsUp || workspaceStage !== STAGE_AUTHORING) return;
-    if (showWaypointOptions) {
-      setShowWaypointOptions(false);
-    }
-    if (interactionMode === "spot" || interactionMode === "initial") {
-      setInteractionMode("view");
-    }
-  }, [btNodeIsUp, interactionMode, showWaypointOptions, workspaceStage]);
-
-  useEffect(() => {
-    if (workspaceStage === STAGE_AUTHORING && designMapAvailable && !btNodeIsUp) {
+    if (workspaceStage === STAGE_AUTHORING && designMapAvailable) {
       return;
     }
     setMissionRouteMode(false);
     setMissionRouteSourceId("");
-  }, [btNodeIsUp, designMapAvailable, workspaceStage]);
+  }, [designMapAvailable, workspaceStage]);
 
   const layerToggles = useMemo(() => (
     STAGE_LAYER_IDS[workspaceStage].map((id) => ({
@@ -3511,19 +3401,6 @@ export default function MissionCanvasPage() {
     return nextSpots;
   }, [applySpots]);
 
-  const loadSpots = useCallback(async () => {
-    const targetMapName = mapName.trim() || DEFAULT_MAP_NAME;
-    if (skipNextSpotLoadForMapRef.current === targetMapName) {
-      skipNextSpotLoadForMapRef.current = "";
-      return;
-    }
-    try {
-      await loadLegacySpotsForMap(targetMapName);
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Failed to load waypoints");
-    }
-  }, [loadLegacySpotsForMap, mapName]);
-
   useEffect(() => {
     void loadStatus();
     const interval = window.setInterval(loadStatus, STATUS_POLL_MS);
@@ -3632,12 +3509,11 @@ export default function MissionCanvasPage() {
     if (!btLayerSpotId) return;
     if (
       workspaceStage !== STAGE_AUTHORING ||
-      btNodeStatus.state === "down" ||
       !visibleSpots.some((spot) => spot.id === btLayerSpotId)
     ) {
       setBtLayerSpotId("");
     }
-  }, [btLayerSpotId, btNodeStatus.state, visibleSpots, workspaceStage]);
+  }, [btLayerSpotId, visibleSpots, workspaceStage]);
 
   useEffect(() => {
     if (!selectedBtLayerSpot || !selectedBtLayerPath) return undefined;
@@ -3675,10 +3551,6 @@ export default function MissionCanvasPage() {
       setMissionBtLoadingPath((current) => (current === selectedBtLayerPath ? "" : current));
     };
   }, [currentMapName, missionBtFiles, missionName, selectedBtLayerPath, selectedBtLayerSpot]);
-
-  useEffect(() => {
-    void loadSpots();
-  }, [loadSpots]);
 
   useEffect(() => {
     currentPoseRef.current = currentPose;
@@ -3801,34 +3673,6 @@ export default function MissionCanvasPage() {
   const publishTeleopCommand = useCallback((motion) => (
     publishRosTopic(TELEOP_TOPIC, TELEOP_MESSAGE_TYPE, teleopTwist(motion))
   ), [publishRosTopic]);
-
-  const handleBtNodeActivate = useCallback(async () => {
-    setBtNodeBusy("activate");
-    try {
-      await setBtNodeServiceActive(true);
-      setMessage("BT node activated");
-      await refreshBtNodeStatus({ quiet: true });
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Failed to activate BT node");
-      await refreshBtNodeStatus({ quiet: true });
-    } finally {
-      setBtNodeBusy("");
-    }
-  }, [refreshBtNodeStatus]);
-
-  const handleBtNodeDeactivate = useCallback(async () => {
-    setBtNodeBusy("deactivate");
-    try {
-      await setBtNodeServiceActive(false);
-      setMessage("BT node deactivated");
-      await refreshBtNodeStatus({ quiet: true });
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Failed to deactivate BT node");
-      await refreshBtNodeStatus({ quiet: true });
-    } finally {
-      setBtNodeBusy("");
-    }
-  }, [refreshBtNodeStatus]);
 
   const loadSavedDesignForMap = useCallback((targetMapName) => {
     const savedNodes = savedBehaviorNodesForMap(targetMapName);
@@ -4142,13 +3986,15 @@ export default function MissionCanvasPage() {
       setMessage("Mission file required");
       return;
     }
-    skipNextSpotLoadForMapRef.current = selectedMapName;
     setMapName(selectedMapName);
     setDesignMapPath(pendingDesignMapPath);
     setMissionMapLoaded(true);
     setShowDesignMapDialog(false);
     setWorkspaceStage(STAGE_AUTHORING);
     setInteractionMode("view");
+    setMissionRouteMode(false);
+    setMissionRouteSourceId("");
+    setBtLayerSpotId("");
     setDesignMapReloadToken((value) => value + 1);
     setMissionName(pendingDesignMissionName);
     setDesignCatalog({ mapName: selectedMapName, names: designMissionNames });
@@ -4738,6 +4584,7 @@ export default function MissionCanvasPage() {
     setSelectedBehaviorNodeId("");
     setBtLayerSpotId("");
     setMissionRouteMode(false);
+    setMissionRouteSourceId("");
     designDirtyRef.current = false;
     setDesignDirty(false);
     setDesignMapBusy(true);
@@ -4957,6 +4804,18 @@ export default function MissionCanvasPage() {
     },
   ), [runCommand, stopMissionRunner]);
 
+  const cancelPendingDesignLocalization = useCallback(() => {
+    if (
+      workspaceStage !== STAGE_AUTHORING
+      || interactionMode !== "initial"
+      || !designLocalizationActive
+    ) {
+      return false;
+    }
+    void handleStopNavigation();
+    return true;
+  }, [designLocalizationActive, handleStopNavigation, interactionMode, workspaceStage]);
+
   const handleSelectSpot = useCallback((spotId) => {
     setSelectedSpotId(spotId);
     setSelectedBehaviorNodeId("");
@@ -4965,22 +4824,31 @@ export default function MissionCanvasPage() {
     setEditingSpotLabel("");
     setShowWaypointOptions(false);
     setInteractionMode("view");
-    if (workspaceStage === STAGE_AUTHORING && btNodeIsUp) {
-      setBtLayerSpotId(spotId);
-    } else {
-      setBtLayerSpotId("");
-    }
-  }, [btNodeIsUp, workspaceStage]);
+  }, []);
+
+  const handleOpenWaypointBt = useCallback((spotId) => {
+    const spot = visibleSpots.find((item) => item.id === spotId);
+    if (!spot) return;
+    cancelPendingDesignLocalization();
+    setSelectedSpotId(spotId);
+    setSelectedBehaviorNodeId("");
+    setPendingBehaviorNodeTag("");
+    setEditingSpotId("");
+    setEditingSpotLabel("");
+    setShowWaypointOptions(false);
+    setMissionRouteMode(false);
+    setMissionRouteSourceId("");
+    setInteractionMode("view");
+    setBtLayerSpotId(spotId);
+    setMessage(`Editing ${spot.label || spot.id} local BT`);
+  }, [cancelPendingDesignLocalization, visibleSpots]);
 
   const handleToggleMissionRouteMode = useCallback(() => {
-    if (btNodeIsUp) {
-      setMessage("Deactivate BT before editing mission route");
-      return;
-    }
     if (!designMapAvailable) {
       setMessage("Load a mission before editing mission route");
       return;
     }
+    cancelPendingDesignLocalization();
     setWorkspaceStage(STAGE_AUTHORING);
     setPendingBehaviorNodeTag("");
     setShowWaypointOptions(false);
@@ -4993,7 +4861,7 @@ export default function MissionCanvasPage() {
       }
       return next;
     });
-  }, [btNodeIsUp, designMapAvailable]);
+  }, [cancelPendingDesignLocalization, designMapAvailable]);
 
   const handleMissionRouteSpotClick = useCallback((spotId) => {
     const spot = visibleSpots.find((item) => item.id === spotId);
@@ -5006,7 +4874,7 @@ export default function MissionCanvasPage() {
     setBtLayerSpotId("");
     setShowWaypointOptions(false);
     setInteractionMode("view");
-    if (!missionRouteMode || btNodeIsUp) return;
+    if (!missionRouteMode) return;
     if (!missionRouteSourceId) {
       setMissionRouteSourceId(spotId);
       setMessage(`Route start: ${spot.label || spot.id}`);
@@ -5035,7 +4903,6 @@ export default function MissionCanvasPage() {
       setMessage(`Route: ${sourceSpot?.label || missionRouteSourceId} -> ${spot.label || spot.id}`);
     }
   }, [
-    btNodeIsUp,
     markDesignDirty,
     missionFlowEdges,
     missionRouteMode,
@@ -5140,6 +5007,7 @@ export default function MissionCanvasPage() {
   }, [btLayerSpotId]);
 
   const handleSelectBehaviorNode = useCallback((nodeId) => {
+    cancelPendingDesignLocalization();
     setSelectedBehaviorNodeId(nodeId);
     setSelectedSpotId("");
     setEditingSpotId("");
@@ -5148,9 +5016,10 @@ export default function MissionCanvasPage() {
     setShowWaypointOptions(false);
     setBtLayerSpotId("");
     setInteractionMode("view");
-  }, []);
+  }, [cancelPendingDesignLocalization]);
 
   const handleSelectBehaviorPaletteNode = useCallback((tag) => {
+    cancelPendingDesignLocalization();
     setWorkspaceStage(STAGE_AUTHORING);
     setPendingBehaviorNodeTag(tag);
     setSelectedSpotId("");
@@ -5158,24 +5027,20 @@ export default function MissionCanvasPage() {
     setEditingSpotLabel("");
     setBtLayerSpotId("");
     setShowWaypointOptions(false);
+    setMissionRouteMode(false);
+    setMissionRouteSourceId("");
     setInteractionMode("behavior");
     setMessage(`${tag} selected`);
-  }, []);
+  }, [cancelPendingDesignLocalization]);
 
   const handleToggleWaypointOptions = useCallback(() => {
-    if (btNodeIsUp) {
-      setMessage("Deactivate BT before editing waypoints");
-      return;
-    }
+    cancelPendingDesignLocalization();
     setWorkspaceStage(STAGE_AUTHORING);
     setShowWaypointOptions((value) => !value);
-  }, [btNodeIsUp]);
+  }, [cancelPendingDesignLocalization]);
 
   const handleToggleSpotMode = useCallback(() => {
-    if (btNodeIsUp) {
-      setMessage("Deactivate BT before editing waypoints");
-      return;
-    }
+    cancelPendingDesignLocalization();
     setWorkspaceStage(STAGE_AUTHORING);
     setPendingBehaviorNodeTag("");
     setSelectedBehaviorNodeId("");
@@ -5184,7 +5049,7 @@ export default function MissionCanvasPage() {
     setEditingSpotLabel("");
     setShowWaypointOptions(false);
     setInteractionMode((value) => (value === "spot" ? "view" : "spot"));
-  }, [btNodeIsUp]);
+  }, [cancelPendingDesignLocalization]);
 
   const waitForAutoLocalizedPose = useCallback(async () => {
     let latestPose = null;
@@ -5234,10 +5099,12 @@ export default function MissionCanvasPage() {
       if (interactionMode === "initial") void handleRunPoseEstimate(x, y, yaw);
       return;
     }
-    if (btNodeIsUp && (interactionMode === "spot" || interactionMode === "initial")) {
+    if (
+      interactionMode === "initial"
+      && (mappingRuntimeActive || runRuntimeActive || missionRunnerActive)
+    ) {
       setInteractionMode("view");
-      setShowWaypointOptions(false);
-      setMessage("Deactivate BT before editing waypoints");
+      setMessage("Stop the active navigation session before using At Robot");
       return;
     }
     if (interactionMode === "initial") {
@@ -5335,22 +5202,24 @@ export default function MissionCanvasPage() {
     }
   }, [
     currentMapName,
-    btNodeIsUp,
     clearLocalizationPoseCache,
     designMapPath,
     handleRunPoseEstimate,
     interactionMode,
+    mappingRuntimeActive,
     markDesignDirty,
+    missionRunnerActive,
     pendingBehaviorNodeTag,
     runCommand,
+    runRuntimeActive,
     spots,
     waitForAutoLocalizedPose,
     workspaceStage,
   ]);
 
   const handleCreateSpotAtRobot = useCallback(() => {
-    if (btNodeIsUp) {
-      setMessage("Deactivate BT before editing waypoints");
+    if (mappingRuntimeActive || runRuntimeActive || missionRunnerActive) {
+      setMessage("Stop the active navigation session before using At Robot");
       return;
     }
     if (!designMapAvailable || !designMapPath) {
@@ -5362,6 +5231,8 @@ export default function MissionCanvasPage() {
     setPendingBehaviorNodeTag("");
     setSelectedBehaviorNodeId("");
     setSelectedSpotId("");
+    setMissionRouteMode(false);
+    setMissionRouteSourceId("");
     setShowWaypointOptions(false);
     setDesignPoseInitialized(false);
     clearLocalizationPoseCache();
@@ -5389,18 +5260,16 @@ export default function MissionCanvasPage() {
     );
   }, [
     currentMapName,
-    btNodeIsUp,
     clearLocalizationPoseCache,
     designMapAvailable,
     designMapPath,
+    mappingRuntimeActive,
+    missionRunnerActive,
     runCommand,
+    runRuntimeActive,
   ]);
 
   const handleMoveSpot = useCallback(async (spotId, x, y, yaw) => {
-    if (btNodeIsUp) {
-      setMessage("Deactivate BT before editing waypoints");
-      return;
-    }
     const spot = spots.find((item) => item.id === spotId);
     if (!spot) return;
     const nextPose = spotPoseFromMapPose(x, y, yaw ?? spot.pose?.yaw ?? 0);
@@ -5431,7 +5300,7 @@ export default function MissionCanvasPage() {
       )));
       setMessage(error instanceof Error ? error.message : "Failed to move waypoint");
     }
-  }, [btNodeIsUp, markDesignDirty, spots]);
+  }, [markDesignDirty, spots]);
 
   const handleMoveBehaviorNode = useCallback((nodeId, x, y, yaw) => {
     markDesignDirty();
@@ -5557,7 +5426,6 @@ export default function MissionCanvasPage() {
     !designMapAvailable ||
     !!busy ||
     designMapBusy ||
-    btNodeIsUp ||
     waypointBtLayerOpen
   );
 
@@ -5743,17 +5611,22 @@ export default function MissionCanvasPage() {
                 type="button"
                 role="tab"
                 aria-selected={selected}
+                disabled={!!busy}
                 onClick={() => {
-                  if (stage.id !== workspaceStage) setMissionMapLoaded(false);
-                  setWorkspaceStage(stage.id);
-                  if (stage.id !== STAGE_MAPPING) setShowPgmFix(false);
-                  if (stage.id !== STAGE_AUTHORING) {
+                  if (stage.id !== workspaceStage) {
+                    cancelPendingDesignLocalization();
+                    setMissionMapLoaded(false);
                     setInteractionMode("view");
                     setPendingBehaviorNodeTag("");
                     setShowWaypointOptions(false);
+                    setMissionRouteMode(false);
+                    setMissionRouteSourceId("");
+                    setBtLayerSpotId("");
                   }
+                  setWorkspaceStage(stage.id);
+                  if (stage.id !== STAGE_MAPPING) setShowPgmFix(false);
                 }}
-                className="flex items-center gap-3 px-3 py-2.5 text-[13px] font-semibold transition-colors"
+                className="flex items-center gap-3 px-3 py-2.5 text-[13px] font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50"
                 style={{
                   borderRadius: 10,
                   color: selected ? MISSION_TEXT : MISSION_TEXT_MUTED,
@@ -5785,12 +5658,13 @@ export default function MissionCanvasPage() {
                 <span className="font-semibold truncate" style={{ color: MISSION_TEXT_MUTED }}>{waypointBtLayer.spot.label || waypointBtLayer.spot.id}</span>
                 <span className="text-[11px] font-mono shrink-0" style={{ color: "var(--mc-text-subtle)" }}>· Local BT</span>
               </div>
-              {/* BT lifecycle control lives in the BtRuntimePanel only — no
-                  duplicate Deactivate button up here. */}
-              <div className="flex items-center gap-2 px-3 py-1.5" style={{ borderRadius: 999, backgroundColor: "color-mix(in srgb, var(--mc-success) 14%, transparent)", border: "1px solid color-mix(in srgb, var(--mc-success) 35%, transparent)" }}>
-                <span className="w-2 h-2 rounded-full" style={{ backgroundColor: "var(--mc-success)" }} />
-                <span className="text-[12px] font-semibold" style={{ color: "var(--mc-success)" }}>BT Active · {waypointBtLayer.executionLabel}</span>
-              </div>
+              <ActionButton
+                onClick={() => setBtLayerSpotId("")}
+                title="Return to the Design map"
+                variant="secondary"
+              >
+                ← Back to Map
+              </ActionButton>
             </>
           ) : workspaceStage === STAGE_RUN && runBtLayer ? (
             <>
@@ -5930,7 +5804,7 @@ export default function MissionCanvasPage() {
         )}
 
         {/* content: map + inspector */}
-        <div className="flex-1 min-h-0 grid grid-cols-1 xl:grid-cols-[minmax(460px,1fr)_380px]">
+        <div className={`flex-1 min-h-0 grid grid-cols-1 ${waypointBtLayer ? "" : "xl:grid-cols-[minmax(460px,1fr)_380px]"}`}>
           <section className="min-h-0 overflow-hidden relative" style={{ backgroundColor: "var(--mc-surface)", borderRight: "1px solid var(--mc-border)" }}>
           <MapViewer
             isDark={isDark}
@@ -5952,7 +5826,7 @@ export default function MissionCanvasPage() {
             behaviorPreviewNode={missionOverlayActive ? behaviorPreviewNode : null}
             missionRouteOrder={missionOverlayActive ? missionRouteOrder : []}
             missionRouteClosed={missionOverlayActive && missionRouteClosed}
-            missionRouteMode={workspaceStage === STAGE_AUTHORING && missionRouteMode && !btNodeIsUp}
+            missionRouteMode={workspaceStage === STAGE_AUTHORING && missionRouteMode}
             selectedMissionRouteSourceId={missionRouteSourceId}
             mapAnnotations={
               mappingEditorActive
@@ -5975,7 +5849,7 @@ export default function MissionCanvasPage() {
                 }
                 : null
             }
-            btLayer={activeBtLayer}
+            btLayer={workspaceStage === STAGE_AUTHORING ? waypointBtLayer : runBtLayer}
             showMap={mappingEditorActive ? true : activeLayers.map}
             showGlobalCostmap={mappingEditorActive ? false : needsGlobalCostmap}
             showLocalCostmap={mappingEditorActive ? false : needsLocalCostmap}
@@ -6009,23 +5883,23 @@ export default function MissionCanvasPage() {
                   ? "Waiting for /map"
                   : runDisplayMapEditor.busy ? "Loading map" : "Load a mission to view the map"}
             /* Selection is an authoring gesture; Run waypoints ignore clicks. */
-            onSpotClick={workspaceStage === STAGE_AUTHORING ? (missionRouteMode ? handleMissionRouteSpotClick : handleSelectSpot) : undefined}
-            onBehaviorNodeClick={handleSelectBehaviorNode}
+            onSpotClick={workspaceStage === STAGE_AUTHORING && !waypointBtLayer ? (missionRouteMode ? handleMissionRouteSpotClick : handleSelectSpot) : undefined}
+            onBehaviorNodeClick={workspaceStage === STAGE_AUTHORING && !waypointBtLayer ? handleSelectBehaviorNode : undefined}
             onMissionRouteSpotClick={handleMissionRouteSpotClick}
             onMissionRouteMapClick={handleMissionRouteMapClick}
             /* Waypoints are editable in Design only — Run must not even start
                a drag (a Run drag would just snap back, but shouldn't begin). */
-            onSpotPoseChange={workspaceStage === STAGE_AUTHORING && !btNodeIsUp && !missionRouteMode ? handleMoveSpot : undefined}
-            onBehaviorNodePoseChange={handleMoveBehaviorNode}
+            onSpotPoseChange={workspaceStage === STAGE_AUTHORING && !missionRouteMode && !waypointBtLayer ? handleMoveSpot : undefined}
+            onBehaviorNodePoseChange={workspaceStage === STAGE_AUTHORING && !missionRouteMode && !waypointBtLayer ? handleMoveBehaviorNode : undefined}
             onEditorMapPoint={
               mapEditor.tool === "extend_area" || mapEditor.tool === "erase_area"
                 ? mapEditor.editAreaAtMapPoint
                 : mapEditor.editAtMapPoint
             }
             onEditorMapArea={mapEditor.tool === "label_marker" ? mapEditor.placeAnnotationAtMapArea : undefined}
-            onMapClick={handleClearMapSelection}
-            onMapPose={handleCreateSpotAtPose}
-            onBtLayerClose={() => setBtLayerSpotId("")}
+            onMapClick={waypointBtLayer ? undefined : handleClearMapSelection}
+            onMapPose={waypointBtLayer ? undefined : handleCreateSpotAtPose}
+            onBtLayerClose={workspaceStage === STAGE_AUTHORING ? () => setBtLayerSpotId("") : undefined}
           />
 
           {workspaceStage === STAGE_AUTHORING && !waypointBtLayer && (
@@ -6042,10 +5916,10 @@ export default function MissionCanvasPage() {
                   <button
                     type="button"
                     onClick={handleToggleWaypointOptions}
-                    disabled={!designMapAvailable || btNodeIsUp || missionRouteMode}
+                    disabled={!designMapAvailable || missionRouteMode}
                     aria-label="Create Waypoint"
                     aria-pressed={(showWaypointOptions || interactionMode === "spot") ? true : undefined}
-                    title={btNodeIsUp ? "Deactivate BT before editing waypoints" : missionRouteMode ? "Turn off Edit Route first" : "Add a waypoint"}
+                    title={missionRouteMode ? "Turn off Edit Route first" : "Add a waypoint"}
                     className="h-8 px-3 text-[12.5px] font-semibold inline-flex items-center gap-1.5 disabled:opacity-45"
                     style={{ borderRadius: 9, border: "none", backgroundColor: (showWaypointOptions || interactionMode === "spot") ? "var(--mc-accent)" : "var(--mc-text)", color: (showWaypointOptions || interactionMode === "spot") ? "var(--mc-accent-fg)" : "var(--mc-bg)" }}
                   >
@@ -6054,18 +5928,24 @@ export default function MissionCanvasPage() {
                   </button>
                   {showWaypointOptions && (
                     <div className="absolute left-0 top-[calc(100%+6px)] flex items-center gap-2 p-2" role="menu" aria-label="Waypoint creation options" style={{ borderRadius: 12, backgroundColor: "var(--mc-surface)", border: "1px solid var(--mc-border-strong)", boxShadow: "var(--mc-shadow)" }}>
-                      <WaypointOptionButton active={interactionMode === "spot"} disabled={!designMapAvailable || btNodeIsUp || missionRouteMode} onClick={handleToggleSpotMode}>On Map</WaypointOptionButton>
-                      <WaypointOptionButton active={interactionMode === "initial" || busy === "At Robot"} disabled={!!busy || !designMapAvailable || btNodeIsUp || missionRouteMode || runShutdownPending} onClick={handleCreateSpotAtRobot}>At Robot</WaypointOptionButton>
+                      <WaypointOptionButton active={interactionMode === "spot"} disabled={!designMapAvailable || missionRouteMode} onClick={handleToggleSpotMode}>On Map</WaypointOptionButton>
+                      <WaypointOptionButton
+                        active={interactionMode === "initial" || busy === "At Robot"}
+                        disabled={!!busy || !designMapAvailable || missionRouteMode || runShutdownPending || mappingRuntimeActive || runRuntimeActive || missionRunnerActive}
+                        onClick={handleCreateSpotAtRobot}
+                      >
+                        At Robot
+                      </WaypointOptionButton>
                     </div>
                   )}
                 </div>
                 <button
                   type="button"
                   onClick={handleToggleMissionRouteMode}
-                  disabled={!!busy || !designMapAvailable || btNodeIsUp}
+                  disabled={!!busy || !designMapAvailable}
                   aria-label="Edit On Map"
                   aria-pressed={missionRouteMode ? true : undefined}
-                  title={btNodeIsUp ? "Deactivate BT before editing mission route" : "Edit the mission route on the map"}
+                  title="Edit the mission route on the map"
                   className="h-8 px-3 text-[12.5px] font-semibold disabled:opacity-45"
                   style={{ borderRadius: 9, border: `1px solid ${missionRouteMode ? "var(--mc-accent)" : "var(--mc-border-strong)"}`, backgroundColor: missionRouteMode ? "var(--mc-accent-soft)" : "var(--mc-surface)", color: "var(--mc-text)" }}
                 >
@@ -6166,25 +6046,16 @@ export default function MissionCanvasPage() {
           {!activeBtLayer && !mappingEditorActive && <LayersPopover layerToggles={layerToggles} />}
         </section>
 
-        {workspaceStage === STAGE_AUTHORING ? (
-          <aside className="min-h-0 grid grid-rows-[auto_minmax(0,1fr)_minmax(220px,0.7fr)] gap-4 overflow-hidden p-4">
-            <BtRuntimePanel
-              nodeState={btNodeStatus.state}
-              btStatus={btStatusText}
-              activeNodes={btActiveNodesText}
-              busy={!!btNodeBusy}
-              onActivate={handleBtNodeActivate}
-              onDeactivate={handleBtNodeDeactivate}
-            />
-
+        {workspaceStage === STAGE_AUTHORING ? (!waypointBtLayer ? (
+          <aside className="min-h-0 grid grid-rows-[minmax(0,1fr)_minmax(220px,0.7fr)] gap-4 overflow-hidden p-4">
             {/* Waypoints — LIST ONLY (Create moved to the map HUD) */}
             <div className="min-h-0 overflow-auto" style={{ backgroundColor: "var(--mc-surface)", border: "1px solid var(--mc-border)", borderRadius: 16, boxShadow: "var(--mc-shadow)", padding: 18 }}>
               <div className="flex items-center justify-between mb-3.5">
                 <span className="text-[13.5px] font-bold">Waypoints</span>
-                <span className="text-[11px] font-mono" style={{ color: "var(--mc-text-subtle)" }}>{spots.length}</span>
+                <span className="text-[11px] font-mono" style={{ color: "var(--mc-text-subtle)" }}>{designPanelSpots.length}</span>
               </div>
               <div className="grid gap-2">
-                {spots.map((spot) => {
+                {designPanelSpots.map((spot) => {
                   const selected = spot.id === selectedSpotId;
                   const editing = editingSpotId === spot.id;
                   return (
@@ -6203,6 +6074,16 @@ export default function MissionCanvasPage() {
                             <span className="block truncate">{spot.label || spot.id}</span>
                           </button>
                         )}
+                        <button
+                          type="button"
+                          aria-label={`Edit BT for ${spot.label || spot.id}`}
+                          title={`Edit ${spot.label || spot.id} local BT`}
+                          onClick={() => handleOpenWaypointBt(spot.id)}
+                          className="h-8 shrink-0 px-2.5 text-[11.5px] font-semibold active:translate-y-px"
+                          style={{ borderRadius: 8, border: "1px solid var(--mc-border-strong)", backgroundColor: "var(--mc-surface)", color: "var(--mc-text-muted)" }}
+                        >
+                          Edit BT
+                        </button>
                         <button type="button" aria-label={`Delete Waypoint ${spot.label || spot.id}`} title={`Delete ${spot.label || spot.id}`} onClick={() => { void handleDeleteSpot(spot); }}
                           className="h-8 w-8 shrink-0 inline-flex items-center justify-center active:translate-y-px"
                           style={{ borderRadius: 8, border: "1px solid var(--mc-border-strong)", backgroundColor: "var(--mc-surface)", color: "var(--mc-danger)" }}>
@@ -6212,8 +6093,8 @@ export default function MissionCanvasPage() {
                     </div>
                   );
                 })}
-                {spots.length === 0 && <div className="text-[12px]" style={{ color: "var(--mc-text-muted)" }}>No waypoints for this map yet.</div>}
-                {activeBehaviorNodes.map((node) => {
+                {designPanelSpots.length === 0 && <div className="text-[12px]" style={{ color: "var(--mc-text-muted)" }}>No waypoints for this map yet.</div>}
+                {designPanelBehaviorNodes.map((node) => {
                   const selected = node.id === selectedBehaviorNodeId;
                   return (
                     <div key={node.id} className="flex items-center gap-1.5 min-w-0">
@@ -6238,18 +6119,18 @@ export default function MissionCanvasPage() {
                 <div className="flex items-center justify-between">
                   <span className="text-[13.5px] font-bold">Mission Route</span>
                   <div className="flex items-center gap-1.5">
-                    {missionRouteClosed && <span className="text-[10.5px] font-mono px-2 py-1" style={{ borderRadius: 6, backgroundColor: "color-mix(in srgb, var(--mc-success) 14%, transparent)", color: "var(--mc-success)" }}>closed loop</span>}
+                    {designPanelRouteClosed && <span className="text-[10.5px] font-mono px-2 py-1" style={{ borderRadius: 6, backgroundColor: "color-mix(in srgb, var(--mc-success) 14%, transparent)", color: "var(--mc-success)" }}>closed loop</span>}
                     {missionRouteMode && <span className="text-[10.5px] font-mono px-2 py-1" style={{ borderRadius: 6, backgroundColor: "var(--mc-accent-soft)", color: "var(--mc-accent-hover)" }}>editing on map</span>}
                     {/* Only while a route exists — map clicks can only ADD
                         edges, so this is the sole way to discard a route (or a
                         closed loop) without deleting waypoints. */}
-                    {missionFlowEdges.length > 0 && (
+                    {designDocumentReady && missionFlowEdges.length > 0 && (
                       <button
                         type="button"
                         onClick={handleClearMissionRoute}
-                        disabled={!!busy || btNodeIsUp}
+                        disabled={!!busy}
                         aria-label="Clear Route"
-                        title={btNodeIsUp ? "Deactivate BT before editing mission route" : "Remove all route connections (waypoints stay)"}
+                        title="Remove all route connections (waypoints stay)"
                         className="h-7 px-2.5 text-[11px] font-semibold disabled:opacity-45 active:translate-y-px"
                         style={{ borderRadius: 7, border: "1px solid var(--mc-border-strong)", backgroundColor: "var(--mc-surface)", color: "var(--mc-danger)" }}
                       >
@@ -6260,10 +6141,10 @@ export default function MissionCanvasPage() {
                 </div>
                 <div className="min-h-0 overflow-auto pr-1">
                   <div className="grid gap-0">
-                    {missionRouteTreeSpots.map((spot, index) => {
+                    {designPanelRouteSpots.map((spot, index) => {
                       const selected = spot.id === selectedSpotId;
-                      const routeEnd = index === missionRouteTreeSpots.length - 1;
-                      const last = routeEnd && !missionRouteClosed;
+                      const routeEnd = index === designPanelRouteSpots.length - 1;
+                      const last = routeEnd && !designPanelRouteClosed;
                       return (
                         <div key={spot.id} className="flex gap-3 items-stretch">
                           <div className="flex flex-col items-center" style={{ width: 26 }}>
@@ -6290,22 +6171,21 @@ export default function MissionCanvasPage() {
                         </div>
                       );
                     })}
-                    {missionRouteClosed && missionRouteTreeSpots.length > 1 && (
-                      <div className="flex gap-3 items-stretch" aria-label={`Return to ${missionRouteTreeSpots[0].label || missionRouteTreeSpots[0].id}`}>
+                    {designPanelRouteClosed && designPanelRouteSpots.length > 1 && (
+                      <div className="flex gap-3 items-stretch" aria-label={`Return to ${designPanelRouteSpots[0].label || designPanelRouteSpots[0].id}`}>
                         <div className="flex flex-col items-center" style={{ width: 26 }}>
                           <span className="h-[26px] w-[26px] shrink-0 rounded-full inline-flex items-center justify-center text-[13px] font-semibold" style={{ color: "var(--mc-success)", backgroundColor: "color-mix(in srgb, var(--mc-success) 14%, transparent)", border: "1px solid var(--mc-success)" }}>↻</span>
                         </div>
                         <div className="flex-1 mb-2 grid grid-cols-[1fr_auto] items-center gap-2 min-w-0" style={{ padding: 10, borderRadius: 11, border: "1px solid var(--mc-success)", backgroundColor: "color-mix(in srgb, var(--mc-success) 10%, transparent)" }}>
                           <div className="min-w-0">
                             <span className="block truncate text-[12.5px] font-semibold" style={{ color: "var(--mc-success)" }}>
-                              Return to {missionRouteTreeSpots[0].label || missionRouteTreeSpots[0].id}
+                              Return to {designPanelRouteSpots[0].label || designPanelRouteSpots[0].id}
                             </span>
                             <span className="block truncate text-[10px] font-mono" style={{ color: "var(--mc-text-subtle)" }}>Loop closure</span>
                           </div>
                           {/* A closed loop rejects every map-click edit, so the
                               closure row carries its own remove affordance. */}
                           <button type="button" aria-label="Open loop" title="Remove the loop closure so the route can be edited again"
-                            disabled={btNodeIsUp}
                             onClick={handleOpenMissionRouteLoop}
                             className="h-7 w-7 shrink-0 inline-flex items-center justify-center text-[13px] leading-none active:translate-y-px disabled:opacity-40"
                             style={{ borderRadius: 7, border: "1px solid var(--mc-border-strong)", backgroundColor: "var(--mc-surface)", color: "var(--mc-danger)" }}>
@@ -6314,13 +6194,13 @@ export default function MissionCanvasPage() {
                         </div>
                       </div>
                     )}
-                    {missionRouteTreeSpots.length === 0 && <div className="text-[12px]" style={{ color: "var(--mc-text-muted)" }}>Select a waypoint and add it to the route.</div>}
+                    {designPanelRouteSpots.length === 0 && <div className="text-[12px]" style={{ color: "var(--mc-text-muted)" }}>Select a waypoint and add it to the route.</div>}
                   </div>
                 </div>
               </div>
             </div>
           </aside>
-        ) : (
+        ) : null) : (
           <aside className="min-h-0 grid gap-4 overflow-auto p-4 content-start">
             {/* Teleop drives the robot while recording; it has no role in the
                 saved-map editor, so hide it there. */}
@@ -6339,9 +6219,8 @@ export default function MissionCanvasPage() {
               />
             ) : (
               // The BT node lifecycle is run-owned (Run Mission activates it on
-              // demand and the runner releases it afterwards), so Run carries
-              // no manual Activate/Deactivate panel — Design keeps one because
-              // waypoint BT editing needs the node up.
+              // demand and the runner releases it afterwards), so there is no
+              // manual Activate/Deactivate panel in Mission Canvas.
               <RunSessionPanel
                 mapName={currentMapName}
                 running={running}

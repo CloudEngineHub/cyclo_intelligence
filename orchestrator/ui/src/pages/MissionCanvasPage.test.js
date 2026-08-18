@@ -359,7 +359,7 @@ test('renders Mission Canvas foundation', async () => {
   expect(screen.queryByText('/global_costmap/costmap')).not.toBeInTheDocument();
   expect(screen.queryByText('/bt/status')).not.toBeInTheDocument();
   await waitFor(() => expect(getServiceStatus).toHaveBeenCalled());
-  await waitFor(() => expect(getNavigationSpots).toHaveBeenCalledWith('map'));
+  expect(getNavigationSpots).not.toHaveBeenCalled();
 });
 
 test('updates mapping topics when layer toggles change', async () => {
@@ -397,10 +397,10 @@ test('updates mapping topics when layer toggles change', async () => {
   expect(screen.queryByText('/amcl_pose')).not.toBeInTheDocument();
 
   await waitFor(() => expect(getServiceStatus).toHaveBeenCalled());
-  await waitFor(() => expect(getNavigationSpots).toHaveBeenCalledWith('map'));
+  expect(getNavigationSpots).not.toHaveBeenCalled();
 });
 
-test('shows Waypoint and BT authoring panels in the authoring stage', async () => {
+test('shows waypoint authoring panels without Design BT runtime controls', async () => {
   const latestMapViewerProps = () => (
     mockMapViewer.mock.calls[mockMapViewer.mock.calls.length - 1][0]
   );
@@ -411,10 +411,10 @@ test('shows Waypoint and BT authoring panels in the authoring stage', async () =
 
   expect(screen.queryByText('Mission Flow')).not.toBeInTheDocument();
   expect(screen.queryByText('Properties')).not.toBeInTheDocument();
-  expect(screen.getByText('BT Runtime')).toBeInTheDocument();
-  expect(screen.getByText('BT Node Unknown')).toBeInTheDocument();
-  expect(screen.getByRole('button', { name: 'Activate BT' })).toBeEnabled();
-  expect(screen.getByRole('button', { name: 'Deactivate BT' })).toBeDisabled();
+  expect(screen.queryByText('BT Runtime')).not.toBeInTheDocument();
+  expect(screen.queryByText(/BT Node (Unknown|Inactive|Active)/)).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Activate BT' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Deactivate BT' })).not.toBeInTheDocument();
   expect(screen.getByText('Waypoints')).toBeInTheDocument();
   expect(screen.queryByText('Behavior Nodes')).not.toBeInTheDocument();
   expect(screen.queryByText('No behavior nodes placed yet.')).not.toBeInTheDocument();
@@ -425,6 +425,8 @@ test('shows Waypoint and BT authoring panels in the authoring stage', async () =
   expect(screen.queryByRole('button', { name: 'Save Mission' })).not.toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Edit On Map' })).toBeDisabled();
   expect(screen.queryByRole('button', { name: 'Add Selected' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Select Waypoints' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Move Waypoints' })).not.toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Create Waypoint' })).toBeDisabled();
   expect(screen.queryByRole('menu', { name: 'Waypoint creation options' })).not.toBeInTheDocument();
   expect(screen.queryByRole('button', { name: 'At Robot' })).not.toBeInTheDocument();
@@ -440,8 +442,7 @@ test('shows Waypoint and BT authoring panels in the authoring stage', async () =
   expect(screen.queryByText('/scan')).not.toBeInTheDocument();
   expect(screen.queryByText('/global_costmap/costmap')).not.toBeInTheDocument();
   await waitFor(() => expect(getServiceStatus).toHaveBeenCalled());
-  await waitFor(() => expect(getNavigationSpots).toHaveBeenCalledWith('map'));
-  await waitFor(() => expect(screen.getByText('BT Node Inactive')).toBeInTheDocument());
+  expect(getNavigationSpots).not.toHaveBeenCalled();
   expect(getPgmImage).not.toHaveBeenCalled();
   expect(latestMapViewerProps().map).toBeNull();
   expect(latestMapViewerProps().waitingLabel).toBe('Load a map');
@@ -451,69 +452,51 @@ test('shows Waypoint and BT authoring panels in the authoring stage', async () =
   expect(latestMapViewerProps().missionRouteOrder).toEqual([]);
 });
 
-test('controls BT node lifecycle from the design stage', async () => {
-  global.fetch
-    .mockResolvedValueOnce(mockJsonResponse({
-      name: 'bt_node',
-      state: 'down',
-      raw: 'down',
-    }))
-    .mockResolvedValueOnce(mockJsonResponse({
-      ok: true,
-      message: 'started',
-    }))
-    .mockResolvedValueOnce(mockJsonResponse({
-      name: 'bt_node',
-      state: 'up',
-      raw: 'up',
-    }))
-    .mockResolvedValueOnce(mockJsonResponse({
-      ok: true,
-      message: 'stopped',
-    }))
-    .mockResolvedValueOnce(mockJsonResponse({
-      name: 'bt_node',
-      state: 'down',
-      raw: 'down',
-    }));
+test('keeps Waypoints empty on first Design entry until a map and mission are loaded', async () => {
+  getNavigationSpots.mockResolvedValue({
+    map_name: 'map',
+    spots: [{
+      id: 'persisted_waypoint',
+      map_name: 'map',
+      label: 'Persisted Waypoint',
+      pose: { frame_id: 'map', x: 1, y: 2, yaw: 0 },
+      linked_bt_tree: '',
+      metadata: {},
+    }],
+  });
+  window.sessionStorage.setItem('cyclo_intelligence.robot_type', 'ffw_sg2');
+  window.sessionStorage.setItem('mission_canvas_session', JSON.stringify({
+    workspaceStage: 'authoring',
+    mapName: 'map',
+    missionName: 'Mission1',
+    designMapPath: 'map.pgm',
+  }));
 
+  render(<MissionCanvasPage />);
+  expect(screen.getByRole('tab', { name: 'Design' })).toHaveAttribute('aria-selected', 'true');
+  await waitFor(() => expect(getServiceStatus).toHaveBeenCalled());
+
+  const waypointsPanel = screen.getByText('Waypoints').parentElement.parentElement;
+  expect(within(waypointsPanel).getByText('0')).toBeInTheDocument();
+  expect(within(waypointsPanel).getByText('No waypoints for this map yet.')).toBeInTheDocument();
+  expect(within(waypointsPanel).queryByText('Persisted Waypoint')).not.toBeInTheDocument();
+  expect(getNavigationSpots).not.toHaveBeenCalled();
+});
+
+test('does not start or stop the BT runtime while entering Design', async () => {
   render(<MissionCanvasPage />);
 
   fireEvent.click(screen.getByRole('tab', { name: 'Design' }));
 
-  await waitFor(() => expect(screen.getByText('BT Node Inactive')).toBeInTheDocument());
-  expect(screen.getByText('Execution')).toBeInTheDocument();
-  expect(screen.getAllByText('wait').length).toBeGreaterThan(0);
-  expect(screen.getByRole('button', { name: 'Activate BT' })).toBeEnabled();
-  expect(screen.getByRole('button', { name: 'Deactivate BT' })).toBeDisabled();
-
-  fireEvent.click(screen.getByRole('button', { name: 'Activate BT' }));
-
-  await waitFor(() => expect(global.fetch).toHaveBeenCalledWith(
-    '/api/services/bt_node/start',
-    expect.objectContaining({
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ robot_type: 'ffw_sg2_rev1' }),
-    }),
-  ));
-  await waitFor(() => expect(screen.getByText('BT Node Active')).toBeInTheDocument());
-  expect(screen.getAllByText('Ready').length).toBeGreaterThan(0);
-  expect(screen.getByText('Waiting for run')).toBeInTheDocument();
-  expect(screen.getByRole('button', { name: 'Activate BT' })).toBeDisabled();
-  expect(screen.getByRole('button', { name: 'Deactivate BT' })).toBeEnabled();
-
-  fireEvent.click(screen.getByRole('button', { name: 'Deactivate BT' }));
-
-  await waitFor(() => expect(global.fetch).toHaveBeenCalledWith(
-    '/api/services/bt_node/stop',
-    expect.objectContaining({ method: 'POST' }),
-  ));
-  await waitFor(() => expect(screen.getByText('BT Node Inactive')).toBeInTheDocument());
-  expect(screen.getAllByText('wait').length).toBeGreaterThan(0);
+  await waitFor(() => expect(getServiceStatus).toHaveBeenCalled());
+  expect(screen.queryByText('BT Runtime')).not.toBeInTheDocument();
+  expect(global.fetch.mock.calls.some(([url, options]) => (
+    String(url).includes('/api/services/bt_node/')
+    && options?.method === 'POST'
+  ))).toBe(false);
 });
 
-test('uses BT topic messages in the design runtime summary', async () => {
+test('does not surface BT execution topics in Design', async () => {
   mockTopicDataByName['/bt/status'] = stringTopicMessage('running');
   mockTopicDataByName['/bt/active_nodes'] = stringTopicMessage('MoveBase, Wait');
   global.fetch.mockResolvedValue(mockJsonResponse({
@@ -528,9 +511,9 @@ test('uses BT topic messages in the design runtime summary', async () => {
 
   expect(screen.queryByText('/bt/status')).not.toBeInTheDocument();
   expect(screen.queryByText('/bt/active_nodes')).not.toBeInTheDocument();
-  await waitFor(() => expect(screen.getByText('BT Node Active')).toBeInTheDocument());
-  expect(screen.getByText('Running')).toBeInTheDocument();
-  expect(screen.getByText('MoveBase, Wait')).toBeInTheDocument();
+  expect(screen.queryByText('BT Node Active')).not.toBeInTheDocument();
+  expect(screen.queryByText('Running')).not.toBeInTheDocument();
+  expect(screen.queryByText('MoveBase, Wait')).not.toBeInTheDocument();
   await waitFor(() => expect(getServiceStatus).toHaveBeenCalled());
 });
 
@@ -982,6 +965,9 @@ test('edits mission manifest waypoints without legacy spot persistence', async (
   expect(getNavigationMissionBtFile).toHaveBeenCalledWith('factory', 'global.xml', '');
   expect(getNavigationMissionBtFile).toHaveBeenCalledWith('factory', 'locals/mission_pickup.xml', '');
 
+  expect(screen.queryByRole('button', { name: 'Select Waypoints' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Move Waypoints' })).not.toBeInTheDocument();
+  expect(latestMapViewerProps().onSpotPoseChange).toEqual(expect.any(Function));
   await act(async () => {
     await latestMapViewerProps().onSpotPoseChange('mission_pickup', 4, 5, 0.25);
   });
@@ -992,6 +978,7 @@ test('edits mission manifest waypoints without legacy spot persistence', async (
     y: 5,
     yaw: 0.25,
   }));
+  expect(latestMapViewerProps().onSpotPoseChange).toEqual(expect.any(Function));
 
   fireEvent.click(screen.getByRole('button', { name: 'Save Mission' }));
   await waitFor(() => expect(saveNavigationMission).toHaveBeenCalledWith(
@@ -1153,8 +1140,11 @@ test('shows waypoint actions in Waypoints after placing a waypoint', async () =>
   expect(screen.getByRole('button', { name: 'Create Waypoint' })).not.toHaveAttribute('aria-pressed', 'true');
   expect(latestMapViewerProps().interactionMode).toBe('view');
   expect(screen.queryByRole('button', { name: 'Create BT' })).not.toBeInTheDocument();
-  expect(screen.queryByRole('button', { name: 'Edit BT' })).not.toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Edit BT for Waypoint A' })).toBeEnabled();
   expect(screen.getByRole('button', { name: /Delete Waypoint Waypoint A/ })).toBeEnabled();
+  expect(screen.queryByRole('button', { name: 'Select Waypoints' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Move Waypoints' })).not.toBeInTheDocument();
+  expect(latestMapViewerProps().onSpotPoseChange).toEqual(expect.any(Function));
 
   await act(async () => {
     await latestMapViewerProps().onSpotPoseChange('spot_a', 4, 5, 0.25);
@@ -1170,6 +1160,7 @@ test('shows waypoint actions in Waypoints after placing a waypoint', async () =>
     y: 5,
     yaw: 0.25,
   }));
+  expect(latestMapViewerProps().onSpotPoseChange).toEqual(expect.any(Function));
 
   fireEvent.click(screen.getByRole('button', { name: 'Save Mission' }));
   // "default" already exists in the catalog, so Save writes in place — no dialog.
@@ -1227,8 +1218,9 @@ test('shows waypoint actions in Waypoints after placing a waypoint', async () =>
     latestMapViewerProps().onMapClick(0, 0);
   });
   await waitFor(() => expect(latestMapViewerProps().selectedSpotId).toBe(''));
+  expect(latestMapViewerProps().btLayer).toBeNull();
   expect(screen.queryByRole('button', { name: 'Create BT' })).not.toBeInTheDocument();
-  expect(screen.queryByRole('button', { name: 'Edit BT' })).not.toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Edit BT for Waypoint A' })).toBeEnabled();
 
   fireEvent.click(screen.getByRole('button', { name: 'Create Waypoint' }));
   fireEvent.click(screen.getByRole('button', { name: 'On Map' }));
@@ -1329,15 +1321,10 @@ test('undoes and redoes Design waypoint edits from buttons and shortcuts', async
   await waitFor(() => expect(latestMapViewerProps().spots).toHaveLength(1));
 });
 
-test('opens waypoint BT map layer when selecting a waypoint with BT active', async () => {
+test('opens waypoint BT from the rail while map selection stays runtime-independent', async () => {
   const latestMapViewerProps = () => (
     mockMapViewer.mock.calls[mockMapViewer.mock.calls.length - 1][0]
   );
-  global.fetch.mockResolvedValue(mockJsonResponse({
-    name: 'bt_node',
-    state: 'up',
-    raw: 'up',
-  }));
   getPgmFiles.mockResolvedValue({
     files: [{ path: 'factory.pgm', name: 'factory.pgm' }],
   });
@@ -1368,13 +1355,25 @@ test('opens waypoint BT map layer when selecting a waypoint with BT active', asy
   fireEvent.click(screen.getByRole('button', { name: 'Load' }));
 
   await waitFor(() => expect(latestMapViewerProps().spots).toHaveLength(1));
-  await waitFor(() => expect(screen.getByText('BT Node Active')).toBeInTheDocument());
-  expect(latestMapViewerProps().onSpotPoseChange).toBeUndefined();
-  expect(screen.getByRole('button', { name: 'Create Waypoint' })).toBeDisabled();
+  expect(latestMapViewerProps().onSpotPoseChange).toEqual(expect.any(Function));
+  expect(screen.getByRole('button', { name: 'Create Waypoint' })).toBeEnabled();
+  expect(screen.getByRole('button', { name: 'Edit BT for Waypoint Factory' })).toBeEnabled();
 
   act(() => {
     latestMapViewerProps().onSpotClick('spot_factory');
   });
+  await waitFor(() => expect(latestMapViewerProps().selectedSpotId).toBe('spot_factory'));
+  expect(latestMapViewerProps().btLayer).toBeNull();
+
+  act(() => {
+    latestMapViewerProps().onMapClick(0, 0);
+  });
+  await waitFor(() => expect(latestMapViewerProps().selectedSpotId).toBe(''));
+  expect(latestMapViewerProps().btLayer).toBeNull();
+
+  const mapBeforeBt = latestMapViewerProps().map;
+  const viewKeyBeforeBt = latestMapViewerProps().viewKey;
+  fireEvent.click(screen.getByRole('button', { name: 'Edit BT for Waypoint Factory' }));
 
   await waitFor(() => expect(latestMapViewerProps().btLayer).toMatchObject({
     spot: {
@@ -1382,11 +1381,18 @@ test('opens waypoint BT map layer when selecting a waypoint with BT active', asy
       label: 'Waypoint Factory',
       linked_bt_tree: 'factory_waypoint.xml',
     },
-    nodeLabel: 'Active',
-    executionLabel: 'Ready',
-    activeNodesLabel: 'Waiting for run',
   }));
+  expect(latestMapViewerProps().btLayer).not.toHaveProperty('fullCanvas');
+  expect(latestMapViewerProps().btLayer).not.toHaveProperty('focusMap');
   expect(latestMapViewerProps().btLayer.editor.props.fileActionsDisabled).toBe(false);
+  expect(latestMapViewerProps().onSpotClick).toBeUndefined();
+  expect(latestMapViewerProps().onSpotPoseChange).toBeUndefined();
+  expect(latestMapViewerProps().onMapClick).toBeUndefined();
+  expect(screen.getByRole('button', { name: /Back to Map/ })).toBeEnabled();
+  expect(global.fetch.mock.calls.some(([url, options]) => (
+    String(url).includes('/api/services/bt_node/start')
+    && options?.method === 'POST'
+  ))).toBe(false);
 
   const draftXml = [
     '<root BTCPP_format="4" main_tree_to_execute="MainTree">',
@@ -1419,12 +1425,13 @@ test('opens waypoint BT map layer when selecting a waypoint with BT active', asy
   expect(screen.queryByRole('button', { name: 'Create BT' })).not.toBeInTheDocument();
   expect(screen.queryByRole('button', { name: 'Edit BT' })).not.toBeInTheDocument();
 
-  act(() => {
-    latestMapViewerProps().onMapClick(0, 0);
-  });
+  fireEvent.click(screen.getByRole('button', { name: /Back to Map/ }));
 
   await waitFor(() => expect(latestMapViewerProps().btLayer).toBeNull());
   expect(latestMapViewerProps().selectedSpotId).toBe('spot_factory');
+  expect(latestMapViewerProps().map).toBe(mapBeforeBt);
+  expect(latestMapViewerProps().viewKey).toBe(viewKeyBeforeBt);
+  expect(screen.getByRole('button', { name: 'Edit BT for Waypoint Factory' })).toBeEnabled();
 });
 
 test('loads and saves each waypoint XML through its mission-local storage path', async () => {
@@ -1441,11 +1448,6 @@ test('loads and saves each waypoint XML through its mission-local storage path',
     'locals/a.xml': xmlFor('StoredA'),
     'locals/b.xml': xmlFor('StoredB'),
   };
-  global.fetch.mockResolvedValue(mockJsonResponse({
-    name: 'bt_node',
-    state: 'up',
-    raw: 'up',
-  }));
   getPgmFiles.mockResolvedValue({ files: [{ path: 'factory.pgm', name: 'factory.pgm' }] });
   getNavigationMissions.mockResolvedValue({ map_name: 'factory', missions: ['inspection'] });
   getNavigationMission.mockResolvedValue({
@@ -1486,9 +1488,8 @@ test('loads and saves each waypoint XML through its mission-local storage path',
     .toHaveValue('inspection'));
   fireEvent.click(screen.getByRole('button', { name: 'Load' }));
   await waitFor(() => expect(latestMapViewerProps().spots).toHaveLength(2));
-  await screen.findByText('BT Node Active');
 
-  act(() => latestMapViewerProps().onSpotClick('wp_a'));
+  fireEvent.click(screen.getByRole('button', { name: 'Edit BT for A' }));
   await waitFor(() => expect(latestMapViewerProps().btLayer?.editor).toBeTruthy());
   expect(latestMapViewerProps().btLayer.editor.props.fileActionsDisabled).toBe(false);
   getNavigationMissionBtFile.mockClear();
@@ -1521,7 +1522,7 @@ test('loads and saves each waypoint XML through its mission-local storage path',
     'locals/a.xml',
     'inspection',
   );
-  act(() => latestMapViewerProps().onSpotClick('wp_a'));
+  fireEvent.click(screen.getByRole('button', { name: 'Edit BT for A' }));
   await waitFor(() => expect(latestMapViewerProps().btLayer.editor.props.xml)
     .toContain('ReloadedA'));
 
@@ -1565,7 +1566,8 @@ test('loads and saves each waypoint XML through its mission-local storage path',
     { waypointId: 'wp_a', expectedRevision: 7 },
   );
 
-  act(() => latestMapViewerProps().onSpotClick('wp_b'));
+  fireEvent.click(screen.getByRole('button', { name: /Back to Map/ }));
+  fireEvent.click(screen.getByRole('button', { name: 'Edit BT for B' }));
   await waitFor(() => expect(latestMapViewerProps().btLayer.editor.props.filePath)
     .toBe('locals/b.xml'));
   const editedB = xmlFor('EditedB');
@@ -1600,7 +1602,6 @@ test('keeps a waypoint XML library separate from its changeable runtime default'
     'locals/a.xml': xmlFor('DefaultA'),
     'locals/a_alt.xml': xmlFor('AlternateA'),
   };
-  global.fetch.mockResolvedValue(mockJsonResponse({ name: 'bt_node', state: 'up', raw: 'up' }));
   getPgmFiles.mockResolvedValue({ files: [{ path: 'factory.pgm', name: 'factory.pgm' }] });
   getNavigationMissions.mockResolvedValue({ map_name: 'factory', missions: ['inspection'] });
   let serverRevision = 7;
@@ -1672,8 +1673,7 @@ test('keeps a waypoint XML library separate from its changeable runtime default'
     .toHaveValue('inspection'));
   fireEvent.click(screen.getByRole('button', { name: 'Load' }));
   await waitFor(() => expect(latestMapViewerProps().spots).toHaveLength(1));
-  await screen.findByText('BT Node Active');
-  act(() => latestMapViewerProps().onSpotClick('wp_a'));
+  fireEvent.click(screen.getByRole('button', { name: 'Edit BT for A' }));
   await waitFor(() => expect(latestMapViewerProps().btLayer?.editor).toBeTruthy());
 
   expect(latestMapViewerProps().btLayer.editor.props).toMatchObject({
@@ -1796,11 +1796,6 @@ test('saves the latest local BT snapshot after closing the editor', async () => 
     '</root>',
   ].join('\n');
   const editedXml = originalXml.replace('Before', 'After').replace('1.0', '3.5');
-  global.fetch.mockResolvedValue(mockJsonResponse({
-    name: 'bt_node',
-    state: 'up',
-    raw: 'up',
-  }));
   getPgmFiles.mockResolvedValue({
     files: [{ path: 'factory.pgm', name: 'factory.pgm' }],
   });
@@ -1829,8 +1824,7 @@ test('saves the latest local BT snapshot after closing the editor', async () => 
   await screen.findByRole('combobox', { name: 'Design mission map file' });
   fireEvent.click(screen.getByRole('button', { name: 'Load' }));
   await waitFor(() => expect(latestMapViewerProps().spots).toHaveLength(1));
-  await screen.findByText('BT Node Active');
-  act(() => latestMapViewerProps().onSpotClick('wp1'));
+  fireEvent.click(screen.getByRole('button', { name: 'Edit BT for Pickup' }));
   await waitFor(() => expect(latestMapViewerProps().btLayer?.editor).toBeTruthy());
 
   const editor = latestMapViewerProps().btLayer.editor;
@@ -1861,18 +1855,6 @@ test('saves the local BT restored by Design undo', async () => {
     '</root>',
   ].join('\n');
   const editedXml = originalXml.replace('Before', 'After');
-  let btUp = true;
-  global.fetch.mockImplementation((url) => {
-    if (String(url).includes('/services/bt_node/stop')) {
-      btUp = false;
-      return Promise.resolve(mockJsonResponse({ ok: true }));
-    }
-    return Promise.resolve(mockJsonResponse({
-      name: 'bt_node',
-      state: btUp ? 'up' : 'down',
-      raw: '',
-    }));
-  });
   getPgmFiles.mockResolvedValue({ files: [{ path: 'factory.pgm', name: 'factory.pgm' }] });
   getNavigationMission.mockResolvedValue({
     exists: true,
@@ -1899,16 +1881,13 @@ test('saves the local BT restored by Design undo', async () => {
   await screen.findByRole('combobox', { name: 'Design mission map file' });
   fireEvent.click(screen.getByRole('button', { name: 'Load' }));
   await waitFor(() => expect(latestMapViewerProps().spots).toHaveLength(1));
-  await screen.findByText('BT Node Active');
-  act(() => latestMapViewerProps().onSpotClick('wp1'));
+  fireEvent.click(screen.getByRole('button', { name: 'Edit BT for Pickup' }));
   await waitFor(() => expect(latestMapViewerProps().btLayer?.editor).toBeTruthy());
   act(() => {
     latestMapViewerProps().btLayer.editor.props.onXmlChange('locals/wp1.xml', editedXml);
     latestMapViewerProps().onBtLayerClose();
   });
 
-  fireEvent.click(screen.getByRole('button', { name: 'Deactivate BT' }));
-  await screen.findByText('BT Node Inactive');
   const undo = screen.getByRole('button', { name: 'Undo' });
   await waitFor(() => expect(undo).toBeEnabled());
   fireEvent.click(undo);
@@ -1979,7 +1958,6 @@ test('keeps edits made while a mission save is in flight', async () => {
   ].join('\n');
   const savedXml = originalXml.replace('Before', 'SavedSnapshot');
   const newerXml = originalXml.replace('Before', 'EditedDuringSave');
-  global.fetch.mockResolvedValue(mockJsonResponse({ name: 'bt_node', state: 'up', raw: 'up' }));
   getPgmFiles.mockResolvedValue({ files: [{ path: 'factory.pgm', name: 'factory.pgm' }] });
   getNavigationMission.mockResolvedValue({
     exists: true,
@@ -2013,8 +1991,7 @@ test('keeps edits made while a mission save is in flight', async () => {
   await screen.findByRole('combobox', { name: 'Design mission map file' });
   fireEvent.click(screen.getByRole('button', { name: 'Load' }));
   await waitFor(() => expect(latestMapViewerProps().spots).toHaveLength(1));
-  await screen.findByText('BT Node Active');
-  act(() => latestMapViewerProps().onSpotClick('wp1'));
+  fireEvent.click(screen.getByRole('button', { name: 'Edit BT for Pickup' }));
   await waitFor(() => expect(latestMapViewerProps().btLayer?.editor).toBeTruthy());
 
   act(() => {
@@ -2031,7 +2008,7 @@ test('keeps edits made while a mission save is in flight', async () => {
     '',
     { expectedRevision: 0 },
   );
-  act(() => latestMapViewerProps().onSpotClick('wp1'));
+  fireEvent.click(screen.getByRole('button', { name: 'Edit BT for Pickup' }));
   await waitFor(() => expect(latestMapViewerProps().btLayer?.editor).toBeTruthy());
   act(() => latestMapViewerProps().btLayer.editor.props.onXmlChange(
     'legacy.xml',
@@ -2065,7 +2042,6 @@ test('retries a partially completed mission save from the latest server revision
   const editedXml = originalXml.replace('Before', 'After');
   let globalUploads = 0;
   let localUploads = 0;
-  global.fetch.mockResolvedValue(mockJsonResponse({ name: 'bt_node', state: 'up', raw: 'up' }));
   getPgmFiles.mockResolvedValue({ files: [{ path: 'factory.pgm', name: 'factory.pgm' }] });
   getNavigationMission.mockResolvedValue({
     exists: true,
@@ -2117,8 +2093,7 @@ test('retries a partially completed mission save from the latest server revision
   await screen.findByRole('combobox', { name: 'Design mission map file' });
   fireEvent.click(screen.getByRole('button', { name: 'Load' }));
   await waitFor(() => expect(latestMapViewerProps().spots).toHaveLength(1));
-  await screen.findByText('BT Node Active');
-  act(() => latestMapViewerProps().onSpotClick('wp1'));
+  fireEvent.click(screen.getByRole('button', { name: 'Edit BT for Pickup' }));
   await waitFor(() => expect(latestMapViewerProps().btLayer?.editor).toBeTruthy());
   act(() => {
     latestMapViewerProps().btLayer.editor.props.onXmlChange('locals/wp1.xml', editedXml);
@@ -2134,6 +2109,67 @@ test('retries a partially completed mission save from the latest server revision
   expect(globalUploads).toBe(2);
   expect(localUploads).toBe(2);
   expect(saveNavigationMission).toHaveBeenCalledTimes(1);
+});
+
+test('locks stage navigation while At Robot localization is starting', async () => {
+  let resolveNavigationStart;
+  let resolveAmclConfiguration;
+  startNavigation.mockReturnValue(new Promise((resolve) => {
+    resolveNavigationStart = resolve;
+  }));
+  configureDesignLocalizationAmcl.mockReturnValue(new Promise((resolve) => {
+    resolveAmclConfiguration = resolve;
+  }));
+  getPgmFiles.mockResolvedValue({
+    files: [{ path: 'factory.pgm', name: 'factory.pgm' }],
+  });
+  getPgmImage.mockResolvedValue({
+    path: 'factory.pgm',
+    width: 1,
+    height: 1,
+    maxval: 255,
+    pixels_base64: 'AA==',
+  });
+
+  render(<MissionCanvasPage />);
+
+  fireEvent.click(screen.getByRole('tab', { name: 'Design' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Load Map' }));
+  await screen.findByRole('combobox', { name: 'Design mission map file' });
+  fireEvent.click(screen.getByRole('button', { name: 'Load' }));
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Create Waypoint' }))
+    .toBeEnabled());
+
+  fireEvent.click(screen.getByRole('button', { name: 'Create Waypoint' }));
+  fireEvent.click(screen.getByRole('button', { name: 'At Robot' }));
+  await waitFor(() => expect(startNavigation).toHaveBeenCalledWith('localize', 'factory'));
+
+  const designTab = screen.getByRole('tab', { name: 'Design' });
+  const mappingTab = screen.getByRole('tab', { name: 'Mapping' });
+  const runTab = screen.getByRole('tab', { name: 'Run' });
+  expect(mappingTab).toBeDisabled();
+  expect(runTab).toBeDisabled();
+  fireEvent.click(mappingTab);
+  fireEvent.click(runTab);
+  expect(designTab).toHaveAttribute('aria-selected', 'true');
+
+  await act(async () => {
+    resolveNavigationStart({ ok: true, message: 'started' });
+    await Promise.resolve();
+  });
+  await waitFor(() => expect(configureDesignLocalizationAmcl).toHaveBeenCalledTimes(1));
+  expect(mappingTab).toBeDisabled();
+  expect(runTab).toBeDisabled();
+  fireEvent.click(runTab);
+  expect(designTab).toHaveAttribute('aria-selected', 'true');
+
+  await act(async () => {
+    resolveAmclConfiguration({ ok: true });
+    await Promise.resolve();
+  });
+  await waitFor(() => expect(mappingTab).toBeEnabled());
+  expect(runTab).toBeEnabled();
+  expect(designTab).toHaveAttribute('aria-selected', 'true');
 });
 
 test('creates a waypoint at robot with automatic localization from the waypoint menu', async () => {
@@ -4079,6 +4115,52 @@ test('hides run waypoints with the map after leaving and returning to Run', asyn
   expect(latestMapViewerProps().missionRouteOrder).toEqual([]);
 });
 
+test('clears a pending Run pose gesture when switching to Design', async () => {
+  const latestMapViewerProps = () => (
+    mockMapViewer.mock.calls[mockMapViewer.mock.calls.length - 1][0]
+  );
+  let navigationUp = false;
+  getServiceStatus.mockImplementation(() => Promise.resolve(
+    navigationUp ? { is_up: true, mode: 'nav' } : { is_up: false, mode: 'idle' },
+  ));
+  startNavigation.mockImplementation(() => {
+    navigationUp = true;
+    return Promise.resolve({ ok: true, message: 'started' });
+  });
+  stopNavigation.mockImplementation(() => {
+    navigationUp = false;
+    return Promise.resolve({ ok: true, message: 'stopped' });
+  });
+
+  render(<MissionCanvasPage />);
+
+  fireEvent.click(screen.getByRole('tab', { name: 'Run' }));
+  await loadRunMapFromDialog('factory.pgm');
+  fireEvent.click(screen.getByRole('button', { name: 'Localize' }));
+  await waitFor(() => expect(startNavigation).toHaveBeenCalledWith('nav', 'factory'));
+  await waitFor(() => expect(latestMapViewerProps().interactionMode).toBe('initial'));
+  expect(navigationUp).toBe(true);
+
+  sendInitialPoseEstimate.mockClear();
+  createNavigationSpot.mockClear();
+  stopNavigation.mockClear();
+  fireEvent.click(screen.getByRole('tab', { name: 'Design' }));
+
+  await waitFor(() => expect(latestMapViewerProps().interactionMode).toBe('view'));
+  expect(screen.getByRole('tab', { name: 'Design' })).toHaveAttribute('aria-selected', 'true');
+  await act(async () => {
+    latestMapViewerProps().onMapClick(1, 2);
+    await latestMapViewerProps().onMapPose(1, 2, 0.25);
+  });
+
+  expect(sendInitialPoseEstimate).not.toHaveBeenCalled();
+  expect(createNavigationSpot).not.toHaveBeenCalled();
+  expect(stopNavigation).not.toHaveBeenCalled();
+  expect(navigationUp).toBe(true);
+  expect(screen.queryByText('Stop the active navigation session before using At Robot'))
+    .not.toBeInTheDocument();
+});
+
 test('gates the mission run on an initial robot pose', async () => {
   const latestMapViewerProps = () => (
     mockMapViewer.mock.calls[mockMapViewer.mock.calls.length - 1][0]
@@ -4310,8 +4392,8 @@ test('keeps Run localization active while the BT node is up', async () => {
   const latestMapViewerProps = () => (
     mockMapViewer.mock.calls[mockMapViewer.mock.calls.length - 1][0]
   );
-  // A running mission keeps the BT node up; the design-only "deactivate BT
-  // before editing" guard must not cancel the Run pose-set gesture.
+  // A running mission can keep the BT node up while localization still uses
+  // the map pose-set gesture.
   global.fetch.mockResolvedValue(mockJsonResponse({ name: 'bt_node', state: 'up', raw: 'up' }));
   getPgmFiles.mockResolvedValue({
     files: [{ path: 'factory.pgm', name: 'factory.pgm' }],
@@ -4332,14 +4414,8 @@ test('keeps Run localization active while the BT node is up', async () => {
 
   render(<MissionCanvasPage />);
 
-  // Establish that the BT node is up (observable in the design stage).
-  fireEvent.click(screen.getByRole('tab', { name: 'Design' }));
-  fireEvent.click(screen.getByRole('button', { name: 'Load Map' }));
-  await screen.findByRole('combobox', { name: 'Design mission map file' });
-  fireEvent.click(screen.getByRole('button', { name: 'Load' }));
-  await waitFor(() => expect(screen.getByText('BT Node Active')).toBeInTheDocument());
-
-  // Move to Run and localize; the BT node stays up throughout.
+  // Run observes the active BT service internally without exposing manual
+  // lifecycle controls in Design.
   fireEvent.click(screen.getByRole('tab', { name: 'Run' }));
   fireEvent.click(screen.getByRole('button', { name: 'Load Map' }));
   const mapSelect = await screen.findByRole('combobox', { name: 'Run mission map file' });
