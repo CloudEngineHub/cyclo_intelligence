@@ -583,6 +583,67 @@ def test_backend_status_model_exposes_stale_image_status():
     assert status.image_status == "stale"
 
 
+def test_backend_start_keeps_running_container(monkeypatch):
+    class FakeContainer:
+        def __init__(self):
+            self.started = False
+            self.restarted = False
+
+        def start(self):
+            self.started = True
+
+        def restart(self, timeout):
+            self.restarted = timeout
+
+    container = FakeContainer()
+    client = SimpleNamespace(
+        containers=SimpleNamespace(get=lambda _name: container),
+    )
+    monkeypatch.setattr(app, "_docker_client", lambda: client)
+    monkeypatch.setattr(app, "_host_workspace_dir", lambda: None)
+    monkeypatch.setattr(
+        app,
+        "_backend_container_stale_reason",
+        lambda *_args: None,
+    )
+    monkeypatch.setattr(app, "_container_raw_state", lambda _ctr: "running")
+
+    result = asyncio.run(app.backend_start("lerobot"))
+
+    assert result.ok is True
+    assert result.message == "lerobot_server already running"
+    assert container.started is False
+    assert container.restarted is False
+
+
+def test_backend_restart_restarts_running_container(monkeypatch):
+    class FakeContainer:
+        def __init__(self):
+            self.restart_timeout = None
+
+        def restart(self, timeout):
+            self.restart_timeout = timeout
+
+    container = FakeContainer()
+    client = SimpleNamespace(
+        containers=SimpleNamespace(get=lambda _name: container),
+    )
+    monkeypatch.setattr(app, "_docker_client", lambda: client)
+    monkeypatch.setattr(app, "_host_workspace_dir", lambda: None)
+    monkeypatch.setattr(
+        app,
+        "_backend_container_stale_reason",
+        lambda *_args: None,
+    )
+    monkeypatch.setattr(app, "_container_raw_state", lambda _ctr: "running")
+
+    result = asyncio.run(app.backend_restart("lerobot"))
+
+    assert result.ok is True
+    assert result.message == "lerobot_server restarted"
+    assert container.restart_timeout == 10
+
+
 def test_host_project_dir_falls_back_to_compose_container_name(monkeypatch):
     class FakeContainers:
         def __init__(self):

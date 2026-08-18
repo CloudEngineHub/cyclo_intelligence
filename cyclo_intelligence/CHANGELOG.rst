@@ -6,6 +6,7 @@ Changelog for package cyclo_intelligence
 ------------------
 * Forwarded UI and behavior-tree ``Control Hz``, ``Inference Hz``, and ``Chunk Align Window`` settings to the LeRobot and GR00T action-processing runtimes.
 * Added timing-aware policy reloads so changed action-processing settings cannot reuse stale runtime configuration.
+* Removed the fixed policy backend warm-up delay and made backend ON idempotent while keeping Restart explicit.
 * Updated image support to ``robotis/cyclo-intelligence:1.3.1``, ``robotis/lerobot-zenoh:1.4.1``, and ``robotis/groot-zenoh:1.3.5``. These images form one service-interface release set and cannot be mixed with older versions.
 * Contributors: Taehyeong Kim
 

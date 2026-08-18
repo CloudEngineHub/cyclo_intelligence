@@ -4,7 +4,7 @@ Changelog for package cyclo-ui
 
 1.3.1 (2026-08-18)
 ------------------
-* Updated Cyclo UI release metadata for end-to-end inference timing support.
+* Removed the fixed 45-second policy backend warm-up delay once all runtime services are running.
 * Contributors: Taehyeong Kim
 
 1.3.0 (2026-08-14)

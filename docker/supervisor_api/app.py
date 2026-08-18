@@ -1170,7 +1170,7 @@ async def service_stop(name: str) -> ActionResult:
 # -- Backend container endpoints — PLAN §4.8 -----------------------------------
 # Hybrid wiring (matches PLAN §4.8 example):
 #   - pull   → docker-py client.api.pull(stream=True), SSE per layer
-#   - start  → restart an existing running container, start an existing
+#   - start  → keep an existing running container, start an existing
 #              stopped container, or 'docker compose up -d --no-build
 #              <service>' when the container does not exist. No build is
 #              attempted from the UI path; missing images are reported so the
@@ -1262,13 +1262,13 @@ async def backend_pull(name: str) -> StreamingResponse:
 @app.post("/backends/{name}/start", response_model=ActionResult)
 async def backend_start(name: str) -> ActionResult:
     spec = _require_known_backend(name)
-    return await _ensure_backend_running(name, spec)
+    return await _ensure_backend_running(name, spec, restart_running=False)
 
 
 @app.post("/backends/{name}/restart", response_model=ActionResult)
 async def backend_restart(name: str) -> ActionResult:
     spec = _require_known_backend(name)
-    return await _ensure_backend_running(name, spec)
+    return await _ensure_backend_running(name, spec, restart_running=True)
 
 
 @app.post("/backends/{name}/recreate", response_model=ActionResult)
@@ -1347,8 +1347,13 @@ async def backend_stop(name: str) -> ActionResult:
     return ActionResult(ok=ok, message=msg)
 
 
-async def _ensure_backend_running(name: str, spec: Dict[str, str]) -> ActionResult:
-    """Start policy backend without building; reset if it is already running."""
+async def _ensure_backend_running(
+    name: str,
+    spec: Dict[str, str],
+    *,
+    restart_running: bool,
+) -> ActionResult:
+    """Start a policy backend without building it."""
 
     container_name = spec["container"]
 
@@ -1381,8 +1386,10 @@ async def _ensure_backend_running(name: str, spec: Dict[str, str]) -> ActionResu
                 ctr.unpause()
                 state = "running"
             if state == "running":
-                ctr.restart(timeout=10)
-                return True, f"{container_name} restarted"
+                if restart_running:
+                    ctr.restart(timeout=10)
+                    return True, f"{container_name} restarted"
+                return True, f"{container_name} already running"
             ctr.start()
             return True, f"{container_name} started from {state}"
         except DockerException as e:
