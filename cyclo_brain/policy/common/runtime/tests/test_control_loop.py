@@ -5,6 +5,7 @@ from __future__ import annotations
 import sys
 import types
 import unittest
+from unittest import mock
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -19,6 +20,7 @@ robot_client_stub = types.ModuleType("robot_client")
 robot_client_stub.RobotClient = object
 sys.modules.setdefault("robot_client", robot_client_stub)
 
+from main_runtime import control_loop as control_loop_module  # noqa: E402
 from main_runtime.control_loop import ControlLoop  # noqa: E402
 
 
@@ -90,6 +92,99 @@ class ControlLoopSafetyTests(unittest.TestCase):
         loop._processor = processor
         loop._action_keys = ["arm"]
         return loop
+
+    def test_configure_applies_requested_timing(self) -> None:
+        loop = ControlLoop(
+            requester=object(),
+            inference_hz=12,
+            control_hz=80,
+            chunk_align_window_s=0.4,
+        )
+        processor = FakeProcessor()
+        with self.assertLogs(control_loop_module.logger, level="INFO") as logs:
+            with (
+                mock.patch.object(
+                    control_loop_module, "RobotClient", return_value=FakeRobot()
+                ),
+                mock.patch.object(
+                    control_loop_module,
+                    "ActionChunkProcessor",
+                    return_value=processor,
+                ) as processor_factory,
+            ):
+                loop.configure(
+                    robot_type="ffw",
+                    control_hz=50,
+                    inference_hz=20,
+                    chunk_align_window_s=0.25,
+                )
+
+        processor_factory.assert_called_once_with(
+            inference_hz=20.0,
+            control_hz=50.0,
+            chunk_align_window_s=0.25,
+            postprocess=True,
+            target_chunk_size=None,
+            alignment_mode="l2",
+        )
+        self.assertIn(
+            "control_hz=50 inference_hz=20 chunk_align_window_s=0.25",
+            "\n".join(logs.output),
+        )
+        self.assertEqual(loop._tick_period(), 1.0 / processor.output_hz)
+
+    def test_configure_invalid_timing_uses_constructor_defaults(self) -> None:
+        loop = ControlLoop(
+            requester=object(),
+            inference_hz=12,
+            control_hz=80,
+            chunk_align_window_s=0.4,
+        )
+        with (
+            mock.patch.object(
+                control_loop_module, "RobotClient", return_value=FakeRobot()
+            ),
+            mock.patch.object(
+                control_loop_module,
+                "ActionChunkProcessor",
+                return_value=FakeProcessor(),
+            ) as processor_factory,
+        ):
+            loop.configure(
+                robot_type="ffw",
+                control_hz=0,
+                inference_hz=float("nan"),
+                chunk_align_window_s=-1,
+            )
+
+        call_kwargs = processor_factory.call_args.kwargs
+        self.assertEqual(call_kwargs["control_hz"], 80.0)
+        self.assertEqual(call_kwargs["inference_hz"], 12.0)
+        self.assertEqual(call_kwargs["chunk_align_window_s"], 0.4)
+
+    def test_configure_zero_timing_uses_runtime_defaults(self) -> None:
+        loop = ControlLoop(requester=object())
+        with (
+            mock.patch.object(
+                control_loop_module, "RobotClient", return_value=FakeRobot()
+            ),
+            mock.patch.object(
+                control_loop_module,
+                "ActionChunkProcessor",
+                return_value=FakeProcessor(),
+            ) as processor_factory,
+        ):
+            loop.configure(
+                robot_type="ffw",
+                control_hz=0,
+                inference_hz=0,
+                chunk_align_window_s=0.0,
+            )
+
+        call_kwargs = processor_factory.call_args.kwargs
+        self.assertEqual(call_kwargs["control_hz"], 100.0)
+        self.assertEqual(call_kwargs["inference_hz"], 15.0)
+        self.assertEqual(call_kwargs["chunk_align_window_s"], 0.3)
 
     def test_dry_run_publishes_preview_without_robot_command(self) -> None:
         action = np.asarray([0.1, 0.2], dtype=np.float64)

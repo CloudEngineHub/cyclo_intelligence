@@ -2,6 +2,12 @@
 Changelog for package orchestrator
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+1.3.1 (2026-08-18)
+------------------
+* Forwarded action-processing timing from UI and behavior-tree task information to policy LOAD requests.
+* Included timing in the loaded-policy runtime signature so changing any timing value forces reconfiguration instead of RESUME.
+* Contributors: Taehyeong Kim
+
 1.3.0 (2026-08-14)
 ------------------
 * Added MolmoAct2, VLA-JEPA, and FastWAM routing for inference commands, behavior trees, and training requests.

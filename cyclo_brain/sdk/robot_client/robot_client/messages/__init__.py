@@ -65,6 +65,9 @@ bool publish_to_robot
 string action_request_mode
 string acceleration_mode
 string acceleration_engine_path
+uint16 control_hz
+uint16 inference_hz
+float64 chunk_align_window_s
 """
 
 INFERENCE_COMMAND_RESPONSE_DEF = """\

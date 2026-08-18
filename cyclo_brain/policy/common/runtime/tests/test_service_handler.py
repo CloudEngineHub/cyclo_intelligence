@@ -120,6 +120,39 @@ class ServiceHandlerPublishModeTests(unittest.TestCase):
         self.assertTrue(response.success)
         self.assertEqual(loop.configures[0]["action_request_mode"], "sync")
 
+    def test_load_forwards_action_processing_timing(self) -> None:
+        handler, _session, loop = self._handler()
+
+        response = handler.handle(SimpleNamespace(
+            command=CMD_LOAD,
+            model_path="/models/policy",
+            robot_type="ffw",
+            task_instruction="pick",
+            control_hz=80,
+            inference_hz=20,
+            chunk_align_window_s=0.25,
+        ))
+
+        self.assertTrue(response.success)
+        self.assertEqual(loop.configures[0]["control_hz"], 80)
+        self.assertEqual(loop.configures[0]["inference_hz"], 20)
+        self.assertEqual(loop.configures[0]["chunk_align_window_s"], 0.25)
+
+    def test_load_uses_zero_timing_for_legacy_request(self) -> None:
+        handler, _session, loop = self._handler()
+
+        response = handler.handle(SimpleNamespace(
+            command=CMD_LOAD,
+            model_path="/models/policy",
+            robot_type="ffw",
+            task_instruction="pick",
+        ))
+
+        self.assertTrue(response.success)
+        self.assertEqual(loop.configures[0]["control_hz"], 0)
+        self.assertEqual(loop.configures[0]["inference_hz"], 0)
+        self.assertEqual(loop.configures[0]["chunk_align_window_s"], 0.0)
+
     def test_start_applies_publish_mode(self) -> None:
         handler, _session, loop = self._handler()
         handler.handle(SimpleNamespace(

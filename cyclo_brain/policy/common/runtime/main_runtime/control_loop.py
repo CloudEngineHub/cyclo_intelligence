@@ -50,6 +50,16 @@ ACTION_REQUEST_MODE_SYNC = "sync"
 ACTION_REQUEST_MODES = {ACTION_REQUEST_MODE_ASYNC, ACTION_REQUEST_MODE_SYNC}
 
 
+def positive_finite_or_default(value: object, default: float) -> float:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return float(default)
+    if not math.isfinite(parsed) or parsed <= 0.0:
+        return float(default)
+    return parsed
+
+
 def normalize_action_request_mode(value: object) -> str:
     mode = str(value or "").strip().lower()
     if mode == ACTION_REQUEST_MODE_SYNC:
@@ -75,9 +85,14 @@ class ControlLoop:
         action_request_mode: str = ACTION_REQUEST_MODE_ASYNC,
     ) -> None:
         self._requester = requester
-        self._inference_hz = float(inference_hz)
-        self._control_hz = float(control_hz)
-        self._chunk_align_window_s = float(chunk_align_window_s)
+        self._default_inference_hz = positive_finite_or_default(inference_hz, 15.0)
+        self._default_control_hz = positive_finite_or_default(control_hz, 100.0)
+        self._default_chunk_align_window_s = positive_finite_or_default(
+            chunk_align_window_s, 0.3
+        )
+        self._inference_hz = self._default_inference_hz
+        self._control_hz = self._default_control_hz
+        self._chunk_align_window_s = self._default_chunk_align_window_s
         self._target_chunk_size = target_chunk_size
         self._postprocess_actions = bool(postprocess_actions)
         self._alignment_mode = alignment_mode
@@ -115,9 +130,21 @@ class ControlLoop:
         action_keys: Optional[list[str]] = None,
         publish_to_robot: bool = False,
         action_request_mode: Optional[str] = None,
+        control_hz: Optional[float] = None,
+        inference_hz: Optional[float] = None,
+        chunk_align_window_s: Optional[float] = None,
     ) -> None:
         with self._lock:
             self.deconfigure()
+            self._control_hz = positive_finite_or_default(
+                control_hz, self._default_control_hz
+            )
+            self._inference_hz = positive_finite_or_default(
+                inference_hz, self._default_inference_hz
+            )
+            self._chunk_align_window_s = positive_finite_or_default(
+                chunk_align_window_s, self._default_chunk_align_window_s
+            )
             self._action_request_mode = normalize_action_request_mode(
                 action_request_mode
                 if action_request_mode is not None
@@ -143,10 +170,14 @@ class ControlLoop:
             self._generation += 1
             logger.info(
                 "configured RobotClient command path for %s "
-                "(publish_to_robot=%s action_request_mode=%s)",
+                "(publish_to_robot=%s action_request_mode=%s "
+                "control_hz=%g inference_hz=%g chunk_align_window_s=%g)",
                 robot_type,
                 self._publish_to_robot,
                 self._action_request_mode,
+                self._control_hz,
+                self._inference_hz,
+                self._chunk_align_window_s,
             )
 
     def deconfigure(self) -> None:
@@ -156,6 +187,9 @@ class ControlLoop:
             self._action_keys = []
             self._publish_to_robot = False
             self._action_request_mode = self._default_action_request_mode
+            self._inference_hz = self._default_inference_hz
+            self._control_hz = self._default_control_hz
+            self._chunk_align_window_s = self._default_chunk_align_window_s
             self._processor = None
             self._generation += 1
             if self._robot is not None:

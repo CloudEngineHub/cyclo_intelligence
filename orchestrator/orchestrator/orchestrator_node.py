@@ -68,6 +68,8 @@ from orchestrator.internal.communication.container_service_client import (
     ContainerServiceClient,
 )
 from orchestrator.internal.communication.inference_mode import (
+    inference_runtime_signature,
+    inference_timing_from_task_info,
     publish_to_robot_from_task_info,
 )
 from orchestrator.timer.timer_manager import TimerManager
@@ -201,6 +203,9 @@ class OrchestratorNode(Node):
         self._loaded_inference_acceleration_mode: str = 'pytorch'
         self._loaded_inference_acceleration_engine_path: str = ''
         self._loaded_inference_action_request_mode: str = 'async'
+        self._loaded_inference_control_hz: int = 100
+        self._loaded_inference_inference_hz: int = 15
+        self._loaded_inference_chunk_align_window_s: float = 0.3
 
         # HF endpoint registry — orchestrator-owned because the
         # set/get/list/select_hf_endpoint services also read and mutate
@@ -643,11 +648,9 @@ class OrchestratorNode(Node):
         # The rest of this function still drives inference-side config
         # (control_hz, joint_order, params) which stays on this node.
 
-        control_hz = getattr(task_info, 'control_hz', 0) or 100
-        inference_hz = getattr(task_info, 'inference_hz', 0) or 15
-        chunk_align_window_s = getattr(task_info, 'chunk_align_window_s', 0.0)
-        if chunk_align_window_s <= 0.0:
-            chunk_align_window_s = 0.3
+        control_hz, inference_hz, chunk_align_window_s = (
+            inference_timing_from_task_info(task_info)
+        )
         self._control_hz = control_hz
         self._inference_hz = inference_hz
         self._chunk_align_window_s = chunk_align_window_s
@@ -669,7 +672,10 @@ class OrchestratorNode(Node):
                 callback_function=callback,
             )
         self.get_logger().info(
-            f'Robot control parameters initialized (control_hz={control_hz})')
+            'Robot control parameters initialized '
+            f'(control_hz={control_hz} inference_hz={inference_hz} '
+            f'chunk_align_window_s={chunk_align_window_s})'
+        )
 
     def clear_parameters(self):
         if self.timer_manager is not None:
@@ -1324,6 +1330,11 @@ class OrchestratorNode(Node):
                 requested_action_request_mode = (
                     self._action_request_mode_from_task_info(task_info)
                 )
+                (
+                    requested_control_hz,
+                    requested_inference_hz,
+                    requested_chunk_align_window_s,
+                ) = inference_timing_from_task_info(task_info)
 
                 # If the requested policy is already loaded on this
                 # container, treat START_INFERENCE as RESUME. If the user
@@ -1352,22 +1363,33 @@ class OrchestratorNode(Node):
                     loaded_action_request_mode = (
                         self._loaded_inference_action_request_mode
                     )
+                    loaded_control_hz = self._loaded_inference_control_hz
+                    loaded_inference_hz = self._loaded_inference_inference_hz
+                    loaded_chunk_align_window_s = (
+                        self._loaded_inference_chunk_align_window_s
+                    )
                 start_handled = False
                 if (
                     existing_client is not None
                     and existing_client._service_prefix == service_prefix
                 ):
-                    loaded_signature = (
+                    loaded_signature = inference_runtime_signature(
                         loaded_policy_path,
                         loaded_acceleration_mode,
                         loaded_acceleration_engine_path,
                         loaded_action_request_mode,
+                        loaded_control_hz,
+                        loaded_inference_hz,
+                        loaded_chunk_align_window_s,
                     )
-                    requested_signature = (
+                    requested_signature = inference_runtime_signature(
                         requested_policy_path,
                         requested_acceleration_mode,
                         requested_acceleration_engine_path,
                         requested_action_request_mode,
+                        requested_control_hz,
+                        requested_inference_hz,
+                        requested_chunk_align_window_s,
                     )
                     if (
                         requested_policy_path
@@ -1471,6 +1493,11 @@ class OrchestratorNode(Node):
                                         requested_acceleration_engine_path
                                     ),
                                     action_request_mode=requested_action_request_mode,
+                                    control_hz=requested_control_hz,
+                                    inference_hz=requested_inference_hz,
+                                    chunk_align_window_s=(
+                                        requested_chunk_align_window_s
+                                    ),
                                 )
 
                             with self._inference_lifecycle_lock:
@@ -1565,6 +1592,15 @@ class OrchestratorNode(Node):
                                     )
                                     self._loaded_inference_action_request_mode = (
                                         requested_action_request_mode
+                                    )
+                                    self._loaded_inference_control_hz = (
+                                        requested_control_hz
+                                    )
+                                    self._loaded_inference_inference_hz = (
+                                        requested_inference_hz
+                                    )
+                                    self._loaded_inference_chunk_align_window_s = (
+                                        requested_chunk_align_window_s
                                     )
 
                                 self._set_session_active(
@@ -2575,6 +2611,9 @@ class OrchestratorNode(Node):
             self._loaded_inference_acceleration_mode = 'pytorch'
             self._loaded_inference_acceleration_engine_path = ''
             self._loaded_inference_action_request_mode = 'async'
+            self._loaded_inference_control_hz = 100
+            self._loaded_inference_inference_hz = 15
+            self._loaded_inference_chunk_align_window_s = 0.3
         if client is None:
             return
 

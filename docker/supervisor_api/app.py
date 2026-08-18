@@ -304,13 +304,13 @@ _BACKENDS: Dict[str, Dict[str, str]] = {
     "lerobot": {
         "service": "lerobot",
         "container": "lerobot_server",
-        "image": f"robotis/lerobot-zenoh:1.4.0-{_BACKEND_ARCH}",
+        "image": f"robotis/lerobot-zenoh:1.4.1-{_BACKEND_ARCH}",
         "services": ["main-runtime", "engine-process"],
     },
     "groot": {
         "service": "groot",
         "container": "groot_server",
-        "image": f"robotis/groot-zenoh:1.3.4-{_BACKEND_ARCH}",
+        "image": f"robotis/groot-zenoh:1.3.5-{_BACKEND_ARCH}",
         "services": ["main-runtime", "engine-process"],
     },
 }
@@ -1073,7 +1073,7 @@ def _parse_svstat(raw: str) -> dict:
 app = FastAPI(
     title="cyclo_intelligence supervisor_api",
     description=__doc__,
-    version="1.3.0",
+    version="1.3.1",
 )
 
 _include_router_with_eager_routes(app, navigation_router)

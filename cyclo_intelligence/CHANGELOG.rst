@@ -2,6 +2,13 @@
 Changelog for package cyclo_intelligence
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+1.3.1 (2026-08-18)
+------------------
+* Forwarded UI and behavior-tree ``Control Hz``, ``Inference Hz``, and ``Chunk Align Window`` settings to the LeRobot and GR00T action-processing runtimes.
+* Added timing-aware policy reloads so changed action-processing settings cannot reuse stale runtime configuration.
+* Updated image support to ``robotis/cyclo-intelligence:1.3.1``, ``robotis/lerobot-zenoh:1.4.1``, and ``robotis/groot-zenoh:1.3.5``. These images form one service-interface release set and cannot be mixed with older versions.
+* Contributors: Taehyeong Kim
+
 1.3.0 (2026-08-14)
 ------------------
 * Updated the LeRobot integration to 0.6.1 with MolmoAct2, VLA-JEPA, and FastWAM inference support.

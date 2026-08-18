@@ -67,6 +67,9 @@ class ServiceHandler:
             action_keys=action_keys,
             publish_to_robot=bool(getattr(request, "publish_to_robot", False)),
             action_request_mode=getattr(request, "action_request_mode", "async"),
+            control_hz=getattr(request, "control_hz", 0),
+            inference_hz=getattr(request, "inference_hz", 0),
+            chunk_align_window_s=getattr(request, "chunk_align_window_s", 0.0),
         )
         return self._make_response(True, response.message or "loaded", action_keys)
 

@@ -2,6 +2,11 @@
 Changelog for package cyclo-ui
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+1.3.1 (2026-08-18)
+------------------
+* Updated Cyclo UI release metadata for end-to-end inference timing support.
+* Contributors: Taehyeong Kim
+
 1.3.0 (2026-08-14)
 ------------------
 * Added MolmoAct2, VLA-JEPA, and FastWAM to inference and behavior-tree policy selection.
