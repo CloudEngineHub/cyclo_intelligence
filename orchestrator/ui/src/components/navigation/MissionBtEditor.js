@@ -14,7 +14,14 @@
 //
 // Author: Seongwoo Kim
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   ReactFlow,
   Controls,
@@ -26,10 +33,12 @@ import {
 import "@xyflow/react/dist/style.css";
 import clsx from "clsx";
 import toast from "react-hot-toast";
-import { useSelector } from "react-redux";
 import {
   MdAutoFixHigh,
+  MdDriveFileRenameOutline,
   MdRedo,
+  MdSave,
+  MdStar,
   MdUndo,
   MdUploadFile,
 } from "react-icons/md";
@@ -46,8 +55,6 @@ import {
   findDeletionLayoutAnchor,
 } from "../../utils/btTreeParser";
 import { serializeFromGraph } from "../../utils/btXmlSerializer";
-import TreeListModal from "../../features/btmanager/components/TreeListModal";
-import { CYCLO_VIDEO_SERVER_PORT } from "../../config/runtimeConfig";
 
 const nodeTypes = {
   btControl: BTControlNode,
@@ -55,20 +62,6 @@ const nodeTypes = {
 };
 
 const reactFlowProOptions = { hideAttribution: true };
-
-export function buildBtTreeFileUrl(rosbridgeUrl, filePath) {
-  let host = "localhost";
-  try {
-    host = new URL(rosbridgeUrl).hostname || host;
-  } catch {
-    // Keep the local-development fallback when ROS bridge configuration is absent.
-  }
-  // URL.hostname already brackets IPv6 literals; only wrap bare ones.
-  const authority = host.includes(":") && !host.startsWith("[") ? `[${host}]` : host;
-  const path = String(filePath || "");
-  const normalizedPath = path.startsWith("/") ? path : `/${path}`;
-  return `http://${authority}:${CYCLO_VIDEO_SERVER_PORT}${normalizedPath}`;
-}
 
 // Observe the app's dark theme via the `dark` class on <html> so the ReactFlow
 // canvas (which needs a JS color value for its dot grid) stays theme-aware.
@@ -119,6 +112,29 @@ function computeHiddenIds(nodes, edges) {
   return hidden;
 }
 
+export function isValidBtConnection(connection, nodes, edges) {
+  const source = connection?.source;
+  const target = connection?.target;
+  if (!source || !target || source === target) return false;
+  const sourceNode = nodes.find((node) => node.id === source);
+  if (!sourceNode || sourceNode.type !== "btControl") return false;
+  if (edges.some((edge) => edge.target === target)) return false;
+
+  // Adding source -> target is cyclic when target already reaches source.
+  const queue = [target];
+  const visited = new Set();
+  while (queue.length) {
+    const nodeId = queue.shift();
+    if (nodeId === source) return false;
+    if (visited.has(nodeId)) continue;
+    visited.add(nodeId);
+    edges.forEach((edge) => {
+      if (edge.source === nodeId) queue.push(edge.target);
+    });
+  }
+  return true;
+}
+
 function layoutVisibleOnly(nodes, edges, { anchorNodeId = null } = {}) {
   const hidden = computeHiddenIds(nodes, edges);
   const visibleNodes = nodes.filter((node) => !hidden.has(node.id));
@@ -133,27 +149,21 @@ function layoutVisibleOnly(nodes, edges, { anchorNodeId = null } = {}) {
   return nodes.map((node) => byId.get(node.id) || node);
 }
 
-// This wrapper is mounted only while the modal is open. It keeps the waypoint
-// editor's file-server host resolution identical to BT Manager without making
-// the editor require a Redux provider in isolated, closed-modal renders.
-function WaypointTreeListModal({ onClose, onSelect }) {
-  const rosbridgeUrl = useSelector((state) => state.ros.rosbridgeUrl);
-  return (
-    <TreeListModal
-      isOpen
-      onClose={onClose}
-      onSelect={(item) => onSelect(item, rosbridgeUrl)}
-    />
-  );
-}
-
 export default function MissionBtEditor({
   title,
   filePath,
+  fileOptions = [],
+  defaultFilePath = "",
   xml,
   loading = false,
   activeNodeNames = [],
   onXmlChange,
+  onLoadXml,
+  onSaveXml,
+  onFilePathChange,
+  onSaveXmlAs,
+  onSetDefaultXml,
+  fileActionsDisabled = false,
 }) {
   const isDark = useIsDark();
   const { catalog: nodeCatalog = [] } = useBTNodeCatalog();
@@ -162,8 +172,12 @@ export default function MissionBtEditor({
   const [nodeDataMap, setNodeDataMap] = useState(new Map());
   const [selectedNodeId, setSelectedNodeId] = useState(null);
   const [parseError, setParseError] = useState(null);
-  const [showTreeList, setShowTreeList] = useState(false);
-  const [loadingTreeFile, setLoadingTreeFile] = useState(false);
+  const [hydratedPath, setHydratedPath] = useState("");
+  const [fileAction, setFileAction] = useState("");
+  const [showLoadDialog, setShowLoadDialog] = useState(false);
+  const [pendingLoadPath, setPendingLoadPath] = useState(filePath || "");
+  const [showSaveAsDialog, setShowSaveAsDialog] = useState(false);
+  const [saveAsName, setSaveAsName] = useState("");
   const reactFlowRef = useRef(null);
   const nodesRef = useRef(nodes);
   const edgesRef = useRef(edges);
@@ -171,11 +185,28 @@ export default function MissionBtEditor({
   const lastEmittedXmlRef = useRef(null);
   const lastEmittedPathRef = useRef("");
   const onXmlChangeRef = useRef(onXmlChange);
+  const fileActionRequestRef = useRef(0);
+  const coalescedEditRef = useRef({ key: "", lastChangeAt: 0 });
 
   nodesRef.current = nodes;
   edgesRef.current = edges;
   nodeDataMapRef.current = nodeDataMap;
   onXmlChangeRef.current = onXmlChange;
+
+  useEffect(() => {
+    fileActionRequestRef.current += 1;
+    setFileAction("");
+    setShowLoadDialog(false);
+    setPendingLoadPath(filePath || "");
+    setShowSaveAsDialog(false);
+    setSaveAsName("");
+  }, [filePath]);
+
+  const availableFileOptions = useMemo(() => (
+    [filePath, ...fileOptions]
+      .map((path) => String(path || "").trim())
+      .filter((path, index, paths) => path && paths.indexOf(path) === index)
+  ), [fileOptions, filePath]);
 
   const getHistorySnapshot = useCallback(() => {
     if (nodes.length === 0) return null;
@@ -197,6 +228,7 @@ export default function MissionBtEditor({
       setNodeDataMap(new Map(parsed.nodeDataMap || []));
       setSelectedNodeId(null);
       setParseError(null);
+      coalescedEditRef.current = { key: "", lastChangeAt: 0 };
     } catch (error) {
       setParseError(error instanceof Error ? error.message : "Failed to restore history");
     }
@@ -214,6 +246,15 @@ export default function MissionBtEditor({
     applySnapshot: applyHistorySnapshot,
   });
 
+  const captureCoalescedEditHistory = useCallback((key) => {
+    const now = Date.now();
+    const previous = coalescedEditRef.current;
+    if (previous.key !== key || now - previous.lastChangeAt > 750) {
+      captureHistory();
+    }
+    coalescedEditRef.current = { key, lastChangeAt: now };
+  }, [captureHistory]);
+
   useEffect(() => {
     if (
       filePath === lastEmittedPathRef.current &&
@@ -223,11 +264,22 @@ export default function MissionBtEditor({
     }
     try {
       const parsed = parseBTXml(xml || "");
+      // The prop already is parent-owned state. Treat its normalized graph as
+      // the baseline instead of emitting the component's initial empty graph
+      // (or marking formatting-only normalization as a user edit).
+      lastEmittedXmlRef.current = serializeFromGraph(
+        parsed.nodes || [],
+        parsed.edges || [],
+        parsed.nodeDataMap || new Map(),
+      );
+      lastEmittedPathRef.current = filePath;
       setNodes(parsed.nodes || []);
       setEdges(parsed.edges || []);
       setNodeDataMap(parsed.nodeDataMap || new Map());
       setSelectedNodeId(null);
       setParseError(null);
+      setHydratedPath(filePath);
+      coalescedEditRef.current = { key: "", lastChangeAt: 0 };
       resetHistory();
     } catch (error) {
       setNodes([]);
@@ -235,6 +287,8 @@ export default function MissionBtEditor({
       setNodeDataMap(new Map());
       setSelectedNodeId(null);
       setParseError(error instanceof Error ? error.message : "Failed to parse BT XML");
+      setHydratedPath(filePath);
+      coalescedEditRef.current = { key: "", lastChangeAt: 0 };
     }
   }, [filePath, resetHistory, setEdges, setNodes, xml]);
 
@@ -246,8 +300,8 @@ export default function MissionBtEditor({
   // is intentionally excluded from the deps: on a waypoint switch it changes one
   // render before `nodes` reloads, and emitting in that gap would write the old
   // tree to the new path.
-  useEffect(() => {
-    if (parseError) return;
+  useLayoutEffect(() => {
+    if (parseError || hydratedPath !== filePath) return;
     const emit = onXmlChangeRef.current;
     if (typeof emit !== "function") return;
     let serialized;
@@ -261,9 +315,9 @@ export default function MissionBtEditor({
     }
     lastEmittedXmlRef.current = serialized;
     lastEmittedPathRef.current = filePath;
-    emit(serialized);
+    emit(filePath, serialized);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [edges, nodeDataMap, nodes, parseError]);
+  }, [edges, hydratedPath, nodeDataMap, nodes, parseError]);
 
   const handleCanvasDragOver = useCallback((event) => {
     if (event.dataTransfer.types.includes(PALETTE_DRAG_MIME)) {
@@ -317,6 +371,10 @@ export default function MissionBtEditor({
   }, [captureHistory, nodeCatalog, setNodes]);
 
   const handleConnect = useCallback((connection) => {
+    if (!isValidBtConnection(connection, nodesRef.current, edgesRef.current)) {
+      toast.error("BT connections must form a single-parent acyclic tree");
+      return;
+    }
     captureHistory();
     const nextEdges = addEdge(
       { ...connection, type: "smoothstep", animated: false },
@@ -334,34 +392,106 @@ export default function MissionBtEditor({
     setNodes(layoutVisibleOnly(nodesRef.current, edgesRef.current));
   }, [captureHistory, setNodes]);
 
-  // Keep XML loading consistent with BT Manager: select a server-side tree,
-  // fetch its XML from the data file server, validate it, and replace the
-  // current editor graph. The parent persists the loaded content under this
-  // waypoint's local BT path, rather than changing that path to the source.
-  const handleServerFileSelect = useCallback(async (item, rosbridgeUrl) => {
-    if (!item?.full_path) return;
-    setShowTreeList(false);
-    setLoadingTreeFile(true);
-    try {
-      const response = await fetch(buildBtTreeFileUrl(rosbridgeUrl, item.full_path));
-      if (!response.ok) throw new Error(`Failed to fetch file: ${response.status}`);
+  // Local waypoint XML is owned by the mission store. Keep file I/O behind
+  // parent callbacks so this editor never reaches into BT Manager's global
+  // orchestrator/bt/trees template directory.
+  const serializeCurrentXml = useCallback(() => serializeFromGraph(
+    nodesRef.current,
+    edgesRef.current,
+    nodeDataMapRef.current,
+  ), []);
 
-      const xmlContent = await response.text();
-      const parsed = parseBTXml(xmlContent);
-      setNodes(parsed.nodes || []);
-      setEdges(parsed.edges || []);
-      setNodeDataMap(parsed.nodeDataMap || new Map());
-      setSelectedNodeId(null);
-      setParseError(null);
-      resetHistory();
-      onXmlChangeRef.current?.(xmlContent);
-      toast.success(`Loaded: ${item.name || item.full_path.split("/").pop()}`);
+  const handleLoadXml = useCallback(async (targetPath) => {
+    if (!targetPath || typeof onLoadXml !== "function") return;
+    const requestId = fileActionRequestRef.current + 1;
+    fileActionRequestRef.current = requestId;
+    setFileAction("load");
+    try {
+      await onLoadXml(targetPath);
+      if (fileActionRequestRef.current !== requestId) return;
+      setShowLoadDialog(false);
+      toast.success(`Loaded: ${targetPath}`);
+      if (typeof onFilePathChange === "function") onFilePathChange(targetPath);
     } catch (error) {
-      toast.error(`Failed to load file: ${error instanceof Error ? error.message : String(error)}`);
+      if (fileActionRequestRef.current !== requestId) return;
+      toast.error(`Failed to load ${targetPath}: ${error instanceof Error ? error.message : String(error)}`);
     } finally {
-      setLoadingTreeFile(false);
+      if (fileActionRequestRef.current === requestId) setFileAction("");
     }
-  }, [resetHistory, setEdges, setNodes]);
+  }, [onFilePathChange, onLoadXml]);
+
+  const handleSaveXml = useCallback(async () => {
+    if (!filePath || typeof onSaveXml !== "function") return;
+    let serialized;
+    try {
+      serialized = serializeCurrentXml();
+    } catch (error) {
+      toast.error(`Failed to serialize ${filePath}: ${error instanceof Error ? error.message : String(error)}`);
+      return;
+    }
+    const requestId = fileActionRequestRef.current + 1;
+    fileActionRequestRef.current = requestId;
+    setFileAction("save");
+    try {
+      await onSaveXml(filePath, serialized);
+      if (fileActionRequestRef.current !== requestId) return;
+      toast.success(`Saved: ${filePath}`);
+    } catch (error) {
+      if (fileActionRequestRef.current !== requestId) return;
+      toast.error(`Failed to save ${filePath}: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      if (fileActionRequestRef.current === requestId) setFileAction("");
+    }
+  }, [filePath, onSaveXml, serializeCurrentXml]);
+
+  const handleSaveXmlAs = useCallback(async (event) => {
+    event.preventDefault();
+    const targetName = saveAsName.trim();
+    if (!filePath || !targetName || typeof onSaveXmlAs !== "function") return;
+    let serialized;
+    try {
+      serialized = serializeCurrentXml();
+    } catch (error) {
+      toast.error(`Failed to serialize ${filePath}: ${error instanceof Error ? error.message : String(error)}`);
+      return;
+    }
+    const requestId = fileActionRequestRef.current + 1;
+    fileActionRequestRef.current = requestId;
+    setFileAction("save-as");
+    try {
+      const response = await onSaveXmlAs(filePath, targetName, serialized);
+      if (fileActionRequestRef.current !== requestId) return;
+      const nextPath = String(response?.path || "").trim();
+      setShowSaveAsDialog(false);
+      setSaveAsName("");
+      toast.success(`Saved as: ${nextPath || targetName}`);
+      if (nextPath && response?.selected !== true && typeof onFilePathChange === "function") {
+        onFilePathChange(nextPath);
+      }
+    } catch (error) {
+      if (fileActionRequestRef.current !== requestId) return;
+      toast.error(`Failed to save as ${targetName}: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      if (fileActionRequestRef.current === requestId) setFileAction("");
+    }
+  }, [filePath, onFilePathChange, onSaveXmlAs, saveAsName, serializeCurrentXml]);
+
+  const handleSetDefaultXml = useCallback(async () => {
+    if (!filePath || typeof onSetDefaultXml !== "function") return;
+    const requestId = fileActionRequestRef.current + 1;
+    fileActionRequestRef.current = requestId;
+    setFileAction("set-default");
+    try {
+      await onSetDefaultXml(filePath);
+      if (fileActionRequestRef.current !== requestId) return;
+      toast.success(`Default BT: ${filePath}`);
+    } catch (error) {
+      if (fileActionRequestRef.current !== requestId) return;
+      toast.error(`Failed to set default ${filePath}: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      if (fileActionRequestRef.current === requestId) setFileAction("");
+    }
+  }, [filePath, onSetDefaultXml]);
 
   const handleToggleCollapse = useCallback((nodeId) => {
     const target = nodesRef.current.find((node) => node.id === nodeId);
@@ -387,7 +517,7 @@ export default function MissionBtEditor({
   const handleNameChange = useCallback((nodeId, name) => {
     const trimmed = String(name || "").trim();
     if (!trimmed) return;
-    captureHistory();
+    captureCoalescedEditHistory(`name:${nodeId}`);
     setNodeDataMap((current) => {
       const next = new Map(current);
       const entry = next.get(nodeId);
@@ -399,10 +529,10 @@ export default function MissionBtEditor({
         ? { ...node, data: { ...node.data, label: trimmed } }
         : node
     )));
-  }, [captureHistory, setNodes]);
+  }, [captureCoalescedEditHistory, setNodes]);
 
   const handleParamChange = useCallback((nodeId, paramName, value) => {
-    captureHistory();
+    captureCoalescedEditHistory(`param:${nodeId}:${paramName}`);
     setNodeDataMap((current) => {
       const next = new Map(current);
       const entry = next.get(nodeId);
@@ -423,7 +553,7 @@ export default function MissionBtEditor({
         }
         : node
     )));
-  }, [captureHistory, setNodes]);
+  }, [captureCoalescedEditHistory, setNodes]);
 
   useEffect(() => {
     const handleDelete = (event) => {
@@ -505,6 +635,24 @@ export default function MissionBtEditor({
   return (
     <div className="h-full min-h-0 relative flex bg-[var(--mc-bg)] text-[var(--mc-text)]">
       <div className="absolute top-3 right-3 z-20 flex items-center gap-1 rounded-[10px] border border-[var(--mc-border)] bg-[var(--mc-surface)]/95 p-1 shadow-sm">
+          <div
+            className="min-w-0 max-w-36 px-2 text-right"
+            title={`${title || "Local BT"} · ${filePath || "No XML selected"}`}
+          >
+            <div className="truncate text-[10px] text-[var(--mc-text-subtle)]">
+              {title || "Local BT"}
+            </div>
+            <div className="flex items-center justify-end gap-1">
+              <span className="truncate text-xs font-semibold text-[var(--mc-text-muted)]">
+                {filePath?.split("/").pop() || "No XML"}
+              </span>
+              {filePath && filePath === defaultFilePath && (
+                <span className="rounded bg-orange-500/15 px-1 py-0.5 text-[9px] font-semibold text-orange-500">
+                  Default
+                </span>
+              )}
+            </div>
+          </div>
           <button
             type="button"
             onClick={undoHistory}
@@ -549,17 +697,106 @@ export default function MissionBtEditor({
           </button>
           <button
             type="button"
-            onClick={() => setShowTreeList(true)}
-            disabled={loadingTreeFile}
-            title="Load XML"
+            onClick={() => {
+              setPendingLoadPath(filePath || availableFileOptions[0] || "");
+              setShowLoadDialog(true);
+            }}
+            disabled={loading || fileActionsDisabled || Boolean(fileAction) || !onLoadXml}
+            title={filePath ? `Load ${filePath}` : "Load XML"}
             aria-label="Load XML"
             className={clsx(
               "h-8 flex items-center gap-1.5 rounded-lg bg-[var(--mc-surface-2)] px-2.5 text-xs font-medium text-[var(--mc-text-muted)] transition-colors hover:bg-[var(--mc-surface-hover)]",
-              loadingTreeFile && "cursor-wait opacity-60",
+              (loading || fileActionsDisabled || fileAction || !onLoadXml) && "cursor-not-allowed opacity-60",
             )}
           >
             <MdUploadFile size={18} />
-            {loadingTreeFile ? "Loading..." : "Load XML"}
+            {fileAction === "load" ? "Loading..." : "Load XML"}
+          </button>
+          <button
+            type="button"
+            onClick={handleSaveXml}
+            disabled={(
+              loading ||
+              fileActionsDisabled ||
+              Boolean(fileAction) ||
+              Boolean(parseError) ||
+              hydratedPath !== filePath ||
+              !onSaveXml
+            )}
+            title={filePath ? `Save ${filePath}` : "Save XML"}
+            aria-label="Save XML"
+            className={clsx(
+              "h-8 flex items-center gap-1.5 rounded-lg bg-[var(--mc-surface-2)] px-2.5 text-xs font-medium text-[var(--mc-text-muted)] transition-colors hover:bg-[var(--mc-surface-hover)]",
+              (
+                loading ||
+                fileActionsDisabled ||
+                fileAction ||
+                parseError ||
+                hydratedPath !== filePath ||
+                !onSaveXml
+              ) && "cursor-not-allowed opacity-60",
+            )}
+          >
+            <MdSave size={18} />
+            {fileAction === "save" ? "Saving..." : "Save"}
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowSaveAsDialog(true)}
+            disabled={(
+              loading
+              || fileActionsDisabled
+              || Boolean(fileAction)
+              || Boolean(parseError)
+              || hydratedPath !== filePath
+              || !onSaveXmlAs
+            )}
+            title="Save the current tree as another waypoint XML"
+            aria-label="Save XML as"
+            className={clsx(
+              "h-8 flex items-center gap-1.5 rounded-lg bg-[var(--mc-surface-2)] px-2.5 text-xs font-medium text-[var(--mc-text-muted)] transition-colors hover:bg-[var(--mc-surface-hover)]",
+              (
+                loading
+                || fileActionsDisabled
+                || fileAction
+                || parseError
+                || hydratedPath !== filePath
+                || !onSaveXmlAs
+              ) && "cursor-not-allowed opacity-60",
+            )}
+          >
+            <MdDriveFileRenameOutline size={18} />
+            {fileAction === "save-as" ? "Saving..." : "Save As"}
+          </button>
+          <button
+            type="button"
+            onClick={handleSetDefaultXml}
+            disabled={(
+              loading
+              || fileActionsDisabled
+              || Boolean(fileAction)
+              || !filePath
+              || filePath === defaultFilePath
+              || !onSetDefaultXml
+            )}
+            title={filePath === defaultFilePath
+              ? "This XML is already the default"
+              : "Use this XML when the mission runs"}
+            aria-label="Set default BT"
+            className={clsx(
+              "h-8 flex items-center gap-1.5 rounded-lg bg-[var(--mc-surface-2)] px-2.5 text-xs font-medium text-[var(--mc-text-muted)] transition-colors hover:bg-[var(--mc-surface-hover)]",
+              (
+                loading
+                || fileActionsDisabled
+                || fileAction
+                || !filePath
+                || filePath === defaultFilePath
+                || !onSetDefaultXml
+              ) && "cursor-not-allowed opacity-60",
+            )}
+          >
+            <MdStar size={18} />
+            {fileAction === "set-default" ? "Setting..." : "Set Default"}
           </button>
       </div>
 
@@ -596,6 +833,9 @@ export default function MissionBtEditor({
               nodeTypes={nodeTypes}
               onInit={(instance) => { reactFlowRef.current = instance; }}
               onConnect={handleConnect}
+              isValidConnection={(connection) => (
+                isValidBtConnection(connection, nodesRef.current, edgesRef.current)
+              )}
               onNodeClick={(_event, node) => setSelectedNodeId(node.id)}
               onNodeDragStop={captureHistory}
               fitView
@@ -627,11 +867,126 @@ export default function MissionBtEditor({
             onClose={() => setSelectedNodeId(null)}
           />
         )}
-        {showTreeList && (
-          <WaypointTreeListModal
-            onClose={() => setShowTreeList(false)}
-            onSelect={handleServerFileSelect}
-          />
+        {showLoadDialog && (
+          <div
+            className="absolute inset-0 z-50 flex items-center justify-center bg-black/45 p-6"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Local BT XML files"
+          >
+            <form
+              className="w-full max-w-md rounded-xl border border-[var(--mc-border)] bg-[var(--mc-surface)] p-4 shadow-xl"
+              onSubmit={(event) => {
+                event.preventDefault();
+                void handleLoadXml(pendingLoadPath);
+              }}
+            >
+              <div className="text-sm font-semibold">Load waypoint XML</div>
+              <div className="mt-1 text-xs text-[var(--mc-text-subtle)]">
+                Loading another XML changes the editor only. Use Set Default to change Run behavior.
+              </div>
+              <div className="mt-3 max-h-64 space-y-2 overflow-auto">
+                {availableFileOptions.map((path) => (
+                  <label
+                    key={path}
+                    className={clsx(
+                      "flex cursor-pointer items-start gap-2 rounded-lg border p-2.5",
+                      pendingLoadPath === path
+                        ? "border-orange-500 bg-orange-500/10"
+                        : "border-[var(--mc-border)] bg-[var(--mc-surface-2)]",
+                    )}
+                  >
+                    <input
+                      type="radio"
+                      name="local-bt-xml"
+                      value={path}
+                      checked={pendingLoadPath === path}
+                      onChange={() => setPendingLoadPath(path)}
+                      className="mt-0.5"
+                    />
+                    <span className="min-w-0 flex-1">
+                      <span className="flex items-center gap-1 text-xs font-semibold">
+                        <span className="truncate">{path.split("/").pop()}</span>
+                        {path === defaultFilePath && (
+                          <span className="rounded bg-orange-500/15 px-1 py-0.5 text-[9px] text-orange-500">
+                            Default
+                          </span>
+                        )}
+                      </span>
+                      <span className="block truncate text-[10px] text-[var(--mc-text-subtle)]">
+                        {path}
+                      </span>
+                    </span>
+                  </label>
+                ))}
+              </div>
+              <div className="mt-4 flex justify-end gap-2">
+                <button
+                  type="button"
+                  className="rounded-lg border border-[var(--mc-border)] px-3 py-2 text-xs"
+                  onClick={() => setShowLoadDialog(false)}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={!pendingLoadPath || Boolean(fileAction)}
+                  className="rounded-lg bg-orange-500 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50"
+                >
+                  {fileAction === "load" ? "Loading..." : "Load Selected"}
+                </button>
+              </div>
+            </form>
+          </div>
+        )}
+        {showSaveAsDialog && (
+          <div
+            className="absolute inset-0 z-50 flex items-center justify-center bg-black/45 p-6"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Save local BT XML as"
+          >
+            <form
+              className="w-full max-w-sm rounded-xl border border-[var(--mc-border)] bg-[var(--mc-surface)] p-4 shadow-xl"
+              onSubmit={handleSaveXmlAs}
+            >
+              <div className="text-sm font-semibold">Save local BT as</div>
+              <div className="mt-1 text-xs text-[var(--mc-text-subtle)]">
+                A new XML is added to this waypoint. The current default does not change.
+              </div>
+              <label className="mt-4 block text-xs font-medium" htmlFor="local-bt-save-as-name">
+                New BT XML name
+              </label>
+              <input
+                id="local-bt-save-as-name"
+                aria-label="New BT XML name"
+                value={saveAsName}
+                onChange={(event) => setSaveAsName(event.target.value)}
+                placeholder="alternate.xml"
+                className="mt-1 w-full rounded-lg border border-[var(--mc-border)] bg-[var(--mc-surface-2)] px-3 py-2 text-sm outline-none focus:border-orange-500"
+                autoFocus
+              />
+              <div className="mt-1 text-[10px] text-[var(--mc-text-subtle)]">
+                .xml is added automatically. Use letters, numbers, dot, underscore or hyphen.
+              </div>
+              <div className="mt-4 flex justify-end gap-2">
+                <button
+                  type="button"
+                  className="rounded-lg border border-[var(--mc-border)] px-3 py-2 text-xs"
+                  onClick={() => setShowSaveAsDialog(false)}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={!saveAsName.trim() || Boolean(fileAction)}
+                  className="rounded-lg bg-orange-500 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50"
+                >
+                  {fileAction === "save-as" ? "Saving..." : "Save As"}
+                </button>
+              </div>
+            </form>
+          </div>
         )}
     </div>
   );

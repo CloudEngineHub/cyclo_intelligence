@@ -259,6 +259,15 @@ main_container_has_npm() {
         && docker exec "$MAIN_CONTAINER" sh -lc 'command -v npm >/dev/null 2>&1'
 }
 
+main_container_ui_accessible() {
+    main_container_has_npm \
+        && docker exec \
+            -u "$(id -u):$(id -g)" \
+            -w /tmp \
+            "$MAIN_CONTAINER" \
+            sh -c 'exec head -c 1 "$1" >/dev/null 2>&1' sh "$(main_ui_dir)/package.json"
+}
+
 enter_bash() {
     local container="$1"
     docker exec -it "$container" bash
@@ -286,7 +295,7 @@ run_ui_npm_external() {
 }
 
 run_ui_npm() {
-    if main_container_has_npm; then
+    if main_container_ui_accessible; then
         run_ui_npm_in_main "$@"
     else
         run_ui_npm_external "$@"
@@ -295,8 +304,12 @@ run_ui_npm() {
 
 ensure_ui_dependencies() {
     local dir
-    if main_container_has_npm; then
-        if docker exec "$MAIN_CONTAINER" test -x "$(main_ui_dir)/node_modules/.bin/react-scripts"; then
+    if main_container_ui_accessible; then
+        if docker exec \
+            -u "$(id -u):$(id -g)" \
+            -w /tmp \
+            "$MAIN_CONTAINER" \
+            test -x "$(main_ui_dir)/node_modules/.bin/react-scripts"; then
             return 0
         fi
 

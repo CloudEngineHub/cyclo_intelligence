@@ -12,6 +12,7 @@ import {
   sendNavigateToPoseGoalAndWait,
   sendNavigateThroughPosesGoalsAndWait,
   startNavigation,
+  stopNavigation,
 } from './navigationApi';
 
 beforeEach(() => {
@@ -55,6 +56,18 @@ test('maps localization starts to the supervisor localize mode', async () => {
     expect.objectContaining({
       method: 'POST',
       body: JSON.stringify({ mode: 'localize', map_name: 'factory' }),
+    })
+  );
+});
+
+test('keeps the navigation stop request alive while the page exits', async () => {
+  await stopNavigation({ keepalive: true });
+
+  expect(global.fetch).toHaveBeenCalledWith(
+    '/api/navigation/stop',
+    expect.objectContaining({
+      method: 'POST',
+      keepalive: true,
     })
   );
 });

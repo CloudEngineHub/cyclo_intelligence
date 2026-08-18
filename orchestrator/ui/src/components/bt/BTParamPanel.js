@@ -14,7 +14,7 @@
 //
 // Author: Seongwoo Kim
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import { MdClose, MdFolderOpen } from 'react-icons/md';
 import FileBrowserModal from '../FileBrowserModal';
@@ -180,6 +180,8 @@ export default function BTParamPanel({
   const [localParams, setLocalParams] = useState({});
   // Local name buffer — same cursor-preservation trick as localParams.
   const [localName, setLocalName] = useState('');
+  const nameAtFocusRef = useRef('');
+  const suppressNextNameBlurRef = useRef(false);
   const [showPolicyBrowser, setShowPolicyBrowser] = useState(false);
 
   const policyBrowserPath = useMemo(() => {
@@ -206,6 +208,10 @@ export default function BTParamPanel({
   const paramEntries = Object.entries(localParams);
 
   const commitName = () => {
+    if (suppressNextNameBlurRef.current) {
+      suppressNextNameBlurRef.current = false;
+      return;
+    }
     const trimmed = localName.trim();
     if (!trimmed) {
       // Reject empty — snap input back to current label.
@@ -219,10 +225,10 @@ export default function BTParamPanel({
 
   const handleChange = (paramName, value) => {
     setLocalParams((prev) => ({ ...prev, [paramName]: value }));
-  };
-
-  const handleBlur = (paramName) => {
-    onParamChange(selectedNodeId, paramName, localParams[paramName]);
+    // A Design Save click can happen before a blur-driven graph update reaches
+    // the mission state. Keep the graph current while the field is focused so
+    // the visible value is always the value that gets serialized.
+    onParamChange(selectedNodeId, paramName, value);
   };
 
   const commitParam = (paramName, value) => {
@@ -275,7 +281,6 @@ export default function BTParamPanel({
         value={value}
         disabled={disabled}
         onChange={(e) => handleChange(key, e.target.value)}
-        onBlur={() => handleBlur(key)}
         rows={String(value).length > 60 ? 3 : 1}
         className={`w-full px-2 py-1.5 border border-[var(--mc-border-strong)] rounded-lg text-sm bg-[var(--mc-surface)] text-[var(--mc-text)] focus:outline-none focus:ring-1 focus:ring-[var(--mc-accent)] resize-y${disabledCls}`}
       />
@@ -333,11 +338,7 @@ export default function BTParamPanel({
         <select
           value={value}
           disabled={disabled}
-          onChange={(e) => {
-            handleChange(key, e.target.value);
-            // select has no meaningful blur event for this; sync immediately
-            onParamChange(selectedNodeId, key, e.target.value);
-          }}
+          onChange={(e) => handleChange(key, e.target.value)}
           className={`w-full px-2 py-1.5 border border-[var(--mc-border-strong)] rounded-lg text-sm bg-[var(--mc-surface)] text-[var(--mc-text)] focus:outline-none focus:ring-1 focus:ring-[var(--mc-accent)]${disabledCls}`}
         >
           {ENUM_PARAMS[key].map((opt) => (
@@ -357,7 +358,6 @@ export default function BTParamPanel({
             onChange={(e) => {
               const v = e.target.checked ? 'true' : 'false';
               handleChange(key, v);
-              onParamChange(selectedNodeId, key, v);
             }}
             className="w-4 h-4 rounded border-[var(--mc-border-strong)] text-[var(--mc-accent)] focus:ring-[var(--mc-accent)]"
           />
@@ -373,7 +373,6 @@ export default function BTParamPanel({
             value={value}
             disabled={disabled}
             onChange={(e) => handleChange(key, e.target.value)}
-            onBlur={() => handleBlur(key)}
             rows={String(value).length > 60 ? 3 : 1}
             placeholder="Enter Policy Path or Repo ID"
             className={`flex-1 min-w-0 px-2 py-1.5 border border-[var(--mc-border-strong)] rounded-lg text-sm bg-[var(--mc-surface)] text-[var(--mc-text)] focus:outline-none focus:ring-1 focus:ring-[var(--mc-accent)] resize-y${disabledCls}`}
@@ -400,7 +399,6 @@ export default function BTParamPanel({
           value={value}
           disabled={disabled}
           onChange={(e) => handleChange(key, e.target.value)}
-          onBlur={() => handleBlur(key)}
           className={`w-full px-2 py-1.5 border border-[var(--mc-border-strong)] rounded-lg text-sm bg-[var(--mc-surface)] text-[var(--mc-text)] focus:outline-none focus:ring-1 focus:ring-[var(--mc-accent)]${disabledCls}`}
         />
       );
@@ -411,7 +409,6 @@ export default function BTParamPanel({
         value={value}
         disabled={disabled}
         onChange={(e) => handleChange(key, e.target.value)}
-        onBlur={() => handleBlur(key)}
         rows={String(value).length > 60 ? 3 : 1}
         className={`w-full px-2 py-1.5 border border-[var(--mc-border-strong)] rounded-lg text-sm bg-[var(--mc-surface)] text-[var(--mc-text)] focus:outline-none focus:ring-1 focus:ring-[var(--mc-accent)] resize-y${disabledCls}`}
       />
@@ -427,13 +424,24 @@ export default function BTParamPanel({
           <input
             type="text"
             value={localName}
-            onChange={(e) => setLocalName(e.target.value)}
+            onFocus={() => {
+              nameAtFocusRef.current = label;
+            }}
+            onChange={(e) => {
+              const value = e.target.value;
+              setLocalName(value);
+              const trimmed = value.trim();
+              if (trimmed) onNameChange?.(selectedNodeId, trimmed);
+            }}
             onBlur={commitName}
             onKeyDown={(e) => {
               if (e.key === 'Enter') {
                 e.currentTarget.blur();
               } else if (e.key === 'Escape') {
-                setLocalName(label);
+                const originalName = nameAtFocusRef.current || label;
+                suppressNextNameBlurRef.current = true;
+                setLocalName(originalName);
+                onNameChange?.(selectedNodeId, originalName);
                 e.currentTarget.blur();
               }
             }}

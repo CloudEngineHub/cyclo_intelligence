@@ -237,6 +237,13 @@ export function serializeFromGraph(nodes, edges, nodeDataMap) {
 
   const reachableFromMain = mainRoot ? getReachable(mainRoot.id) : new Set();
   const pendingNodes = nodes.filter((n) => !reachableFromMain.has(n.id));
+  const pendingNodeIds = new Set(pendingNodes.map((node) => node.id));
+  // Preserve each disconnected component once. Appending every pending node
+  // here would serialize descendants both under their parent and again as a
+  // top-level element in __pending__.
+  const pendingRoots = pendingNodes.filter((node) => !edges.some((edge) => (
+    edge.target === node.id && pendingNodeIds.has(edge.source)
+  )));
 
   const xmlDoc = new DOMParser().parseFromString('<root/>', 'text/xml');
   const rootEl = xmlDoc.documentElement;
@@ -272,14 +279,17 @@ export function serializeFromGraph(nodes, edges, nodeDataMap) {
   }
   rootEl.appendChild(mainBT);
 
-  if (pendingNodes.length > 0) {
-    const pendingBT = xmlDoc.createElement('BehaviorTree');
-    pendingBT.setAttribute('ID', '__pending__');
-    pendingNodes.forEach((n) => {
+  if (pendingRoots.length > 0) {
+    // BehaviorTree.CPP requires one root node per BehaviorTree. Keep every
+    // disconnected editor component in its own non-executed tree; the parser
+    // accepts both these IDs and the legacy single __pending__ container.
+    pendingRoots.forEach((n, index) => {
+      const pendingBT = xmlDoc.createElement('BehaviorTree');
+      pendingBT.setAttribute('ID', `__pending__${index + 1}`);
       const el = buildEl(n.id);
       if (el) pendingBT.appendChild(el);
+      rootEl.appendChild(pendingBT);
     });
-    rootEl.appendChild(pendingBT);
   }
 
   return serializeBTXml(xmlDoc);

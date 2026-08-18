@@ -13,31 +13,25 @@
 // limitations under the License.
 
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import MissionBtEditor, { buildBtTreeFileUrl } from "./MissionBtEditor";
+import MissionBtEditor, {
+  isValidBtConnection,
+} from "./MissionBtEditor";
 
 jest.mock("../../hooks/useBTNodeCatalog", () => ({
   useBTNodeCatalog: () => ({ catalog: [] }),
 }));
 
 jest.mock("react-redux", () => ({
-  useSelector: (selector) => selector({ ros: { rosbridgeUrl: "ws://robot-host:7090" } }),
+  useDispatch: () => jest.fn(),
+  useSelector: (selector) => selector({
+    ros: { rosbridgeUrl: "ws://robot-host:7090" },
+    tasks: { robotType: "ffw_sg2" },
+  }),
 }));
 
 jest.mock("react-hot-toast", () => ({
   __esModule: true,
   default: { error: jest.fn(), success: jest.fn() },
-}));
-
-jest.mock("../../features/btmanager/components/TreeListModal", () => ({
-  __esModule: true,
-  default: ({ isOpen, onSelect }) => isOpen ? (
-    <button
-      type="button"
-      onClick={() => onSelect({ name: "template.xml", full_path: "/bt/trees/template.xml" })}
-    >
-      Select XML fixture
-    </button>
-  ) : null,
 }));
 
 const treeXml = (waitName) => [
@@ -46,14 +40,29 @@ const treeXml = (waitName) => [
   "</root>",
 ].join("\n");
 
-test("builds a data-server URL from ws and wss rosbridge URLs", () => {
-  expect(buildBtTreeFileUrl("ws://robot-host:7090", "/bt/trees/example.xml"))
-    .toBe("http://robot-host:7082/bt/trees/example.xml");
-  expect(buildBtTreeFileUrl("wss://[2001:db8::1]:7090", "bt/trees/example.xml"))
-    .toBe("http://[2001:db8::1]:7082/bt/trees/example.xml");
+test("rejects connections that would make the BT cyclic or multi-parent", () => {
+  const nodes = [
+    { id: "root", type: "btControl" },
+    { id: "branch", type: "btControl" },
+    { id: "leaf", type: "btAction" },
+  ];
+  const edges = [
+    { source: "root", target: "branch" },
+    { source: "branch", target: "leaf" },
+  ];
+
+  expect(isValidBtConnection({ source: "root", target: "leaf" }, nodes, edges)).toBe(false);
+  expect(isValidBtConnection({ source: "leaf", target: "root" }, nodes, edges)).toBe(false);
+  expect(isValidBtConnection({ source: "branch", target: "root" }, nodes, edges)).toBe(false);
+  expect(isValidBtConnection({ source: "root", target: "root" }, nodes, edges)).toBe(false);
+  expect(isValidBtConnection(
+    { source: "root", target: "leaf" },
+    nodes,
+    [{ source: "root", target: "branch" }],
+  )).toBe(true);
 });
 
-test("emits the loaded tree to the parent without waiting on a debounce", async () => {
+test("hydrates a loaded tree without emitting an initial empty graph", async () => {
   const onXmlChange = jest.fn();
   render(
     <MissionBtEditor
@@ -63,13 +72,11 @@ test("emits the loaded tree to the parent without waiting on a debounce", async 
       onXmlChange={onXmlChange}
     />,
   );
-  // The tree is pushed up promptly (previously a re-render-starved debounce
-  // could drop it entirely).
-  await waitFor(() => expect(onXmlChange).toHaveBeenCalled());
-  expect(onXmlChange.mock.calls.some(([xml]) => xml.includes("StepA"))).toBe(true);
+  await screen.findByText("StepA");
+  expect(onXmlChange).not.toHaveBeenCalled();
 });
 
-test("emits to the new file path after a waypoint switch, not the old tree", async () => {
+test("does not emit the previous graph while hydrating a new waypoint path", async () => {
   const onXmlChange = jest.fn();
   const { rerender } = render(
     <MissionBtEditor
@@ -79,9 +86,7 @@ test("emits to the new file path after a waypoint switch, not the old tree", asy
       onXmlChange={onXmlChange}
     />,
   );
-  await waitFor(() => (
-    expect(onXmlChange.mock.calls.some(([xml]) => xml.includes("StepA"))).toBe(true)
-  ));
+  await screen.findByText("StepA");
 
   // Switch to another waypoint; the parent supplies that waypoint's XML.
   onXmlChange.mockClear();
@@ -93,38 +98,135 @@ test("emits to the new file path after a waypoint switch, not the old tree", asy
       onXmlChange={onXmlChange}
     />,
   );
-  // Any emission after the switch must be B's tree — never A's written to B.
-  await waitFor(() => (
-    expect(onXmlChange.mock.calls.some(([xml]) => xml.includes("StepB"))).toBe(true)
-  ));
-  expect(onXmlChange.mock.calls.some(([xml]) => xml.includes("StepA"))).toBe(false);
+  await screen.findByText("StepB");
+  expect(onXmlChange).not.toHaveBeenCalled();
 });
 
-test("loads a BT Manager XML selection into the current waypoint tree", async () => {
-  const onXmlChange = jest.fn();
-  const originalFetch = global.fetch;
-  global.fetch = jest.fn().mockResolvedValue({
-    ok: true,
-    text: () => Promise.resolve(treeXml("LoadedStep")),
-  });
-
+test("captures a new parameter edit immediately after undo", async () => {
   render(
     <MissionBtEditor
       title="A"
       filePath="locals/a.xml"
-      xml={treeXml("OriginalStep")}
-      onXmlChange={onXmlChange}
+      xml={treeXml("StepA")}
+      onXmlChange={jest.fn()}
     />,
   );
-  await waitFor(() => expect(onXmlChange).toHaveBeenCalled());
-  onXmlChange.mockClear();
+  fireEvent.click(await screen.findByText("StepA"));
+  const undo = screen.getByTitle("Undo");
+  fireEvent.change(screen.getByDisplayValue("1.0"), { target: { value: "2.0" } });
+  await waitFor(() => expect(undo).toBeEnabled());
+  fireEvent.click(undo);
+  await waitFor(() => expect(undo).toBeDisabled());
+
+  fireEvent.click(screen.getByText("StepA"));
+  fireEvent.change(screen.getByDisplayValue("1.0"), { target: { value: "3.0" } });
+  await waitFor(() => expect(undo).toBeEnabled());
+});
+
+test("loads a selected XML without changing the waypoint default", async () => {
+  const onLoadXml = jest.fn().mockResolvedValue({
+    path: "locals/b.xml",
+    content: treeXml("LoadedStep"),
+    exists: true,
+  });
+  const onFilePathChange = jest.fn();
+  const onSetDefaultXml = jest.fn();
+  render(
+    <MissionBtEditor
+      title="A"
+      filePath="locals/a.xml"
+      fileOptions={["locals/a.xml", "locals/b.xml"]}
+      defaultFilePath="locals/a.xml"
+      xml={treeXml("OriginalStep")}
+      onXmlChange={jest.fn()}
+      onLoadXml={onLoadXml}
+      onFilePathChange={onFilePathChange}
+      onSetDefaultXml={onSetDefaultXml}
+    />,
+  );
+  await screen.findByText("OriginalStep");
 
   fireEvent.click(screen.getByRole("button", { name: "Load XML" }));
-  fireEvent.click(screen.getByRole("button", { name: "Select XML fixture" }));
+  expect(screen.getByRole("dialog", { name: "Local BT XML files" })).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("radio", { name: /b\.xml/ }));
+  fireEvent.click(screen.getByRole("button", { name: "Load Selected" }));
+  await waitFor(() => expect(onLoadXml).toHaveBeenCalledWith("locals/b.xml"));
+  expect(onFilePathChange).toHaveBeenCalledWith("locals/b.xml");
+  expect(onSetDefaultXml).not.toHaveBeenCalled();
+});
 
-  await waitFor(() => expect(onXmlChange.mock.calls.some(([xml]) => (
-    xml.includes("LoadedStep")
-  ))).toBe(true));
-  expect(global.fetch).toHaveBeenCalledWith("http://robot-host:7082/bt/trees/template.xml");
-  global.fetch = originalFetch;
+test("saves the latest graph to the current mission-local path", async () => {
+  const onSaveXml = jest.fn().mockResolvedValue({
+    path: "locals/a.xml",
+    exists: true,
+  });
+  render(
+    <MissionBtEditor
+      title="A"
+      filePath="locals/a.xml"
+      xml={treeXml("StepA")}
+      onXmlChange={jest.fn()}
+      onSaveXml={onSaveXml}
+    />,
+  );
+  fireEvent.click(await screen.findByText("StepA"));
+  fireEvent.change(screen.getByDisplayValue("1.0"), { target: { value: "3.5" } });
+  fireEvent.click(screen.getByRole("button", { name: "Save XML" }));
+
+  await waitFor(() => expect(onSaveXml).toHaveBeenCalledWith(
+    "locals/a.xml",
+    expect.stringContaining('duration="3.5"'),
+  ));
+});
+
+test("saves the latest graph as another XML in the same waypoint", async () => {
+  const onSaveXmlAs = jest.fn().mockResolvedValue({
+    path: "locals/spot_a/alternate.xml",
+    exists: true,
+  });
+  const onFilePathChange = jest.fn();
+  render(
+    <MissionBtEditor
+      title="A"
+      filePath="locals/a.xml"
+      fileOptions={["locals/a.xml"]}
+      defaultFilePath="locals/a.xml"
+      xml={treeXml("StepA")}
+      onXmlChange={jest.fn()}
+      onSaveXmlAs={onSaveXmlAs}
+      onFilePathChange={onFilePathChange}
+    />,
+  );
+  fireEvent.click(await screen.findByText("StepA"));
+  fireEvent.change(screen.getByDisplayValue("1.0"), { target: { value: "4.0" } });
+  fireEvent.click(screen.getByRole("button", { name: "Save XML as" }));
+  fireEvent.change(screen.getByRole("textbox", { name: "New BT XML name" }), {
+    target: { value: "alternate" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Save As" }));
+
+  await waitFor(() => expect(onSaveXmlAs).toHaveBeenCalledWith(
+    "locals/a.xml",
+    "alternate",
+    expect.stringContaining('duration="4.0"'),
+  ));
+  expect(onFilePathChange).toHaveBeenCalledWith("locals/spot_a/alternate.xml");
+});
+
+test("changes the runtime default only through Set Default", async () => {
+  const onSetDefaultXml = jest.fn().mockResolvedValue(undefined);
+  render(
+    <MissionBtEditor
+      title="A"
+      filePath="locals/b.xml"
+      fileOptions={["locals/a.xml", "locals/b.xml"]}
+      defaultFilePath="locals/a.xml"
+      xml={treeXml("StepB")}
+      onXmlChange={jest.fn()}
+      onSetDefaultXml={onSetDefaultXml}
+    />,
+  );
+  await screen.findByText("StepB");
+  fireEvent.click(screen.getByRole("button", { name: "Set default BT" }));
+  await waitFor(() => expect(onSetDefaultXml).toHaveBeenCalledWith("locals/b.xml"));
 });

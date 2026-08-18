@@ -57,24 +57,42 @@ export function saveNavigationMission(mapName, mission, missionName = "") {
   });
 }
 
-export function deleteNavigationMission(mapName, missionName) {
+export function deleteNavigationMission(mapName, missionName, options = {}) {
+  const expectedRevision = options?.expectedRevision ?? options?.expected_revision;
   return request(
-    `/${encodeURIComponent(mapName)}?mission_name=${encodeURIComponent(missionName)}`,
+    `/${encodeURIComponent(mapName)}?mission_name=${encodeURIComponent(missionName)}`
+      + `${Number.isInteger(expectedRevision)
+        ? `&expected_revision=${encodeURIComponent(expectedRevision)}`
+        : ''}`,
     { method: 'DELETE' },
   );
 }
 
-export function renameNavigationMission(mapName, missionName, newName) {
+export function renameNavigationMission(mapName, missionName, newName, options = {}) {
+  const expectedRevision = options?.expectedRevision ?? options?.expected_revision;
   return request(`/${encodeURIComponent(mapName)}/rename`, {
     method: 'POST',
-    body: JSON.stringify({ mission_name: missionName, new_name: newName }),
+    body: JSON.stringify({
+      mission_name: missionName,
+      new_name: newName,
+      ...(Number.isInteger(expectedRevision)
+        ? { expected_revision: expectedRevision }
+        : {}),
+    }),
   });
 }
 
-export function duplicateNavigationMission(mapName, missionName, newName) {
+export function duplicateNavigationMission(mapName, missionName, newName, options = {}) {
+  const expectedRevision = options?.expectedRevision ?? options?.expected_revision;
   return request(`/${encodeURIComponent(mapName)}/duplicate`, {
     method: 'POST',
-    body: JSON.stringify({ mission_name: missionName, new_name: newName }),
+    body: JSON.stringify({
+      mission_name: missionName,
+      new_name: newName,
+      ...(Number.isInteger(expectedRevision)
+        ? { expected_revision: expectedRevision }
+        : {}),
+    }),
   });
 }
 
@@ -84,16 +102,64 @@ export function getNavigationMissionBtFile(mapName, path, missionName = "") {
   );
 }
 
-export function saveNavigationMissionBtFile(mapName, path, content, missionName = "") {
+export function saveNavigationMissionBtFile(
+  mapName,
+  path,
+  content,
+  missionName = "",
+  options = {},
+) {
+  const waypointId = options?.waypointId || options?.waypoint_id || "";
+  const expectedRevision = options?.expectedRevision ?? options?.expected_revision;
   return request(`/${encodeURIComponent(mapName)}/bt${missionQuery(missionName)}`, {
     method: 'PUT',
-    body: JSON.stringify({ path, content }),
+    body: JSON.stringify({
+      path,
+      content,
+      ...(waypointId ? { waypoint_id: waypointId } : {}),
+      ...(Number.isInteger(expectedRevision)
+        ? { expected_revision: expectedRevision }
+        : {}),
+    }),
   });
 }
 
-export function deleteNavigationMissionBtFile(mapName, path, missionName = "") {
+export function setNavigationMissionDefaultBtFile(
+  mapName,
+  waypointId,
+  path,
+  missionName = "",
+  options = {},
+) {
+  const expectedRevision = options?.expectedRevision ?? options?.expected_revision;
   return request(
-    `/${encodeURIComponent(mapName)}/bt?path=${encodeURIComponent(path)}${missionName ? `&mission_name=${encodeURIComponent(missionName)}` : ""}`,
+    `/${encodeURIComponent(mapName)}/bt/default${missionQuery(missionName)}`,
+    {
+      method: 'PUT',
+      body: JSON.stringify({
+        waypoint_id: waypointId,
+        path,
+        ...(Number.isInteger(expectedRevision)
+          ? { expected_revision: expectedRevision }
+          : {}),
+      }),
+    },
+  );
+}
+
+export function deleteNavigationMissionBtFile(
+  mapName,
+  path,
+  missionName = "",
+  options = {},
+) {
+  const expectedRevision = options?.expectedRevision ?? options?.expected_revision;
+  return request(
+    `/${encodeURIComponent(mapName)}/bt?path=${encodeURIComponent(path)}`
+      + `${missionName ? `&mission_name=${encodeURIComponent(missionName)}` : ""}`
+      + `${Number.isInteger(expectedRevision)
+        ? `&expected_revision=${encodeURIComponent(expectedRevision)}`
+        : ""}`,
     { method: 'DELETE' },
   );
 }

@@ -556,6 +556,7 @@ def test_navigation_routes_are_registered():
     assert "/navigation/missions" in paths
     assert "/navigation/missions/{map_name}" in paths
     assert "/navigation/missions/{map_name}/bt" in paths
+    assert "/navigation/missions/{map_name}/bt/default" in paths
     assert "/navigation/missions/{map_name}/duplicate" in paths
     assert "/navigation/missions/{map_name}/rename" in paths
 
@@ -628,6 +629,7 @@ def test_navigation_mission_manifest_and_bt_files(monkeypatch, tmp_path):
     assert saved.mission_name == "default"
     assert not hasattr(saved, "compiled_bt")
     assert saved.waypoints[0].local_bt == "locals/table_a.xml"
+    assert saved.waypoints[0].local_bt_files == ["locals/table_a.xml"]
 
     loaded = navigation_missions.load_mission("factory")
     assert loaded.exists is True
@@ -638,9 +640,12 @@ def test_navigation_mission_manifest_and_bt_files(monkeypatch, tmp_path):
         navigation_missions.MissionBtFileRequest(
             path="locals/table_a.xml",
             content="<root/>",
+            waypoint_id="table_a",
+            expected_revision=saved.revision,
         ),
     )
     assert bt_file.exists is True
+    assert bt_file.revision == saved.revision + 1
 
     loaded_bt = navigation_missions.load_bt_file(
         "factory",
@@ -648,13 +653,35 @@ def test_navigation_mission_manifest_and_bt_files(monkeypatch, tmp_path):
     )
     assert loaded_bt.content == "<root/>"
 
+    from fastapi import HTTPException
+    with pytest.raises(HTTPException) as referenced_delete:
+        navigation_missions.delete_bt_file(
+            "factory",
+            path="locals/table_a.xml",
+            expected_revision=bt_file.revision,
+        )
+    assert referenced_delete.value.status_code == 409
+
+    bt_saved = navigation_missions.save_bt_file(
+        "factory",
+        navigation_missions.MissionBtFileRequest(
+            path="locals/orphan.xml",
+            content="<root/>",
+            expected_revision=bt_file.revision,
+        ),
+    )
     deleted_bt = navigation_missions.delete_bt_file(
         "factory",
-        path="locals/table_a.xml",
+        path="locals/orphan.xml",
+        expected_revision=bt_saved.revision,
     )
     assert deleted_bt.exists is False
-    assert not (
+    assert deleted_bt.revision == bt_saved.revision + 1
+    assert (
         tmp_path / "missions" / "factory" / "default" / "locals" / "table_a.xml"
+    ).exists()
+    assert not (
+        tmp_path / "missions" / "factory" / "default" / "locals" / "orphan.xml"
     ).exists()
 
 
@@ -679,7 +706,7 @@ def test_navigation_mission_delete_removes_mission_dir(monkeypatch, tmp_path):
     from fastapi import HTTPException
 
     monkeypatch.setattr(navigation_missions, "NAVIGATION_DATA_ROOT", tmp_path)
-    navigation_missions.save_mission(
+    saved = navigation_missions.save_mission(
         "factory",
         navigation_missions.MissionSaveRequest(
             waypoints=[
@@ -692,27 +719,204 @@ def test_navigation_mission_delete_removes_mission_dir(monkeypatch, tmp_path):
         ),
         mission_name="picnic",
     )
-    navigation_missions.save_bt_file(
+    bt_saved = navigation_missions.save_bt_file(
         "factory",
         navigation_missions.MissionBtFileRequest(
             path="locals/table_a.xml",
             content="<root/>",
+            waypoint_id="table_a",
+            expected_revision=saved.revision,
         ),
         mission_name="picnic",
     )
 
-    result = navigation_missions.delete_mission("factory", mission_name="picnic")
+    with pytest.raises(HTTPException) as stale:
+        navigation_missions.delete_mission(
+            "factory",
+            mission_name="picnic",
+            expected_revision=saved.revision,
+        )
+    assert stale.value.status_code == 409
+    assert (tmp_path / "missions" / "factory" / "picnic").is_dir()
+
+    result = navigation_missions.delete_mission(
+        "factory",
+        mission_name="picnic",
+        expected_revision=bt_saved.revision,
+    )
 
     assert result.deleted is True
     assert result.mission_name == "picnic"
     assert not (tmp_path / "missions" / "factory" / "picnic").exists()
 
     with pytest.raises(HTTPException) as missing:
-        navigation_missions.delete_mission("factory", mission_name="picnic")
+        navigation_missions.delete_mission(
+            "factory",
+            mission_name="picnic",
+            expected_revision=bt_saved.revision,
+        )
     assert missing.value.status_code == 404
 
     with pytest.raises(HTTPException):
-        navigation_missions.delete_mission("factory", mission_name="../escape")
+        navigation_missions.delete_mission(
+            "factory", mission_name="../escape", expected_revision=0
+        )
+
+
+def test_navigation_mission_delete_leaves_revision_tombstone(
+    monkeypatch, tmp_path
+):
+    import pytest
+    from fastapi import HTTPException
+
+    monkeypatch.setattr(navigation_missions, "NAVIGATION_DATA_ROOT", tmp_path)
+    saved = navigation_missions.save_mission(
+        "factory",
+        navigation_missions.MissionSaveRequest(waypoints=[]),
+        mission_name="picnic",
+    )
+    navigation_missions.delete_mission(
+        "factory",
+        mission_name="picnic",
+        expected_revision=saved.revision,
+    )
+
+    deleted = navigation_missions.load_mission("factory", mission_name="picnic")
+    assert deleted.exists is False
+    assert deleted.revision == saved.revision + 1
+    with pytest.raises(HTTPException) as stale:
+        navigation_missions.save_bt_file(
+            "factory",
+            navigation_missions.MissionBtFileRequest(
+                path="global.xml",
+                content="<root id='stale-session'/>",
+                expected_revision=saved.revision,
+            ),
+            mission_name="picnic",
+        )
+    assert stale.value.status_code == 409
+    with pytest.raises(HTTPException) as missing_revision:
+        navigation_missions.save_mission(
+            "factory",
+            navigation_missions.MissionSaveRequest(waypoints=[]),
+            mission_name="picnic",
+        )
+    assert missing_revision.value.status_code == 409
+    assert not (
+        tmp_path / "missions" / "factory" / "picnic" / "global.xml"
+    ).exists()
+
+
+@pytest.mark.parametrize("invalid_name", [".", "..", ".revisions", ".TRASH"])
+def test_navigation_mission_rejects_storage_control_names(
+    monkeypatch, tmp_path, invalid_name
+):
+    from fastapi import HTTPException
+
+    monkeypatch.setattr(navigation_missions, "NAVIGATION_DATA_ROOT", tmp_path)
+    sentinel = tmp_path / "missions" / "factory" / "kept" / "sentinel.txt"
+    sentinel.parent.mkdir(parents=True)
+    sentinel.write_text("keep", encoding="utf-8")
+
+    with pytest.raises(HTTPException) as invalid:
+        navigation_missions.load_mission(
+            "factory",
+            mission_name=invalid_name,
+        )
+    assert invalid.value.status_code == 400
+    assert sentinel.read_text(encoding="utf-8") == "keep"
+
+
+def test_navigation_mission_revision_marker_is_symlink_safe(
+    monkeypatch, tmp_path
+):
+    from fastapi import HTTPException
+
+    monkeypatch.setattr(navigation_missions, "NAVIGATION_DATA_ROOT", tmp_path)
+    map_root = tmp_path / "missions" / "factory"
+    outside = tmp_path / "outside"
+    map_root.mkdir(parents=True)
+    outside.mkdir()
+    (map_root / ".revisions").symlink_to(outside, target_is_directory=True)
+
+    with pytest.raises(HTTPException) as escaped:
+        navigation_missions.load_mission("factory", mission_name="inspection")
+    assert escaped.value.status_code == 400
+    assert list(outside.iterdir()) == []
+
+
+def test_navigation_mission_corrupt_revision_marker_fails_closed(
+    monkeypatch, tmp_path
+):
+    from fastapi import HTTPException
+
+    monkeypatch.setattr(navigation_missions, "NAVIGATION_DATA_ROOT", tmp_path)
+    marker = (
+        tmp_path
+        / "missions"
+        / "factory"
+        / ".revisions"
+        / "inspection.revision"
+    )
+    marker.parent.mkdir(parents=True)
+    marker.write_text("not-a-revision\n", encoding="utf-8")
+
+    with pytest.raises(HTTPException) as corrupt:
+        navigation_missions.load_mission("factory", mission_name="inspection")
+    assert corrupt.value.status_code == 500
+
+
+def test_navigation_mission_manifest_symlink_fails_closed(
+    monkeypatch, tmp_path
+):
+    from fastapi import HTTPException
+
+    monkeypatch.setattr(navigation_missions, "NAVIGATION_DATA_ROOT", tmp_path)
+    outside_manifest = tmp_path / "outside.json"
+    secret = "must-not-be-exposed"
+    outside_manifest.write_text(
+        json.dumps({
+            "revision": 9,
+            "global_bt": "global.xml",
+            "waypoints": [],
+            "metadata": {"secret": secret},
+        }),
+        encoding="utf-8",
+    )
+    mission_dir = tmp_path / "missions" / "factory" / "inspection"
+    mission_dir.mkdir(parents=True)
+    (mission_dir / "mission.json").symlink_to(outside_manifest)
+
+    with pytest.raises(HTTPException) as escaped:
+        navigation_missions.load_mission(
+            "factory", mission_name="inspection"
+        )
+
+    assert escaped.value.status_code == 400
+    assert secret not in str(escaped.value.detail)
+    assert json.loads(outside_manifest.read_text(encoding="utf-8"))["metadata"] == {
+        "secret": secret,
+    }
+
+
+def test_navigation_mission_non_regular_manifest_fails_closed(
+    monkeypatch, tmp_path
+):
+    from fastapi import HTTPException
+
+    monkeypatch.setattr(navigation_missions, "NAVIGATION_DATA_ROOT", tmp_path)
+    manifest_path = (
+        tmp_path / "missions" / "factory" / "inspection" / "mission.json"
+    )
+    manifest_path.mkdir(parents=True)
+
+    with pytest.raises(HTTPException) as invalid:
+        navigation_missions.load_mission(
+            "factory", mission_name="inspection"
+        )
+
+    assert invalid.value.status_code in {400, 500}
+    assert "inspection" not in navigation_missions.list_missions("factory").missions
 
 
 def test_navigation_mission_rename_moves_dir_and_rewrites_name(
@@ -722,7 +926,7 @@ def test_navigation_mission_rename_moves_dir_and_rewrites_name(
     from fastapi import HTTPException
 
     monkeypatch.setattr(navigation_missions, "NAVIGATION_DATA_ROOT", tmp_path)
-    navigation_missions.save_mission(
+    saved = navigation_missions.save_mission(
         "factory",
         navigation_missions.MissionSaveRequest(
             waypoints=[
@@ -736,11 +940,13 @@ def test_navigation_mission_rename_moves_dir_and_rewrites_name(
         ),
         mission_name="picnic",
     )
-    navigation_missions.save_bt_file(
+    bt_saved = navigation_missions.save_bt_file(
         "factory",
         navigation_missions.MissionBtFileRequest(
             path="locals/table_a.xml",
             content="<root/>",
+            waypoint_id="table_a",
+            expected_revision=saved.revision,
         ),
         mission_name="picnic",
     )
@@ -748,12 +954,15 @@ def test_navigation_mission_rename_moves_dir_and_rewrites_name(
     renamed = navigation_missions.rename_mission(
         "factory",
         navigation_missions.MissionRenameRequest(
-            mission_name="picnic", new_name="evening"
+            mission_name="picnic",
+            new_name="evening",
+            expected_revision=bt_saved.revision,
         ),
     )
 
     assert renamed.exists is True
     assert renamed.mission_name == "evening"
+    assert renamed.revision == bt_saved.revision + 1
     assert not (tmp_path / "missions" / "factory" / "picnic").exists()
     new_dir = tmp_path / "missions" / "factory" / "evening"
     assert (new_dir / "locals" / "table_a.xml").read_text() == "<root/>"
@@ -769,7 +978,7 @@ def test_navigation_mission_rename_moves_dir_and_rewrites_name(
         )
     assert missing.value.status_code == 404
 
-    navigation_missions.save_mission(
+    saved = navigation_missions.save_mission(
         "factory",
         navigation_missions.MissionSaveRequest(waypoints=[]),
         mission_name="other",
@@ -778,7 +987,9 @@ def test_navigation_mission_rename_moves_dir_and_rewrites_name(
         navigation_missions.rename_mission(
             "factory",
             navigation_missions.MissionRenameRequest(
-                mission_name="evening", new_name="other"
+                mission_name="evening",
+                new_name="other",
+                expected_revision=renamed.revision,
             ),
         )
     assert conflict.value.status_code == 409
@@ -791,7 +1002,7 @@ def test_navigation_mission_duplicate_copies_manifest_and_bt(
     from fastapi import HTTPException
 
     monkeypatch.setattr(navigation_missions, "NAVIGATION_DATA_ROOT", tmp_path)
-    navigation_missions.save_mission(
+    saved = navigation_missions.save_mission(
         "factory",
         navigation_missions.MissionSaveRequest(
             waypoints=[
@@ -805,11 +1016,13 @@ def test_navigation_mission_duplicate_copies_manifest_and_bt(
         ),
         mission_name="picnic",
     )
-    navigation_missions.save_bt_file(
+    bt_saved = navigation_missions.save_bt_file(
         "factory",
         navigation_missions.MissionBtFileRequest(
             path="locals/table_a.xml",
             content="<root/>",
+            waypoint_id="table_a",
+            expected_revision=saved.revision,
         ),
         mission_name="picnic",
     )
@@ -817,12 +1030,15 @@ def test_navigation_mission_duplicate_copies_manifest_and_bt(
     copy = navigation_missions.duplicate_mission(
         "factory",
         navigation_missions.MissionDuplicateRequest(
-            mission_name="picnic", new_name="picnic-copy"
+            mission_name="picnic",
+            new_name="picnic-copy",
+            expected_revision=bt_saved.revision,
         ),
     )
 
     assert copy.exists is True
     assert copy.mission_name == "picnic-copy"
+    assert copy.revision == bt_saved.revision + 1
     assert copy.waypoints[0].label == "Table A"
     copy_dir = tmp_path / "missions" / "factory" / "picnic-copy"
     assert (copy_dir / "locals" / "table_a.xml").read_text() == "<root/>"
@@ -838,7 +1054,9 @@ def test_navigation_mission_duplicate_copies_manifest_and_bt(
         navigation_missions.duplicate_mission(
             "factory",
             navigation_missions.MissionDuplicateRequest(
-                mission_name="picnic", new_name="picnic-copy"
+                mission_name="picnic",
+                new_name="picnic-copy",
+                expected_revision=bt_saved.revision,
             ),
         )
     assert conflict.value.status_code == 409
@@ -853,6 +1071,229 @@ def test_navigation_mission_duplicate_copies_manifest_and_bt(
     assert missing.value.status_code == 404
 
 
+def test_navigation_rename_and_duplicate_reissue_target_generations(
+    monkeypatch, tmp_path
+):
+    from fastapi import HTTPException
+
+    monkeypatch.setattr(navigation_missions, "NAVIGATION_DATA_ROOT", tmp_path)
+    old_target = navigation_missions.save_mission(
+        "factory",
+        navigation_missions.MissionSaveRequest(waypoints=[]),
+        mission_name="reused",
+    )
+    old_target = navigation_missions.save_bt_file(
+        "factory",
+        navigation_missions.MissionBtFileRequest(
+            path="global.xml",
+            content="<root id='old-target'/>",
+            expected_revision=old_target.revision,
+        ),
+        mission_name="reused",
+    )
+    navigation_missions.delete_mission(
+        "factory",
+        mission_name="reused",
+        expected_revision=old_target.revision,
+    )
+    target_tombstone = navigation_missions.load_mission(
+        "factory", mission_name="reused"
+    ).revision
+
+    source = navigation_missions.save_mission(
+        "factory",
+        navigation_missions.MissionSaveRequest(waypoints=[]),
+        mission_name="source",
+    )
+    renamed = navigation_missions.rename_mission(
+        "factory",
+        navigation_missions.MissionRenameRequest(
+            mission_name="source",
+            new_name="reused",
+            expected_revision=source.revision,
+        ),
+    )
+    assert renamed.revision == target_tombstone + 1
+    source_tombstone = navigation_missions.load_mission(
+        "factory", mission_name="source"
+    )
+    assert source_tombstone.exists is False
+    assert source_tombstone.revision == source.revision + 1
+    with pytest.raises(HTTPException) as stale_target:
+        navigation_missions.save_bt_file(
+            "factory",
+            navigation_missions.MissionBtFileRequest(
+                path="global.xml",
+                content="<root id='stale-target'/>",
+                expected_revision=old_target.revision,
+            ),
+            mission_name="reused",
+        )
+    assert stale_target.value.status_code == 409
+
+    old_copy = navigation_missions.save_mission(
+        "factory",
+        navigation_missions.MissionSaveRequest(waypoints=[]),
+        mission_name="reused-copy",
+    )
+    navigation_missions.delete_mission(
+        "factory",
+        mission_name="reused-copy",
+        expected_revision=old_copy.revision,
+    )
+    copy_tombstone = navigation_missions.load_mission(
+        "factory", mission_name="reused-copy"
+    ).revision
+    copied = navigation_missions.duplicate_mission(
+        "factory",
+        navigation_missions.MissionDuplicateRequest(
+            mission_name="reused",
+            new_name="reused-copy",
+            expected_revision=renamed.revision,
+        ),
+    )
+    assert copied.revision == max(renamed.revision, copy_tombstone) + 1
+    assert navigation_missions.load_mission(
+        "factory", mission_name="reused"
+    ).revision == renamed.revision
+
+
+def test_navigation_duplicate_rejects_nested_symlinks(monkeypatch, tmp_path):
+    from fastapi import HTTPException
+
+    monkeypatch.setattr(navigation_missions, "NAVIGATION_DATA_ROOT", tmp_path)
+    source = navigation_missions.save_mission(
+        "factory",
+        navigation_missions.MissionSaveRequest(waypoints=[]),
+        mission_name="source",
+    )
+    source_dir = tmp_path / "missions" / "factory" / "source"
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "secret.xml").write_text("<secret/>", encoding="utf-8")
+    (source_dir / "locals").mkdir()
+    (source_dir / "locals" / "redirect").symlink_to(
+        outside, target_is_directory=True
+    )
+
+    with pytest.raises(HTTPException) as rejected:
+        navigation_missions.duplicate_mission(
+            "factory",
+            navigation_missions.MissionDuplicateRequest(
+                mission_name="source",
+                new_name="copy",
+                expected_revision=source.revision,
+            ),
+        )
+    assert rejected.value.status_code == 400
+    assert not (tmp_path / "missions" / "factory" / "copy").exists()
+    assert (outside / "secret.xml").read_text(encoding="utf-8") == "<secret/>"
+
+
+@pytest.mark.parametrize("failure_stage", ["copy", "manifest"])
+def test_navigation_duplicate_failure_does_not_publish_or_block_target(
+    monkeypatch, tmp_path, failure_stage
+):
+    from fastapi import HTTPException
+
+    monkeypatch.setattr(navigation_missions, "NAVIGATION_DATA_ROOT", tmp_path)
+    source = navigation_missions.save_mission(
+        "factory",
+        navigation_missions.MissionSaveRequest(waypoints=[
+            navigation_missions.MissionWaypoint(
+                id="table_a",
+                label="Table A",
+                pose=navigation_missions.SpotPose(x=1.0, y=2.0, yaw=0.5),
+                local_bt="locals/table_a.xml",
+            )
+        ]),
+        mission_name="source",
+    )
+    source = navigation_missions.save_bt_file(
+        "factory",
+        navigation_missions.MissionBtFileRequest(
+            path="locals/table_a.xml",
+            content="<root id='source-local'/>",
+            waypoint_id="table_a",
+            expected_revision=source.revision,
+        ),
+        mission_name="source",
+    )
+    target_name = f"copy-after-{failure_stage}-failure"
+    target_dir = tmp_path / "missions" / "factory" / target_name
+
+    with monkeypatch.context() as failure:
+        if failure_stage == "copy":
+            def fail_copytree(_source, destination, *args, **kwargs):
+                partial = Path(destination)
+                partial.mkdir(parents=True)
+                (partial / "partial.txt").write_text(
+                    "incomplete", encoding="utf-8"
+                )
+                raise OSError("injected copy failure")
+
+            failure.setattr(
+                navigation_missions.shutil,
+                "copytree",
+                fail_copytree,
+            )
+        else:
+            def fail_manifest_write(manifest):
+                if manifest.mission_name == target_name:
+                    raise HTTPException(500, "injected manifest failure")
+                raise AssertionError("unexpected manifest write")
+
+            failure.setattr(
+                navigation_missions,
+                "_write_manifest",
+                fail_manifest_write,
+            )
+
+        with pytest.raises(HTTPException) as failed:
+            navigation_missions.duplicate_mission(
+                "factory",
+                navigation_missions.MissionDuplicateRequest(
+                    mission_name="source",
+                    new_name=target_name,
+                    expected_revision=source.revision,
+                ),
+            )
+
+    assert failed.value.status_code == 500
+    assert not target_dir.exists()
+    assert target_name not in navigation_missions.list_missions("factory").missions
+    reserved = navigation_missions.load_mission(
+        "factory", mission_name=target_name
+    )
+    assert reserved.exists is False
+    assert reserved.revision > source.revision
+
+    copied = navigation_missions.duplicate_mission(
+        "factory",
+        navigation_missions.MissionDuplicateRequest(
+            mission_name="source",
+            new_name=target_name,
+            expected_revision=source.revision,
+        ),
+    )
+
+    assert copied.exists is True
+    assert copied.revision == max(source.revision, reserved.revision) + 1
+    assert copied.waypoints[0].local_bt == "locals/table_a.xml"
+    assert (
+        target_dir / "locals" / "table_a.xml"
+    ).read_text(encoding="utf-8") == "<root id='source-local'/>"
+    published = navigation_missions.load_mission(
+        "factory", mission_name=target_name
+    )
+    assert published.revision == copied.revision
+    assert published.waypoints == copied.waypoints
+    stored = json.loads((target_dir / "mission.json").read_text(encoding="utf-8"))
+    assert stored["mission_name"] == target_name
+    assert stored["revision"] == copied.revision
+    assert target_name in navigation_missions.list_missions("factory").missions
+
+
 def test_navigation_mission_save_prunes_orphan_local_bt_files(
     monkeypatch, tmp_path
 ):
@@ -862,6 +1303,10 @@ def test_navigation_mission_save_prunes_orphan_local_bt_files(
     (locals_dir / "table_a.xml").write_text("<root/>", encoding="utf-8")
     (locals_dir / "waypoint_2.xml").write_text("<root/>", encoding="utf-8")
     (locals_dir / "waypoint_5.xml").write_text("<root/>", encoding="utf-8")
+    nested_dir = locals_dir / "table_a"
+    nested_dir.mkdir()
+    (nested_dir / "alternate.xml").write_text("<root/>", encoding="utf-8")
+    (nested_dir / "orphan.xml").write_text("<root/>", encoding="utf-8")
 
     navigation_missions.save_mission(
         "factory",
@@ -872,6 +1317,10 @@ def test_navigation_mission_save_prunes_orphan_local_bt_files(
                     label="Table A",
                     pose=navigation_missions.SpotPose(x=1.0, y=2.0, yaw=0.5),
                     local_bt="locals/table_a.xml",
+                    local_bt_files=[
+                        "locals/table_a.xml",
+                        "locals/table_a/alternate.xml",
+                    ],
                 )
             ],
         ),
@@ -879,8 +1328,914 @@ def test_navigation_mission_save_prunes_orphan_local_bt_files(
 
     # Referenced file survives; leftovers from deleted/renamed waypoints go.
     assert (locals_dir / "table_a.xml").exists()
+    assert (nested_dir / "alternate.xml").exists()
+    assert not (nested_dir / "orphan.xml").exists()
     assert not (locals_dir / "waypoint_2.xml").exists()
     assert not (locals_dir / "waypoint_5.xml").exists()
+
+
+def test_navigation_mission_prune_preserves_global_bt_under_locals(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setattr(navigation_missions, "NAVIGATION_DATA_ROOT", tmp_path)
+    locals_dir = tmp_path / "missions" / "factory" / "default" / "locals"
+    locals_dir.mkdir(parents=True)
+    global_path = locals_dir / "global.xml"
+    orphan_path = locals_dir / "orphan.xml"
+    global_path.write_text("<root id='global'/>", encoding="utf-8")
+    orphan_path.write_text("<root id='orphan'/>", encoding="utf-8")
+
+    saved = navigation_missions.save_mission(
+        "factory",
+        navigation_missions.MissionSaveRequest(
+            global_bt="locals/global.xml",
+            waypoints=[],
+        ),
+    )
+
+    assert saved.global_bt == "locals/global.xml"
+    assert global_path.read_text(encoding="utf-8") == "<root id='global'/>"
+    assert not orphan_path.exists()
+
+
+def test_navigation_mission_v1_manifest_promotes_default_to_file_library(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setattr(navigation_missions, "NAVIGATION_DATA_ROOT", tmp_path)
+    mission_dir = tmp_path / "missions" / "factory" / "default"
+    mission_dir.mkdir(parents=True)
+    (mission_dir / "mission.json").write_text(
+        json.dumps({
+            "schema_version": 1,
+            "map_name": "factory",
+            "mission_name": "default",
+            "global_bt": "global.xml",
+            "waypoints": [{
+                "id": "table_a",
+                "label": "Table A",
+                "pose": {"frame_id": "map", "x": 1.0, "y": 2.0, "yaw": 0.5},
+                "local_bt": "locals/table_a.xml",
+            }],
+        }),
+        encoding="utf-8",
+    )
+
+    loaded = navigation_missions.load_mission("factory")
+
+    assert loaded.schema_version == 2
+    assert loaded.waypoints[0].local_bt == "locals/table_a.xml"
+    assert loaded.waypoints[0].local_bt_files == ["locals/table_a.xml"]
+
+
+def test_navigation_mission_preserves_alternates_when_default_changes(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setattr(navigation_missions, "NAVIGATION_DATA_ROOT", tmp_path)
+    locals_dir = tmp_path / "missions" / "factory" / "default" / "locals"
+    locals_dir.mkdir(parents=True)
+    default_path = locals_dir / "table_a.xml"
+    alternate_path = locals_dir / "table_a_alt.xml"
+    default_path.write_text("<root id='default'/>", encoding="utf-8")
+    alternate_path.write_text("<root id='alternate'/>", encoding="utf-8")
+
+    def waypoint(default_bt, *, files_marker=True):
+        kwargs = {
+            "id": "table_a",
+            "label": "Table A",
+            "pose": navigation_missions.SpotPose(x=1.0, y=2.0, yaw=0.5),
+            "local_bt": default_bt,
+        }
+        if files_marker:
+            kwargs["local_bt_files"] = [
+                "locals/table_a.xml",
+                "locals/table_a_alt.xml",
+            ]
+        return navigation_missions.MissionWaypoint(**kwargs)
+
+    initial = navigation_missions.save_mission(
+        "factory",
+        navigation_missions.MissionSaveRequest(
+            waypoints=[waypoint("locals/table_a.xml")]
+        ),
+    )
+    switched = navigation_missions.save_mission(
+        "factory",
+        navigation_missions.MissionSaveRequest(
+            waypoints=[waypoint("locals/table_a_alt.xml")],
+            expected_revision=initial.revision,
+        ),
+    )
+    assert switched.waypoints[0].local_bt == "locals/table_a_alt.xml"
+    assert switched.waypoints[0].local_bt_files == [
+        "locals/table_a_alt.xml",
+        "locals/table_a.xml",
+    ]
+    assert default_path.exists()
+    assert alternate_path.exists()
+
+    # A cached v1 client omits local_bt_files entirely. It may change the
+    # default pointer, but must not silently delete the v2 library.
+    preserved = navigation_missions.save_mission(
+        "factory",
+        navigation_missions.MissionSaveRequest(
+            waypoints=[waypoint("locals/table_a.xml", files_marker=False)],
+            expected_revision=switched.revision,
+        ),
+    )
+    assert preserved.waypoints[0].local_bt_files == [
+        "locals/table_a.xml",
+        "locals/table_a_alt.xml",
+    ]
+    assert alternate_path.exists()
+
+    # An explicit v2 empty list is authoritative; normalization keeps the
+    # selected default and prunes the removed alternative.
+    removed = navigation_missions.save_mission(
+        "factory",
+        navigation_missions.MissionSaveRequest(
+            expected_revision=preserved.revision,
+            waypoints=[navigation_missions.MissionWaypoint(
+                id="table_a",
+                label="Table A",
+                pose=navigation_missions.SpotPose(x=1.0, y=2.0, yaw=0.5),
+                local_bt="locals/table_a.xml",
+                local_bt_files=[],
+            )]
+        ),
+    )
+    assert removed.waypoints[0].local_bt_files == ["locals/table_a.xml"]
+    assert default_path.exists()
+    assert not alternate_path.exists()
+
+
+def test_navigation_bt_save_registers_waypoint_file_in_manifest(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setattr(navigation_missions, "NAVIGATION_DATA_ROOT", tmp_path)
+    pose = navigation_missions.SpotPose(x=1.0, y=2.0, yaw=0.5)
+    initial = navigation_missions.save_mission(
+        "factory",
+        navigation_missions.MissionSaveRequest(waypoints=[
+            navigation_missions.MissionWaypoint(
+                id="table_a",
+                label="Table A",
+                pose=pose,
+                local_bt="locals/table_a/default.xml",
+            )
+        ]),
+        mission_name="picnic",
+    )
+
+    saved = navigation_missions.save_bt_file(
+        "factory",
+        navigation_missions.MissionBtFileRequest(
+            path="locals/table_a//alternate.xml",
+            content="<root id='alternate'/>",
+            waypoint_id="table_a",
+            expected_revision=initial.revision,
+        ),
+        mission_name="picnic",
+    )
+
+    assert saved.path == "locals/table_a/alternate.xml"
+    alternate_path = (
+        tmp_path
+        / "missions"
+        / "factory"
+        / "picnic"
+        / "locals"
+        / "table_a"
+        / "alternate.xml"
+    )
+    assert alternate_path.read_text(encoding="utf-8") == "<root id='alternate'/>"
+    loaded = navigation_missions.load_mission("factory", mission_name="picnic")
+    assert loaded.waypoints[0].local_bt == "locals/table_a/default.xml"
+    assert loaded.waypoints[0].local_bt_files == [
+        "locals/table_a/default.xml",
+        "locals/table_a/alternate.xml",
+    ]
+    stored = json.loads((
+        tmp_path / "missions" / "factory" / "picnic" / "mission.json"
+    ).read_text(encoding="utf-8"))
+    assert stored["waypoints"][0]["local_bt_files"] == [
+        "locals/table_a/default.xml",
+        "locals/table_a/alternate.xml",
+    ]
+
+    # A later cached-v1 mission save still preserves the file registered by
+    # Save As because local_bt_files was omitted, not explicitly cleared.
+    cached_v1_save = navigation_missions.save_mission(
+        "factory",
+        navigation_missions.MissionSaveRequest(waypoints=[
+            navigation_missions.MissionWaypoint(
+                id="table_a",
+                label="Renamed Table",
+                pose=pose,
+                local_bt="locals/table_a/default.xml",
+            )
+        ], expected_revision=saved.revision),
+        mission_name="picnic",
+    )
+    assert cached_v1_save.waypoints[0].local_bt_files == [
+        "locals/table_a/default.xml",
+        "locals/table_a/alternate.xml",
+    ]
+    assert alternate_path.exists()
+
+
+def test_navigation_bt_save_keeps_existing_legacy_root_file_compatible(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setattr(navigation_missions, "NAVIGATION_DATA_ROOT", tmp_path)
+    initial = navigation_missions.save_mission(
+        "factory",
+        navigation_missions.MissionSaveRequest(waypoints=[
+            navigation_missions.MissionWaypoint(
+                id="table_a",
+                label="Table A",
+                pose=navigation_missions.SpotPose(x=0.0, y=0.0, yaw=0.0),
+                local_bt="legacy_table.xml",
+            )
+        ]),
+    )
+
+    saved = navigation_missions.save_bt_file(
+        "factory",
+        navigation_missions.MissionBtFileRequest(
+            path="legacy_table.xml",
+            content="<root id='legacy'/>",
+            waypoint_id="table_a",
+            expected_revision=initial.revision,
+        ),
+    )
+
+    assert saved.exists is True
+    assert navigation_missions.load_bt_file(
+        "factory", path="legacy_table.xml"
+    ).content == "<root id='legacy'/>"
+
+
+def test_navigation_mission_revision_rejects_stale_library_overwrite(
+    monkeypatch, tmp_path
+):
+    from fastapi import HTTPException
+
+    monkeypatch.setattr(navigation_missions, "NAVIGATION_DATA_ROOT", tmp_path)
+    pose = navigation_missions.SpotPose(x=0.0, y=0.0, yaw=0.0)
+    initial = navigation_missions.save_mission(
+        "factory",
+        navigation_missions.MissionSaveRequest(waypoints=[
+            navigation_missions.MissionWaypoint(
+                id="table_a",
+                label="Table A",
+                pose=pose,
+                local_bt="locals/table_a/default.xml",
+            )
+        ]),
+    )
+    assert initial.revision == 1
+
+    registered = navigation_missions.save_bt_file(
+        "factory",
+        navigation_missions.MissionBtFileRequest(
+            path="locals/table_a/alternate.xml",
+            content="<root/>",
+            waypoint_id="table_a",
+            expected_revision=initial.revision,
+        ),
+    )
+    assert registered.revision == 2
+
+    with pytest.raises(HTTPException) as stale:
+        navigation_missions.save_mission(
+            "factory",
+            navigation_missions.MissionSaveRequest(
+                expected_revision=initial.revision,
+                waypoints=[navigation_missions.MissionWaypoint(
+                    id="table_a",
+                    label="Stale Table",
+                    pose=pose,
+                    local_bt="locals/table_a/default.xml",
+                    local_bt_files=["locals/table_a/default.xml"],
+                )],
+            ),
+        )
+    assert stale.value.status_code == 409
+    current = navigation_missions.load_mission("factory")
+    assert current.revision == registered.revision
+    assert current.waypoints[0].local_bt_files == [
+        "locals/table_a/default.xml",
+        "locals/table_a/alternate.xml",
+    ]
+    assert (
+        tmp_path
+        / "missions"
+        / "factory"
+        / "default"
+        / "locals"
+        / "table_a"
+        / "alternate.xml"
+    ).exists()
+
+
+def test_navigation_bt_save_rejects_stale_same_file_overwrite(
+    monkeypatch, tmp_path
+):
+    from fastapi import HTTPException
+
+    monkeypatch.setattr(navigation_missions, "NAVIGATION_DATA_ROOT", tmp_path)
+    initial = navigation_missions.save_mission(
+        "factory",
+        navigation_missions.MissionSaveRequest(waypoints=[
+            navigation_missions.MissionWaypoint(
+                id="table_a",
+                label="Table A",
+                pose=navigation_missions.SpotPose(x=0.0, y=0.0, yaw=0.0),
+                local_bt="locals/table_a.xml",
+            )
+        ]),
+    )
+
+    first_session_revision = initial.revision
+    second_session_revision = initial.revision
+    first_save = navigation_missions.save_bt_file(
+        "factory",
+        navigation_missions.MissionBtFileRequest(
+            path="locals/table_a.xml",
+            content="<root id='first-session'/>",
+            waypoint_id="table_a",
+            expected_revision=first_session_revision,
+        ),
+    )
+
+    assert first_save.revision == first_session_revision + 1
+    with pytest.raises(HTTPException) as stale:
+        navigation_missions.save_bt_file(
+            "factory",
+            navigation_missions.MissionBtFileRequest(
+                path="locals/table_a.xml",
+                content="<root id='second-session'/>",
+                waypoint_id="table_a",
+                expected_revision=second_session_revision,
+            ),
+        )
+    assert stale.value.status_code == 409
+    assert navigation_missions.load_bt_file(
+        "factory", path="locals/table_a.xml"
+    ).content == "<root id='first-session'/>"
+    assert navigation_missions.load_mission("factory").revision == first_save.revision
+
+
+def test_navigation_bt_save_burns_revision_before_manifest_commit(
+    monkeypatch, tmp_path
+):
+    from fastapi import HTTPException
+
+    monkeypatch.setattr(navigation_missions, "NAVIGATION_DATA_ROOT", tmp_path)
+    initial = navigation_missions.save_mission(
+        "factory",
+        navigation_missions.MissionSaveRequest(waypoints=[]),
+    )
+    current = navigation_missions.save_bt_file(
+        "factory",
+        navigation_missions.MissionBtFileRequest(
+            path="global.xml",
+            content="<root id='before-crash'/>",
+            expected_revision=initial.revision,
+        ),
+    )
+
+    with monkeypatch.context() as crash:
+        crash.setattr(
+            navigation_missions,
+            "_write_manifest",
+            lambda _manifest: (_ for _ in ()).throw(
+                SystemExit("injected crash before manifest commit")
+            ),
+        )
+        with pytest.raises(SystemExit):
+            navigation_missions.save_bt_file(
+                "factory",
+                navigation_missions.MissionBtFileRequest(
+                    path="global.xml",
+                    content="<root id='after-semantic-write'/>",
+                    expected_revision=current.revision,
+                ),
+            )
+
+    effective = navigation_missions.load_mission("factory")
+    assert effective.revision == current.revision + 1
+    assert navigation_missions.load_bt_file(
+        "factory", path="global.xml"
+    ).content == "<root id='after-semantic-write'/>"
+    with pytest.raises(HTTPException) as stale:
+        navigation_missions.save_bt_file(
+            "factory",
+            navigation_missions.MissionBtFileRequest(
+                path="global.xml",
+                content="<root id='stale-overwrite'/>",
+                expected_revision=current.revision,
+            ),
+        )
+    assert stale.value.status_code == 409
+
+
+def test_navigation_bt_default_burns_revision_before_manifest_commit(
+    monkeypatch, tmp_path
+):
+    from fastapi import HTTPException
+
+    monkeypatch.setattr(navigation_missions, "NAVIGATION_DATA_ROOT", tmp_path)
+    initial = navigation_missions.save_mission(
+        "factory",
+        navigation_missions.MissionSaveRequest(waypoints=[
+            navigation_missions.MissionWaypoint(
+                id="table_a",
+                label="Table A",
+                pose=navigation_missions.SpotPose(x=1.0, y=2.0, yaw=0.5),
+                local_bt="locals/table_a/default.xml",
+                local_bt_files=[
+                    "locals/table_a/default.xml",
+                    "locals/table_a/alternate.xml",
+                ],
+            )
+        ]),
+    )
+    current = navigation_missions.save_bt_file(
+        "factory",
+        navigation_missions.MissionBtFileRequest(
+            path="global.xml",
+            content=(
+                '<root><BehaviorTree ID="MainTree"><MissionStep '
+                'waypoint_id="table_a" '
+                'local_bt="locals/table_a/default.xml"/>'
+                '</BehaviorTree></root>'
+            ),
+            expected_revision=initial.revision,
+        ),
+    )
+
+    with monkeypatch.context() as crash:
+        crash.setattr(
+            navigation_missions,
+            "_write_manifest",
+            lambda _manifest: (_ for _ in ()).throw(
+                SystemExit("injected crash before manifest commit")
+            ),
+        )
+        with pytest.raises(SystemExit):
+            navigation_missions.set_default_bt_file(
+                "factory",
+                navigation_missions.MissionBtDefaultRequest(
+                    waypoint_id="table_a",
+                    path="locals/table_a/alternate.xml",
+                    expected_revision=current.revision,
+                ),
+            )
+
+    effective = navigation_missions.load_mission("factory")
+    assert effective.revision == current.revision + 1
+    updated_global = navigation_missions.load_bt_file(
+        "factory", path="global.xml"
+    ).content
+    assert 'local_bt="locals/table_a/alternate.xml"' in updated_global
+    with pytest.raises(HTTPException) as stale:
+        navigation_missions.set_default_bt_file(
+            "factory",
+            navigation_missions.MissionBtDefaultRequest(
+                waypoint_id="table_a",
+                path="locals/table_a/alternate.xml",
+                expected_revision=current.revision,
+            ),
+        )
+    assert stale.value.status_code == 409
+
+
+def test_navigation_bt_delete_burns_revision_before_manifest_commit(
+    monkeypatch, tmp_path
+):
+    from fastapi import HTTPException
+
+    monkeypatch.setattr(navigation_missions, "NAVIGATION_DATA_ROOT", tmp_path)
+    initial = navigation_missions.save_mission(
+        "factory",
+        navigation_missions.MissionSaveRequest(waypoints=[]),
+    )
+    current = navigation_missions.save_bt_file(
+        "factory",
+        navigation_missions.MissionBtFileRequest(
+            path="locals/orphan.xml",
+            content="<root id='delete-me'/>",
+            expected_revision=initial.revision,
+        ),
+    )
+    orphan_path = (
+        tmp_path
+        / "missions"
+        / "factory"
+        / "default"
+        / "locals"
+        / "orphan.xml"
+    )
+    assert orphan_path.exists()
+
+    with monkeypatch.context() as crash:
+        crash.setattr(
+            navigation_missions,
+            "_write_manifest",
+            lambda _manifest: (_ for _ in ()).throw(
+                SystemExit("injected crash before manifest commit")
+            ),
+        )
+        with pytest.raises(SystemExit):
+            navigation_missions.delete_bt_file(
+                "factory",
+                path="locals/orphan.xml",
+                expected_revision=current.revision,
+            )
+
+    assert not orphan_path.exists()
+    effective = navigation_missions.load_mission("factory")
+    assert effective.revision == current.revision + 1
+    with pytest.raises(HTTPException) as stale:
+        navigation_missions.delete_bt_file(
+            "factory",
+            path="locals/orphan.xml",
+            expected_revision=current.revision,
+        )
+    assert stale.value.status_code == 409
+
+
+def test_navigation_bt_delete_rejects_stale_missing_file(
+    monkeypatch, tmp_path
+):
+    from fastapi import HTTPException
+
+    monkeypatch.setattr(navigation_missions, "NAVIGATION_DATA_ROOT", tmp_path)
+    initial = navigation_missions.save_mission(
+        "factory",
+        navigation_missions.MissionSaveRequest(waypoints=[]),
+    )
+    concurrent = navigation_missions.save_bt_file(
+        "factory",
+        navigation_missions.MissionBtFileRequest(
+            path="global.xml",
+            content="<root id='concurrent'/>",
+            expected_revision=initial.revision,
+        ),
+    )
+
+    with pytest.raises(HTTPException) as stale:
+        navigation_missions.delete_bt_file(
+            "factory",
+            path="locals/already-pruned.xml",
+            expected_revision=initial.revision,
+        )
+    assert stale.value.status_code == 409
+    assert navigation_missions.load_mission("factory").revision == concurrent.revision
+
+
+def test_navigation_new_mission_file_upload_reserves_revision(
+    monkeypatch, tmp_path
+):
+    import pytest
+    from fastapi import HTTPException
+
+    monkeypatch.setattr(navigation_missions, "NAVIGATION_DATA_ROOT", tmp_path)
+    first = navigation_missions.save_bt_file(
+        "factory",
+        navigation_missions.MissionBtFileRequest(
+            path="global.xml",
+            content="<root id='first-session'/>",
+            expected_revision=0,
+        ),
+        mission_name="inspection",
+    )
+    assert first.revision == 1
+
+    with pytest.raises(HTTPException) as stale:
+        navigation_missions.save_bt_file(
+            "factory",
+            navigation_missions.MissionBtFileRequest(
+                path="locals/other-session.xml",
+                content="<root id='other-session'/>",
+                expected_revision=0,
+            ),
+            mission_name="inspection",
+        )
+    assert stale.value.status_code == 409
+    assert not (
+        tmp_path
+        / "missions"
+        / "factory"
+        / "inspection"
+        / "locals"
+        / "other-session.xml"
+    ).exists()
+
+    second = navigation_missions.save_bt_file(
+        "factory",
+        navigation_missions.MissionBtFileRequest(
+            path="locals/waypoint.xml",
+            content="<root id='first-session-local'/>",
+            expected_revision=first.revision,
+        ),
+        mission_name="inspection",
+    )
+    assert second.revision == 2
+    finalized = navigation_missions.save_mission(
+        "factory",
+        navigation_missions.MissionSaveRequest(
+            expected_revision=second.revision,
+            waypoints=[navigation_missions.MissionWaypoint(
+                id="waypoint",
+                label="Waypoint",
+                pose=navigation_missions.SpotPose(x=0.0, y=0.0, yaw=0.0),
+                local_bt="locals/waypoint.xml",
+            )],
+        ),
+        mission_name="inspection",
+    )
+    assert finalized.exists is True
+    assert finalized.revision == 3
+
+
+def test_navigation_bt_save_validates_ownership_before_overwrite(
+    monkeypatch, tmp_path
+):
+    from fastapi import HTTPException
+
+    monkeypatch.setattr(navigation_missions, "NAVIGATION_DATA_ROOT", tmp_path)
+    pose = navigation_missions.SpotPose(x=0.0, y=0.0, yaw=0.0)
+    initial = navigation_missions.save_mission(
+        "factory",
+        navigation_missions.MissionSaveRequest(waypoints=[
+            navigation_missions.MissionWaypoint(
+                id="a", label="A", pose=pose, local_bt="locals/a.xml"
+            ),
+            navigation_missions.MissionWaypoint(
+                id="b", label="B", pose=pose, local_bt="locals/b.xml"
+            ),
+        ]),
+    )
+    owner_save = navigation_missions.save_bt_file(
+        "factory",
+        navigation_missions.MissionBtFileRequest(
+            path="locals/b.xml",
+            content="<root id='owner-b'/>",
+            waypoint_id="b",
+            expected_revision=initial.revision,
+        ),
+    )
+
+    with pytest.raises(HTTPException) as missing_revision:
+        navigation_missions.save_bt_file(
+            "factory",
+            navigation_missions.MissionBtFileRequest(
+                path="locals/b.xml",
+                content="<root id='legacy-client-overwrite'/>",
+            ),
+        )
+    assert missing_revision.value.status_code == 409
+
+    with pytest.raises(HTTPException) as missing_owner:
+        navigation_missions.save_bt_file(
+            "factory",
+            navigation_missions.MissionBtFileRequest(
+                path="locals/b.xml",
+                content="<root id='unchecked-overwrite'/>",
+                expected_revision=owner_save.revision,
+            ),
+        )
+    assert missing_owner.value.status_code == 409
+
+    valid_overwrite = navigation_missions.save_bt_file(
+        "factory",
+        navigation_missions.MissionBtFileRequest(
+            path="locals/b.xml",
+            content="<root id='owner-b-updated'/>",
+            waypoint_id="b",
+            expected_revision=owner_save.revision,
+        ),
+    )
+
+    with pytest.raises(HTTPException) as conflict:
+        navigation_missions.save_bt_file(
+            "factory",
+            navigation_missions.MissionBtFileRequest(
+                path="locals//b.xml",
+                content="<root id='owner-a-overwrite'/>",
+                waypoint_id="a",
+                expected_revision=valid_overwrite.revision,
+            ),
+        )
+    assert conflict.value.status_code == 400
+    b_path = (
+        tmp_path / "missions" / "factory" / "default" / "locals" / "b.xml"
+    )
+    assert b_path.read_text(encoding="utf-8") == "<root id='owner-b-updated'/>"
+    loaded = navigation_missions.load_mission("factory")
+    assert loaded.waypoints[0].local_bt_files == ["locals/a.xml"]
+    assert loaded.waypoints[1].local_bt_files == ["locals/b.xml"]
+
+    global_save = navigation_missions.save_bt_file(
+        "factory",
+        navigation_missions.MissionBtFileRequest(
+            path="global.xml",
+            content="<root id='global'/>",
+            expected_revision=valid_overwrite.revision,
+        ),
+    )
+    with pytest.raises(HTTPException) as global_collision:
+        navigation_missions.save_bt_file(
+            "factory",
+            navigation_missions.MissionBtFileRequest(
+                path="global.xml",
+                content="<root id='local-overwrite'/>",
+                waypoint_id="a",
+                expected_revision=global_save.revision,
+            ),
+        )
+    assert global_collision.value.status_code == 400
+    assert navigation_missions.load_bt_file(
+        "factory", path="global.xml"
+    ).content == "<root id='global'/>"
+
+    with pytest.raises(HTTPException) as root_level_new_file:
+        navigation_missions.save_bt_file(
+            "factory",
+            navigation_missions.MissionBtFileRequest(
+                path="alternate.xml",
+                content="<root/>",
+                waypoint_id="a",
+                expected_revision=global_save.revision,
+            ),
+        )
+    assert root_level_new_file.value.status_code == 400
+
+    missing_path = (
+        tmp_path
+        / "missions"
+        / "factory"
+        / "default"
+        / "locals"
+        / "missing.xml"
+    )
+    with pytest.raises(HTTPException) as missing_waypoint:
+        navigation_missions.save_bt_file(
+            "factory",
+            navigation_missions.MissionBtFileRequest(
+                path="locals/missing.xml",
+                content="<root/>",
+                waypoint_id="missing",
+                expected_revision=global_save.revision,
+            ),
+        )
+    assert missing_waypoint.value.status_code == 404
+    assert not missing_path.exists()
+
+
+def test_navigation_bt_default_requires_owned_file_and_persists(
+    monkeypatch, tmp_path
+):
+    from fastapi import HTTPException
+
+    monkeypatch.setattr(navigation_missions, "NAVIGATION_DATA_ROOT", tmp_path)
+    initial = navigation_missions.save_mission(
+        "factory",
+        navigation_missions.MissionSaveRequest(waypoints=[
+            navigation_missions.MissionWaypoint(
+                id="table_a",
+                label="Table A",
+                pose=navigation_missions.SpotPose(x=1.0, y=2.0, yaw=0.5),
+                local_bt="locals/table_a/default.xml",
+                local_bt_files=[
+                    "locals/table_a/default.xml",
+                    "locals/table_a/alternate.xml",
+                ],
+            )
+        ]),
+        mission_name="picnic",
+    )
+    global_save = navigation_missions.save_bt_file(
+        "factory",
+        navigation_missions.MissionBtFileRequest(
+            path="global.xml",
+            content=(
+                '<root><BehaviorTree ID="MainTree"><Sequence>'
+                '<MissionStep waypoint_id="table_a" '
+                'local_bt="locals/table_a/default.xml"/>'
+                '<MissionStep waypoint_id="table_a" '
+                'local_bt="locals/table_a/default.xml"/>'
+                '</Sequence></BehaviorTree></root>'
+            ),
+            expected_revision=initial.revision,
+        ),
+        mission_name="picnic",
+    )
+
+    switched = navigation_missions.set_default_bt_file(
+        "factory",
+        navigation_missions.MissionBtDefaultRequest(
+            waypoint_id="table_a",
+            path="locals/table_a//alternate.xml",
+            expected_revision=global_save.revision,
+        ),
+        mission_name="picnic",
+    )
+
+    assert switched.waypoints[0].local_bt == "locals/table_a/alternate.xml"
+    assert switched.waypoints[0].local_bt_files == [
+        "locals/table_a/alternate.xml",
+        "locals/table_a/default.xml",
+    ]
+    reloaded = navigation_missions.load_mission("factory", mission_name="picnic")
+    assert reloaded.waypoints[0].local_bt == "locals/table_a/alternate.xml"
+    updated_global = navigation_missions.load_bt_file(
+        "factory",
+        path="global.xml",
+        mission_name="picnic",
+    ).content
+    assert updated_global.count('local_bt="locals/table_a/alternate.xml"') == 2
+    assert 'local_bt="locals/table_a/default.xml"' not in updated_global
+
+    with pytest.raises(HTTPException) as unowned:
+        navigation_missions.set_default_bt_file(
+            "factory",
+            navigation_missions.MissionBtDefaultRequest(
+                waypoint_id="table_a",
+                path="locals/table_a/unowned.xml",
+                expected_revision=switched.revision,
+            ),
+            mission_name="picnic",
+        )
+    assert unowned.value.status_code == 400
+    unchanged = navigation_missions.load_mission("factory", mission_name="picnic")
+    assert unchanged.waypoints[0].local_bt == "locals/table_a/alternate.xml"
+
+
+def test_navigation_mission_rejects_duplicate_waypoints_and_bt_ownership(
+    monkeypatch, tmp_path
+):
+    import pytest
+    from fastapi import HTTPException
+
+    monkeypatch.setattr(navigation_missions, "NAVIGATION_DATA_ROOT", tmp_path)
+    pose = navigation_missions.SpotPose(x=0.0, y=0.0, yaw=0.0)
+
+    with pytest.raises(HTTPException) as duplicate_id:
+        navigation_missions.save_mission(
+            "factory",
+            navigation_missions.MissionSaveRequest(waypoints=[
+                navigation_missions.MissionWaypoint(
+                    id="same", label="A", pose=pose, local_bt="locals/a.xml"
+                ),
+                navigation_missions.MissionWaypoint(
+                    id="same", label="B", pose=pose, local_bt="locals/b.xml"
+                ),
+            ]),
+        )
+    assert duplicate_id.value.status_code == 400
+
+    with pytest.raises(HTTPException) as duplicate_path:
+        navigation_missions.save_mission(
+            "factory",
+            navigation_missions.MissionSaveRequest(waypoints=[
+                navigation_missions.MissionWaypoint(
+                    id="a", label="A", pose=pose, local_bt="locals/shared.xml"
+                ),
+                navigation_missions.MissionWaypoint(
+                    id="b", label="B", pose=pose, local_bt="locals/SHARED.xml"
+                ),
+            ]),
+        )
+    assert duplicate_path.value.status_code == 400
+
+    with pytest.raises(HTTPException) as alias_path:
+        navigation_missions.save_mission(
+            "factory",
+            navigation_missions.MissionSaveRequest(waypoints=[
+                navigation_missions.MissionWaypoint(
+                    id="a", label="A", pose=pose, local_bt="locals/shared.xml"
+                ),
+                navigation_missions.MissionWaypoint(
+                    id="b", label="B", pose=pose, local_bt="locals//shared.xml"
+                ),
+            ]),
+        )
+    assert alias_path.value.status_code == 400
+
+    with pytest.raises(HTTPException) as global_path:
+        navigation_missions.save_mission(
+            "factory",
+            navigation_missions.MissionSaveRequest(
+                global_bt="global.xml",
+                waypoints=[navigation_missions.MissionWaypoint(
+                    id="a", label="A", pose=pose, local_bt="GLOBAL.xml"
+                )],
+            ),
+        )
+    assert global_path.value.status_code == 400
 
 
 def test_navigation_missions_reject_path_escape(monkeypatch, tmp_path):
@@ -899,6 +2254,59 @@ def test_navigation_missions_reject_path_escape(monkeypatch, tmp_path):
                 content="<root/>",
             ),
         )
+    with pytest.raises(HTTPException):
+        navigation_missions.save_bt_file(
+            "factory",
+            navigation_missions.MissionBtFileRequest(
+                path="mission.json",
+                content="{}",
+            ),
+        )
+
+
+def test_navigation_missions_reject_bt_path_through_intermediate_symlink(
+    monkeypatch, tmp_path
+):
+    from fastapi import HTTPException
+
+    monkeypatch.setattr(navigation_missions, "NAVIGATION_DATA_ROOT", tmp_path)
+    initial = navigation_missions.save_mission(
+        "factory",
+        navigation_missions.MissionSaveRequest(waypoints=[]),
+    )
+    mission_dir = tmp_path / "missions" / "factory" / "default"
+    locals_dir = mission_dir / "locals"
+    locals_dir.mkdir()
+    outside_dir = tmp_path / "outside"
+    outside_dir.mkdir()
+    outside_file = outside_dir / "escape.xml"
+    outside_file.write_text("<root id='outside'/>", encoding="utf-8")
+    (locals_dir / "redirect").symlink_to(outside_dir, target_is_directory=True)
+
+    with pytest.raises(HTTPException) as read_escape:
+        navigation_missions.load_bt_file(
+            "factory", path="locals/redirect/escape.xml"
+        )
+    assert read_escape.value.status_code == 400
+
+    with pytest.raises(HTTPException) as write_escape:
+        navigation_missions.save_bt_file(
+            "factory",
+            navigation_missions.MissionBtFileRequest(
+                path="locals/redirect/new.xml",
+                content="<root id='write'/>",
+                expected_revision=initial.revision,
+            ),
+        )
+    assert write_escape.value.status_code == 400
+    assert not (outside_dir / "new.xml").exists()
+
+    with pytest.raises(HTTPException) as delete_escape:
+        navigation_missions.delete_bt_file(
+            "factory", path="locals/redirect/escape.xml"
+        )
+    assert delete_escape.value.status_code == 400
+    assert outside_file.read_text(encoding="utf-8") == "<root id='outside'/>"
 
 
 def test_navigation_grid_data_crc32_uses_only_map_data():

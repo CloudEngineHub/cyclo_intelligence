@@ -56,13 +56,22 @@ export function parseBTXml(xmlString) {
   }
 
   if (!rootElement) {
-    const firstBT = behaviorTrees[0];
+    // Pending trees are editor-only disconnected components and must never be
+    // promoted to the executable root when an external XML omits/invalidates
+    // main_tree_to_execute.
+    const firstBT = [...behaviorTrees].find((bt) => (
+      !String(bt.getAttribute('ID') || '').startsWith('__pending__')
+    ));
     if (firstBT && firstBT.children.length > 0) {
       rootElement = firstBT.children[0];
     }
   }
 
-  if (!rootElement) {
+  const pendingTrees = [...behaviorTrees].filter((bt) => (
+    String(bt.getAttribute('ID') || '').startsWith('__pending__') && bt.children.length > 0
+  ));
+
+  if (!rootElement && pendingTrees.length === 0) {
     return { nodes: [], edges: [], xmlDoc: doc, nodeElementMap: new Map(), nodeDataMap: new Map() };
   }
 
@@ -123,7 +132,16 @@ export function parseBTXml(xmlString) {
     }
   }
 
-  traverse(rootElement, null);
+  if (rootElement) traverse(rootElement, null);
+
+  // Disconnected work-in-progress is serialized under a non-executed
+  // __pending__ BehaviorTree. Restore it as disconnected canvas components so
+  // switching waypoints or reloading the page cannot make those nodes vanish.
+  for (const bt of pendingTrees) {
+    for (const child of bt.children) {
+      traverse(child, null);
+    }
+  }
 
   const layout = applyDagreLayout(nodes, edges);
   return { ...layout, xmlDoc: doc, nodeElementMap, nodeDataMap };

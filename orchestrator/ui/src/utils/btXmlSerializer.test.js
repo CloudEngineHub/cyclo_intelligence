@@ -61,6 +61,57 @@ describe('btXmlSerializer', () => {
     ]);
   });
 
+  it('round-trips disconnected pending subtrees without dropping or duplicating nodes', () => {
+    const { nodes, edges, nodeDataMap } = sampleGraph();
+    const allNodes = [
+      ...nodes,
+      {
+        id: 'bt_2',
+        type: 'btControl',
+        position: { x: 400, y: 20 },
+        data: { label: 'Fallback_1', nodeType: 'Fallback', params: {} },
+      },
+      {
+        id: 'bt_3',
+        type: 'btAction',
+        position: { x: 400, y: 160 },
+        data: { label: 'Wait_pending', nodeType: 'Wait', params: { duration: '4.0' } },
+      },
+      {
+        id: 'bt_4',
+        type: 'btAction',
+        position: { x: 700, y: 20 },
+        data: { label: 'Command_pending', nodeType: 'SendCommand', params: { command: 'STOP' } },
+      },
+    ];
+    const allEdges = [
+      ...edges,
+      { id: 'e_bt_2_bt_3', source: 'bt_2', target: 'bt_3' },
+    ];
+    const allData = new Map([
+      ...nodeDataMap.entries(),
+      ['bt_2', { tag: 'Fallback', name: 'Fallback_1', params: {} }],
+      ['bt_3', { tag: 'Wait', name: 'Wait_pending', params: { duration: '4.0' } }],
+      ['bt_4', { tag: 'SendCommand', name: 'Command_pending', params: { command: 'STOP' } }],
+    ]);
+
+    const xml = serializeFromGraph(allNodes, allEdges, allData);
+    const parsed = parseBTXml(xml);
+
+    expect(xml.match(/name="Wait_pending"/g)).toHaveLength(1);
+    expect(xml).toContain('<BehaviorTree ID="__pending__1">');
+    expect(xml).toContain('<BehaviorTree ID="__pending__2">');
+    expect(parsed.nodes).toHaveLength(5);
+    expect(parsed.edges).toHaveLength(2);
+    expect([...parsed.nodeDataMap.values()].map((entry) => entry.name)).toEqual([
+      'Sequence_1',
+      'Wait_1',
+      'Fallback_1',
+      'Wait_pending',
+      'Command_pending',
+    ]);
+  });
+
   it('serializes SendCommand with command-specific parameters only', () => {
     const nodes = [
       {

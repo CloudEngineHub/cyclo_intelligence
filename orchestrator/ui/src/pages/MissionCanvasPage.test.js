@@ -1,3 +1,4 @@
+import { StrictMode } from 'react';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import MissionCanvasPage, { assembleMissionBtFilesForSave } from './MissionCanvasPage';
 import {
@@ -32,6 +33,7 @@ import {
   renameNavigationMission,
   saveNavigationMission,
   saveNavigationMissionBtFile,
+  setNavigationMissionDefaultBtFile,
 } from '../utils/navigationMissionsApi';
 
 const mockMapViewer = jest.fn(() => <div>Mission Canvas Map</div>);
@@ -72,6 +74,15 @@ function mockJsonResponse(data, ok = true, status = ok ? 200 : 500) {
     status,
     text: () => Promise.resolve(JSON.stringify(data)),
   };
+}
+
+async function loadRunMapFromDialog(path = 'map.pgm') {
+  getPgmFiles.mockResolvedValue({ files: [{ path, name: path }] });
+  fireEvent.click(screen.getByRole('button', { name: 'Load Map' }));
+  const mapSelect = await screen.findByRole('combobox', { name: 'Run mission map file' });
+  await waitFor(() => expect(mapSelect).toHaveValue(path));
+  fireEvent.click(screen.getByRole('button', { name: 'Load' }));
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Localize' })).toBeEnabled());
 }
 
 jest.mock('../components/navigation/MapViewer', () => ({
@@ -182,6 +193,14 @@ jest.mock('../utils/navigationMissionsApi', () => ({
     content: '',
     exists: true,
   }),
+  setNavigationMissionDefaultBtFile: jest.fn().mockResolvedValue({
+    exists: true,
+    map_name: 'map',
+    mission_name: 'default',
+    global_bt: 'global.xml',
+    waypoints: [],
+    metadata: {},
+  }),
 }));
 
 jest.mock('../hooks/useNavigationRosTopic', () => ({
@@ -262,6 +281,14 @@ beforeEach(() => {
     path: 'global.xml',
     content: '',
     exists: true,
+  });
+  setNavigationMissionDefaultBtFile.mockResolvedValue({
+    exists: true,
+    map_name: 'map',
+    mission_name: 'default',
+    global_bt: 'global.xml',
+    waypoints: [],
+    metadata: {},
   });
   deleteNavigationMissionBtFile.mockResolvedValue({
     path: 'locals/waypoint_a.xml',
@@ -570,6 +597,12 @@ test('loads a saved map into the design stage', async () => {
       }),
     }),
   ]));
+  const designAreasSwitch = screen.getByRole('switch', { name: 'Map areas' });
+  expect(designAreasSwitch).toHaveAttribute('aria-checked', 'true');
+  fireEvent.click(designAreasSwitch);
+  await waitFor(() => expect(latestMapViewerProps().mapAnnotations).toEqual([]));
+  fireEvent.click(designAreasSwitch);
+  await waitFor(() => expect(latestMapViewerProps().mapAnnotations).toHaveLength(1));
   const activeMissionSelect = screen.getByRole('combobox', { name: 'Active mission' });
   expect(activeMissionSelect).toHaveValue('chestnut');
   fireEvent.change(activeMissionSelect, { target: { value: 'default' } });
@@ -647,6 +680,15 @@ test('names a not-yet-saved mission through the save dialog', async () => {
   getNavigationMissions
     .mockResolvedValueOnce({ map_name: 'factory', missions: [] })
     .mockResolvedValue({ map_name: 'factory', missions: ['evening_route'] });
+  getNavigationMission.mockImplementation((mapName, missionName) => Promise.resolve({
+    exists: false,
+    revision: missionName === 'evening_route' ? 7 : 0,
+    map_name: mapName,
+    mission_name: missionName || 'default',
+    global_bt: 'global.xml',
+    waypoints: [],
+    metadata: {},
+  }));
 
   render(<MissionCanvasPage />);
 
@@ -664,13 +706,62 @@ test('names a not-yet-saved mission through the save dialog', async () => {
 
   await waitFor(() => expect(saveNavigationMission).toHaveBeenCalledWith(
     'factory',
-    expect.anything(),
+    expect.objectContaining({ expected_revision: 7 }),
     'evening_route',
   ));
+  expect(saveNavigationMissionBtFile).toHaveBeenCalledWith(
+    'factory',
+    'global.xml',
+    expect.any(String),
+    'evening_route',
+    { expectedRevision: 7 },
+  );
   await waitFor(() => expect(screen.getByText('Saved evening_route for factory')).toBeInTheDocument());
   // The catalog refetched and the rail now tracks the new mission.
   const railSelect = screen.getByRole('combobox', { name: 'Active mission' });
   await waitFor(() => expect(railSelect).toHaveValue('evening_route'));
+});
+
+test('does not overwrite an existing catalog mission when naming an unsaved mission', async () => {
+  getPgmFiles.mockResolvedValue({
+    files: [{ path: 'factory.pgm', name: 'factory.pgm' }],
+  });
+  getNavigationMissions.mockResolvedValue({
+    map_name: 'factory',
+    missions: ['default', 'stored_route'],
+  });
+  getNavigationMission.mockResolvedValue({
+    exists: true,
+    revision: 0,
+    map_name: 'factory',
+    mission_name: 'default',
+    global_bt: 'global.xml',
+    waypoints: [],
+    metadata: {},
+  });
+
+  render(<MissionCanvasPage />);
+
+  fireEvent.click(screen.getByRole('tab', { name: 'Design' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Load Map' }));
+  await screen.findByRole('combobox', { name: 'Design mission map file' });
+  fireEvent.click(screen.getByRole('button', { name: 'Load' }));
+  await waitFor(() => expect(screen.getByRole('combobox', { name: 'Active mission' }))
+    .toHaveValue('default'));
+
+  fireEvent.click(screen.getByRole('button', { name: 'New Mission' }));
+  await waitFor(() => expect(screen.getByRole('combobox', { name: 'Active mission' }))
+    .toHaveValue('untitled'));
+  fireEvent.click(screen.getByRole('button', { name: 'Save Mission' }));
+  fireEvent.click(screen.getByRole('button', { name: 'stored_route' }));
+
+  expect(screen.getByText('A mission named "stored_route" already exists.')).toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Overwrite' })).not.toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Save', exact: true })).toBeDisabled();
+
+  fireEvent.click(screen.getByRole('button', { name: 'Save', exact: true }));
+  expect(saveNavigationMissionBtFile).not.toHaveBeenCalled();
+  expect(saveNavigationMission).not.toHaveBeenCalled();
 });
 
 test('starts a fresh mission and guards unsaved changes', async () => {
@@ -750,6 +841,7 @@ test('renames the active mission from the rail', async () => {
     'factory',
     'picnic',
     'evening',
+    { expectedRevision: 0 },
   ));
   await waitFor(() => expect(screen.getByText('Renamed picnic to evening')).toBeInTheDocument());
   await waitFor(() => (
@@ -783,6 +875,7 @@ test('duplicates and deletes the active mission from the rail', async () => {
     'factory',
     'chestnut',
     'chestnut-copy',
+    { expectedRevision: 0 },
   ));
   await waitFor(() => expect(screen.getByText('Duplicated chestnut as chestnut-copy')).toBeInTheDocument());
   // Active mission unchanged after duplicating.
@@ -792,7 +885,11 @@ test('duplicates and deletes the active mission from the rail', async () => {
   expect(screen.getByText(/Delete mission "chestnut"\?/)).toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: 'Delete', exact: true }));
 
-  await waitFor(() => expect(deleteNavigationMission).toHaveBeenCalledWith('factory', 'chestnut'));
+  await waitFor(() => expect(deleteNavigationMission).toHaveBeenCalledWith(
+    'factory',
+    'chestnut',
+    { expectedRevision: 0 },
+  ));
   // Switches to the first remaining mission from the refreshed catalog.
   await waitFor(() => expect(getNavigationMission).toHaveBeenCalledWith('factory', 'chestnut-copy'));
 });
@@ -1110,6 +1207,7 @@ test('shows waypoint actions in Waypoints after placing a waypoint', async () =>
     'global.xml',
     expect.stringContaining('<Sequence name="GlobalMission"/>'),
     '',
+    { expectedRevision: 0 },
   ));
   expect(saveNavigationMissionBtFile).not.toHaveBeenCalledWith(
     'factory',
@@ -1121,6 +1219,7 @@ test('shows waypoint actions in Waypoints after placing a waypoint', async () =>
     'locals/waypoint_a.xml',
     expect.stringContaining('<BehaviorTree ID="MainTree"/>'),
     '',
+    { expectedRevision: 0 },
   );
   await waitFor(() => expect(screen.getByText('Saved default for factory')).toBeInTheDocument());
 
@@ -1153,7 +1252,8 @@ test('shows waypoint actions in Waypoints after placing a waypoint', async () =>
       waypoints: [
         expect.objectContaining({
           label: 'Pickup A',
-          local_bt: 'locals/pickup_a.xml',
+          local_bt: 'locals/waypoint_a.xml',
+          local_bt_files: ['locals/waypoint_a.xml'],
         }),
       ],
     }),
@@ -1161,15 +1261,17 @@ test('shows waypoint actions in Waypoints after placing a waypoint', async () =>
   ));
   expect(saveNavigationMissionBtFile).toHaveBeenCalledWith(
     'factory',
-    'locals/pickup_a.xml',
+    'locals/waypoint_a.xml',
     expect.any(String),
     '',
+    { waypointId: 'spot_a', expectedRevision: 1 },
   );
-  await waitFor(() => expect(deleteNavigationMissionBtFile).toHaveBeenCalledWith(
+  expect(deleteNavigationMissionBtFile).not.toHaveBeenCalledWith(
     'factory',
     'locals/waypoint_a.xml',
     '',
-  ));
+    expect.anything(),
+  );
 
   fireEvent.click(screen.getByRole('button', { name: /Delete Waypoint Pickup A/ }));
   await waitFor(() => expect(deleteNavigationSpot).toHaveBeenCalledWith('spot_a', 'factory'));
@@ -1177,8 +1279,9 @@ test('shows waypoint actions in Waypoints after placing a waypoint', async () =>
   fireEvent.click(screen.getByRole('button', { name: 'Save Mission' }));
   await waitFor(() => expect(deleteNavigationMissionBtFile).toHaveBeenCalledWith(
     'factory',
-    'locals/pickup_a.xml',
+    'locals/waypoint_a.xml',
     '',
+    { expectedRevision: expect.any(Number) },
   ));
 });
 
@@ -1295,6 +1398,711 @@ test('opens waypoint BT map layer when selecting a waypoint with BT active', asy
 
   await waitFor(() => expect(latestMapViewerProps().btLayer).toBeNull());
   expect(latestMapViewerProps().selectedSpotId).toBe('spot_factory');
+});
+
+test('loads and saves each waypoint XML through its mission-local storage path', async () => {
+  const latestMapViewerProps = () => (
+    mockMapViewer.mock.calls[mockMapViewer.mock.calls.length - 1][0]
+  );
+  const xmlFor = (name) => [
+    '<root BTCPP_format="4" main_tree_to_execute="MainTree">',
+    `  <BehaviorTree ID="MainTree"><Wait name="${name}" duration="1.0"/></BehaviorTree>`,
+    '</root>',
+  ].join('\n');
+  const stored = {
+    'global.xml': '<root BTCPP_format="4" main_tree_to_execute="MainTree"><BehaviorTree ID="MainTree"/></root>',
+    'locals/a.xml': xmlFor('StoredA'),
+    'locals/b.xml': xmlFor('StoredB'),
+  };
+  global.fetch.mockResolvedValue(mockJsonResponse({
+    name: 'bt_node',
+    state: 'up',
+    raw: 'up',
+  }));
+  getPgmFiles.mockResolvedValue({ files: [{ path: 'factory.pgm', name: 'factory.pgm' }] });
+  getNavigationMissions.mockResolvedValue({ map_name: 'factory', missions: ['inspection'] });
+  getNavigationMission.mockResolvedValue({
+    exists: true,
+    map_name: 'factory',
+    mission_name: 'inspection',
+    revision: 7,
+    global_bt: 'global.xml',
+    waypoints: [
+      {
+        id: 'wp_a',
+        label: 'A',
+        pose: { frame_id: 'map', x: 1, y: 0, yaw: 0 },
+        local_bt: 'locals/a.xml',
+        metadata: {},
+      },
+      {
+        id: 'wp_b',
+        label: 'B',
+        pose: { frame_id: 'map', x: 2, y: 0, yaw: 0 },
+        local_bt: 'locals/b.xml',
+        metadata: {},
+      },
+    ],
+    metadata: {},
+  });
+  getNavigationMissionBtFile.mockImplementation((_mapName, path) => Promise.resolve({
+    path,
+    content: stored[path],
+    exists: true,
+  }));
+
+  render(<MissionCanvasPage />);
+  fireEvent.click(screen.getByRole('tab', { name: 'Design' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Load Map' }));
+  await screen.findByRole('combobox', { name: 'Design mission map file' });
+  await waitFor(() => expect(screen.getByRole('combobox', { name: 'Design mission file' }))
+    .toHaveValue('inspection'));
+  fireEvent.click(screen.getByRole('button', { name: 'Load' }));
+  await waitFor(() => expect(latestMapViewerProps().spots).toHaveLength(2));
+  await screen.findByText('BT Node Active');
+
+  act(() => latestMapViewerProps().onSpotClick('wp_a'));
+  await waitFor(() => expect(latestMapViewerProps().btLayer?.editor).toBeTruthy());
+  expect(latestMapViewerProps().btLayer.editor.props.fileActionsDisabled).toBe(false);
+  getNavigationMissionBtFile.mockClear();
+  saveNavigationMissionBtFile.mockClear();
+  saveNavigationMission.mockClear();
+  stored['locals/a.xml'] = xmlFor('ReloadedA');
+  let finishReload;
+  getNavigationMissionBtFile.mockReturnValueOnce(new Promise((resolve) => {
+    finishReload = resolve;
+  }));
+  let reloadPromise;
+  act(() => {
+    reloadPromise = latestMapViewerProps().btLayer.editor.props.onLoadXml('locals/a.xml');
+  });
+  await waitFor(() => expect(latestMapViewerProps().btLayer.editor.props.fileActionsDisabled)
+    .toBe(true));
+  act(() => latestMapViewerProps().onBtLayerClose());
+  await waitFor(() => expect(screen.getByRole('combobox', { name: 'Active mission' }))
+    .toBeDisabled());
+  await act(async () => {
+    finishReload({
+      path: 'locals/a.xml',
+      content: stored['locals/a.xml'],
+      exists: true,
+    });
+    await reloadPromise;
+  });
+  expect(getNavigationMissionBtFile).toHaveBeenCalledWith(
+    'factory',
+    'locals/a.xml',
+    'inspection',
+  );
+  act(() => latestMapViewerProps().onSpotClick('wp_a'));
+  await waitFor(() => expect(latestMapViewerProps().btLayer.editor.props.xml)
+    .toContain('ReloadedA'));
+
+  let finishStaleReload;
+  getNavigationMissionBtFile.mockReturnValueOnce(new Promise((resolve) => {
+    finishStaleReload = resolve;
+  }));
+  let staleReloadPromise;
+  act(() => {
+    staleReloadPromise = latestMapViewerProps().btLayer.editor.props.onLoadXml('locals/a.xml');
+  });
+  await waitFor(() => expect(latestMapViewerProps().btLayer.editor.props.fileActionsDisabled)
+    .toBe(true));
+  const editedDuringLoad = xmlFor('EditedDuringLoad');
+  act(() => latestMapViewerProps().btLayer.editor.props.onXmlChange(
+    'locals/a.xml',
+    editedDuringLoad,
+  ));
+  await act(async () => {
+    finishStaleReload({
+      path: 'locals/a.xml',
+      content: xmlFor('LateDiskA'),
+      exists: true,
+    });
+    await expect(staleReloadPromise).rejects.toThrow(
+      'Local BT changed while its saved XML was loading',
+    );
+  });
+  await waitFor(() => expect(latestMapViewerProps().btLayer.editor.props.xml)
+    .toBe(editedDuringLoad));
+
+  const editedA = xmlFor('EditedA');
+  await act(async () => {
+    await latestMapViewerProps().btLayer.editor.props.onSaveXml('locals/a.xml', editedA);
+  });
+  expect(saveNavigationMissionBtFile).toHaveBeenCalledWith(
+    'factory',
+    'locals/a.xml',
+    editedA,
+    'inspection',
+    { waypointId: 'wp_a', expectedRevision: 7 },
+  );
+
+  act(() => latestMapViewerProps().onSpotClick('wp_b'));
+  await waitFor(() => expect(latestMapViewerProps().btLayer.editor.props.filePath)
+    .toBe('locals/b.xml'));
+  const editedB = xmlFor('EditedB');
+  await act(async () => {
+    await latestMapViewerProps().btLayer.editor.props.onSaveXml('locals/b.xml', editedB);
+  });
+  expect(saveNavigationMissionBtFile).toHaveBeenCalledWith(
+    'factory',
+    'locals/b.xml',
+    editedB,
+    'inspection',
+    { waypointId: 'wp_b', expectedRevision: 7 },
+  );
+  expect(saveNavigationMission).not.toHaveBeenCalled();
+  act(() => latestMapViewerProps().onBtLayerClose());
+  fireEvent.click(await screen.findByRole('button', { name: 'New Mission' }));
+  expect(screen.queryByText('Unsaved changes')).not.toBeInTheDocument();
+  await waitFor(() => expect(latestMapViewerProps().spots).toEqual([]));
+});
+
+test('keeps a waypoint XML library separate from its changeable runtime default', async () => {
+  const latestMapViewerProps = () => (
+    mockMapViewer.mock.calls[mockMapViewer.mock.calls.length - 1][0]
+  );
+  const xmlFor = (name) => [
+    '<root BTCPP_format="4" main_tree_to_execute="MainTree">',
+    `  <BehaviorTree ID="MainTree"><Wait name="${name}" duration="1.0"/></BehaviorTree>`,
+    '</root>',
+  ].join('\n');
+  const stored = {
+    'global.xml': xmlFor('Global'),
+    'locals/a.xml': xmlFor('DefaultA'),
+    'locals/a_alt.xml': xmlFor('AlternateA'),
+  };
+  global.fetch.mockResolvedValue(mockJsonResponse({ name: 'bt_node', state: 'up', raw: 'up' }));
+  getPgmFiles.mockResolvedValue({ files: [{ path: 'factory.pgm', name: 'factory.pgm' }] });
+  getNavigationMissions.mockResolvedValue({ map_name: 'factory', missions: ['inspection'] });
+  let serverRevision = 7;
+  getNavigationMission.mockResolvedValue({
+    exists: true,
+    map_name: 'factory',
+    mission_name: 'inspection',
+    revision: serverRevision,
+    global_bt: 'global.xml',
+    waypoints: [{
+      id: 'wp_a',
+      label: 'A',
+      pose: { frame_id: 'map', x: 1, y: 0, yaw: 0 },
+      local_bt: 'locals/a.xml',
+      local_bt_files: ['locals/a.xml', 'locals/a_alt.xml'],
+      metadata: {},
+    }],
+    metadata: {},
+  });
+  getNavigationMissionBtFile.mockImplementation((_mapName, path) => Promise.resolve({
+    path,
+    content: stored[path],
+    exists: true,
+    revision: serverRevision,
+  }));
+  saveNavigationMissionBtFile.mockImplementation((
+    _mapName,
+    path,
+    content,
+    _missionName,
+    options,
+  ) => {
+    expect(options.expectedRevision).toBe(serverRevision);
+    serverRevision += 1;
+    return Promise.resolve({ path, content, exists: true, revision: serverRevision });
+  });
+  setNavigationMissionDefaultBtFile.mockImplementation((
+    _mapName,
+    _waypointId,
+    _path,
+    _missionName,
+    options,
+  ) => {
+    expect(options.expectedRevision).toBe(serverRevision);
+    serverRevision += 1;
+    return Promise.resolve({ exists: true, revision: serverRevision });
+  });
+  saveNavigationMission.mockImplementation((_mapName, payload) => {
+    expect(payload.expected_revision).toBe(serverRevision);
+    serverRevision += 1;
+    return Promise.resolve({ exists: true, revision: serverRevision });
+  });
+  deleteNavigationMissionBtFile.mockImplementation((
+    _mapName,
+    path,
+    _missionName,
+    options,
+  ) => {
+    expect(options.expectedRevision).toBe(serverRevision);
+    serverRevision += 1;
+    return Promise.resolve({ path, content: '', exists: false, revision: serverRevision });
+  });
+
+  render(<MissionCanvasPage />);
+  fireEvent.click(screen.getByRole('tab', { name: 'Design' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Load Map' }));
+  await screen.findByRole('combobox', { name: 'Design mission map file' });
+  await waitFor(() => expect(screen.getByRole('combobox', { name: 'Design mission file' }))
+    .toHaveValue('inspection'));
+  fireEvent.click(screen.getByRole('button', { name: 'Load' }));
+  await waitFor(() => expect(latestMapViewerProps().spots).toHaveLength(1));
+  await screen.findByText('BT Node Active');
+  act(() => latestMapViewerProps().onSpotClick('wp_a'));
+  await waitFor(() => expect(latestMapViewerProps().btLayer?.editor).toBeTruthy());
+
+  expect(latestMapViewerProps().btLayer.editor.props).toMatchObject({
+    filePath: 'locals/a.xml',
+    defaultFilePath: 'locals/a.xml',
+    fileOptions: ['locals/a.xml', 'locals/a_alt.xml'],
+  });
+
+  await act(async () => {
+    await latestMapViewerProps().btLayer.editor.props.onLoadXml('locals/a_alt.xml');
+    latestMapViewerProps().btLayer.editor.props.onFilePathChange('locals/a_alt.xml');
+  });
+  await waitFor(() => expect(latestMapViewerProps().btLayer.editor.props.filePath)
+    .toBe('locals/a_alt.xml'));
+  expect(latestMapViewerProps().btLayer.editor.props.defaultFilePath).toBe('locals/a.xml');
+
+  const editedAlternate = xmlFor('EditedAlternate');
+  await act(async () => {
+    await latestMapViewerProps().btLayer.editor.props.onSaveXml(
+      'locals/a_alt.xml',
+      editedAlternate,
+    );
+  });
+  expect(saveNavigationMissionBtFile).toHaveBeenCalledWith(
+    'factory',
+    'locals/a_alt.xml',
+    editedAlternate,
+    'inspection',
+    { waypointId: 'wp_a', expectedRevision: 7 },
+  );
+
+  const thirdXml = xmlFor('ThirdA');
+  let saveAsResponse;
+  await act(async () => {
+    saveAsResponse = await latestMapViewerProps().btLayer.editor.props.onSaveXmlAs(
+      'locals/a_alt.xml',
+      'third',
+      thirdXml,
+    );
+  });
+  expect(saveAsResponse).toMatchObject({
+    path: 'locals/wp_a/third.xml',
+    selected: true,
+  });
+  expect(saveNavigationMissionBtFile).toHaveBeenCalledWith(
+    'factory',
+    'locals/wp_a/third.xml',
+    thirdXml,
+    'inspection',
+    { waypointId: 'wp_a', expectedRevision: 8 },
+  );
+  await waitFor(() => expect(latestMapViewerProps().btLayer.editor.props).toMatchObject({
+    filePath: 'locals/wp_a/third.xml',
+    defaultFilePath: 'locals/a.xml',
+    fileOptions: ['locals/a.xml', 'locals/a_alt.xml', 'locals/wp_a/third.xml'],
+  }));
+
+  await act(async () => {
+    await latestMapViewerProps().btLayer.editor.props.onSetDefaultXml('locals/wp_a/third.xml');
+  });
+  expect(setNavigationMissionDefaultBtFile).toHaveBeenCalledWith(
+    'factory',
+    'wp_a',
+    'locals/wp_a/third.xml',
+    'inspection',
+    { expectedRevision: 9 },
+  );
+  await waitFor(() => expect(latestMapViewerProps().btLayer.editor.props.defaultFilePath)
+    .toBe('locals/wp_a/third.xml'));
+
+  act(() => latestMapViewerProps().onBtLayerClose());
+  fireEvent.click(screen.getByRole('button', { name: 'Save Mission' }));
+  await waitFor(() => expect(saveNavigationMission).toHaveBeenLastCalledWith(
+    'factory',
+    expect.objectContaining({
+      waypoints: [expect.objectContaining({
+        id: 'wp_a',
+        local_bt: 'locals/wp_a/third.xml',
+        local_bt_files: [
+          'locals/wp_a/third.xml',
+          'locals/a.xml',
+          'locals/a_alt.xml',
+        ],
+      })],
+    }),
+    'inspection',
+  ));
+  expect(deleteNavigationMissionBtFile).not.toHaveBeenCalledWith(
+    'factory',
+    expect.stringMatching(/^locals\/(a|a_alt|wp_a\/third)\.xml$/),
+    'inspection',
+    expect.anything(),
+  );
+
+  fireEvent.click(screen.getByRole('button', { name: /Delete Waypoint A/ }));
+  fireEvent.click(screen.getByRole('button', { name: 'Save Mission' }));
+  await waitFor(() => {
+    ['locals/a.xml', 'locals/a_alt.xml', 'locals/wp_a/third.xml'].forEach((path) => {
+      expect(deleteNavigationMissionBtFile).toHaveBeenCalledWith(
+        'factory',
+        path,
+        'inspection',
+        { expectedRevision: expect.any(Number) },
+      );
+    });
+  });
+});
+
+test('saves the latest local BT snapshot after closing the editor', async () => {
+  const latestMapViewerProps = () => (
+    mockMapViewer.mock.calls[mockMapViewer.mock.calls.length - 1][0]
+  );
+  const originalXml = [
+    '<root BTCPP_format="4" main_tree_to_execute="MainTree">',
+    '  <BehaviorTree ID="MainTree"><Wait name="Before" duration="1.0"/></BehaviorTree>',
+    '</root>',
+  ].join('\n');
+  const editedXml = originalXml.replace('Before', 'After').replace('1.0', '3.5');
+  global.fetch.mockResolvedValue(mockJsonResponse({
+    name: 'bt_node',
+    state: 'up',
+    raw: 'up',
+  }));
+  getPgmFiles.mockResolvedValue({
+    files: [{ path: 'factory.pgm', name: 'factory.pgm' }],
+  });
+  getNavigationMission.mockResolvedValue({
+    exists: true,
+    map_name: 'factory',
+    global_bt: 'global.xml',
+    waypoints: [{
+      id: 'wp1',
+      label: 'Pickup',
+      pose: { frame_id: 'map', x: 1, y: 2, yaw: 0 },
+      local_bt: 'locals/wp1.xml',
+      metadata: { local_bt: 'locals/wp1.xml' },
+    }],
+    metadata: {},
+  });
+  getNavigationMissionBtFile.mockImplementation((_mapName, path) => Promise.resolve({
+    path,
+    content: path === 'locals/wp1.xml' ? originalXml : '<root/>',
+    exists: true,
+  }));
+
+  render(<MissionCanvasPage />);
+  fireEvent.click(screen.getByRole('tab', { name: 'Design' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Load Map' }));
+  await screen.findByRole('combobox', { name: 'Design mission map file' });
+  fireEvent.click(screen.getByRole('button', { name: 'Load' }));
+  await waitFor(() => expect(latestMapViewerProps().spots).toHaveLength(1));
+  await screen.findByText('BT Node Active');
+  act(() => latestMapViewerProps().onSpotClick('wp1'));
+  await waitFor(() => expect(latestMapViewerProps().btLayer?.editor).toBeTruthy());
+
+  const editor = latestMapViewerProps().btLayer.editor;
+  act(() => {
+    editor.props.onXmlChange('locals/wp1.xml', editedXml);
+    latestMapViewerProps().onBtLayerClose();
+  });
+  fireEvent.click(await screen.findByRole('button', { name: 'Save Mission' }));
+
+  await waitFor(() => expect(saveNavigationMissionBtFile).toHaveBeenCalledWith(
+    'factory',
+    'locals/wp1.xml',
+    editedXml,
+    '',
+    { waypointId: 'wp1', expectedRevision: 0 },
+  ));
+  expect(Math.max(...saveNavigationMissionBtFile.mock.invocationCallOrder))
+    .toBeLessThan(saveNavigationMission.mock.invocationCallOrder[0]);
+});
+
+test('saves the local BT restored by Design undo', async () => {
+  const latestMapViewerProps = () => (
+    mockMapViewer.mock.calls[mockMapViewer.mock.calls.length - 1][0]
+  );
+  const originalXml = [
+    '<root BTCPP_format="4" main_tree_to_execute="MainTree">',
+    '  <BehaviorTree ID="MainTree"><Wait name="Before" duration="1.0"/></BehaviorTree>',
+    '</root>',
+  ].join('\n');
+  const editedXml = originalXml.replace('Before', 'After');
+  let btUp = true;
+  global.fetch.mockImplementation((url) => {
+    if (String(url).includes('/services/bt_node/stop')) {
+      btUp = false;
+      return Promise.resolve(mockJsonResponse({ ok: true }));
+    }
+    return Promise.resolve(mockJsonResponse({
+      name: 'bt_node',
+      state: btUp ? 'up' : 'down',
+      raw: '',
+    }));
+  });
+  getPgmFiles.mockResolvedValue({ files: [{ path: 'factory.pgm', name: 'factory.pgm' }] });
+  getNavigationMission.mockResolvedValue({
+    exists: true,
+    map_name: 'factory',
+    global_bt: 'global.xml',
+    waypoints: [{
+      id: 'wp1',
+      label: 'Pickup',
+      pose: { frame_id: 'map', x: 1, y: 2, yaw: 0 },
+      local_bt: 'locals/wp1.xml',
+      metadata: { local_bt: 'locals/wp1.xml' },
+    }],
+    metadata: {},
+  });
+  getNavigationMissionBtFile.mockImplementation((_mapName, path) => Promise.resolve({
+    path,
+    content: path === 'locals/wp1.xml' ? originalXml : '<root/>',
+    exists: true,
+  }));
+
+  render(<MissionCanvasPage />);
+  fireEvent.click(screen.getByRole('tab', { name: 'Design' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Load Map' }));
+  await screen.findByRole('combobox', { name: 'Design mission map file' });
+  fireEvent.click(screen.getByRole('button', { name: 'Load' }));
+  await waitFor(() => expect(latestMapViewerProps().spots).toHaveLength(1));
+  await screen.findByText('BT Node Active');
+  act(() => latestMapViewerProps().onSpotClick('wp1'));
+  await waitFor(() => expect(latestMapViewerProps().btLayer?.editor).toBeTruthy());
+  act(() => {
+    latestMapViewerProps().btLayer.editor.props.onXmlChange('locals/wp1.xml', editedXml);
+    latestMapViewerProps().onBtLayerClose();
+  });
+
+  fireEvent.click(screen.getByRole('button', { name: 'Deactivate BT' }));
+  await screen.findByText('BT Node Inactive');
+  const undo = screen.getByRole('button', { name: 'Undo' });
+  await waitFor(() => expect(undo).toBeEnabled());
+  fireEvent.click(undo);
+  fireEvent.click(screen.getByRole('button', { name: 'Save Mission' }));
+
+  await waitFor(() => expect(saveNavigationMissionBtFile).toHaveBeenCalledWith(
+    'factory',
+    'locals/wp1.xml',
+    originalXml,
+    '',
+    { waypointId: 'wp1', expectedRevision: 0 },
+  ));
+  await screen.findByText('Saved default for factory');
+  expect(screen.getByRole('button', { name: 'Undo' })).toBeDisabled();
+  expect(screen.getByRole('button', { name: 'Redo' })).toBeDisabled();
+});
+
+test('blocks saving when any local BT file fails to load', async () => {
+  const latestMapViewerProps = () => (
+    mockMapViewer.mock.calls[mockMapViewer.mock.calls.length - 1][0]
+  );
+  getPgmFiles.mockResolvedValue({
+    files: [{ path: 'factory.pgm', name: 'factory.pgm' }],
+  });
+  getNavigationMission.mockResolvedValue({
+    exists: true,
+    map_name: 'factory',
+    global_bt: 'global.xml',
+    waypoints: [{
+      id: 'wp1',
+      label: 'Pickup',
+      pose: { frame_id: 'map', x: 1, y: 2, yaw: 0 },
+      local_bt: 'locals/wp1.xml',
+      metadata: { local_bt: 'locals/wp1.xml' },
+    }],
+    metadata: {},
+  });
+  getNavigationMissionBtFile.mockImplementation((_mapName, path) => {
+    if (path === 'locals/wp1.xml') {
+      return Promise.reject(new Error('Local BT unavailable'));
+    }
+    return Promise.resolve({ path, content: '<root/>', exists: true });
+  });
+
+  render(<MissionCanvasPage />);
+  fireEvent.click(screen.getByRole('tab', { name: 'Design' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Load Map' }));
+  await screen.findByRole('combobox', { name: 'Design mission map file' });
+  fireEvent.click(screen.getByRole('button', { name: 'Load' }));
+
+  await screen.findByText(/Local BT unavailable\. Reload the mission before saving\./);
+  expect(latestMapViewerProps().spots).toEqual([]);
+  const saveButton = screen.getByRole('button', { name: 'Save Mission' });
+  expect(saveButton).toBeDisabled();
+  fireEvent.click(saveButton);
+  expect(saveNavigationMission).not.toHaveBeenCalled();
+  expect(saveNavigationMissionBtFile).not.toHaveBeenCalled();
+});
+
+test('keeps edits made while a mission save is in flight', async () => {
+  const latestMapViewerProps = () => (
+    mockMapViewer.mock.calls[mockMapViewer.mock.calls.length - 1][0]
+  );
+  const originalXml = [
+    '<root BTCPP_format="4" main_tree_to_execute="MainTree">',
+    '  <BehaviorTree ID="MainTree"><Wait name="Before" duration="1.0"/></BehaviorTree>',
+    '</root>',
+  ].join('\n');
+  const savedXml = originalXml.replace('Before', 'SavedSnapshot');
+  const newerXml = originalXml.replace('Before', 'EditedDuringSave');
+  global.fetch.mockResolvedValue(mockJsonResponse({ name: 'bt_node', state: 'up', raw: 'up' }));
+  getPgmFiles.mockResolvedValue({ files: [{ path: 'factory.pgm', name: 'factory.pgm' }] });
+  getNavigationMission.mockResolvedValue({
+    exists: true,
+    map_name: 'factory',
+    global_bt: 'global.xml',
+    waypoints: [{
+      id: 'wp1',
+      label: 'Pickup',
+      pose: { frame_id: 'map', x: 1, y: 2, yaw: 0 },
+      local_bt: 'legacy.xml',
+      metadata: { local_bt: 'legacy.xml' },
+    }],
+    metadata: {},
+  });
+  getNavigationMissionBtFile.mockImplementation((_mapName, path) => Promise.resolve({
+    path,
+    content: path === 'legacy.xml' ? originalXml : '<root/>',
+    exists: true,
+  }));
+  let finishLocalSave;
+  let canonicalPath = '';
+  saveNavigationMissionBtFile.mockImplementation((_mapName, path) => {
+    if (path === 'global.xml') return Promise.resolve({ path, exists: true });
+    canonicalPath = path;
+    return new Promise((resolve) => { finishLocalSave = resolve; });
+  });
+
+  render(<MissionCanvasPage />);
+  fireEvent.click(screen.getByRole('tab', { name: 'Design' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Load Map' }));
+  await screen.findByRole('combobox', { name: 'Design mission map file' });
+  fireEvent.click(screen.getByRole('button', { name: 'Load' }));
+  await waitFor(() => expect(latestMapViewerProps().spots).toHaveLength(1));
+  await screen.findByText('BT Node Active');
+  act(() => latestMapViewerProps().onSpotClick('wp1'));
+  await waitFor(() => expect(latestMapViewerProps().btLayer?.editor).toBeTruthy());
+
+  act(() => {
+    latestMapViewerProps().btLayer.editor.props.onXmlChange('legacy.xml', savedXml);
+    latestMapViewerProps().onBtLayerClose();
+  });
+  fireEvent.click(screen.getByRole('button', { name: 'Save Mission' }));
+  await waitFor(() => expect(finishLocalSave).toEqual(expect.any(Function)));
+  expect(canonicalPath).toMatch(/^locals\/wp1_[a-z0-9]+\.xml$/);
+  expect(saveNavigationMissionBtFile).toHaveBeenCalledWith(
+    'factory',
+    canonicalPath,
+    savedXml,
+    '',
+    { expectedRevision: 0 },
+  );
+  act(() => latestMapViewerProps().onSpotClick('wp1'));
+  await waitFor(() => expect(latestMapViewerProps().btLayer?.editor).toBeTruthy());
+  act(() => latestMapViewerProps().btLayer.editor.props.onXmlChange(
+    'legacy.xml',
+    newerXml,
+  ));
+  await act(async () => {
+    finishLocalSave({ path: canonicalPath, exists: true });
+    await Promise.resolve();
+  });
+
+  await waitFor(() => expect(saveNavigationMission).toHaveBeenCalledTimes(1));
+  await waitFor(() => expect(latestMapViewerProps().btLayer.editor.props.filePath)
+    .toBe(canonicalPath));
+  await waitFor(() => expect(latestMapViewerProps().btLayer.editor.props.xml).toBe(newerXml));
+  act(() => latestMapViewerProps().onBtLayerClose());
+  const newMissionButton = await screen.findByRole('button', { name: 'New Mission' });
+  await waitFor(() => expect(newMissionButton).toBeEnabled());
+  fireEvent.click(newMissionButton);
+  expect(await screen.findByText('Unsaved changes')).toBeInTheDocument();
+});
+
+test('retries a partially completed mission save from the latest server revision', async () => {
+  const latestMapViewerProps = () => (
+    mockMapViewer.mock.calls[mockMapViewer.mock.calls.length - 1][0]
+  );
+  const originalXml = [
+    '<root BTCPP_format="4" main_tree_to_execute="MainTree">',
+    '  <BehaviorTree ID="MainTree"><Wait name="Before" duration="1.0"/></BehaviorTree>',
+    '</root>',
+  ].join('\n');
+  const editedXml = originalXml.replace('Before', 'After');
+  let globalUploads = 0;
+  let localUploads = 0;
+  global.fetch.mockResolvedValue(mockJsonResponse({ name: 'bt_node', state: 'up', raw: 'up' }));
+  getPgmFiles.mockResolvedValue({ files: [{ path: 'factory.pgm', name: 'factory.pgm' }] });
+  getNavigationMission.mockResolvedValue({
+    exists: true,
+    map_name: 'factory',
+    mission_name: 'default',
+    revision: 5,
+    global_bt: 'global.xml',
+    waypoints: [{
+      id: 'wp1',
+      label: 'Pickup',
+      pose: { frame_id: 'map', x: 1, y: 2, yaw: 0 },
+      local_bt: 'locals/wp1.xml',
+      local_bt_files: ['locals/wp1.xml'],
+      metadata: {},
+    }],
+    metadata: {},
+  });
+  getNavigationMissionBtFile.mockImplementation((_mapName, path) => Promise.resolve({
+    path,
+    content: path === 'locals/wp1.xml' ? originalXml : '<root/>',
+    exists: true,
+    revision: 5,
+  }));
+  saveNavigationMissionBtFile.mockImplementation((
+    _mapName,
+    path,
+    content,
+    _missionName,
+    options,
+  ) => {
+    if (path === 'global.xml') {
+      globalUploads += 1;
+      expect(options.expectedRevision).toBe(globalUploads === 1 ? 5 : 6);
+      return Promise.resolve({ path, content, exists: true, revision: 6 });
+    }
+    localUploads += 1;
+    expect(options).toEqual({ waypointId: 'wp1', expectedRevision: 6 });
+    if (localUploads === 1) return Promise.reject(new Error('Local upload interrupted'));
+    return Promise.resolve({ path, content, exists: true, revision: 7 });
+  });
+  saveNavigationMission.mockImplementation((_mapName, payload) => {
+    expect(payload.expected_revision).toBe(7);
+    return Promise.resolve({ exists: true, revision: 8 });
+  });
+
+  render(<MissionCanvasPage />);
+  fireEvent.click(screen.getByRole('tab', { name: 'Design' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Load Map' }));
+  await screen.findByRole('combobox', { name: 'Design mission map file' });
+  fireEvent.click(screen.getByRole('button', { name: 'Load' }));
+  await waitFor(() => expect(latestMapViewerProps().spots).toHaveLength(1));
+  await screen.findByText('BT Node Active');
+  act(() => latestMapViewerProps().onSpotClick('wp1'));
+  await waitFor(() => expect(latestMapViewerProps().btLayer?.editor).toBeTruthy());
+  act(() => {
+    latestMapViewerProps().btLayer.editor.props.onXmlChange('locals/wp1.xml', editedXml);
+    latestMapViewerProps().onBtLayerClose();
+  });
+
+  fireEvent.click(screen.getByRole('button', { name: 'Save Mission' }));
+  await screen.findByText('Local upload interrupted');
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Save Mission' })).toBeEnabled());
+
+  fireEvent.click(screen.getByRole('button', { name: 'Save Mission' }));
+  await screen.findByText('Saved default for factory');
+  expect(globalUploads).toBe(2);
+  expect(localUploads).toBe(2);
+  expect(saveNavigationMission).toHaveBeenCalledTimes(1);
 });
 
 test('creates a waypoint at robot with automatic localization from the waypoint menu', async () => {
@@ -2737,12 +3545,17 @@ test('loads a saved map for the run stage', async () => {
       ? {
         exists: true,
         map_name: 'factory',
+        revision: 3,
         global_bt: 'global.xml',
         waypoints: [{
           id: 'run_waypoint',
           label: 'Run Waypoint',
           pose: { frame_id: 'map', x: 1, y: 2, yaw: 0.5 },
           local_bt: 'locals/run_waypoint.xml',
+          local_bt_files: [
+            'locals/run_waypoint.xml',
+            'locals/run_waypoint_alternate.xml',
+          ],
           metadata: {},
         }],
         metadata: {},
@@ -2755,6 +3568,17 @@ test('loads a saved map for the run stage', async () => {
         metadata: {},
       },
   ));
+  getNavigationMissionBtFile.mockImplementation((_mapName, path) => {
+    if (path === 'locals/run_waypoint_alternate.xml') {
+      return Promise.reject(new Error('Unused alternate is unavailable'));
+    }
+    return Promise.resolve({
+      path,
+      content: `<root><BehaviorTree ID="${path}"/></root>`,
+      exists: true,
+      revision: 3,
+    });
+  });
 
   render(<MissionCanvasPage />);
 
@@ -2775,6 +3599,16 @@ test('loads a saved map for the run stage', async () => {
     label: 'Run Waypoint',
     linked_bt_tree: 'locals/run_waypoint.xml',
   });
+  expect(getNavigationMissionBtFile).toHaveBeenCalledWith(
+    'factory',
+    'locals/run_waypoint.xml',
+    '',
+  );
+  expect(getNavigationMissionBtFile).not.toHaveBeenCalledWith(
+    'factory',
+    'locals/run_waypoint_alternate.xml',
+    '',
+  );
   expect(getNavigationSpots.mock.calls.some(([mapName]) => mapName === 'factory')).toBe(false);
   // Labeled map areas from Edit Map render in Run too.
   await waitFor(() => expect(getMapAnnotations).toHaveBeenCalledWith('factory.pgm'));
@@ -2797,6 +3631,48 @@ test('loads a saved map for the run stage', async () => {
   fireEvent.click(screen.getByRole('button', { name: 'Localize' }));
 
   await waitFor(() => expect(startNavigation).toHaveBeenCalledWith('nav', 'factory'));
+});
+
+test('rejects a Run snapshot assembled from different mission revisions', async () => {
+  const latestMapViewerProps = () => (
+    mockMapViewer.mock.calls[mockMapViewer.mock.calls.length - 1][0]
+  );
+  getPgmFiles.mockResolvedValue({
+    files: [{ path: 'factory.pgm', name: 'factory.pgm' }],
+  });
+  getNavigationMissions.mockResolvedValue({ map_name: 'factory', missions: ['default'] });
+  getNavigationMission.mockResolvedValue({
+    exists: true,
+    map_name: 'factory',
+    mission_name: 'default',
+    revision: 7,
+    global_bt: 'global.xml',
+    waypoints: [{
+      id: 'run_waypoint',
+      label: 'Run Waypoint',
+      pose: { frame_id: 'map', x: 1, y: 2, yaw: 0.5 },
+      local_bt: 'locals/run_waypoint.xml',
+      local_bt_files: ['locals/run_waypoint.xml'],
+      metadata: {},
+    }],
+    metadata: {},
+  });
+  getNavigationMissionBtFile.mockImplementation((_mapName, path) => Promise.resolve({
+    path,
+    content: `<root><BehaviorTree ID="${path}"/></root>`,
+    exists: true,
+    revision: path === 'global.xml' ? 7 : 8,
+  }));
+
+  render(<MissionCanvasPage />);
+  fireEvent.click(screen.getByRole('tab', { name: 'Run' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Load Map' }));
+  await screen.findByRole('combobox', { name: 'Run mission map file' });
+  fireEvent.click(screen.getByRole('button', { name: 'Load' }));
+
+  await screen.findByText(/Mission changed while loading locals\/run_waypoint\.xml/);
+  expect(latestMapViewerProps().spots).toEqual([]);
+  expect(screen.getByRole('button', { name: 'Localize' })).toBeDisabled();
 });
 
 test('allows changing the Run mission while navigation stays active between runs', async () => {
@@ -2847,6 +3723,237 @@ test('allows changing the Run mission while navigation stays active between runs
     id: 'evening_waypoint',
     label: 'evening waypoint',
   }));
+});
+
+test('keeps the previous Run snapshot when a mission switch fails', async () => {
+  const latestMapViewerProps = () => (
+    mockMapViewer.mock.calls[mockMapViewer.mock.calls.length - 1][0]
+  );
+  let rejectEveningLoad;
+  getServiceStatus.mockResolvedValue({ is_up: true, mode: 'run' });
+  mockTopicDataByName['/amcl_pose'] = amclPoseMessage(0, 0, 0);
+  getPgmFiles.mockResolvedValue({
+    files: [{ path: 'factory.pgm', name: 'factory.pgm' }],
+  });
+  getNavigationMissions.mockResolvedValue({
+    map_name: 'factory',
+    missions: ['morning', 'evening'],
+  });
+  getNavigationMission.mockImplementation((mapName, missionName) => {
+    if (missionName === 'evening') {
+      return new Promise((_resolve, reject) => {
+        rejectEveningLoad = reject;
+      });
+    }
+    return Promise.resolve({
+      exists: true,
+      map_name: mapName,
+      mission_name: missionName,
+      global_bt: 'global.xml',
+      waypoints: [{
+        id: 'morning_waypoint',
+        label: 'morning waypoint',
+        pose: { frame_id: 'map', x: 1, y: 2, yaw: 0 },
+        local_bt: 'locals/morning.xml',
+        metadata: {},
+      }],
+      metadata: {},
+    });
+  });
+
+  render(<MissionCanvasPage />);
+  fireEvent.click(screen.getByRole('tab', { name: 'Run' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Load Map' }));
+  await screen.findByRole('combobox', { name: 'Run mission map file' });
+  fireEvent.click(screen.getByRole('button', { name: 'Load' }));
+
+  const missionSelect = await screen.findByRole('combobox', { name: 'Active mission' });
+  await waitFor(() => expect(missionSelect).toHaveValue('morning'));
+  await waitFor(() => expect(latestMapViewerProps().spots[0]).toMatchObject({
+    id: 'morning_waypoint',
+  }));
+  fireEvent.change(missionSelect, { target: { value: 'evening' } });
+  await waitFor(() => expect(getNavigationMission).toHaveBeenCalledWith('factory', 'evening'));
+  expect(missionSelect).toHaveValue('morning');
+  expect(missionSelect).toBeDisabled();
+  expect(screen.getByRole('button', { name: 'Localize' })).toBeDisabled();
+  expect(screen.getByRole('button', { name: 'Run Mission' })).toBeDisabled();
+
+  await act(async () => {
+    rejectEveningLoad(new Error('Evening mission unavailable'));
+  });
+  await screen.findByText('Evening mission unavailable');
+  expect(missionSelect).toHaveValue('morning');
+  expect(latestMapViewerProps().spots[0]).toMatchObject({ id: 'morning_waypoint' });
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Localize' })).toBeEnabled());
+});
+
+test('stops an owned Run runtime across a full page refresh', async () => {
+  let navigationUp = false;
+  getServiceStatus.mockImplementation(() => Promise.resolve(
+    navigationUp ? { is_up: true, mode: 'run' } : { is_up: false },
+  ));
+  startNavigation.mockImplementation(() => {
+    navigationUp = true;
+    return Promise.resolve({ ok: true, message: 'started' });
+  });
+  stopNavigation.mockImplementation(() => {
+    navigationUp = false;
+    return Promise.resolve({ ok: true, message: 'stopped' });
+  });
+
+  const currentDocument = render(<MissionCanvasPage />);
+  fireEvent.click(screen.getByRole('tab', { name: 'Run' }));
+  await loadRunMapFromDialog();
+  fireEvent.click(screen.getByRole('button', { name: 'Localize' }));
+
+  await waitFor(() => expect(startNavigation).toHaveBeenCalledWith('nav', 'map'));
+  await waitFor(() => expect(
+    screen.getAllByText('Click and drag the robot pose on the map').length,
+  ).toBeGreaterThan(0));
+  stopNavigation.mockClear();
+
+  fireEvent(window, new Event('pagehide'));
+  expect(stopNavigation).toHaveBeenCalledTimes(1);
+  expect(stopNavigation).toHaveBeenCalledWith({ keepalive: true });
+  expect(JSON.parse(window.sessionStorage.getItem('mission_canvas_session'))).toEqual(
+    expect.objectContaining({
+      navigationRuntimeMode: 'idle',
+      runRuntimeOwned: true,
+      runShutdownPending: true,
+      runShutdownRequestedAt: expect.any(Number),
+    }),
+  );
+
+  // Guard duplicate delivery so it cannot create a burst of shutdown calls.
+  fireEvent(window, new Event('pagehide'));
+  expect(stopNavigation).toHaveBeenCalledTimes(1);
+
+  currentDocument.unmount();
+  stopNavigation.mockClear();
+  render(<StrictMode><MissionCanvasPage /></StrictMode>);
+
+  await waitFor(() => expect(
+    stopNavigation.mock.calls.some((args) => args.length === 0),
+  ).toBe(true));
+  expect(stopNavigation.mock.calls.filter((args) => args.length === 0)).toHaveLength(1);
+  await waitFor(() => expect(
+    JSON.parse(window.sessionStorage.getItem('mission_canvas_session')),
+  ).toEqual(expect.objectContaining({
+    navigationRuntimeMode: 'idle',
+    runRuntimeOwned: false,
+    runShutdownPending: false,
+  })));
+  await waitFor(() => expect(screen.getByText('Status: idle')).toBeInTheDocument());
+});
+
+test('stops Run even when the page refreshes while navigation is starting', async () => {
+  let resolveStart;
+  startNavigation.mockReturnValue(new Promise((resolve) => {
+    resolveStart = resolve;
+  }));
+
+  const currentDocument = render(<MissionCanvasPage />);
+  fireEvent.click(screen.getByRole('tab', { name: 'Run' }));
+  await loadRunMapFromDialog();
+  fireEvent.click(screen.getByRole('button', { name: 'Localize' }));
+  await waitFor(() => expect(startNavigation).toHaveBeenCalledWith('nav', 'map'));
+
+  fireEvent(window, new Event('pagehide'));
+  expect(stopNavigation).toHaveBeenCalledWith({ keepalive: true });
+  expect(JSON.parse(window.sessionStorage.getItem('mission_canvas_session'))).toEqual(
+    expect.objectContaining({
+      navigationRuntimeMode: 'idle',
+      runRuntimeOwned: true,
+      runShutdownPending: true,
+    }),
+  );
+
+  await act(async () => {
+    resolveStart({ ok: true, message: 'started' });
+    await Promise.resolve();
+  });
+  expect(stopNavigation.mock.calls.filter(
+    ([options]) => options?.keepalive === true,
+  )).toHaveLength(2);
+  // The late start completion must not overwrite the page-exit fallback.
+  expect(JSON.parse(window.sessionStorage.getItem('mission_canvas_session'))).toEqual(
+    expect.objectContaining({
+      navigationRuntimeMode: 'idle',
+      runRuntimeOwned: true,
+      runShutdownPending: true,
+    }),
+  );
+  currentDocument.unmount();
+});
+
+test('retries the page-exit stop after a partially failed navigation start', async () => {
+  let rejectStart;
+  startNavigation.mockReturnValue(new Promise((resolve, reject) => {
+    rejectStart = reject;
+  }));
+
+  const currentDocument = render(<MissionCanvasPage />);
+  fireEvent.click(screen.getByRole('tab', { name: 'Run' }));
+  await loadRunMapFromDialog();
+  fireEvent.click(screen.getByRole('button', { name: 'Localize' }));
+  await waitFor(() => expect(startNavigation).toHaveBeenCalledWith('nav', 'map'));
+  fireEvent(window, new Event('pagehide'));
+
+  await act(async () => {
+    rejectStart(new Error('start timed out'));
+    await Promise.resolve();
+  });
+
+  expect(stopNavigation.mock.calls.filter(
+    ([options]) => options?.keepalive === true,
+  )).toHaveLength(2);
+  expect(JSON.parse(window.sessionStorage.getItem('mission_canvas_session'))).toEqual(
+    expect.objectContaining({
+      navigationRuntimeMode: 'idle',
+      runShutdownPending: true,
+    }),
+  );
+  currentDocument.unmount();
+});
+
+test('does not stop a Mapping runtime when the page exits', async () => {
+  window.sessionStorage.setItem('mission_canvas_session', JSON.stringify({
+    workspaceStage: 'mapping',
+    navigationRuntimeMode: 'mapping',
+    runRuntimeOwned: true,
+    runShutdownPending: false,
+  }));
+  getServiceStatus.mockResolvedValue({ is_up: true, mode: 'map' });
+
+  render(<MissionCanvasPage />);
+  await waitFor(() => expect(screen.getByText('Status: running')).toBeInTheDocument());
+  fireEvent(window, new Event('pagehide'));
+
+  expect(stopNavigation).not.toHaveBeenCalled();
+});
+
+test('does not apply an expired Run shutdown marker to a later runtime', async () => {
+  window.sessionStorage.setItem('mission_canvas_session', JSON.stringify({
+    workspaceStage: 'run',
+    navigationRuntimeMode: 'idle',
+    runRuntimeOwned: true,
+    runShutdownPending: true,
+    runShutdownRequestedAt: Date.now() - 120_000,
+  }));
+  getServiceStatus.mockResolvedValue({ is_up: true, mode: 'run' });
+
+  render(<MissionCanvasPage />);
+  await waitFor(() => expect(screen.getByText('Status: running')).toBeInTheDocument());
+  await waitFor(() => expect(
+    JSON.parse(window.sessionStorage.getItem('mission_canvas_session')),
+  ).toEqual(expect.objectContaining({
+    runRuntimeOwned: false,
+    runShutdownPending: false,
+  })));
+  fireEvent(window, new Event('pagehide'));
+
+  expect(stopNavigation).not.toHaveBeenCalled();
 });
 
 test('lists the mission route waypoints in the run session panel', async () => {
@@ -3208,6 +4315,7 @@ test('keeps Run localization active while the BT node is up', async () => {
   await waitFor(() => expect(mapSelect).toHaveValue('factory.pgm'));
   fireEvent.click(screen.getByRole('button', { name: 'Load' }));
   await waitFor(() => expect(getMapAnnotations).toHaveBeenCalledWith('factory.pgm'));
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Localize' })).toBeEnabled());
 
   fireEvent.click(screen.getByRole('button', { name: 'Localize' }));
   // Settle so the guard effect (which would reset "initial" in the buggy code)
@@ -3223,9 +4331,7 @@ describe('assembleMissionBtFilesForSave', () => {
     '</root>',
   ].join('\n');
 
-  test('migrates authored BT content to the canonical label path', () => {
-    // The editor stored content under a non-canonical path (e.g. an id-based or
-    // pre-rename path); it must follow the waypoint to locals/bay.xml on save.
+  test('preserves the waypoint BT path as stable identity', () => {
     const spot = {
       id: 'spot_a',
       label: 'Bay',
@@ -3239,10 +4345,10 @@ describe('assembleMissionBtFilesForSave', () => {
       'global.xml',
       '<global/>',
     );
-    expect(files['locals/bay.xml']).toBe(EDITED);
-    expect(files['locals/dock.xml']).toBeUndefined();
+    expect(files['locals/dock.xml']).toBe(EDITED);
+    expect(files['locals/bay.xml']).toBeUndefined();
     expect(files['global.xml']).toBe('<global/>');
-    expect(stalePaths).toContain('locals/dock.xml');
+    expect(stalePaths).toEqual([]);
   });
 
   test('preserves edited content when the stored path already matches', () => {
@@ -3258,9 +4364,104 @@ describe('assembleMissionBtFilesForSave', () => {
     expect(stalePaths).toEqual([]);
   });
 
+  test('persists every owned XML while local_bt only selects the default', () => {
+    const alternate = EDITED.replace('2.0', '4.0');
+    const spot = {
+      id: 'spot_a',
+      label: 'Dock',
+      linked_bt_tree: 'locals/alternate.xml',
+      local_bt_files: ['locals/alternate.xml', 'locals/default.xml'],
+      metadata: {
+        local_bt: 'locals/alternate.xml',
+        local_bt_files: ['locals/alternate.xml', 'locals/default.xml'],
+      },
+    };
+    const { files, stalePaths } = assembleMissionBtFilesForSave(
+      [spot],
+      {
+        'locals/default.xml': EDITED,
+        'locals/alternate.xml': alternate,
+      },
+      [],
+      'global.xml',
+      '<global/>',
+    );
+
+    expect(files['locals/default.xml']).toBe(EDITED);
+    expect(files['locals/alternate.xml']).toBe(alternate);
+    expect(stalePaths).toEqual([]);
+  });
+
+  test('migrates a legacy root-level BT file into collision-safe local storage', () => {
+    const spot = {
+      id: 'spot_legacy',
+      label: 'Prep table',
+      linked_bt_tree: 'prep_table.xml',
+      metadata: { local_bt: 'prep_table.xml' },
+    };
+    const { files, stalePaths } = assembleMissionBtFilesForSave(
+      [spot],
+      { 'prep_table.xml': EDITED },
+      [],
+      'global.xml',
+      '<global/>',
+    );
+    const localEntries = Object.entries(files).filter(([path]) => path.startsWith('locals/'));
+
+    expect(localEntries).toHaveLength(1);
+    expect(localEntries[0][0]).toMatch(/^locals\/spot_legacy_[a-z0-9]+\.xml$/);
+    expect(localEntries[0][1]).toBe(EDITED);
+    expect(files['prep_table.xml']).toBeUndefined();
+    expect(stalePaths).toEqual(['prep_table.xml']);
+  });
+
   test('writes an empty default for an unedited waypoint', () => {
     const spot = { id: 'spot_a', label: 'Dock', metadata: {} };
     const { files } = assembleMissionBtFilesForSave([spot], {}, [], 'global.xml', '<global/>');
     expect(files['locals/dock.xml']).toContain('<BehaviorTree ID="MainTree"/>');
+  });
+
+  test('keeps distinct BT files when labels normalize to the same slug', () => {
+    const spots = [
+      {
+        id: 'spot_a',
+        label: '픽업',
+        metadata: { local_bt: 'locals/pickup_a.xml' },
+      },
+      {
+        id: 'spot_b',
+        label: '도착',
+        metadata: { local_bt: 'locals/dropoff_b.xml' },
+      },
+    ];
+    const second = EDITED.replace('2.0', '3.0');
+    const { files } = assembleMissionBtFilesForSave(
+      spots,
+      {
+        'locals/pickup_a.xml': EDITED,
+        'locals/dropoff_b.xml': second,
+      },
+      [],
+      'global.xml',
+      '<global/>',
+    );
+
+    expect(files['locals/pickup_a.xml']).toBe(EDITED);
+    expect(files['locals/dropoff_b.xml']).toBe(second);
+  });
+
+  test('rejects duplicate BT paths instead of silently overwriting one tree', () => {
+    const spots = [
+      { id: 'spot_a', label: 'A', metadata: { local_bt: 'locals/shared.xml' } },
+      { id: 'spot_b', label: 'B', metadata: { local_bt: 'locals/shared.xml' } },
+    ];
+
+    expect(() => assembleMissionBtFilesForSave(
+      spots,
+      { 'locals/shared.xml': EDITED },
+      [],
+      'global.xml',
+      '<global/>',
+    )).toThrow('Multiple waypoints reference the same local BT path');
   });
 });

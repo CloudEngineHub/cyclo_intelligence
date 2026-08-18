@@ -52,8 +52,11 @@ export function startNavigation(mode, mapName = 'map') {
   });
 }
 
-export function stopNavigation() {
-  return request('/stop', { method: 'POST' });
+export function stopNavigation({ keepalive = false } = {}) {
+  return request('/stop', {
+    method: 'POST',
+    ...(keepalive ? { keepalive: true } : {}),
+  });
 }
 
 export function saveNavigationMap(mapName = 'map') {
