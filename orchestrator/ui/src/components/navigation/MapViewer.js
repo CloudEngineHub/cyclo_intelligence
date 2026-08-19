@@ -40,6 +40,32 @@ const WAYPOINT_LABEL_SCALE_Y = 6;
 const BT_FOCUS_VISIBLE_HEIGHT_MIN = 5;
 const BT_FOCUS_VISIBLE_HEIGHT_MAX = 11;
 const BT_FOCUS_WAYPOINT_NDC_X = -0.75;
+// UI-only decimation. Nav2 still consumes every LaserScan ray; the browser
+// projects half of them to reduce point geometry and local-costmap highlighting.
+const SCAN_VISUALIZATION_STRIDE = 2;
+const RENDER_INTERVAL_ACTIVE_MS = 33;
+const RENDER_INTERVAL_IDLE_MS = 100;
+const RENDER_INTERVAL_HIDDEN_MS = 500;
+
+export function mapRenderIntervalMs({ hidden = false, active = false } = {}) {
+    if (hidden)
+        return RENDER_INTERVAL_HIDDEN_MS;
+    return active ? RENDER_INTERVAL_ACTIVE_MS : RENDER_INTERVAL_IDLE_MS;
+}
+
+function forEachVisualizedScanRange(ranges, callback) {
+    let lastVisited = -1;
+    for (let index = 0; index < ranges.length; index += SCAN_VISUALIZATION_STRIDE) {
+        callback(ranges[index], index);
+        lastVisited = index;
+    }
+    // Preserve the far edge of the scanner's field of view when stride does
+    // not naturally land on the final ray.
+    const lastIndex = ranges.length - 1;
+    if (lastIndex >= 0 && lastVisited !== lastIndex) {
+        callback(ranges[lastIndex], lastIndex);
+    }
+}
 function gridMeta(grid) {
     var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k;
     const info = grid === null || grid === void 0 ? void 0 : grid.info;
@@ -74,7 +100,7 @@ function scanCellsForGrid(grid, scan, scanPose, framePose) {
     const angleMin = Number((_m = scan.angle_min) !== null && _m !== void 0 ? _m : 0);
     const inc = Number((_o = scan.angle_increment) !== null && _o !== void 0 ? _o : 0);
     const cells = new Set();
-    scan.ranges.forEach((range, index) => {
+    forEachVisualizedScanRange(scan.ranges, (range, index) => {
         const r = Number(range);
         if (!Number.isFinite(r) || r < min || r > max)
             return;
@@ -453,11 +479,7 @@ function makeOccupancyTexture(grid, alpha, mode, highlightedCells = null, isDark
     }
 
     // ---- costmaps: crisp per-cell (safety-accurate), warm colors ----
-    const canvas = document.createElement("canvas");
-    canvas.width = w; canvas.height = h;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return null;
-    const image = ctx.createImageData(w, h);
+    const data = new Uint8Array(w * h * 4);
     for (let y = 0; y < h; y += 1) {
         for (let x = 0; x < w; x += 1) {
             const srcIndex = (w - 1 - x) + (h - 1 - y) * w;
@@ -483,20 +505,81 @@ function makeOccupancyTexture(grid, alpha, mode, highlightedCells = null, isDark
                 else if (value < 70) { [r, g, b, a] = palette.lethal; }
                 else { [r, g, b, a] = palette.inflate; }
             }
-            image.data[dstIndex] = r;
-            image.data[dstIndex + 1] = g;
-            image.data[dstIndex + 2] = b;
-            image.data[dstIndex + 3] = a;
+            data[dstIndex] = r;
+            data[dstIndex + 1] = g;
+            data[dstIndex + 2] = b;
+            data[dstIndex + 3] = a;
         }
     }
-    ctx.putImageData(image, 0, 0);
-    const texture = new THREE.CanvasTexture(canvas);
+    const texture = new THREE.DataTexture(
+        data,
+        w,
+        h,
+        THREE.RGBAFormat,
+        THREE.UnsignedByteType,
+    );
     texture.colorSpace = THREE.SRGBColorSpace;
     texture.magFilter = THREE.NearestFilter;
     texture.minFilter = THREE.NearestFilter;
+    texture.generateMipmaps = false;
     texture.flipY = false;
     texture.needsUpdate = true;
     return texture;
+}
+
+function writeGlobalCostmapPixel(data, index, value) {
+    if (value <= 0) {
+        data[index] = 0;
+        data[index + 1] = 0;
+        data[index + 2] = 0;
+        data[index + 3] = 0;
+        return;
+    }
+    const normalized = Math.min(Math.max(value, 0), 100) / 100;
+    const gray = Math.round(200 - normalized * 130);
+    data[index] = gray;
+    data[index + 1] = gray;
+    data[index + 2] = gray;
+    data[index + 3] = Math.round(40 + normalized * 70);
+}
+
+export function updateGlobalCostmapTexture(texture, grid, updateRegion) {
+    const meta = gridMeta(grid);
+    const image = texture?.image;
+    const textureData = image?.data;
+    if (!meta || !textureData || !updateRegion || !texture?.addUpdateRange)
+        return false;
+    const x = Number(updateRegion.x);
+    const y = Number(updateRegion.y);
+    const width = Number(updateRegion.width);
+    const height = Number(updateRegion.height);
+    if (
+        !Number.isInteger(x) || !Number.isInteger(y) ||
+        !Number.isInteger(width) || !Number.isInteger(height) ||
+        x < 0 || y < 0 || width <= 0 || height <= 0 ||
+        x + width > meta.width || y + height > meta.height ||
+        image.width !== meta.width || image.height !== meta.height ||
+        textureData.length < meta.width * meta.height * 4
+    ) {
+        return false;
+    }
+
+    for (let gridY = y; gridY < y + height; gridY += 1) {
+        const textureY = meta.height - 1 - gridY;
+        const textureX = meta.width - x - width;
+        for (let gridX = x; gridX < x + width; gridX += 1) {
+            const sourceIndex = gridY * meta.width + gridX;
+            const targetX = meta.width - 1 - gridX;
+            const targetIndex = (textureY * meta.width + targetX) * 4;
+            writeGlobalCostmapPixel(textureData, targetIndex, grid.data[sourceIndex] ?? -1);
+        }
+        texture.addUpdateRange(
+            (textureY * meta.width + textureX) * 4,
+            width * 4,
+        );
+    }
+    texture.needsUpdate = true;
+    return true;
 }
 function disposeObject(object) {
     object.traverse((child) => {
@@ -1457,6 +1540,9 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, scanPose = n
     const btFocusActiveRef = useRef(false);
     const followRobotRef = useRef(false);
     const followPoseRef = useRef(null);
+    const lastMotionPoseRef = useRef(null);
+    const renderActiveUntilRef = useRef(0);
+    const renderInteractionActiveRef = useRef(false);
     const latestFootprintRef = useRef(null);
     const tfSyncedFootprintRef = useRef(null);
     const [dragPreviewPose, setDragPreviewPose] = useState(null);
@@ -1477,6 +1563,7 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, scanPose = n
     // Split layer groups so high-frequency signals (TF pose, scan) never force
     // a rebuild of the expensive layers (costmap pixel planes, marker sprites).
     const costmapLayerRef = useRef(null);
+    const globalCostmapTextureRef = useRef(null);
     const navPathLayerRef = useRef(null);
     const liveLayerRef = useRef(null);
     const nodeDragRef = useRef(null);
@@ -1492,6 +1579,8 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, scanPose = n
         let controls = null;
         let resizeObserver = null;
         let resize = null;
+        let handleControlsStart = null;
+        let handleControlsEnd = null;
         try {
             scene = new THREE.Scene();
             scene.background = new THREE.Color(isDark ? SCENE_BG.dark : SCENE_BG.light);
@@ -1537,12 +1626,22 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, scanPose = n
             };
             controls.screenSpacePanning = true;
             controlsRef.current = controls;
+            handleControlsStart = () => {
+                renderInteractionActiveRef.current = true;
+            };
+            handleControlsEnd = () => {
+                renderInteractionActiveRef.current = false;
+                renderActiveUntilRef.current = performance.now() + 400;
+            };
+            controls.addEventListener?.("start", handleControlsStart);
+            controls.addEventListener?.("end", handleControlsEnd);
             resize = () => {
                 const width = containerEl.clientWidth || 1;
                 const height = containerEl.clientHeight || 1;
                 renderer.setSize(width, height, false);
                 camera.aspect = width / height;
                 camera.updateProjectionMatrix();
+                renderActiveUntilRef.current = performance.now() + 250;
             };
             resize();
             if (typeof ResizeObserver !== "undefined") {
@@ -1553,15 +1652,31 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, scanPose = n
                 window.addEventListener("resize", resize);
             }
             const pulseStart = performance.now();
-            // Cap the render loop at ~30fps: a full-scene render at 60fps kept
-            // one browser core saturated (measured 2026-08-12) and made every
-            // mount (e.g. the waypoint BT split view) visibly hitch. 30fps is
-            // indistinguishable for a robot dashboard and halves the cost.
+            // Adapt rendering to actual activity. Static maps render at 10fps,
+            // motion and interaction use 30fps, and background tabs drop to 2fps.
             let lastFrameAt = 0;
             const animate = () => {
                 animationFrameRef.current = requestAnimationFrame(animate);
                 const now = performance.now();
-                if (now - lastFrameAt < 33) return;
+                const followTarget = followPoseRef.current;
+                const followCameraMoving = Boolean(
+                    followRobotRef.current &&
+                    followTarget &&
+                    Math.hypot(
+                        followTarget.x - controls.target.x,
+                        followTarget.y - controls.target.y,
+                    ) > 0.002
+                );
+                const renderActive = (
+                    renderInteractionActiveRef.current ||
+                    followCameraMoving ||
+                    now < renderActiveUntilRef.current
+                );
+                const frameInterval = mapRenderIntervalMs({
+                    hidden: document.visibilityState === "hidden",
+                    active: renderActive,
+                });
+                if (now - lastFrameAt < frameInterval) return;
                 lastFrameAt = now;
                 const elapsed = (now - pulseStart) / 1000;
                 // Pulse the active-waypoint halo (userData.pulse), and smoothly pan
@@ -1625,6 +1740,10 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, scanPose = n
                 cancelAnimationFrame(animationFrameRef.current);
                 animationFrameRef.current = null;
             }
+            if (controls && handleControlsStart)
+                controls.removeEventListener?.("start", handleControlsStart);
+            if (controls && handleControlsEnd)
+                controls.removeEventListener?.("end", handleControlsEnd);
             controls === null || controls === void 0 ? void 0 : controls.dispose();
             if (mapLayer)
                 disposeObject(mapLayer);
@@ -1650,6 +1769,7 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, scanPose = n
             layersRef.current = null;
             editorBrushLayerRef.current = null;
             costmapLayerRef.current = null;
+            globalCostmapTextureRef.current = null;
             navPathLayerRef.current = null;
             liveLayerRef.current = null;
         };
@@ -1804,12 +1924,39 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, scanPose = n
     // animation loop reads these refs each frame (no per-pose re-render).
     useEffect(() => {
         followRobotRef.current = missionFollowRobot;
+        if (missionFollowRobot)
+            renderActiveUntilRef.current = performance.now() + 400;
     }, [missionFollowRobot]);
     useEffect(() => {
-        followPoseRef.current = (pose === null || pose === void 0 ? void 0 : pose.position)
-            ? { x: pose.position.x, y: pose.position.y }
+        const nextPosition = (pose === null || pose === void 0 ? void 0 : pose.position)
+            ? { x: Number(pose.position.x), y: Number(pose.position.y) }
             : null;
+        followPoseRef.current = nextPosition;
+        const nextMotionPose = nextPosition
+            ? { ...nextPosition, yaw: yawFromPose(pose) }
+            : null;
+        const previous = lastMotionPoseRef.current;
+        if (
+            nextMotionPose &&
+            (!previous ||
+                Math.hypot(nextMotionPose.x - previous.x, nextMotionPose.y - previous.y) >= 0.01 ||
+                Math.abs(Math.atan2(
+                    Math.sin(nextMotionPose.yaw - previous.yaw),
+                    Math.cos(nextMotionPose.yaw - previous.yaw),
+                )) >= 0.01)
+        ) {
+            renderActiveUntilRef.current = performance.now() + 350;
+        }
+        lastMotionPoseRef.current = nextMotionPose;
     }, [pose]);
+    useEffect(() => {
+        const interactionActive = Boolean(
+            mapDragActive || dragPreviewPose || nodeDragPreview || editorAreaPreview
+        );
+        renderInteractionActiveRef.current = interactionActive;
+        if (!interactionActive)
+            renderActiveUntilRef.current = performance.now() + 400;
+    }, [dragPreviewPose, editorAreaPreview, mapDragActive, nodeDragPreview]);
     useEffect(() => {
         latestFootprintRef.current = footprint;
     }, [footprint]);
@@ -1959,20 +2106,49 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, scanPose = n
         viewKey,
         isDark,
     ]);
-    // Global costmap plane — a per-pixel ImageData pass over a map-sized grid.
-    // Isolated so it only redraws when the costmap itself updates, never when
-    // the robot pose ticks.
+    // Global costmap plane. A full snapshot builds one DataTexture; subsequent
+    // dirty rectangles patch only their affected rows in CPU memory and WebGL.
+    // Geometry changes or a client resync still rebuild the complete plane.
     useEffect(() => {
         const group = costmapLayerRef.current;
         if (!group)
             return;
+        if (!showGlobalCostmap || !globalCostmap) {
+            disposeObject(group);
+            group.clear();
+            globalCostmapTextureRef.current = null;
+            return;
+        }
+        const meta = gridMeta(globalCostmap);
+        const geometryKey = meta
+            ? `${meta.width}:${meta.height}:${meta.resolution}:${meta.originX}:${meta.originY}:${meta.originYaw}:${isDark}`
+            : null;
+        const current = globalCostmapTextureRef.current;
+        if (
+            current &&
+            geometryKey &&
+            current.geometryKey === geometryKey &&
+            globalCostmap.updateRegion &&
+            updateGlobalCostmapTexture(
+                current.texture,
+                globalCostmap,
+                globalCostmap.updateRegion,
+            )
+        ) {
+            return;
+        }
+
         disposeObject(group);
         group.clear();
-        if (!showGlobalCostmap || !globalCostmap)
-            return;
+        globalCostmapTextureRef.current = null;
         const plane = makeGridPlane(globalCostmap, "globalCostmap", 0.03, null, null, isDark);
-        if (plane)
+        if (plane) {
             group.add(plane);
+            globalCostmapTextureRef.current = {
+                geometryKey,
+                texture: plane.userData.mapTexture,
+            };
+        }
     }, [globalCostmap, showGlobalCostmap, isDark]);
     // Planner output: global plan line + goal marker (updates at plan rate).
     useEffect(() => {
@@ -2053,7 +2229,7 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, scanPose = n
                 const angleMin = Number((_u = scan.angle_min) !== null && _u !== void 0 ? _u : 0);
                 const inc = Number(scan.angle_increment ?? 0);
                 points = [];
-                scan.ranges.forEach((range, index) => {
+                forEachVisualizedScanRange(scan.ranges, (range, index) => {
                     const r = Number(range);
                     if (!Number.isFinite(r) || r < min || r > max)
                         return;

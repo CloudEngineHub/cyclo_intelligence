@@ -1,7 +1,12 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { MapViewer } from './MapViewer';
+import {
+  MapViewer,
+  mapRenderIntervalMs,
+  updateGlobalCostmapTexture,
+} from './MapViewer';
 
 const mockPointPositions = [];
+const mockDataTextures = [];
 
 jest.mock('three', () => {
   const actual = jest.requireActual('three');
@@ -29,7 +34,14 @@ jest.mock('three', () => {
     }
   }
 
-  return { ...actual, Points, WebGLRenderer };
+  class DataTexture extends actual.DataTexture {
+    constructor(...args) {
+      super(...args);
+      mockDataTextures.push(this);
+    }
+  }
+
+  return { ...actual, DataTexture, Points, WebGLRenderer };
 });
 
 jest.mock('three/examples/jsm/controls/OrbitControls.js', () => ({
@@ -56,6 +68,7 @@ const waypointBtLayer = {
 
 beforeEach(() => {
   mockPointPositions.length = 0;
+  mockDataTextures.length = 0;
 });
 
 test('closes the waypoint BT split when its left 25% map context is clicked', () => {
@@ -77,6 +90,12 @@ test('closes the waypoint BT split when its left 25% map context is clicked', ()
   fireEvent.click(mapContext);
 
   expect(onBtLayerClose).toHaveBeenCalledTimes(1);
+});
+
+test('uses adaptive map render intervals for active, idle and hidden states', () => {
+  expect(mapRenderIntervalMs({ active: true })).toBe(33);
+  expect(mapRenderIntervalMs({ active: false })).toBe(100);
+  expect(mapRenderIntervalMs({ hidden: true, active: true })).toBe(500);
 });
 
 test('keeps the left waypoint context passive when no close action is provided', () => {
@@ -141,4 +160,121 @@ test('reprojects an offset laser frame when its synchronized scan pose improves'
   );
 
   await waitFor(() => expect(mockPointPositions.at(-1)?.[0]).toBeCloseTo(4.2));
+});
+
+test('decimates lidar display rays while preserving both field-of-view edges', async () => {
+  render(
+    <MapViewer
+      scan={{
+        header: { frame_id: 'base_link' },
+        ranges: [1, 1, 1, 1, 1, 1],
+        range_min: 0.02,
+        range_max: 20,
+        angle_min: 0,
+        angle_increment: Math.PI / 4,
+      }}
+      pose={{
+        position: { x: 0, y: 0, z: 0 },
+        orientation: { x: 0, y: 0, z: 0, w: 1 },
+      }}
+      showMap={false}
+      showScan
+    />,
+  );
+
+  // Six source rays become indices 0, 2, 4 and the final edge ray 5.
+  await waitFor(() => expect(mockPointPositions.at(-1)).toHaveLength(12));
+  const positions = mockPointPositions.at(-1);
+  expect(positions.slice(0, 2)).toEqual([1, 0]);
+  expect(positions[9]).toBeCloseTo(Math.cos(5 * Math.PI / 4));
+  expect(positions[10]).toBeCloseTo(Math.sin(5 * Math.PI / 4));
+});
+
+test('updates only the dirty rows of an existing global costmap texture', () => {
+  const THREE = jest.requireActual('three');
+  const texture = new THREE.DataTexture(
+    new Uint8Array(4 * 3 * 4),
+    4,
+    3,
+    THREE.RGBAFormat,
+    THREE.UnsignedByteType,
+  );
+  const grid = {
+    info: {
+      width: 4,
+      height: 3,
+      resolution: 0.05,
+      origin: {
+        position: { x: 0, y: 0, z: 0 },
+        orientation: { x: 0, y: 0, z: 0, w: 1 },
+      },
+    },
+    data: [
+      0, 0, 0, 0,
+      0, 50, 100, 0,
+      0, 25, 75, 0,
+    ],
+  };
+
+  expect(updateGlobalCostmapTexture(
+    texture,
+    grid,
+    { x: 1, y: 1, width: 2, height: 2 },
+  )).toBe(true);
+
+  expect(texture.updateRanges).toEqual([
+    { start: 20, count: 8 },
+    { start: 4, count: 8 },
+  ]);
+  // Grid (2,1)=100 maps to texture pixel (1,1): gray 70, alpha 110.
+  expect(Array.from(texture.image.data.slice(20, 24))).toEqual([70, 70, 70, 110]);
+  // Pixels outside the dirty rectangle remain untouched.
+  expect(Array.from(texture.image.data.slice(0, 4))).toEqual([0, 0, 0, 0]);
+});
+
+test('reuses the global costmap texture for deltas and rebuilds on a full resync', async () => {
+  const info = {
+    width: 2,
+    height: 2,
+    resolution: 0.05,
+    origin: {
+      position: { x: 0, y: 0, z: 0 },
+      orientation: { x: 0, y: 0, z: 0, w: 1 },
+    },
+  };
+  const { rerender } = render(
+    <MapViewer
+      globalCostmap={{ info, data: [0, 0, 0, 0] }}
+      showGlobalCostmap
+      showMap={false}
+    />,
+  );
+
+  await waitFor(() => expect(mockDataTextures).toHaveLength(1));
+  const firstTexture = mockDataTextures[0];
+
+  rerender(
+    <MapViewer
+      globalCostmap={{
+        info,
+        data: [0, 100, 0, 0],
+        updateRegion: { x: 1, y: 0, width: 1, height: 1 },
+      }}
+      showGlobalCostmap
+      showMap={false}
+    />,
+  );
+
+  await waitFor(() => expect(firstTexture.updateRanges).toHaveLength(1));
+  expect(mockDataTextures).toHaveLength(1);
+
+  rerender(
+    <MapViewer
+      globalCostmap={{ info, data: [0, 100, 0, 0] }}
+      showGlobalCostmap
+      showMap={false}
+    />,
+  );
+
+  await waitFor(() => expect(mockDataTextures).toHaveLength(2));
 });

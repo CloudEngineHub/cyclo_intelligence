@@ -603,7 +603,7 @@ function preferredPgmFile(files, mapName) {
     const exact = files.find((file) => mapNameFromPgmPath(file.path) === mapName);
     return exact || files.find((file) => file.path.includes(mapName));
 }
-export function useMapEditor({ open, mapName, onMessage, reloadToken = 0 }) {
+export function useMapEditor({ open, mapName, onMessage, reloadToken = 0, autoSelect = true }) {
     const pixelsRef = useRef(null);
     const annotationsRef = useRef([]);
     const lastPaintPixelRef = useRef(null);
@@ -629,8 +629,11 @@ export function useMapEditor({ open, mapName, onMessage, reloadToken = 0 }) {
         }
     }, [annotations, selectedAnnotationId]);
     useEffect(() => {
-        if (!open)
+        if (!open) {
+            if (!autoSelect)
+                setSelectedPath("");
             return;
+        }
         let cancelled = false;
         setBusy(true);
         getPgmFiles()
@@ -641,6 +644,9 @@ export function useMapEditor({ open, mapName, onMessage, reloadToken = 0 }) {
             const preferred = preferredPgmFile(response.files, mapName);
             setSelectedPath((current) => {
                 var _a;
+                if (!autoSelect) {
+                    return response.files.some((file) => file.path === current) ? current : "";
+                }
                 if (preferred && (reloadToken || mapNameFromPgmPath(current) !== mapName)) {
                     return preferred.path;
                 }
@@ -660,7 +666,7 @@ export function useMapEditor({ open, mapName, onMessage, reloadToken = 0 }) {
         return () => {
             cancelled = true;
         };
-    }, [mapName, onMessage, open, reloadToken]);
+    }, [autoSelect, mapName, onMessage, open, reloadToken]);
     useEffect(() => {
         if (!open || !selectedPath) {
             setImage(null);
@@ -1246,12 +1252,14 @@ export function MapEditorControls({ files, selectedPath, setSelectedPath, tool, 
         <div className="flex w-full flex-col gap-2">
             <div className="flex flex-wrap items-center gap-2">
                 <select
+                    aria-label="PGM map"
                     value={selectedPath}
                     disabled={busy || files.length === 0}
                     onChange={(event) => setSelectedPath(event.currentTarget.value)}
                     className="h-9 min-w-[220px] px-3 text-[12px] font-mono"
                     style={{ borderRadius: 10, color: "var(--mc-text)", backgroundColor: "var(--mc-surface)", border: "1px solid var(--mc-border-strong)" }}
                 >
+                    <option value="">Select a PGM</option>
                     {files.map((file) => (
                         <option key={file.path} value={file.path}>{file.path}</option>
                     ))}

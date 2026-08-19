@@ -69,6 +69,21 @@ _GROOT_REQUIRED_MOUNTS = app._REQUIRED_BACKEND_MOUNTS["groot"]
 _LEROBOT_REQUIRED_MOUNTS = app._REQUIRED_BACKEND_MOUNTS["lerobot"]
 
 
+def test_navigation_grid_cache_starts_with_supervisor_lifespan(monkeypatch):
+    started = []
+    monkeypatch.setattr(
+        app._navigation_module,
+        "ensure_ros_grid_subscriber_started",
+        lambda: started.append(True),
+    )
+
+    async def exercise_lifespan():
+        async with app.app.router.lifespan_context(app.app):
+            assert started == [True]
+
+    asyncio.run(exercise_lifespan())
+
+
 def test_navigation_parses_binary_pgm():
     data = b"P5\n# map\n2 2\n255\n" + bytes([0, 127, 254, 255])
 
@@ -2353,6 +2368,54 @@ def test_navigation_grid_cache_serializes_only_changed_data():
     restored_marker, restored_payload = cache.serialized_if_changed(cleared_marker)
     assert restored_marker != cleared_marker
     assert json.loads(restored_payload)["data"]["data"] == [0, 2]
+
+
+def test_navigation_grid_cache_sends_costmap_deltas_and_resyncs_lagging_clients():
+    cache = navigation_grid_cache.OccupancyGridCache(
+        "/global_costmap/costmap"
+    )
+    cache.cache_ros_message({
+        "header": {"frame_id": "map"},
+        "info": {"width": 4, "height": 2},
+        "data": [0, 1, 2, 3, 4, 5, 6, 7],
+    })
+    full_marker, full_payload = cache.serialized_if_changed(None)
+    assert "data" in json.loads(full_payload)
+
+    cache.cache_ros_update({
+        "header": {"frame_id": "map", "stamp": {"sec": 2}},
+        "x": 1,
+        "y": 0,
+        "width": 2,
+        "height": 2,
+        "data": [10, 20, 50, 60],
+    })
+    first_update_marker, first_update_payload = cache.serialized_if_changed(
+        full_marker
+    )
+    assert json.loads(first_update_payload)["update"]["data"] == [10, 20, 50, 60]
+
+    # A newly connected client receives the current assembled full grid.
+    _, reconnect_payload = cache.serialized_if_changed(None)
+    assert json.loads(reconnect_payload)["data"]["data"] == [
+        0, 10, 20, 3, 4, 50, 60, 7,
+    ]
+
+    cache.cache_ros_update({
+        "x": 0,
+        "y": 1,
+        "width": 1,
+        "height": 1,
+        "data": [99],
+    })
+    _, current_delta = cache.serialized_if_changed(first_update_marker)
+    assert json.loads(current_delta)["update"]["data"] == [99]
+
+    # A client that missed an intermediate delta gets a full resync instead.
+    _, lagging_payload = cache.serialized_if_changed(full_marker)
+    assert json.loads(lagging_payload)["data"]["data"] == [
+        0, 10, 20, 3, 99, 50, 60, 7,
+    ]
 
 
 def test_navigation_grid_websocket_sends_cached_original_topic(monkeypatch):

@@ -16,7 +16,7 @@
 #
 # Author: Howon Kim
 
-"""CRC-filtered cache for the large Navigation OccupancyGrid topics."""
+"""Cached full grids plus incremental Navigation costmap updates."""
 
 from __future__ import annotations
 
@@ -30,6 +30,9 @@ import zlib
 logger = logging.getLogger("supervisor_api.navigation_topics")
 
 GRID_TOPICS = frozenset({"/map", "/global_costmap/costmap"})
+GRID_UPDATE_TOPICS = {
+    "/global_costmap/costmap_updates": "/global_costmap/costmap",
+}
 
 
 def occupancy_grid_data_crc32(message: Any) -> int | None:
@@ -109,6 +112,30 @@ def occupancy_grid_to_dict(message: Any) -> dict[str, Any]:
     }
 
 
+def occupancy_grid_update_to_dict(message: Any) -> dict[str, Any]:
+    """Convert the OccupancyGridUpdate fields needed by the UI cache."""
+    if isinstance(message, dict):
+        return {
+            "header": dict(message.get("header") or {}),
+            "x": int(message.get("x", 0)),
+            "y": int(message.get("y", 0)),
+            "width": int(message.get("width", 0)),
+            "height": int(message.get("height", 0)),
+            "data": list(message.get("data") or []),
+        }
+    return {
+        "header": {
+            "stamp": _time_to_dict(message.header.stamp),
+            "frame_id": message.header.frame_id,
+        },
+        "x": int(message.x),
+        "y": int(message.y),
+        "width": int(message.width),
+        "height": int(message.height),
+        "data": list(message.data),
+    }
+
+
 class OccupancyGridCache:
     """Keep one serialized grid and notify connected WebSocket clients."""
 
@@ -118,9 +145,14 @@ class OccupancyGridCache:
         self.topic = topic
         self._lock = threading.Lock()
         self._marker: tuple[Any, ...] | None = None
+        self._previous_marker: tuple[Any, ...] | None = None
+        self._grid_signature: tuple[Any, ...] | None = None
+        self._grid: dict[str, Any] | None = None
+        self._latest_is_update = False
         self._payload: str | None = None
+        self._full_payload: str | None = None
         self._listeners: dict[int, tuple[Any, Any]] = {}
-        self._reset_serial = 0
+        self._serial = 0
 
     @staticmethod
     def _metadata_marker(message: Any) -> tuple[Any, ...]:
@@ -152,27 +184,103 @@ class OccupancyGridCache:
         data_marker = occupancy_grid_data_crc32(message)
         if data_marker is None:
             return
-        marker = (data_marker, *self._metadata_marker(message))
+        signature = (data_marker, *self._metadata_marker(message))
+        grid = occupancy_grid_to_dict(message)
+        grid = {
+            **grid,
+            "info": dict(grid.get("info") or {}),
+            "data": list(grid.get("data") or []),
+        }
+        if "header" in grid:
+            grid["header"] = dict(grid.get("header") or {})
+        payload = json.dumps({
+            "available": True,
+            "data": grid,
+        }, separators=(",", ":"))
         with self._lock:
-            if marker == self._marker:
+            if signature == self._grid_signature:
                 return
-            self._marker = marker
+            self._serial += 1
+            self._previous_marker = self._marker
+            self._marker = ("grid", self._serial)
+            self._grid_signature = signature
+            self._grid = grid
+            self._latest_is_update = False
+            self._payload = payload
+            self._full_payload = payload
+            listeners = list(self._listeners.items())
+        self._notify_listeners(listeners)
+
+    def cache_ros_update(self, message: Any) -> None:
+        """Merge a costmap dirty rectangle and notify clients with the delta."""
+        if self.topic != "/global_costmap/costmap":
+            return
+        update = occupancy_grid_update_to_dict(message)
+        x = update["x"]
+        y = update["y"]
+        width = update["width"]
+        height = update["height"]
+        update_data = update["data"]
+        if x < 0 or y < 0 or width <= 0 or height <= 0:
+            return
+        if len(update_data) != width * height:
+            return
+
+        with self._lock:
+            if self._grid is None:
+                return
+            info = self._grid.get("info") or {}
+            grid_width = int(info.get("width") or 0)
+            grid_height = int(info.get("height") or 0)
+            grid_data = self._grid.get("data") or []
+            if (
+                x + width > grid_width
+                or y + height > grid_height
+                or len(grid_data) < grid_width * grid_height
+            ):
+                return
+
+            changed = False
+            for row in range(height):
+                source_start = row * width
+                target_start = (y + row) * grid_width + x
+                row_data = update_data[source_start:source_start + width]
+                if grid_data[target_start:target_start + width] != row_data:
+                    grid_data[target_start:target_start + width] = row_data
+                    changed = True
+            if not changed:
+                return
+
+            if update["header"]:
+                self._grid["header"] = update["header"]
+            self._serial += 1
+            self._previous_marker = self._marker
+            self._marker = ("grid", self._serial)
+            self._grid_signature = None
+            self._latest_is_update = True
             self._payload = json.dumps({
                 "available": True,
-                "data": occupancy_grid_to_dict(message),
+                "update": update,
             }, separators=(",", ":"))
+            # Build a full snapshot lazily only for a new or lagging client.
+            self._full_payload = None
             listeners = list(self._listeners.items())
         self._notify_listeners(listeners)
 
     def clear(self) -> None:
         """Drop the cached grid and notify current clients to clear the map."""
         with self._lock:
-            self._reset_serial += 1
-            self._marker = ("clear", self._reset_serial)
+            self._serial += 1
+            self._previous_marker = self._marker
+            self._marker = ("clear", self._serial)
+            self._grid_signature = None
+            self._grid = None
+            self._latest_is_update = False
             self._payload = json.dumps(
                 {"available": False},
                 separators=(",", ":"),
             )
+            self._full_payload = self._payload
             listeners = list(self._listeners.items())
         self._notify_listeners(listeners)
 
@@ -194,10 +302,16 @@ class OccupancyGridCache:
         """Return a WebSocket payload only when this client's marker changed."""
         with self._lock:
             marker = self._marker
-            payload = self._payload
-        if marker is None or payload is None or marker == last_marker:
-            return last_marker, None
-        return marker, payload
+            if marker is None or self._payload is None or marker == last_marker:
+                return last_marker, None
+            if self._latest_is_update and last_marker == self._previous_marker:
+                return marker, self._payload
+            if self._full_payload is None and self._grid is not None:
+                self._full_payload = json.dumps({
+                    "available": True,
+                    "data": self._grid,
+                }, separators=(",", ":"))
+            return marker, self._full_payload or self._payload
 
     def add_listener(self, listener_id: int, loop: Any, event: Any) -> None:
         with self._lock:
@@ -214,13 +328,14 @@ _ros_thread: threading.Thread | None = None
 
 
 def _ros_grid_spin() -> None:
-    import rclpy
-    from nav_msgs.msg import OccupancyGrid
-    from rclpy.executors import SingleThreadedExecutor
-    from rclpy.node import Node
-    from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
-
     try:
+        import rclpy
+        from map_msgs.msg import OccupancyGridUpdate
+        from nav_msgs.msg import OccupancyGrid
+        from rclpy.executors import SingleThreadedExecutor
+        from rclpy.node import Node
+        from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
+
         if not rclpy.ok():
             rclpy.init()
         node = Node("cyclo_navigation_grid_cache")
@@ -231,13 +346,14 @@ def _ros_grid_spin() -> None:
         )
         executor = SingleThreadedExecutor()
         executor.add_node(node)
+        ros_topics = (*GRID_TOPICS, *GRID_UPDATE_TOPICS)
         discovered_qos = {}
         for _ in range(20):
-            for topic in GRID_TOPICS:
+            for topic in ros_topics:
                 publishers = node.get_publishers_info_by_topic(topic)
                 if publishers:
                     discovered_qos[topic] = publishers[0].qos_profile
-            if len(discovered_qos) == len(GRID_TOPICS):
+            if len(discovered_qos) == len(ros_topics):
                 break
             executor.spin_once(timeout_sec=0.1)
         subscriptions = [
@@ -249,6 +365,15 @@ def _ros_grid_spin() -> None:
             )
             for topic in GRID_TOPICS
         ]
+        subscriptions.extend(
+            node.create_subscription(
+                OccupancyGridUpdate,
+                update_topic,
+                GRID_CACHES[grid_topic].cache_ros_update,
+                discovered_qos.get(update_topic, fallback_qos),
+            )
+            for update_topic, grid_topic in GRID_UPDATE_TOPICS.items()
+        )
         node._navigation_grid_subscriptions = subscriptions
         executor.spin()
     except Exception:

@@ -2425,6 +2425,7 @@ export default function MissionCanvasPage() {
     mapName: currentMapName,
     onMessage: setMessage,
     reloadToken: mapEditorReloadToken,
+    autoSelect: false,
   });
   const designMapEditor = useMapEditor({
     open: designMapActive,

@@ -19,7 +19,8 @@
 """Self-contained Navigation control plane for cyclo_intelligence.
 
 Most ROS topics stay on rosbridge. The two large Navigation grids use a
-CRC32-filtered WebSocket so unchanged maps are not sent to browser clients.
+cached WebSocket; the global costmap is sent once in full and then as dirty
+rectangles, with automatic full resynchronization for lagging clients.
 """
 
 from __future__ import annotations
@@ -84,9 +85,10 @@ _NAVIGATE_TERMINAL_STATUS = re.compile(
     re.IGNORECASE,
 )
 
+
 @router.websocket("/topics/ws")
 async def navigation_grid_websocket(websocket: WebSocket, topic: str):
-    """Send the latest grid initially, then only when its data CRC changes."""
+    """Send an initial grid, then changed costmap regions or a full resync."""
     if topic not in GRID_TOPICS:
         await websocket.close(code=1008, reason="Unsupported grid topic")
         return
@@ -1185,8 +1187,12 @@ def navigation_start(request: NavigationStartRequest):
     _force_stop_navigation_processes()
     _s6_command(NAVIGATION_SERVICE, "down", retries=15, retry_delay=0.2)
     _clear_navigation_runtime_files()
+    GRID_CACHES["/global_costmap/costmap"].clear()
     if request.mode == "map":
         GRID_CACHES["/map"].clear()
+    # Subscribe before Nav2 activates so the initial transient-local full
+    # costmap is available before subsequent dirty-rectangle updates arrive.
+    ensure_ros_grid_subscriber_started()
     _write_runtime_file("/run/navigation_type", request.mode)
     _write_runtime_file(
         f"/run/launch_args/{NAVIGATION_SERVICE}",
@@ -1202,6 +1208,7 @@ def navigation_stop():
     force_message = _force_stop_navigation_processes()
     sync_message = _sync_s6_service_down_best_effort(NAVIGATION_SERVICE)
     _clear_navigation_runtime_files()
+    GRID_CACHES["/global_costmap/costmap"].clear()
     if force_message:
         message = f"{message}\n{force_message}"
     if sync_message:

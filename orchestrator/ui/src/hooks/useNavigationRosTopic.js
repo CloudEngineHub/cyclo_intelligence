@@ -49,6 +49,63 @@ export function navigationGridWebSocketUrl(topic, location = window.location) {
   return `${protocol}//${location.host}/api/navigation/topics/ws?topic=${encodeURIComponent(topic)}`;
 }
 
+export function applyNavigationGridEnvelope(previous, incoming) {
+  if (!incoming?.available || !incoming.update) return incoming;
+  const grid = previous?.available ? previous.data : null;
+  const info = grid?.info;
+  const update = incoming.update;
+  const gridWidth = Number(info?.width || 0);
+  const gridHeight = Number(info?.height || 0);
+  const x = Number(update.x);
+  const y = Number(update.y);
+  const width = Number(update.width);
+  const height = Number(update.height);
+  if (
+    !grid
+    || !Array.isArray(grid.data)
+    || !Number.isInteger(x)
+    || !Number.isInteger(y)
+    || !Number.isInteger(width)
+    || !Number.isInteger(height)
+    || x < 0
+    || y < 0
+    || width <= 0
+    || height <= 0
+    || x + width > gridWidth
+    || y + height > gridHeight
+    || !Array.isArray(update.data)
+    || update.data.length !== width * height
+  ) {
+    return previous;
+  }
+
+  const data = grid.data.slice();
+  for (let row = 0; row < height; row += 1) {
+    const sourceStart = row * width;
+    const targetStart = (y + row) * gridWidth + x;
+    for (let column = 0; column < width; column += 1) {
+      data[targetStart + column] = update.data[sourceStart + column];
+    }
+  }
+  const updateHeader = update.header && Object.keys(update.header).length
+    ? update.header
+    : grid.header;
+  return {
+    available: true,
+    data: {
+      ...grid,
+      header: updateHeader,
+      data,
+      updateRegion: {
+        x,
+        y,
+        width,
+        height,
+      },
+    },
+  };
+}
+
 /** Subscribe to a Navigation ROS topic through the app-wide rosbridge connection. */
 export function useNavigationRosTopic(topic, options = {}) {
   const rosbridgeUrl = useSelector((state) => state.ros.rosbridgeUrl);
@@ -84,7 +141,8 @@ export function useNavigationRosTopic(topic, options = {}) {
       socket.onmessage = (event) => {
         if (!mounted) return;
         try {
-          setTopicData(JSON.parse(event.data));
+          const incoming = JSON.parse(event.data);
+          setTopicData((previous) => applyNavigationGridEnvelope(previous, incoming));
           resetStaleTimer();
         } catch (error) {
           console.error(`Failed to decode Navigation grid ${topic}:`, error);

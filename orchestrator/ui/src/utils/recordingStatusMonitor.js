@@ -1,4 +1,9 @@
 import { RecordPhase } from '../constants/taskPhases';
+import PageType from '../constants/pageType';
+
+export const shouldShowCameraMonitorAlert = (page) => (
+  page !== PageType.MISSION_CANVAS
+);
 
 export const decodeRosUint8Array = (value) => {
   if (typeof value === 'string') {

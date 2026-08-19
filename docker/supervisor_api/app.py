@@ -54,6 +54,7 @@ import subprocess
 import sys
 import threading
 import time
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Literal, Optional
@@ -1083,10 +1084,19 @@ def _parse_svstat(raw: str) -> dict:
 # -- FastAPI app ---------------------------------------------------------------
 
 
+@asynccontextmanager
+async def _app_lifespan(_app: FastAPI):
+    # Stay subscribed before Nav2 starts. Its global costmap publishes one
+    # full snapshot followed by incremental dirty rectangles.
+    _navigation_module.ensure_ros_grid_subscriber_started()
+    yield
+
+
 app = FastAPI(
     title="cyclo_intelligence supervisor_api",
     description=__doc__,
     version="1.3.0",
+    lifespan=_app_lifespan,
 )
 
 _include_router_with_eager_routes(app, navigation_router)

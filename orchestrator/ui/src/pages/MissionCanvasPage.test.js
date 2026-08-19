@@ -85,6 +85,15 @@ async function loadRunMapFromDialog(path = 'map.pgm') {
   await waitFor(() => expect(screen.getByRole('button', { name: 'Localize' })).toBeEnabled());
 }
 
+async function openMappingEditorAndSelect(path = 'factory.pgm') {
+  fireEvent.click(screen.getByRole('button', { name: 'Edit Map' }));
+  await waitFor(() => expect(getPgmFiles).toHaveBeenCalled());
+  const mapSelect = screen.getByRole('combobox', { name: 'PGM map' });
+  await waitFor(() => expect(mapSelect).toBeEnabled());
+  fireEvent.change(mapSelect, { target: { value: path } });
+  await waitFor(() => expect(mapSelect).toHaveValue(path));
+}
+
 jest.mock('../components/navigation/MapViewer', () => ({
   MapViewer: (props) => mockMapViewer(props),
 }));
@@ -2792,7 +2801,7 @@ test('asks for a map name before saving from Mission Canvas', async () => {
   expect(screen.getByText('Live mapping')).toBeInTheDocument();
 });
 
-test('loads saved maps into the mapping fix editor', async () => {
+test('waits for an explicit saved-map selection in the mapping fix editor', async () => {
   const latestMapViewerProps = () => (
     mockMapViewer.mock.calls[mockMapViewer.mock.calls.length - 1][0]
   );
@@ -2812,6 +2821,15 @@ test('loads saved maps into the mapping fix editor', async () => {
   fireEvent.click(screen.getByRole('button', { name: 'Edit Map' }));
 
   await waitFor(() => expect(getPgmFiles).toHaveBeenCalled());
+  const mapSelect = screen.getByRole('combobox', { name: 'PGM map' });
+  await waitFor(() => expect(mapSelect).toBeEnabled());
+  expect(mapSelect).toHaveValue('');
+  expect(screen.getByRole('option', { name: 'Select a PGM' })).toBeInTheDocument();
+  expect(getPgmImage).not.toHaveBeenCalled();
+  expect(latestMapViewerProps().map).toBeNull();
+  expect(latestMapViewerProps().waitingLabel).toBe('Select a PGM');
+
+  fireEvent.change(mapSelect, { target: { value: 'factory.pgm' } });
   await waitFor(() => expect(getPgmImage).toHaveBeenCalledWith('factory.pgm'));
   expect(screen.getByDisplayValue('factory.pgm')).toBeInTheDocument();
   expect(screen.getByText('Saved map')).toBeInTheDocument();
@@ -2846,7 +2864,7 @@ test('switches the mapping header between record and edit modes', async () => {
   expect(screen.getByRole('group', { name: 'Mobile Teleop' })).toBeInTheDocument();
   expect(screen.getByRole('switch', { name: 'Lidar' })).toBeInTheDocument();
 
-  fireEvent.click(screen.getByRole('button', { name: 'Edit Map' }));
+  await openMappingEditorAndSelect();
 
   await waitFor(() => expect(getPgmFiles).toHaveBeenCalled());
   expect(screen.getByRole('button', { name: 'Edit Map' })).toHaveAttribute('aria-pressed', 'true');
@@ -2881,7 +2899,7 @@ test('keeps edit mode when the mapping runtime comes up', async () => {
 
   render(<MissionCanvasPage />);
 
-  fireEvent.click(screen.getByRole('button', { name: 'Edit Map' }));
+  await openMappingEditorAndSelect();
   await waitFor(() => expect(getPgmFiles).toHaveBeenCalled());
 
   // The runtime comes up behind the editor (e.g. started elsewhere): the
@@ -2921,7 +2939,7 @@ test('edits and saves loaded map pixels from the fix editor', async () => {
 
   render(<MissionCanvasPage />);
 
-  fireEvent.click(screen.getByRole('button', { name: 'Edit Map' }));
+  await openMappingEditorAndSelect();
 
   await waitFor(() => expect(getPgmImage).toHaveBeenCalledWith('factory.pgm'));
   // Brush size is now a segmented S/M/L/XL group (XL = 10 cells) instead of a <select>.
@@ -2972,7 +2990,7 @@ test('marks unknown map pixels from the fix editor', async () => {
 
   render(<MissionCanvasPage />);
 
-  fireEvent.click(screen.getByRole('button', { name: 'Edit Map' }));
+  await openMappingEditorAndSelect();
   await waitFor(() => expect(getPgmImage).toHaveBeenCalledWith('factory.pgm'));
 
   fireEvent.click(screen.getByRole('button', { name: 'Mark Unknown' }));
@@ -3005,7 +3023,7 @@ test('paints continuous map pixel segments while dragging', async () => {
 
   render(<MissionCanvasPage />);
 
-  fireEvent.click(screen.getByRole('button', { name: 'Edit Map' }));
+  await openMappingEditorAndSelect();
 
   await waitFor(() => expect(getPgmImage).toHaveBeenCalledWith('factory.pgm'));
   fireEvent.click(screen.getByRole('button', { name: 'Add Obstacle' }));
@@ -3051,7 +3069,7 @@ test('marks free-space areas with automatic color and undo/redo support', async 
 
   render(<MissionCanvasPage />);
 
-  fireEvent.click(screen.getByRole('button', { name: 'Edit Map' }));
+  await openMappingEditorAndSelect();
 
   await waitFor(() => expect(getPgmImage).toHaveBeenCalledWith('factory.pgm'));
   await waitFor(() => expect(getMapAnnotations).toHaveBeenCalledWith('factory.pgm'));
@@ -3133,7 +3151,7 @@ test('auto-numbers and auto-selects areas created by rectangle drag', async () =
 
   render(<MissionCanvasPage />);
 
-  fireEvent.click(screen.getByRole('button', { name: 'Edit Map' }));
+  await openMappingEditorAndSelect();
   await waitFor(() => expect(getMapAnnotations).toHaveBeenCalledWith('factory.pgm'));
 
   fireEvent.click(screen.getByRole('button', { name: 'Area' }));
@@ -3187,7 +3205,7 @@ test('removes an area from the chip list', async () => {
 
   render(<MissionCanvasPage />);
 
-  fireEvent.click(screen.getByRole('button', { name: 'Edit Map' }));
+  await openMappingEditorAndSelect();
 
   await waitFor(() => expect(getMapAnnotations).toHaveBeenCalledWith('factory.pgm'));
   await waitFor(() => expect(latestMapViewerProps().mapAnnotations).toEqual([
@@ -3240,7 +3258,7 @@ test('renames a map area from the chip list', async () => {
 
   render(<MissionCanvasPage />);
 
-  fireEvent.click(screen.getByRole('button', { name: 'Edit Map' }));
+  await openMappingEditorAndSelect();
 
   await waitFor(() => expect(getMapAnnotations).toHaveBeenCalledWith('factory.pgm'));
   await waitFor(() => expect(screen.getByRole('button', { name: 'Dock' })).toBeInTheDocument());
@@ -3319,7 +3337,7 @@ test('freezes visible area cells when deleting an overlapping area', async () =>
 
   render(<MissionCanvasPage />);
 
-  fireEvent.click(screen.getByRole('button', { name: 'Edit Map' }));
+  await openMappingEditorAndSelect();
   await waitFor(() => expect(latestMapViewerProps().mapAnnotations).toEqual([
     expect.objectContaining({ label: 'Front' }),
     expect.objectContaining({ label: 'Back' }),
@@ -3375,7 +3393,7 @@ test('extends the selected area with the extend brush', async () => {
 
   render(<MissionCanvasPage />);
 
-  fireEvent.click(screen.getByRole('button', { name: 'Edit Map' }));
+  await openMappingEditorAndSelect();
   await waitFor(() => expect(getMapAnnotations).toHaveBeenCalledWith('factory.pgm'));
   await waitFor(() => expect(screen.getByRole('button', { name: 'Dock' })).toBeInTheDocument());
 
@@ -3460,7 +3478,7 @@ test('erases map area pixels with brush drag', async () => {
 
   render(<MissionCanvasPage />);
 
-  fireEvent.click(screen.getByRole('button', { name: 'Edit Map' }));
+  await openMappingEditorAndSelect();
 
   await waitFor(() => expect(latestMapViewerProps().mapAnnotations).toEqual([
     expect.objectContaining({ label: 'Dock' }),
