@@ -19,10 +19,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   MdAdd,
+  MdAddLocationAlt,
   MdContentCopy,
   MdDelete,
   MdEdit,
+  MdMyLocation,
+  MdPlayArrow,
   MdRedo,
+  MdRoute,
+  MdSave,
+  MdStop,
   MdUndo,
 } from "react-icons/md";
 import {
@@ -5780,44 +5786,19 @@ export default function MissionCanvasPage() {
 
           <div className="flex items-center gap-2">
             {workspaceStage === STAGE_MAPPING && !mappingEditorActive && (
-              <>
-                <ActionButton active={busy === "Mapping" || mappingRuntimeActive} disabled={!!busy || mappingRuntimeActive || runRuntimeActive || runShutdownPending} onClick={handleStartMapping} variant="primary">Start Mapping</ActionButton>
-                <ActionButton active={busy === "Stop"} disabled={!!busy || !mappingRuntimeActive} onClick={handleStopNavigation} variant="danger">Stop</ActionButton>
-                <ActionButton active={showSaveMapDialog || busy === "Save map"} disabled={!!busy || !mappingRuntimeActive} onClick={handleOpenSaveMapDialog} variant="secondary">Save Map</ActionButton>
-              </>
+              // Stop / Save Map moved onto the map canvas as the mapping HUD;
+              // the header keeps only the session-level Start Mapping.
+              <ActionButton active={busy === "Mapping" || mappingRuntimeActive} disabled={!!busy || mappingRuntimeActive || runRuntimeActive || runShutdownPending} onClick={handleStartMapping} variant="secondary">Start Mapping</ActionButton>
             )}
             {workspaceStage === STAGE_AUTHORING && (
-              <>
-                <ActionButton
-                  className="!w-9 !px-0"
-                  disabled={designHistoryLocked || !canUndoDesign}
-                  onClick={handleUndoDesign}
-                  title="Undo (Ctrl+Z)"
-                  variant="secondary"
-                >
-                  <MdUndo size={18} aria-hidden="true" />
-                  <span className="sr-only">Undo</span>
-                </ActionButton>
-                <ActionButton
-                  className="!w-9 !px-0"
-                  disabled={designHistoryLocked || !canRedoDesign}
-                  onClick={handleRedoDesign}
-                  title="Redo (Ctrl+Shift+Z)"
-                  variant="secondary"
-                >
-                  <MdRedo size={18} aria-hidden="true" />
-                  <span className="sr-only">Redo</span>
-                </ActionButton>
-                <ActionButton active={showDesignMapDialog || designMapBusy} disabled={!!busy || designMapBusy} onClick={handleOpenDesignMapDialog} variant="secondary">Load Map</ActionButton>
-              </>
+              // Undo/Redo moved into the design HUD on the map; the header
+              // keeps only the session-level Load Map.
+              <ActionButton active={showDesignMapDialog || designMapBusy} disabled={!!busy || designMapBusy} onClick={handleOpenDesignMapDialog} variant="secondary">Load Map</ActionButton>
             )}
             {workspaceStage === STAGE_RUN && (
-              <>
-                <ActionButton active={showRunMapDialog || runMapBusy} disabled={!!busy || running || missionRunnerActive || !!btNodeBusy || runMapBusy || runShutdownPending} onClick={handleOpenRunMapDialog} variant="secondary">Load Map</ActionButton>
-                <ActionButton active={interactionMode === "initial" || busy === "Localize" || busy === "Set robot pose"} disabled={!!busy || runMapBusy || runMapSnapshotInvalid || runShutdownPending} onClick={handleLocalize} variant="secondary">Localize</ActionButton>
-                <ActionButton active={busy === "Run mission" || missionRunnerActive} disabled={!!busy || !!btNodeBusy || runMapBusy || !missionMapLoaded || !runPoseInitialized || missionRunnerActive || runShutdownPending} onClick={handleRunMission} variant="primary">Run Mission</ActionButton>
-                <ActionButton active={busy === "Stop" || runShutdownPending} disabled={!!busy || (!running && !missionRunnerActive && !runShutdownPending)} onClick={handleStopNavigation} variant="danger">Stop</ActionButton>
-              </>
+              // Localize / Run Mission / Stop moved onto the map canvas as the
+              // run HUD; the header keeps only the session-level Load Map.
+              <ActionButton active={showRunMapDialog || runMapBusy} disabled={!!busy || running || missionRunnerActive || !!btNodeBusy || runMapBusy || runShutdownPending} onClick={handleOpenRunMapDialog} variant="secondary">Load Map</ActionButton>
             )}
             <div
               className="h-9 flex items-center gap-2 px-3 border shrink-0"
@@ -5993,11 +5974,10 @@ export default function MissionCanvasPage() {
                     aria-label="Create Waypoint"
                     aria-pressed={(showWaypointOptions || interactionMode === "spot") ? true : undefined}
                     title={missionRouteMode ? "Turn off Edit Route first" : "Add a waypoint"}
-                    className="h-8 px-3 text-[12.5px] font-semibold inline-flex items-center gap-1.5 disabled:opacity-45"
+                    className="h-8 w-8 inline-flex items-center justify-center disabled:opacity-45"
                     style={{ borderRadius: 9, border: "none", backgroundColor: (showWaypointOptions || interactionMode === "spot") ? "var(--mc-accent)" : "var(--mc-text)", color: (showWaypointOptions || interactionMode === "spot") ? "var(--mc-accent-fg)" : "var(--mc-bg)" }}
                   >
-                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><path d="M12 5v14M5 12h14" /></svg>
-                    Waypoint
+                    <MdAddLocationAlt size={17} aria-hidden="true" />
                   </button>
                   {showWaypointOptions && (
                     <div className="absolute left-0 top-[calc(100%+6px)] flex items-center gap-2 p-2" role="menu" aria-label="Waypoint creation options" style={{ borderRadius: 12, backgroundColor: "var(--mc-surface)", border: "1px solid var(--mc-border-strong)", boxShadow: "var(--mc-shadow)" }}>
@@ -6019,10 +5999,33 @@ export default function MissionCanvasPage() {
                   aria-label="Edit On Map"
                   aria-pressed={missionRouteMode ? true : undefined}
                   title="Edit the mission route on the map"
-                  className="h-8 px-3 text-[12.5px] font-semibold disabled:opacity-45"
+                  className="h-8 w-8 inline-flex items-center justify-center disabled:opacity-45"
                   style={{ borderRadius: 9, border: `1px solid ${missionRouteMode ? "var(--mc-accent)" : "var(--mc-border-strong)"}`, backgroundColor: missionRouteMode ? "var(--mc-accent-soft)" : "var(--mc-surface)", color: "var(--mc-text)" }}
                 >
-                  Edit Route
+                  <MdRoute size={17} aria-hidden="true" />
+                </button>
+                <span className="h-5 w-px shrink-0" style={{ backgroundColor: "var(--mc-border)" }} aria-hidden="true" />
+                <button
+                  type="button"
+                  onClick={handleUndoDesign}
+                  disabled={designHistoryLocked || !canUndoDesign}
+                  aria-label="Undo"
+                  title="Undo (Ctrl+Z)"
+                  className="h-8 w-8 inline-flex items-center justify-center disabled:opacity-45"
+                  style={{ borderRadius: 9, border: "1px solid var(--mc-border-strong)", backgroundColor: "var(--mc-surface)", color: "var(--mc-text)" }}
+                >
+                  <MdUndo size={17} aria-hidden="true" />
+                </button>
+                <button
+                  type="button"
+                  onClick={handleRedoDesign}
+                  disabled={designHistoryLocked || !canRedoDesign}
+                  aria-label="Redo"
+                  title="Redo (Ctrl+Shift+Z)"
+                  className="h-8 w-8 inline-flex items-center justify-center disabled:opacity-45"
+                  style={{ borderRadius: 9, border: "1px solid var(--mc-border-strong)", backgroundColor: "var(--mc-surface)", color: "var(--mc-text)" }}
+                >
+                  <MdRedo size={17} aria-hidden="true" />
                 </button>
               </div>
 
@@ -6111,6 +6114,108 @@ export default function MissionCanvasPage() {
                   </div>
                 </div>
               )}
+            </div>
+          )}
+
+          {/* Mapping HUD — Stop / Save Map float over the map as icon
+              buttons while recording (the Edit Map mode has its own
+              toolbar); Start Mapping stays in the header. */}
+          {workspaceStage === STAGE_MAPPING && !mappingEditorActive && (
+            <div
+              className="absolute top-5 left-5 z-10 flex items-center gap-2 p-2"
+              style={{ borderRadius: 14, backgroundColor: "color-mix(in srgb, var(--mc-surface) 88%, transparent)", border: "1px solid var(--mc-border)", boxShadow: "var(--mc-shadow)", backdropFilter: "blur(8px)" }}
+            >
+              <button
+                type="button"
+                onClick={handleStopNavigation}
+                disabled={!!busy || !mappingRuntimeActive}
+                aria-label="Stop"
+                aria-pressed={busy === "Stop" ? true : undefined}
+                title="Stop mapping"
+                className="h-8 w-8 inline-flex items-center justify-center disabled:opacity-45"
+                style={{
+                  borderRadius: 9,
+                  border: "1px solid var(--mc-danger-border)",
+                  backgroundColor: busy === "Stop" ? "var(--mc-danger)" : "var(--mc-surface)",
+                  color: busy === "Stop" ? "var(--mc-accent-fg)" : "var(--mc-danger)",
+                }}
+              >
+                <MdStop size={18} aria-hidden="true" />
+              </button>
+              <button
+                type="button"
+                onClick={handleOpenSaveMapDialog}
+                disabled={!!busy || !mappingRuntimeActive}
+                aria-label="Save Map"
+                aria-pressed={(showSaveMapDialog || busy === "Save map") ? true : undefined}
+                title="Save the mapped floor plan"
+                className="h-8 w-8 inline-flex items-center justify-center disabled:opacity-45"
+                style={{
+                  borderRadius: 9,
+                  border: `1px solid ${(showSaveMapDialog || busy === "Save map") ? "var(--mc-accent)" : "var(--mc-border-strong)"}`,
+                  backgroundColor: (showSaveMapDialog || busy === "Save map") ? "var(--mc-accent-soft)" : "var(--mc-surface)",
+                  color: "var(--mc-text)",
+                }}
+              >
+                <MdSave size={17} aria-hidden="true" />
+              </button>
+            </div>
+          )}
+
+          {/* Run HUD — Localize / Run Mission / Stop float over the map as
+              icon buttons (same glass idiom as the Design HUD). Stays visible
+              during the BT split view so Stop is always reachable. */}
+          {workspaceStage === STAGE_RUN && (
+            <div
+              className="absolute top-5 left-5 z-10 flex items-center gap-2 p-2"
+              style={{ borderRadius: 14, backgroundColor: "color-mix(in srgb, var(--mc-surface) 88%, transparent)", border: "1px solid var(--mc-border)", boxShadow: "var(--mc-shadow)", backdropFilter: "blur(8px)" }}
+            >
+              <button
+                type="button"
+                onClick={handleLocalize}
+                disabled={!!busy || runMapBusy || runMapSnapshotInvalid || runShutdownPending}
+                aria-label="Localize"
+                aria-pressed={(interactionMode === "initial" || busy === "Localize" || busy === "Set robot pose") ? true : undefined}
+                title="Bring navigation up and set the robot pose"
+                className="h-8 w-8 inline-flex items-center justify-center disabled:opacity-45"
+                style={{
+                  borderRadius: 9,
+                  border: `1px solid ${(interactionMode === "initial" || busy === "Localize" || busy === "Set robot pose") ? "var(--mc-accent)" : "var(--mc-border-strong)"}`,
+                  backgroundColor: (interactionMode === "initial" || busy === "Localize" || busy === "Set robot pose") ? "var(--mc-accent-soft)" : "var(--mc-surface)",
+                  color: "var(--mc-text)",
+                }}
+              >
+                <MdMyLocation size={17} aria-hidden="true" />
+              </button>
+              <button
+                type="button"
+                onClick={handleRunMission}
+                disabled={!!busy || !!btNodeBusy || runMapBusy || !missionMapLoaded || !runPoseInitialized || missionRunnerActive || runShutdownPending}
+                aria-label="Run Mission"
+                aria-pressed={(busy === "Run mission" || missionRunnerActive) ? true : undefined}
+                title="Run the mission route"
+                className="h-8 w-8 inline-flex items-center justify-center disabled:opacity-45"
+                style={{ borderRadius: 9, border: "none", backgroundColor: "var(--mc-success)", color: "var(--mc-accent-fg)" }}
+              >
+                <MdPlayArrow size={19} aria-hidden="true" />
+              </button>
+              <button
+                type="button"
+                onClick={handleStopNavigation}
+                disabled={!!busy || (!running && !missionRunnerActive && !runShutdownPending)}
+                aria-label="Stop"
+                aria-pressed={(busy === "Stop" || runShutdownPending) ? true : undefined}
+                title="Stop the mission and navigation"
+                className="h-8 w-8 inline-flex items-center justify-center disabled:opacity-45"
+                style={{
+                  borderRadius: 9,
+                  border: "1px solid var(--mc-danger-border)",
+                  backgroundColor: (busy === "Stop" || runShutdownPending) ? "var(--mc-danger)" : "var(--mc-surface)",
+                  color: (busy === "Stop" || runShutdownPending) ? "var(--mc-accent-fg)" : "var(--mc-danger)",
+                }}
+              >
+                <MdStop size={18} aria-hidden="true" />
+              </button>
             </div>
           )}
 
