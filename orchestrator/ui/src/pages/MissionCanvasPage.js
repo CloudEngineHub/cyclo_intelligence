@@ -6173,7 +6173,7 @@ export default function MissionCanvasPage() {
               <button
                 type="button"
                 onClick={handleLocalize}
-                disabled={!!busy || runMapBusy || runMapSnapshotInvalid || runShutdownPending}
+                disabled={!!busy || runMapBusy || !missionMapLoaded || runMapSnapshotInvalid || runShutdownPending}
                 aria-label="Localize"
                 aria-pressed={(interactionMode === "initial" || busy === "Localize" || busy === "Set robot pose") ? true : undefined}
                 title="Bring navigation up and set the robot pose"
