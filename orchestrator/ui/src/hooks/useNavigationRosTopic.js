@@ -29,7 +29,6 @@ const TOPIC_TYPES = {
   '/odom': 'nav_msgs/msg/Odometry',
   '/amcl_pose': 'geometry_msgs/msg/PoseWithCovarianceStamped',
   '/plan': 'nav_msgs/msg/Path',
-  '/goal_pose': 'geometry_msgs/msg/PoseStamped',
   '/tf': 'tf2_msgs/msg/TFMessage',
   '/tf_static': 'tf2_msgs/msg/TFMessage',
   '/bt/status': 'std_msgs/msg/String',

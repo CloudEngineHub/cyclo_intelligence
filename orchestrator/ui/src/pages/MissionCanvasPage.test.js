@@ -390,7 +390,7 @@ test('updates mapping topics when layer toggles change', async () => {
   expect(screen.getByText('/odom')).toBeInTheDocument();
   expect(screen.queryByText('/amcl_pose')).not.toBeInTheDocument();
 
-  fireEvent.click(screen.getByRole('switch', { name: 'Robot Model' }));
+  fireEvent.click(screen.getByRole('switch', { name: 'Robot Footprint' }));
   expect(screen.queryByText('/amcl_pose')).not.toBeInTheDocument();
   expect(screen.queryByText('/local_costmap/published_footprint')).not.toBeInTheDocument();
   expect(screen.getByText('/pose')).toBeInTheDocument();
@@ -3593,7 +3593,8 @@ test('enables navigation runtime layers in the run stage', async () => {
   expect(screen.getByText('/global_costmap/costmap')).toBeInTheDocument();
   expect(screen.getByText('/local_costmap/costmap')).toBeInTheDocument();
   expect(screen.getByText('/plan')).toBeInTheDocument();
-  expect(screen.getByText('/goal_pose')).toBeInTheDocument();
+  expect(screen.queryByText('/goal_pose')).not.toBeInTheDocument();
+  expect(screen.queryByRole('switch', { name: 'Goal pose' })).not.toBeInTheDocument();
   expect(screen.getByText('/bt/status')).toBeInTheDocument();
   expect(screen.queryByText('/tf')).not.toBeInTheDocument();
   await waitFor(() => {
@@ -3601,7 +3602,7 @@ test('enables navigation runtime layers in the run stage', async () => {
       props.showGlobalCostmap === true &&
       props.showLocalCostmap === true &&
       props.showGlobalPlan === true &&
-      props.showGoalPose === true
+      props.showGoalPose === false
     ))).toBe(true);
   });
   const globalCostmapSwitch = screen.getByRole('switch', { name: 'Global costmap' });
@@ -3623,11 +3624,11 @@ test('enables navigation runtime layers in the run stage', async () => {
     props.showGlobalCostmap === true &&
     props.showLocalCostmap === true &&
     props.showGlobalPlan === true &&
-    props.showGoalPose === true
+    props.showGoalPose === false
   ))).toBe(true);
 });
 
-test('prefers the AMCL pose over a stale TF pose in the run stage', async () => {
+test('aligns the Run pose and odom-frame overlays to AMCL instead of stale TF', async () => {
   const latestMapViewerProps = () => (
     mockMapViewer.mock.calls[mockMapViewer.mock.calls.length - 1][0]
   );
@@ -3652,7 +3653,20 @@ test('prefers the AMCL pose over a stale TF pose in the run stage', async () => 
       },
     ],
   };
-  mockTopicDataByName['/amcl_pose'] = amclPoseMessage(1.25, -0.5, 0.75);
+  mockTopicDataByName['/amcl_pose'] = {
+    ...amclPoseMessage(1.25, -0.5, 0),
+    header: { frame_id: 'map', stamp: { sec: 10, nanosec: 0 } },
+  };
+  mockTopicDataByName['/odom'] = {
+    header: { frame_id: 'odom', stamp: { sec: 10, nanosec: 0 } },
+    child_frame_id: 'base_link',
+    pose: {
+      pose: {
+        position: { x: 2, y: 3, z: 0 },
+        orientation: { x: 0, y: 0, z: 0, w: 1 },
+      },
+    },
+  };
 
   render(<MissionCanvasPage />);
   fireEvent.click(screen.getByRole('tab', { name: 'Run' }));
@@ -3662,12 +3676,22 @@ test('prefers the AMCL pose over a stale TF pose in the run stage', async () => 
   }));
 
   fireEvent.click(screen.getByRole('switch', { name: 'Lidar' }));
-  fireEvent.click(screen.getByRole('switch', { name: 'Robot Model' }));
+  fireEvent.click(screen.getByRole('switch', { name: 'Robot Footprint' }));
   fireEvent.click(screen.getByRole('switch', { name: 'TF' }));
 
   await waitFor(() => expect(latestMapViewerProps().pose).toMatchObject({
     position: { x: 1.25, y: -0.5 },
   }));
+  await waitFor(() => expect(latestMapViewerProps().tf.transforms.find((transform) => (
+    transform.header.frame_id === 'map' && transform.child_frame_id === 'odom'
+  ))).toMatchObject({
+    transform: { translation: { x: -0.75, y: -3.5 } },
+  }));
+  expect(latestMapViewerProps().tf.transforms.find((transform) => (
+    transform.header.frame_id === 'odom' && transform.child_frame_id === 'base_link'
+  ))).toMatchObject({
+    transform: { translation: { x: 2, y: 3 } },
+  });
   expect(topicRow('/amcl_pose')).toHaveTextContent('live');
 });
 

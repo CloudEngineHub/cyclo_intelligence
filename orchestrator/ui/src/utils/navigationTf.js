@@ -184,6 +184,32 @@ export function replaceTfFramePose(tf, parentFrame, childFrame, pose, stamp = nu
 }
 
 /**
+ * Make the browser TF tree use the same map-frame localization anchor and
+ * odometry pose as the robot marker. This keeps odom-frame overlays such as
+ * published_footprint aligned even when rosbridge misses map -> odom updates.
+ */
+export function applyPoseSyncToTf(tf, poseSync) {
+    if (!poseSync?.mapToOdomPose)
+        return tf;
+    const mapCorrectedTf = replaceTfFramePose(
+        tf,
+        "map",
+        "odom",
+        poseSync.mapToOdomPose,
+        poseSync.anchorStamp,
+    );
+    return poseSync.odomPose
+        ? replaceTfFramePose(
+            mapCorrectedTf,
+            "odom",
+            "base_link",
+            poseSync.odomPose,
+            poseSync.odomStamp,
+        )
+        : mapCorrectedTf;
+}
+
+/**
  * Keep a short odometry history so slam_toolbox /pose can be paired with the
  * odom sample at the same scan time. The resulting map -> odom anchor is then
  * applied to current odometry for a smooth, map-correct Mapping pose.

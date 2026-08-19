@@ -23,7 +23,7 @@ import { MapEditorControls, useMapEditor } from "../components/navigation/MapEdi
 import { MapViewer } from "../components/navigation/MapViewer";
 import { NavigationSidePanel, } from "../components/navigation/NavigationSidePanel";
 import { NavigationToolbar } from "../components/navigation/NavigationToolbar";
-import { mergeTfMessages, orientationFromYaw, poseFromBaseLinkTf, replaceTfFramePose, tfMessageFromBuffer, updateTfBuffer, yawFromPose, } from "../utils/navigationTf";
+import { applyPoseSyncToTf, mergeTfMessages, orientationFromYaw, poseFromBaseLinkTf, tfMessageFromBuffer, updateTfBuffer, yawFromPose, } from "../utils/navigationTf";
 import { rosTimestampNow } from "../utils/rosTime";
 import FixedLogPanel from "../components/navigation/FixedLogPanel";
 const NAVIGATION_SERVICE = "ai_worker_navigation";
@@ -51,7 +51,6 @@ const IDLE_LAYER_PRESET = {
     localCostmap: false,
     scan: false,
     globalPlan: false,
-    goalPose: false,
     tf: false,
     robotModel: false,
 };
@@ -61,7 +60,6 @@ const MAPPING_LAYER_PRESET = {
     localCostmap: false,
     scan: true,
     globalPlan: false,
-    goalPose: false,
     tf: false,
     robotModel: true,
 };
@@ -71,7 +69,6 @@ const NAVIGATION_LAYER_PRESET = {
     localCostmap: true,
     scan: true,
     globalPlan: true,
-    goalPose: true,
     tf: false,
     robotModel: true,
 };
@@ -85,7 +82,6 @@ const DISPLAY_TOPICS = [
     "/odom",
     "/amcl_pose",
     "/plan",
-    "/goal_pose",
     "/tf",
 ];
 function messageData(value) {
@@ -143,7 +139,6 @@ export default function NavigationPage() {
     const [showLocalCostmap, setShowLocalCostmap] = useState(false);
     const [showScan, setShowScan] = useState(false);
     const [showGlobalPlan, setShowGlobalPlan] = useState(false);
-    const [showGoalPose, setShowGoalPose] = useState(false);
     const [showTf, setShowTf] = useState(false);
     const [showRobotModel, setShowRobotModel] = useState(false);
     const [showLogs, setShowLogs] = useState(false);
@@ -177,10 +172,10 @@ export default function NavigationPage() {
         busy !== "Stop" && (mappingRuntimeActive || busy === "Mapping" || !running)
     );
     const { topicData: slamPoseData } = useNavigationRosTopic(mappingPoseTopicsActive ? "/pose" : null, ROS2_WS_FAST_TOPIC_OPTIONS);
-    const { topicData: odometryData } = useNavigationRosTopic(mappingPoseTopicsActive ? "/odom" : null, ROS2_WS_ODOM_TOPIC_OPTIONS);
+    const runPoseTopicsActive = navigationTopicsActive && !mappingRuntimeActive;
+    const { topicData: odometryData } = useNavigationRosTopic(mappingPoseTopicsActive || runPoseTopicsActive ? "/odom" : null, ROS2_WS_ODOM_TOPIC_OPTIONS);
     const { topicData: amclData } = useNavigationRosTopic(navigationTopicsActive && !mappingRuntimeActive ? "/amcl_pose" : null, ROS2_WS_FAST_TOPIC_OPTIONS);
     const { topicData: planData } = useNavigationRosTopic(navigationTopicsActive && showGlobalPlan ? "/plan" : null);
-    const { topicData: goalPoseData } = useNavigationRosTopic(navigationTopicsActive && showGoalPose ? "/goal_pose" : null);
     const { topicData: tfData } = useNavigationRosTopic(navigationTopicsActive ? "/tf" : null, ROS2_WS_FAST_TOPIC_OPTIONS);
     const { topicData: tfStaticData } = useNavigationRosTopic(navigationTopicsActive ? "/tf_static" : null);
     const map = useMemo(() => messageData(mapData), [mapData]);
@@ -192,7 +187,6 @@ export default function NavigationPage() {
     const odometry = useMemo(() => messageData(odometryData), [odometryData]);
     const amclPose = useMemo(() => messageData(amclData), [amclData]);
     const plan = useMemo(() => messageData(planData), [planData]);
-    const topicGoalPose = useMemo(() => messageData(goalPoseData), [goalPoseData]);
     const tf = useMemo(() => messageData(tfData), [tfData]);
     const tfStatic = useMemo(() => messageData(tfStaticData), [tfStaticData]);
     const latestTf = useMemo(() => mergeTfMessages(tfStatic, tf), [tf, tfStatic]);
@@ -207,39 +201,23 @@ export default function NavigationPage() {
         scanStamp: scan?.header?.stamp ?? null,
     });
     const resetMappingPoseSync = mappingPoseSync.reset;
-    const displayTf = useMemo(() => {
-        if (!mappingRuntimeActive || !mappingPoseSync.mapToOdomPose)
-            return bufferedTf;
-        const mapCorrectedTf = replaceTfFramePose(
-            bufferedTf,
-            "map",
-            "odom",
-            mappingPoseSync.mapToOdomPose,
-            mappingPoseSync.anchorStamp,
-        );
-        return mappingPoseSync.odomPose
-            ? replaceTfFramePose(
-                mapCorrectedTf,
-                "odom",
-                "base_link",
-                mappingPoseSync.odomPose,
-                mappingPoseSync.odomStamp,
-            )
-            : mapCorrectedTf;
-    }, [
-        bufferedTf,
-        mappingPoseSync.anchorStamp,
-        mappingPoseSync.mapToOdomPose,
-        mappingPoseSync.odomPose,
-        mappingPoseSync.odomStamp,
-        mappingRuntimeActive,
-    ]);
-    const goalPose = hideReachedGoalPose ? null : (lastGoalPose !== null && lastGoalPose !== void 0 ? lastGoalPose : topicGoalPose);
+    const runPoseSync = useMappingPoseSync({
+        active: runPoseTopicsActive && !!odometry,
+        slamPose: amclPose,
+        odometry,
+        scanStamp: scan?.header?.stamp ?? null,
+    });
+    const displayTf = mappingRuntimeActive
+        ? applyPoseSyncToTf(bufferedTf, mappingPoseSync)
+        : runPoseTopicsActive
+            ? applyPoseSyncToTf(bufferedTf, runPoseSync)
+            : bufferedTf;
+    const goalPose = hideReachedGoalPose ? null : lastGoalPose;
     const topicBaseLinkPose = useMemo(() => poseFromBaseLinkTf(bufferedTf), [bufferedTf]);
     const baseLinkPose = topicBaseLinkPose !== null && topicBaseLinkPose !== void 0 ? topicBaseLinkPose : lastBaseLinkPose;
     const currentPose = mappingRuntimeActive
         ? mappingPoseSync.pose ?? baseLinkPose
-        : fallbackPose ?? baseLinkPose;
+        : runPoseSync.pose ?? fallbackPose ?? baseLinkPose;
     const mode = running ? "running" : "idle";
     const trimmedMapName = mapName.trim();
     const hasMapName = trimmedMapName.length > 0;
@@ -288,18 +266,16 @@ export default function NavigationPage() {
             checked: showGlobalPlan,
             onChange: setShowGlobalPlan,
         },
-        { id: "goalPose", label: "Goal Pose", checked: showGoalPose, onChange: setShowGoalPose },
         { id: "tf", label: "TF", checked: showTf, onChange: setShowTf },
         {
             id: "robotModel",
-            label: "Robot Model",
+            label: "Robot Footprint",
             checked: showRobotModel,
             onChange: setShowRobotModel,
         },
     ], [
         showGlobalCostmap,
         showGlobalPlan,
-        showGoalPose,
         showLocalCostmap,
         showMap,
         showRobotModel,
@@ -331,15 +307,12 @@ export default function NavigationPage() {
             return { topic, isLive: !!amclPose };
         if (topic === "/plan")
             return { topic, isLive: !!plan };
-        if (topic === "/goal_pose")
-            return { topic, isLive: !!goalPose };
         if (topic === "/tf")
             return { topic, isLive: !!((_c = tf === null || tf === void 0 ? void 0 : tf.transforms) === null || _c === void 0 ? void 0 : _c.length) };
         return { topic, isLive: false };
     }), [
         footprint,
         globalCostmap,
-        goalPose,
         localCostmap,
         map,
         mappingRuntimeActive,
@@ -356,7 +329,6 @@ export default function NavigationPage() {
         setShowLocalCostmap(preset.localCostmap);
         setShowScan(preset.scan);
         setShowGlobalPlan(preset.globalPlan);
-        setShowGoalPose(preset.goalPose);
         setShowTf(preset.tf);
         setShowRobotModel(preset.robotModel);
     }, []);
@@ -611,7 +583,7 @@ export default function NavigationPage() {
                 ? "xl:grid-cols-[var(--map-panel-width)_8px_var(--layers-panel-width)_8px_minmax(var(--log-panel-min-width),1fr)]"
                 : "xl:grid-cols-[var(--map-panel-width)_8px_minmax(300px,1fr)]",
         ].join(" ")} style={contentGridStyle}>
-        <MapViewer map={displayedMap} globalCostmap={showPgmFix ? null : globalCostmap} localCostmap={showPgmFix ? null : localCostmap} scan={showPgmFix ? null : scan} scanPose={showPgmFix || !mappingRuntimeActive ? null : mappingPoseSync.scanPose} pose={showPgmFix ? null : currentPose} plan={showPgmFix ? null : plan} goalPose={showPgmFix ? null : goalPose} footprint={showPgmFix ? null : footprint} tf={showPgmFix ? null : displayTf} showMap={showPgmFix ? true : showMap} showGlobalCostmap={showPgmFix ? false : showGlobalCostmap} showLocalCostmap={showPgmFix ? false : showLocalCostmap} showScan={showPgmFix ? false : showScan} showGlobalPlan={showPgmFix ? false : showGlobalPlan} showGoalPose={showPgmFix ? false : showGoalPose} showTf={showPgmFix ? false : showTf} showRobotModel={showPgmFix ? false : showRobotModel} interactionDisabled={posePublishBusy || (showPgmFix && mapEditor.busy)} interactionMode={showPgmFix ? "view" : clickMode} editorActive={showPgmFix && !!mapEditor.map && mapEditor.tool !== "view"} viewKey={mapViewKey} waitingLabel={showPgmFix ? "Select a PGM" : "Waiting for /map"} onEditorMapPoint={mapEditor.editAtMapPoint} onMapPose={handleMapPose}/>
+        <MapViewer map={displayedMap} globalCostmap={showPgmFix ? null : globalCostmap} localCostmap={showPgmFix ? null : localCostmap} scan={showPgmFix ? null : scan} scanPose={showPgmFix ? null : mappingRuntimeActive ? mappingPoseSync.scanPose : runPoseSync.scanPose} pose={showPgmFix ? null : currentPose} plan={showPgmFix ? null : plan} goalPose={showPgmFix ? null : goalPose} footprint={showPgmFix ? null : footprint} tf={showPgmFix ? null : displayTf} showMap={showPgmFix ? true : showMap} showGlobalCostmap={showPgmFix ? false : showGlobalCostmap} showLocalCostmap={showPgmFix ? false : showLocalCostmap} showScan={showPgmFix ? false : showScan} showGlobalPlan={showPgmFix ? false : showGlobalPlan} showGoalPose={!showPgmFix && !!goalPose} showTf={showPgmFix ? false : showTf} showRobotModel={showPgmFix ? false : showRobotModel} interactionDisabled={posePublishBusy || (showPgmFix && mapEditor.busy)} interactionMode={showPgmFix ? "view" : clickMode} editorActive={showPgmFix && !!mapEditor.map && mapEditor.tool !== "view"} viewKey={mapViewKey} waitingLabel={showPgmFix ? "Select a PGM" : "Waiting for /map"} onEditorMapPoint={mapEditor.editAtMapPoint} onMapPose={handleMapPose}/>
         <div className="hidden xl:block min-h-0 cursor-col-resize" onPointerDown={handleMapResizePointerDown} title="Resize map" aria-label="Resize map" role="separator" style={{ backgroundColor: "var(--vscode-panel-border)" }}/>
         <NavigationSidePanel layerToggles={layerToggles} mapName={mapName} status={status} topicRows={topicRows}/>
         {showLogs && (<div role="separator" aria-label="Resize log panel" aria-orientation="vertical" className="hidden xl:flex min-h-0 cursor-col-resize items-stretch justify-center" onPointerDown={handleLogResizePointerDown}>

@@ -63,10 +63,10 @@ import { MapViewer } from "../components/navigation/MapViewer";
 import MissionBtEditor from "../components/navigation/MissionBtEditor";
 import MissionBtRunView from "../components/navigation/MissionBtRunView";
 import {
+  applyPoseSyncToTf,
   mergeTfMessages,
   orientationFromYaw,
   poseFromBaseLinkTf,
-  replaceTfFramePose,
   tfMessageFromBuffer,
   updateTfBuffer,
   yawFromPose,
@@ -137,12 +137,11 @@ const WORKSPACE_STAGES = [
 const LAYER_DEFINITIONS = {
   map: "Map",
   scan: "Lidar",
-  robotModel: "Robot Model",
+  robotModel: "Robot Footprint",
   tf: "TF",
   globalCostmap: "Global costmap",
   localCostmap: "Local costmap",
   globalPlan: "Global plan",
-  goalPose: "Goal pose",
   mapAreas: "Map areas",
 };
 
@@ -157,7 +156,6 @@ const STAGE_LAYER_IDS = {
     "globalCostmap",
     "localCostmap",
     "globalPlan",
-    "goalPose",
     "tf",
   ],
 };
@@ -171,7 +169,6 @@ const LAYER_PRESETS = {
     globalCostmap: false,
     localCostmap: false,
     globalPlan: false,
-    goalPose: false,
     mapAreas: false,
   },
   [STAGE_AUTHORING]: {
@@ -182,7 +179,6 @@ const LAYER_PRESETS = {
     globalCostmap: false,
     localCostmap: false,
     globalPlan: false,
-    goalPose: false,
     mapAreas: true,
   },
   [STAGE_RUN]: {
@@ -193,7 +189,6 @@ const LAYER_PRESETS = {
     globalCostmap: true,
     localCostmap: true,
     globalPlan: true,
-    goalPose: true,
     mapAreas: true,
   },
 };
@@ -206,7 +201,6 @@ const LAYER_TOPIC_IDS = {
   globalCostmap: ["/global_costmap/costmap"],
   localCostmap: ["/local_costmap/costmap"],
   globalPlan: ["/plan"],
-  goalPose: ["/goal_pose"],
 };
 
 const STAGE_EXTRA_TOPIC_IDS = {
@@ -227,7 +221,6 @@ const TOPIC_ORDER = [
   "/global_costmap/costmap",
   "/local_costmap/costmap",
   "/plan",
-  "/goal_pose",
   "/bt/status",
   "/bt/active_nodes",
 ];
@@ -2449,7 +2442,6 @@ export default function MissionCanvasPage() {
   const needsGlobalCostmap = stageNavigationTopicsActive && activeLayers.globalCostmap;
   const needsLocalCostmap = stageNavigationTopicsActive && activeLayers.localCostmap;
   const needsScan = designLocalizationActive || (stageNavigationTopicsActive && activeLayers.scan);
-  const needsGoalPose = stageNavigationTopicsActive && activeLayers.goalPose;
   const needsPlan = stageNavigationTopicsActive && activeLayers.globalPlan;
   const needsRobotModel = designLocalizationActive || (
     stageNavigationTopicsActive && activeLayers.robotModel
@@ -2506,7 +2498,7 @@ export default function MissionCanvasPage() {
     ROS2_WS_FAST_TOPIC_OPTIONS,
   );
   const { topicData: odometryData } = useNavigationRosTopic(
-    needsMappingPose ? "/odom" : null,
+    needsMappingPose || runTopicsActive ? "/odom" : null,
     ROS2_WS_ODOM_TOPIC_OPTIONS,
   );
   const { topicData: amclData } = useNavigationRosTopic(
@@ -2515,9 +2507,6 @@ export default function MissionCanvasPage() {
   );
   const { topicData: planData } = useNavigationRosTopic(
     needsPlan ? "/plan" : null,
-  );
-  const { topicData: goalPoseData } = useNavigationRosTopic(
-    needsGoalPose ? "/goal_pose" : null,
   );
   const { topicData: tfData } = useNavigationRosTopic(
     needsTf ? "/tf" : null,
@@ -2543,7 +2532,6 @@ export default function MissionCanvasPage() {
   const odometry = useMemo(() => messageData(odometryData), [odometryData]);
   const amclPose = useMemo(() => messageData(amclData), [amclData]);
   const plan = useMemo(() => messageData(planData), [planData]);
-  const goalPose = useMemo(() => messageData(goalPoseData), [goalPoseData]);
   const tf = useMemo(() => messageData(tfData), [tfData]);
   const tfStatic = useMemo(() => messageData(tfStaticData), [tfStaticData]);
   const btStatusText = useMemo(() => rosStringData(btStatusData), [btStatusData]);
@@ -2567,39 +2555,26 @@ export default function MissionCanvasPage() {
     scanStamp: scan?.header?.stamp ?? null,
   });
   const resetMappingPoseSync = mappingPoseSync.reset;
-  const mappingTf = useMemo(() => {
-    if (!mappingTopicsActive || !mappingPoseSync.mapToOdomPose) return bufferedTf;
-    const mapCorrectedTf = replaceTfFramePose(
-      bufferedTf,
-      "map",
-      "odom",
-      mappingPoseSync.mapToOdomPose,
-      mappingPoseSync.anchorStamp,
-    );
-    return mappingPoseSync.odomPose
-      ? replaceTfFramePose(
-          mapCorrectedTf,
-          "odom",
-          "base_link",
-          mappingPoseSync.odomPose,
-          mappingPoseSync.odomStamp,
-        )
-      : mapCorrectedTf;
-  }, [
-    bufferedTf,
-    mappingPoseSync.anchorStamp,
-    mappingPoseSync.mapToOdomPose,
-    mappingPoseSync.odomPose,
-    mappingPoseSync.odomStamp,
-    mappingTopicsActive,
-  ]);
+  const runPoseSync = useMappingPoseSync({
+    active: runTopicsActive && !!odometry,
+    slamPose: amclPose,
+    odometry,
+    scanStamp: scan?.header?.stamp ?? null,
+  });
+  const mappingTf = mappingTopicsActive
+    ? applyPoseSyncToTf(bufferedTf, mappingPoseSync)
+    : bufferedTf;
+  const runTf = runTopicsActive
+    ? applyPoseSyncToTf(bufferedTf, runPoseSync)
+    : bufferedTf;
+  const displayTf = runTopicsActive ? runTf : mappingTf;
   // In Run, AMCL is the authoritative map-frame localization estimate. The
   // rosbridge-throttled /tf stream can miss low-rate map -> odom updates while
   // still receiving odom -> base_link, leaving this browser's composed TF pose
   // stale even though Nav2's internal TF buffer is current. Retain TF as a
   // startup fallback until the first AMCL pose arrives.
   const currentPose = runSessionActive
-    ? fallbackPose ?? tfPose
+    ? runPoseSync.pose ?? fallbackPose ?? tfPose
     : mappingTopicsActive
       ? mappingPoseSync.pose ?? tfPose
       : tfPose ?? fallbackPose;
@@ -3344,7 +3319,6 @@ export default function MissionCanvasPage() {
       "/global_costmap/costmap": !!globalCostmap,
       "/local_costmap/costmap": !!localCostmap,
       "/plan": !!plan,
-      "/goal_pose": !!goalPose,
       "/bt/status": hasTopicMessage(btStatusData) || btNodeIsUp,
       "/bt/active_nodes": hasTopicMessage(btActiveNodesData) || btNodeIsUp,
     };
@@ -3388,7 +3362,6 @@ export default function MissionCanvasPage() {
     btNodeIsUp,
     footprint,
     globalCostmap,
-    goalPose,
     localCostmap,
     map,
     odometry,
@@ -5884,12 +5857,20 @@ export default function MissionCanvasPage() {
             globalCostmap={mappingEditorActive ? null : needsGlobalCostmap ? globalCostmap : null}
             localCostmap={mappingEditorActive ? null : needsLocalCostmap ? localCostmap : null}
             scan={mappingEditorActive ? null : needsScan ? scan : null}
-            scanPose={mappingEditorActive || !mappingTopicsActive ? null : mappingPoseSync.scanPose}
+            scanPose={
+              mappingEditorActive
+                ? null
+                : mappingTopicsActive
+                  ? mappingPoseSync.scanPose
+                  : runTopicsActive
+                    ? runPoseSync.scanPose
+                    : null
+            }
             pose={mappingEditorActive ? null : (designLocalizationActive || stageNavigationTopicsActive) ? currentPose : null}
             plan={mappingEditorActive ? null : needsPlan ? plan : null}
-            goalPose={mappingEditorActive ? null : needsGoalPose ? goalPose : null}
+            goalPose={null}
             footprint={mappingEditorActive ? null : needsRobotModel ? footprint : null}
-            tf={mappingEditorActive ? null : needsTf ? mappingTf : null}
+            tf={mappingEditorActive ? null : needsTf ? displayTf : null}
             spots={missionOverlayActive ? visibleSpots : []}
             selectedSpotId={missionOverlayActive && workspaceStage === STAGE_AUTHORING ? selectedSpotId : ""}
             activeWaypointId={workspaceStage === STAGE_RUN ? missionRunner.activeSpotId : ""}
@@ -5928,7 +5909,7 @@ export default function MissionCanvasPage() {
             showLocalCostmap={mappingEditorActive ? false : needsLocalCostmap}
             showScan={mappingEditorActive ? false : needsScan}
             showGlobalPlan={mappingEditorActive ? false : needsPlan}
-            showGoalPose={mappingEditorActive ? false : needsGoalPose}
+            showGoalPose={false}
             showTf={mappingEditorActive ? false : stageNavigationTopicsActive && activeLayers.tf}
             showRobotModel={mappingEditorActive ? false : needsRobotModel}
             interactionDisabled={

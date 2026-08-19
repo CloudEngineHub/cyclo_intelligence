@@ -45,6 +45,8 @@ test('renders the Navigation page shell', async () => {
 
   expect(screen.getByRole('heading', { name: 'Navigation' })).toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Mapping' })).toBeInTheDocument();
+  expect(screen.queryByText('/goal_pose')).not.toBeInTheDocument();
+  expect(screen.queryByText('Goal Pose')).not.toBeInTheDocument();
   expect(screen.getByText('Navigation Map Viewer')).toBeInTheDocument();
   await waitFor(() => expect(getServiceStatus).toHaveBeenCalled());
 });
@@ -106,4 +108,67 @@ test('uses synchronized SLAM and odometry poses while Mapping', async () => {
   expect(latestMapViewerProps().tf.transforms.find((transform) => (
     transform.header.frame_id === 'odom' && transform.child_frame_id === 'base_link'
   ))).toMatchObject({ transform: { translation: { x: 2, y: 0 } } });
+});
+
+test('aligns Navigation footprint TF to the AMCL and odometry pose', async () => {
+  const latestMapViewerProps = () => (
+    mockMapViewer.mock.calls[mockMapViewer.mock.calls.length - 1][0]
+  );
+  getServiceStatus.mockResolvedValue({ is_up: true, mode: 'nav' });
+  mockTopicDataByName['/tf'] = {
+    transforms: [
+      {
+        header: { frame_id: 'map', stamp: { sec: 10, nanosec: 0 } },
+        child_frame_id: 'odom',
+        transform: {
+          translation: { x: 50, y: 50, z: 0 },
+          rotation: { x: 0, y: 0, z: 0, w: 1 },
+        },
+      },
+      {
+        header: { frame_id: 'odom', stamp: { sec: 10, nanosec: 0 } },
+        child_frame_id: 'base_link',
+        transform: {
+          translation: { x: 99, y: 99, z: 0 },
+          rotation: { x: 0, y: 0, z: 0, w: 1 },
+        },
+      },
+    ],
+  };
+  mockTopicDataByName['/amcl_pose'] = {
+    header: { frame_id: 'map', stamp: { sec: 10, nanosec: 0 } },
+    pose: {
+      pose: {
+        position: { x: 1.25, y: -0.5, z: 0 },
+        orientation: { x: 0, y: 0, z: 0, w: 1 },
+      },
+    },
+  };
+  mockTopicDataByName['/odom'] = {
+    header: { frame_id: 'odom', stamp: { sec: 10, nanosec: 0 } },
+    child_frame_id: 'base_link',
+    pose: {
+      pose: {
+        position: { x: 2, y: 3, z: 0 },
+        orientation: { x: 0, y: 0, z: 0, w: 1 },
+      },
+    },
+  };
+
+  render(
+    <Provider store={store}>
+      <NavigationPage />
+    </Provider>
+  );
+
+  expect(screen.getByRole('checkbox', { name: 'Robot Footprint' })).toBeInTheDocument();
+  await waitFor(() => expect(latestMapViewerProps().pose).toMatchObject({
+    position: { x: 1.25, y: -0.5 },
+  }));
+  await waitFor(() => expect(latestMapViewerProps().tf.transforms.find((transform) => (
+    transform.header.frame_id === 'map' && transform.child_frame_id === 'odom'
+  ))).toMatchObject({ transform: { translation: { x: -0.75, y: -3.5 } } }));
+  expect(latestMapViewerProps().tf.transforms.find((transform) => (
+    transform.header.frame_id === 'odom' && transform.child_frame_id === 'base_link'
+  ))).toMatchObject({ transform: { translation: { x: 2, y: 3 } } });
 });
