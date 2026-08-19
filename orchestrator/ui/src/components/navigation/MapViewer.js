@@ -2446,6 +2446,10 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, scanPose = n
                     clientX: event.clientX,
                     roll: viewRollRef.current,
                 };
+                // The custom roll drag bypasses OrbitControls, so raise the
+                // interaction flag ourselves — otherwise the render loop stays
+                // at the idle frame rate and the rotation looks choppy.
+                renderInteractionActiveRef.current = true;
                 renderer.domElement.setPointerCapture(event.pointerId);
                 return;
             }
@@ -2681,6 +2685,8 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, scanPose = n
                 event.preventDefault();
                 event.stopImmediatePropagation();
                 viewRotateDragRef.current = null;
+                renderInteractionActiveRef.current = false;
+                renderActiveUntilRef.current = performance.now() + 400;
                 if (renderer.domElement.hasPointerCapture(event.pointerId)) {
                     renderer.domElement.releasePointerCapture(event.pointerId);
                 }
@@ -2709,6 +2715,10 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, scanPose = n
             const hadPaintPointer = editorPaintPointerRef.current === event.pointerId;
             editorPaintPointerRef.current = null;
             editorAreaDragRef.current = null;
+            if (viewRotateDragRef.current) {
+                renderInteractionActiveRef.current = false;
+                renderActiveUntilRef.current = performance.now() + 400;
+            }
             viewRotateDragRef.current = null;
             nodeDragRef.current = null;
             pointerDownRef.current = null;
