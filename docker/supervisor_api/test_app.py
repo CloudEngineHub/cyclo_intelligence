@@ -2418,6 +2418,40 @@ def test_navigation_grid_cache_sends_costmap_deltas_and_resyncs_lagging_clients(
     ]
 
 
+def test_navigation_grid_cache_compacts_broad_costmap_bounds_to_actual_changes():
+    cache = navigation_grid_cache.OccupancyGridCache(
+        "/global_costmap/costmap"
+    )
+    cache.cache_ros_message({
+        "header": {"frame_id": "map"},
+        "info": {"width": 5, "height": 4},
+        "data": [0] * 20,
+    })
+    full_marker, _ = cache.serialized_if_changed(None)
+
+    broad_update = [0] * 20
+    broad_update[1 * 5 + 2] = 50
+    broad_update[2 * 5 + 3] = 100
+    cache.cache_ros_update({
+        "header": {"frame_id": "map", "stamp": {"sec": 2}},
+        "x": 0,
+        "y": 0,
+        "width": 5,
+        "height": 4,
+        "data": broad_update,
+    })
+
+    _, payload = cache.serialized_if_changed(full_marker)
+    assert json.loads(payload)["update"] == {
+        "header": {"frame_id": "map", "stamp": {"sec": 2}},
+        "x": 2,
+        "y": 1,
+        "width": 2,
+        "height": 2,
+        "data": [50, 0, 0, 100],
+    }
+
+
 def test_navigation_grid_websocket_sends_cached_original_topic(monkeypatch):
     cache = navigation_grid_cache.OccupancyGridCache("/map")
     cache.cache_ros_message({"info": {"width": 2}, "data": [0, 100]})

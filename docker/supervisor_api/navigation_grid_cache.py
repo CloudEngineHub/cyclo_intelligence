@@ -14,7 +14,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
-# Author: Howon Kim
+# Author: Howon Kim, Seongwoo Kim
 
 """Cached full grids plus incremental Navigation costmap updates."""
 
@@ -240,16 +240,48 @@ class OccupancyGridCache:
             ):
                 return
 
-            changed = False
+            min_changed_column = width
+            min_changed_row = height
+            max_changed_column = -1
+            max_changed_row = -1
             for row in range(height):
                 source_start = row * width
                 target_start = (y + row) * grid_width + x
                 row_data = update_data[source_start:source_start + width]
-                if grid_data[target_start:target_start + width] != row_data:
-                    grid_data[target_start:target_start + width] = row_data
-                    changed = True
-            if not changed:
+                existing_row = grid_data[target_start:target_start + width]
+                if existing_row == row_data:
+                    continue
+                for column, value in enumerate(row_data):
+                    if existing_row[column] == value:
+                        continue
+                    grid_data[target_start + column] = value
+                    min_changed_column = min(min_changed_column, column)
+                    max_changed_column = max(max_changed_column, column)
+                    min_changed_row = min(min_changed_row, row)
+                    max_changed_row = max(max_changed_row, row)
+            if max_changed_column < 0 or max_changed_row < 0:
                 return
+
+            # Costmap2D reports the observation bounds, which can cover the
+            # complete map when raytracing has a long range even if only a few
+            # cells changed. Send the smallest rectangle containing the actual
+            # value changes instead of forwarding those broad bounds.
+            compact_width = max_changed_column - min_changed_column + 1
+            compact_height = max_changed_row - min_changed_row + 1
+            compact_data = []
+            for row in range(min_changed_row, max_changed_row + 1):
+                source_start = row * width + min_changed_column
+                compact_data.extend(
+                    update_data[source_start:source_start + compact_width]
+                )
+            compact_update = {
+                **update,
+                "x": x + min_changed_column,
+                "y": y + min_changed_row,
+                "width": compact_width,
+                "height": compact_height,
+                "data": compact_data,
+            }
 
             if update["header"]:
                 self._grid["header"] = update["header"]
@@ -260,7 +292,7 @@ class OccupancyGridCache:
             self._latest_is_update = True
             self._payload = json.dumps({
                 "available": True,
-                "update": update,
+                "update": compact_update,
             }, separators=(",", ":"))
             # Build a full snapshot lazily only for a new or lagging client.
             self._full_payload = None

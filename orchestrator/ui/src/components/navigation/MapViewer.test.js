@@ -193,16 +193,16 @@ test('decimates lidar display rays while preserving both field-of-view edges', a
 test('updates only the dirty rows of an existing global costmap texture', () => {
   const THREE = jest.requireActual('three');
   const texture = new THREE.DataTexture(
-    new Uint8Array(4 * 3 * 4),
+    new Uint8Array(4 * 5 * 4),
     4,
-    3,
+    5,
     THREE.RGBAFormat,
     THREE.UnsignedByteType,
   );
   const grid = {
     info: {
       width: 4,
-      height: 3,
+      height: 5,
       resolution: 0.05,
       origin: {
         position: { x: 0, y: 0, z: 0 },
@@ -213,6 +213,8 @@ test('updates only the dirty rows of an existing global costmap texture', () => 
       0, 0, 0, 0,
       0, 50, 100, 0,
       0, 25, 75, 0,
+      0, 0, 0, 0,
+      0, 0, 0, 0,
     ],
   };
 
@@ -223,13 +225,49 @@ test('updates only the dirty rows of an existing global costmap texture', () => 
   )).toBe(true);
 
   expect(texture.updateRanges).toEqual([
-    { start: 20, count: 8 },
-    { start: 4, count: 8 },
+    { start: 52, count: 8 },
+    { start: 36, count: 8 },
   ]);
-  // Grid (2,1)=100 maps to texture pixel (1,1): gray 70, alpha 110.
-  expect(Array.from(texture.image.data.slice(20, 24))).toEqual([70, 70, 70, 110]);
+  // Grid (2,1)=100 maps to the vertically flipped texture: gray 70, alpha 110.
+  expect(Array.from(texture.image.data.slice(52, 56))).toEqual([70, 70, 70, 110]);
   // Pixels outside the dirty rectangle remain untouched.
   expect(Array.from(texture.image.data.slice(0, 4))).toEqual([0, 0, 0, 0]);
+});
+
+test('uses one full texture upload when a costmap delta covers a large area', () => {
+  const THREE = jest.requireActual('three');
+  const texture = new THREE.DataTexture(
+    new Uint8Array(4 * 4 * 4),
+    4,
+    4,
+    THREE.RGBAFormat,
+    THREE.UnsignedByteType,
+  );
+  texture.userData.globalCostmapFullUploadPending = false;
+  const grid = {
+    info: {
+      width: 4,
+      height: 4,
+      resolution: 0.05,
+      origin: {
+        position: { x: 0, y: 0, z: 0 },
+        orientation: { x: 0, y: 0, z: 0, w: 1 },
+      },
+    },
+    data: Array(16).fill(100),
+  };
+
+  expect(updateGlobalCostmapTexture(
+    texture,
+    grid,
+    { x: 0, y: 0, width: 4, height: 4 },
+  )).toBe(true);
+
+  // An empty update-range list makes Three.js issue one full texSubImage2D
+  // instead of one call for every row in a broad rectangle.
+  expect(texture.updateRanges).toEqual([]);
+  expect(texture.userData.globalCostmapFullUploadPending).toBe(true);
+  expect(Array.from(texture.image.data.slice(0, 4))).toEqual([70, 70, 70, 110]);
 });
 
 test('reuses the global costmap texture for deltas and rebuilds on a full resync', async () => {

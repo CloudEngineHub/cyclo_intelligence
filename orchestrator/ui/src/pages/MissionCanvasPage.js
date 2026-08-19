@@ -2214,6 +2214,10 @@ export default function MissionCanvasPage() {
   });
   const [btNodeBusy, setBtNodeBusy] = useState("");
   const [btLayerSpotId, setBtLayerSpotId] = useState("");
+  // The read-only Run BT view only needs a stable map context. Suspending
+  // high-frequency visual overlays while it is open avoids redrawing the
+  // WebGL map underneath every ReactFlow update; Nav2 itself is unaffected.
+  const [runBtVisualizationActive, setRunBtVisualizationActive] = useState(false);
   const [editingLocalBtPathBySpotId, setEditingLocalBtPathBySpotId] = useState({});
   const [interactionMode, setInteractionMode] = useState("view");
   // Run stage: AMCL must be given an initial pose after nav bringup before the
@@ -2440,10 +2444,19 @@ export default function MissionCanvasPage() {
     mapName: currentMapName,
     onMessage: setMessage,
   });
-  const needsGlobalCostmap = stageNavigationTopicsActive && activeLayers.globalCostmap;
-  const needsLocalCostmap = stageNavigationTopicsActive && activeLayers.localCostmap;
-  const needsScan = designLocalizationActive || (stageNavigationTopicsActive && activeLayers.scan);
-  const needsPlan = stageNavigationTopicsActive && activeLayers.globalPlan;
+  const runBtMapLightweight = workspaceStage === STAGE_RUN && runBtVisualizationActive;
+  const needsGlobalCostmap = (
+    stageNavigationTopicsActive && activeLayers.globalCostmap && !runBtMapLightweight
+  );
+  const needsLocalCostmap = (
+    stageNavigationTopicsActive && activeLayers.localCostmap && !runBtMapLightweight
+  );
+  const needsScan = designLocalizationActive || (
+    stageNavigationTopicsActive && activeLayers.scan && !runBtMapLightweight
+  );
+  const needsPlan = (
+    stageNavigationTopicsActive && activeLayers.globalPlan && !runBtMapLightweight
+  );
   const needsRobotModel = designLocalizationActive || (
     stageNavigationTopicsActive && activeLayers.robotModel
   );
@@ -2453,7 +2466,7 @@ export default function MissionCanvasPage() {
   const needsMappingPose = mappingPoseSubscriptionActive;
   const needsAmclPose = robotPoseCaptureActive || runTopicsActive;
   const needsTf = robotPoseCaptureActive || (
-    stageNavigationTopicsActive && (
+    stageNavigationTopicsActive && !runBtMapLightweight && (
       activeLayers.tf ||
       activeLayers.scan ||
       activeLayers.robotModel
@@ -3276,6 +3289,11 @@ export default function MissionCanvasPage() {
     ),
   } : null;
   const activeBtLayer = waypointBtLayer || runBtLayer;
+  const runBtViewActive = !!runActiveSpot;
+
+  useEffect(() => {
+    setRunBtVisualizationActive(runBtViewActive);
+  }, [runBtViewActive]);
 
   useEffect(() => {
     if (workspaceStage !== STAGE_AUTHORING) return;
@@ -5871,7 +5889,7 @@ export default function MissionCanvasPage() {
             plan={mappingEditorActive ? null : needsPlan ? plan : null}
             goalPose={null}
             footprint={mappingEditorActive ? null : needsRobotModel ? footprint : null}
-            tf={mappingEditorActive ? null : needsTf ? displayTf : null}
+            tf={mappingEditorActive ? null : (needsTf || needsRobotModel) ? displayTf : null}
             spots={missionOverlayActive ? visibleSpots : []}
             selectedSpotId={missionOverlayActive && workspaceStage === STAGE_AUTHORING ? selectedSpotId : ""}
             activeWaypointId={workspaceStage === STAGE_RUN ? missionRunner.activeSpotId : ""}
@@ -5911,7 +5929,7 @@ export default function MissionCanvasPage() {
             showScan={mappingEditorActive ? false : needsScan}
             showGlobalPlan={mappingEditorActive ? false : needsPlan}
             showGoalPose={false}
-            showTf={mappingEditorActive ? false : stageNavigationTopicsActive && activeLayers.tf}
+            showTf={mappingEditorActive ? false : needsTf && activeLayers.tf}
             showRobotModel={mappingEditorActive ? false : needsRobotModel}
             interactionDisabled={
               !!busy ||

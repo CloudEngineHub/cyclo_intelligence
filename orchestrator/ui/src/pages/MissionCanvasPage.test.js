@@ -4408,8 +4408,9 @@ test('run mission activates the BT node on demand and releases it on stop', asyn
     }
     return Promise.resolve(mockJsonResponse({ name: 'bt_node', state: btUp ? 'up' : 'inactive', raw: '' }));
   });
-  // Navigation hangs until aborted, so the run is still in flight at Stop.
+  const navigationRequests = [];
   sendNavigateToPoseGoalAndWait.mockImplementation((goal, signal) => new Promise((resolve, reject) => {
+    navigationRequests.push({ resolve, reject });
     signal.addEventListener('abort', () => {
       reject(new DOMException('Aborted', 'AbortError'));
     }, { once: true });
@@ -4446,6 +4447,8 @@ test('run mission activates the BT node on demand and releases it on stop', asyn
     mockTopicDataByName['/amcl_pose'] = amclPoseMessage(0.6, 0.4, 0.1);
     return { ok: true };
   });
+  mockTopicDataByName['/bt/status'] = stringTopicMessage('running');
+  mockTopicDataByName['/bt/active_nodes'] = stringTopicMessage('Wait');
 
   // s6 can already report up while the ROS services are still being created.
   // Hold the read-only catalog probe to prove navigation cannot start in that
@@ -4458,7 +4461,7 @@ test('run mission activates the BT node on demand and releases it on stop', asyn
     return Promise.resolve({ success: true });
   });
 
-  render(<MissionCanvasPage />);
+  const { rerender } = render(<MissionCanvasPage />);
 
   fireEvent.click(screen.getByRole('tab', { name: 'Run' }));
   fireEvent.click(screen.getByRole('button', { name: 'Load Map' }));
@@ -4496,6 +4499,46 @@ test('run mission activates the BT node on demand and releases it on stop', asyn
   });
   await waitFor(() => expect(sendNavigateToPoseGoalAndWait).toHaveBeenCalled());
   await waitFor(() => expect(latestMapViewerProps().activeWaypointId).toBe('wp1'));
+
+  // Arriving at wp1 opens the read-only BT canvas. While it is visible, keep
+  // the base map, current pose/footprint, waypoint and route context, but
+  // suspend the high-frequency UI-only overlays behind ReactFlow.
+  fireEvent.click(screen.getByRole('switch', { name: 'TF' }));
+  await waitFor(() => expect(latestMapViewerProps().showTf).toBe(true));
+  await act(async () => {
+    navigationRequests[0].resolve({ ok: true, status: 'SUCCEEDED', message: 'Goal succeeded' });
+    await Promise.resolve();
+  });
+  await waitFor(() => expect(latestMapViewerProps().btLayer).not.toBeNull());
+  await waitFor(() => expect(latestMapViewerProps()).toMatchObject({
+    showMap: true,
+    showGlobalCostmap: false,
+    showLocalCostmap: false,
+    showScan: false,
+    showGlobalPlan: false,
+    showTf: false,
+    showRobotModel: true,
+    activeWaypointId: 'wp1',
+  }));
+  expect(latestMapViewerProps().spots).toHaveLength(2);
+  expect(latestMapViewerProps().missionRouteOrder).toEqual([
+    { id: 'wp1', order: 1 },
+    { id: 'wp2', order: 2 },
+  ]);
+  // Closing the BT view restores the selected layers before the runner starts
+  // navigating to the next waypoint.
+  mockTopicDataByName['/bt/status'] = stringTopicMessage('completed');
+  rerender(<MissionCanvasPage />);
+  await waitFor(() => expect(sendNavigateToPoseGoalAndWait).toHaveBeenCalledTimes(2));
+  await waitFor(() => expect(latestMapViewerProps().btLayer).toBeNull());
+  await waitFor(() => expect(latestMapViewerProps()).toMatchObject({
+    showGlobalCostmap: true,
+    showLocalCostmap: true,
+    showScan: true,
+    showGlobalPlan: true,
+    showTf: true,
+    showRobotModel: true,
+  }));
 
   // Stopping the run releases the node and clears the active waypoint before
   // the same map is loaded again. A stale currentIndex used to recreate an

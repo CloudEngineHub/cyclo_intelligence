@@ -13,6 +13,8 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+#
+# Author: Seongwoo Kim
 
 """supervisor_api — PLAN §4.7 + §4.8 control plane.
 

@@ -46,6 +46,7 @@ const SCAN_VISUALIZATION_STRIDE = 2;
 const RENDER_INTERVAL_ACTIVE_MS = 33;
 const RENDER_INTERVAL_IDLE_MS = 100;
 const RENDER_INTERVAL_HIDDEN_MS = 500;
+const GLOBAL_COSTMAP_FULL_UPLOAD_RATIO = 0.25;
 
 export function mapRenderIntervalMs({ hidden = false, active = false } = {}) {
     if (hidden)
@@ -523,6 +524,12 @@ function makeOccupancyTexture(grid, alpha, mode, highlightedCells = null, isDark
     texture.minFilter = THREE.NearestFilter;
     texture.generateMipmaps = false;
     texture.flipY = false;
+    if (mode === "globalCostmap") {
+        texture.userData.globalCostmapFullUploadPending = false;
+        texture.onUpdate = () => {
+            texture.userData.globalCostmapFullUploadPending = false;
+        };
+    }
     texture.needsUpdate = true;
     return texture;
 }
@@ -564,6 +571,17 @@ export function updateGlobalCostmapTexture(texture, grid, updateRegion) {
         return false;
     }
 
+    const useFullUpload = (
+        width * height > meta.width * meta.height * GLOBAL_COSTMAP_FULL_UPLOAD_RATIO
+    );
+    const fullUploadPending = Boolean(
+        texture.userData?.globalCostmapFullUploadPending
+    );
+    if (useFullUpload) {
+        texture.clearUpdateRanges?.();
+        texture.userData.globalCostmapFullUploadPending = true;
+    }
+
     for (let gridY = y; gridY < y + height; gridY += 1) {
         const textureY = meta.height - 1 - gridY;
         const textureX = meta.width - x - width;
@@ -573,10 +591,12 @@ export function updateGlobalCostmapTexture(texture, grid, updateRegion) {
             const targetIndex = (textureY * meta.width + targetX) * 4;
             writeGlobalCostmapPixel(textureData, targetIndex, grid.data[sourceIndex] ?? -1);
         }
-        texture.addUpdateRange(
-            (textureY * meta.width + textureX) * 4,
-            width * 4,
-        );
+        if (!useFullUpload && !fullUploadPending) {
+            texture.addUpdateRange(
+                (textureY * meta.width + textureX) * 4,
+                width * 4,
+            );
+        }
     }
     texture.needsUpdate = true;
     return true;
