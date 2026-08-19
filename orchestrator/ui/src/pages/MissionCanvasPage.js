@@ -2213,7 +2213,12 @@ export default function MissionCanvasPage() {
   const [missionRouteSourceId, setMissionRouteSourceId] = useState("");
   const [missionBtLoadingPath, setMissionBtLoadingPath] = useState("");
   const [busy, setBusy] = useState("");
-  const [message, setMessage] = useState("Ready");
+  // Status strings are no longer surfaced anywhere (the header status line
+  // was removed on purpose); the state stays because ~70 flows and child
+  // panels still report through setMessage, keeping the wiring in place if a
+  // notification surface ever returns.
+  const [message, setMessage] = useState("");
+  void message;
   const [btNodeStatus, setBtNodeStatus] = useState({
     state: "unknown",
     raw: "not checked",
@@ -5779,9 +5784,6 @@ export default function MissionCanvasPage() {
                 </SegGroup>
               </div>
             )}
-            <span className="text-[11px] font-mono truncate" style={{ color: "var(--mc-text-subtle)" }}>
-              {message}
-            </span>
           </div>
 
           <div className="flex items-center gap-2">
