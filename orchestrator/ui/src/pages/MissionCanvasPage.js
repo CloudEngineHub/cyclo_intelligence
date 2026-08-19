@@ -5849,7 +5849,7 @@ export default function MissionCanvasPage() {
         )}
 
         {/* content: map + inspector */}
-        <div className={`flex-1 min-h-0 grid grid-cols-1 ${waypointBtLayer ? "" : "xl:grid-cols-[minmax(460px,1fr)_380px]"}`}>
+        <div className={`flex-1 min-h-0 grid grid-cols-1 ${waypointBtLayer || mappingEditorActive ? "" : "xl:grid-cols-[minmax(460px,1fr)_380px]"}`}>
           <section className="min-h-0 overflow-hidden relative" style={{ backgroundColor: "var(--mc-surface)", borderRight: "1px solid var(--mc-border)" }}>
           <MapViewer
             isDark={isDark}
@@ -6378,7 +6378,9 @@ export default function MissionCanvasPage() {
               </div>
             </div>
           </aside>
-        ) : null) : (
+        ) : null) : mappingEditorActive ? null : (
+          // The saved-map editor gets the full width: it has no live topics,
+          // and its unsaved state already shows in the editor toolbar.
           <aside className="min-h-0 grid gap-4 overflow-auto p-4 content-start">
             {/* Teleop drives the robot while recording; it has no role in the
                 saved-map editor, so hide it there. */}

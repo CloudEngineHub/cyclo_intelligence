@@ -2832,7 +2832,9 @@ test('waits for an explicit saved-map selection in the mapping fix editor', asyn
   fireEvent.change(mapSelect, { target: { value: 'factory.pgm' } });
   await waitFor(() => expect(getPgmImage).toHaveBeenCalledWith('factory.pgm'));
   expect(screen.getByDisplayValue('factory.pgm')).toBeInTheDocument();
-  expect(screen.getByText('Saved map')).toBeInTheDocument();
+  // The editor takes the full width: no session/topics side panels.
+  expect(screen.queryByText('Mapping Session')).not.toBeInTheDocument();
+  expect(screen.queryByText('Topics')).not.toBeInTheDocument();
   expect(screen.getAllByText('factory.pgm').length).toBeGreaterThan(0);
   expect(latestMapViewerProps().showScan).toBe(false);
   expect(latestMapViewerProps().showMap).toBe(true);
@@ -2875,7 +2877,9 @@ test('switches the mapping header between record and edit modes', async () => {
   expect(screen.queryByRole('button', { name: 'Save Map' })).not.toBeInTheDocument();
   expect(screen.queryByRole('group', { name: 'Mobile Teleop' })).not.toBeInTheDocument();
   expect(screen.queryByRole('switch', { name: 'Lidar' })).not.toBeInTheDocument();
-  expect(screen.getByText('Saved map')).toBeInTheDocument();
+  // The whole side column is gone — the editor gets the full width.
+  expect(screen.queryByText('Mapping Session')).not.toBeInTheDocument();
+  expect(screen.queryByText('Topics')).not.toBeInTheDocument();
 
   fireEvent.click(screen.getByRole('button', { name: 'Record Map' }));
 
@@ -2953,7 +2957,7 @@ test('edits and saves loaded map pixels from the fix editor', async () => {
     latestMapViewerProps().onEditorMapPoint(0, 0);
   });
 
-  expect(screen.getByText('Unsaved changes')).toBeInTheDocument();
+  expect(screen.getByText('· unsaved')).toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Undo' })).toBeEnabled();
   expect(screen.getByRole('button', { name: 'Redo' })).toBeDisabled();
 
@@ -3101,7 +3105,7 @@ test('marks free-space areas with automatic color and undo/redo support', async 
   expect(latestMapViewerProps().editorPaintOnDrag).toBe(true);
   // New areas are auto-selected in the chip list.
   expect(screen.getByRole('button', { name: 'Dock' })).toHaveAttribute('aria-pressed', 'true');
-  expect(screen.getByText('Unsaved changes')).toBeInTheDocument();
+  expect(screen.getByText('· unsaved')).toBeInTheDocument();
   expect(saveMapAnnotations).not.toHaveBeenCalled();
 
   const areaSaveCalls = saveMapAnnotations.mock.calls.length;
@@ -3218,7 +3222,7 @@ test('removes an area from the chip list', async () => {
 
   await waitFor(() => expect(latestMapViewerProps().mapAnnotations).toEqual([]));
   expect(screen.getByText('Removed area Dock')).toBeInTheDocument();
-  expect(screen.getByText('Unsaved changes')).toBeInTheDocument();
+  expect(screen.getByText('· unsaved')).toBeInTheDocument();
   expect(saveMapAnnotations).not.toHaveBeenCalled();
 
   await waitFor(() => expect(screen.getByRole('button', { name: 'Save' })).toBeEnabled());
@@ -3273,7 +3277,7 @@ test('renames a map area from the chip list', async () => {
 
   await waitFor(() => expect(screen.getByRole('button', { name: 'Dock Bay' })).toBeInTheDocument());
   expect(screen.getByText('Renamed area Dock Bay')).toBeInTheDocument();
-  expect(screen.getByText('Unsaved changes')).toBeInTheDocument();
+  expect(screen.getByText('· unsaved')).toBeInTheDocument();
 
   fireEvent.click(screen.getByRole('button', { name: 'Undo' }));
   await waitFor(() => expect(screen.getByRole('button', { name: 'Dock' })).toBeInTheDocument());
@@ -3435,7 +3439,7 @@ test('extends the selected area with the extend brush', async () => {
     }),
   ]));
   expect(screen.getByText('Extended area Dock')).toBeInTheDocument();
-  expect(screen.getByText('Unsaved changes')).toBeInTheDocument();
+  expect(screen.getByText('· unsaved')).toBeInTheDocument();
 
   // The whole stroke is a single undo entry.
   fireEvent.click(screen.getByRole('button', { name: 'Undo' }));
