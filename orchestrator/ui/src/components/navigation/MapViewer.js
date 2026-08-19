@@ -43,7 +43,10 @@ const BT_FOCUS_WAYPOINT_NDC_X = -0.75;
 // UI-only decimation. Nav2 still consumes every LaserScan ray; the browser
 // projects half of them to reduce point geometry and local-costmap highlighting.
 const SCAN_VISUALIZATION_STRIDE = 2;
-const RENDER_INTERVAL_ACTIVE_MS = 33;
+// Interaction renders at ~60fps: panning/rotating a full-viewport map at
+// 30fps reads as visible judder. Idle/hidden tiers keep the CPU savings —
+// interaction is transient, so the 60fps bursts are cheap overall.
+const RENDER_INTERVAL_ACTIVE_MS = 16;
 const RENDER_INTERVAL_IDLE_MS = 100;
 const RENDER_INTERVAL_HIDDEN_MS = 500;
 const GLOBAL_COSTMAP_FULL_UPLOAD_RATIO = 0.25;
@@ -1610,7 +1613,10 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, scanPose = n
             camera.position.set(0, 0, 10);
             cameraRef.current = camera;
             renderer = new THREE.WebGLRenderer({ antialias: true });
-            renderer.setPixelRatio(window.devicePixelRatio || 1);
+            // Cap the pixel ratio: full DPR on hi-DPI displays nearly doubles
+            // the pixels rendered per frame for no visible gain on a map view,
+            // and the full-width editor canvas made that cost noticeable.
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
             renderer.setClearColor(isDark ? SCENE_BG.dark : SCENE_BG.light, 1);
             renderer.domElement.className = "block w-full h-full cursor-grab";
             containerEl.appendChild(renderer.domElement);

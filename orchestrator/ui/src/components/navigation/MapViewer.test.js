@@ -93,7 +93,7 @@ test('closes the waypoint BT split when its left 25% map context is clicked', ()
 });
 
 test('uses adaptive map render intervals for active, idle and hidden states', () => {
-  expect(mapRenderIntervalMs({ active: true })).toBe(33);
+  expect(mapRenderIntervalMs({ active: true })).toBe(16);
   expect(mapRenderIntervalMs({ active: false })).toBe(100);
   expect(mapRenderIntervalMs({ hidden: true, active: true })).toBe(500);
 });
