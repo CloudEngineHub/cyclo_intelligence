@@ -54,6 +54,7 @@ import {
   applyDagreLayout,
   findDeletionLayoutAnchor,
 } from "../../utils/btTreeParser";
+import { isValidBtConnection } from "../../utils/btConnection";
 import { serializeFromGraph } from "../../utils/btXmlSerializer";
 
 const nodeTypes = {
@@ -112,28 +113,8 @@ function computeHiddenIds(nodes, edges) {
   return hidden;
 }
 
-export function isValidBtConnection(connection, nodes, edges) {
-  const source = connection?.source;
-  const target = connection?.target;
-  if (!source || !target || source === target) return false;
-  const sourceNode = nodes.find((node) => node.id === source);
-  if (!sourceNode || sourceNode.type !== "btControl") return false;
-  if (edges.some((edge) => edge.target === target)) return false;
-
-  // Adding source -> target is cyclic when target already reaches source.
-  const queue = [target];
-  const visited = new Set();
-  while (queue.length) {
-    const nodeId = queue.shift();
-    if (nodeId === source) return false;
-    if (visited.has(nodeId)) continue;
-    visited.add(nodeId);
-    edges.forEach((edge) => {
-      if (edge.source === nodeId) queue.push(edge.target);
-    });
-  }
-  return true;
-}
+// Shared with the BT Manager editor; re-exported to keep existing imports.
+export { isValidBtConnection } from "../../utils/btConnection";
 
 function layoutVisibleOnly(nodes, edges, { anchorNodeId = null } = {}) {
   const hidden = computeHiddenIds(nodes, edges);

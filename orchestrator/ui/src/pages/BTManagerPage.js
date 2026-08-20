@@ -28,7 +28,7 @@ export default function BTManagerPage({ isActive = true }) {
   if (!btRobotSupported) {
     return (
       <div className="w-full h-full flex flex-col">
-        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 bg-white">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-black bg-white">
           <h1 className="text-xl font-bold text-gray-800">BT Manager</h1>
         </div>
 

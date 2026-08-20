@@ -48,6 +48,7 @@ import {
   applyDagreLayout,
   findDeletionLayoutAnchor,
 } from '../../../utils/btTreeParser';
+import { isValidBtConnection } from '../../../utils/btConnection';
 import { serializeFromGraph } from '../../../utils/btXmlSerializer';
 import { setTreeXml, setTreeFileName, setBtStatus, setActiveNodeNames, setSelectedNodeId } from '../btmanagerSlice';
 import { useRosServiceCaller } from '../../../hooks/useRosServiceCaller';
@@ -397,6 +398,12 @@ export default function BTEditorSurface({
 
   // ── Manual edge connection ────────────────────────────────────────────────
   const handleConnect = useCallback((connection) => {
+    // Belt-and-braces alongside the isValidConnection prop: actions are BT
+    // leaves — the engine loads children of control nodes only, so an edge
+    // out of an action would render but never execute.
+    if (!isValidBtConnection(connection, nodesRef.current, edgesRef.current)) {
+      return;
+    }
     captureHistory();
     const nextEdges = addEdge(
       { ...connection, type: 'smoothstep', animated: false },
@@ -879,7 +886,7 @@ export default function BTEditorSurface({
   return (
     <div className={clsx(className, 'flex flex-col')}>
       {/* Header */}
-      <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 bg-white">
+      <div className="flex items-center justify-between px-6 py-4 border-b border-black bg-white">
         <h1 className="text-xl font-bold text-gray-800">{title}</h1>
         <div className="flex items-center gap-3">
           <span className="text-sm text-gray-500">
@@ -987,6 +994,9 @@ export default function BTEditorSurface({
               nodeTypes={nodeTypes}
               onInit={(instance) => { reactFlowRef.current = instance; }}
               onConnect={handleConnect}
+              isValidConnection={(connection) => (
+                isValidBtConnection(connection, nodesRef.current, edgesRef.current)
+              )}
               onNodeClick={handleNodeClick}
               onNodeDragStop={handleNodeDragStop}
               fitView
@@ -1019,7 +1029,7 @@ export default function BTEditorSurface({
       </div>
 
       {/* Bottom Control Bar */}
-      <div className="flex items-center justify-between px-6 py-3 border-t border-gray-200 bg-white">
+      <div className="flex items-center justify-between px-6 py-3 border-t border-black bg-white">
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-2 pr-3 mr-1 border-r border-gray-200">
             <div className={clsx('w-3 h-3 rounded-full', btNodeStatusColor)} />

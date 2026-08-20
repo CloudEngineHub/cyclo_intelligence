@@ -91,3 +91,71 @@ test('restores the pre-edit node name when Escape is pressed', () => {
   expect(input).toHaveValue('JointControl_1');
   expect(onNameChange).toHaveBeenLastCalledWith('bt_1', 'JointControl_1');
 });
+
+test('JointControl renders per-joint chips that keep positions aligned', () => {
+  const onParamChange = jest.fn();
+  const jointNode = {
+    id: 'bt_2',
+    data: {
+      label: 'JointControl_2',
+      nodeType: 'JointControl',
+      params: {
+        enable_arms: 'true',
+        left_joint_names: 'arm_l_joint1, arm_l_joint2',
+        left_positions: '0.1, 0.2',
+        right_joint_names: '',
+        right_positions: '',
+        duration: '2.0',
+      },
+    },
+  };
+  render(
+    <BTParamPanel
+      nodes={[jointNode]}
+      selectedNodeId={jointNode.id}
+      onParamChange={onParamChange}
+      onNameChange={jest.fn()}
+    />,
+  );
+
+  // Each side renders the SG2 joint chips (left list + right list).
+  expect(screen.getAllByRole('button', { name: 'arm_l_joint3' })).toHaveLength(1);
+  expect(screen.getAllByRole('button', { name: 'arm_r_joint1' })).toHaveLength(1);
+
+  // Deselecting a joint drops its position from the paired CSV.
+  fireEvent.click(screen.getByRole('button', { name: 'arm_l_joint1' }));
+  expect(onParamChange).toHaveBeenCalledWith('bt_2', 'left_joint_names', 'arm_l_joint2');
+  expect(onParamChange).toHaveBeenCalledWith('bt_2', 'left_positions', '0.2');
+
+  // Selecting a new joint appends it in canonical order with a 0.0 target.
+  fireEvent.click(screen.getByRole('button', { name: 'arm_l_joint3' }));
+  expect(onParamChange).toHaveBeenCalledWith(
+    'bt_2', 'left_joint_names', 'arm_l_joint2, arm_l_joint3',
+  );
+  expect(onParamChange).toHaveBeenCalledWith('bt_2', 'left_positions', '0.2, 0.0');
+});
+
+test('JointControl joint chips are disabled while arms are disabled', () => {
+  const jointNode = {
+    id: 'bt_3',
+    data: {
+      label: 'JointControl_3',
+      nodeType: 'JointControl',
+      params: {
+        enable_arms: 'false',
+        left_joint_names: 'arm_l_joint1',
+        left_positions: '0.0',
+      },
+    },
+  };
+  render(
+    <BTParamPanel
+      nodes={[jointNode]}
+      selectedNodeId={jointNode.id}
+      onParamChange={jest.fn()}
+      onNameChange={jest.fn()}
+    />,
+  );
+
+  expect(screen.getByRole('button', { name: 'arm_l_joint1' })).toBeDisabled();
+});

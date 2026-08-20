@@ -28,33 +28,48 @@ const NUMBER_PARAMS = new Set([
   'timeout_sec',
 ]);
 
+const SG2_LEFT_JOINTS = [
+  'arm_l_joint1',
+  'arm_l_joint2',
+  'arm_l_joint3',
+  'arm_l_joint4',
+  'arm_l_joint5',
+  'arm_l_joint6',
+  'arm_l_joint7',
+  'gripper_l_joint1',
+];
+
+const SG2_RIGHT_JOINTS = [
+  'arm_r_joint1',
+  'arm_r_joint2',
+  'arm_r_joint3',
+  'arm_r_joint4',
+  'arm_r_joint5',
+  'arm_r_joint6',
+  'arm_r_joint7',
+  'gripper_r_joint1',
+];
+
 const SG2_TARGET_JOINTS = {
-  left_target_joints: [
-    'arm_l_joint1',
-    'arm_l_joint2',
-    'arm_l_joint3',
-    'arm_l_joint4',
-    'arm_l_joint5',
-    'arm_l_joint6',
-    'arm_l_joint7',
-    'gripper_l_joint1',
-  ],
-  right_target_joints: [
-    'arm_r_joint1',
-    'arm_r_joint2',
-    'arm_r_joint3',
-    'arm_r_joint4',
-    'arm_r_joint5',
-    'arm_r_joint6',
-    'arm_r_joint7',
-    'gripper_r_joint1',
-  ],
+  // ArmStateGate observation targets
+  left_target_joints: SG2_LEFT_JOINTS,
+  right_target_joints: SG2_RIGHT_JOINTS,
+  // JointControl trajectory joints
+  left_joint_names: SG2_LEFT_JOINTS,
+  right_joint_names: SG2_RIGHT_JOINTS,
 };
 
+// joint-selection param → its paired positions param. Toggling a joint chip
+// keeps the two CSVs aligned (new joints get 0.0, removed joints drop theirs).
 const TARGET_POSITION_PARAM = {
   left_target_joints: 'left_target_positions',
   right_target_joints: 'right_target_positions',
+  left_joint_names: 'left_positions',
+  right_joint_names: 'right_positions',
 };
+
+// Node types whose joint params render as the chip selector.
+const JOINT_SELECTOR_NODE_TYPES = new Set(['ArmStateGate', 'JointControl']);
 
 const csvParts = (value) =>
   String(value || '')
@@ -141,7 +156,10 @@ function isSendCommandFieldDisabled(nodeType, key, params) {
 function isJointControlFieldDisabled(nodeType, key, params) {
   if (nodeType !== 'JointControl') return false;
   if (key === 'head_positions') return !truthy(params.enable_head);
-  if (key === 'left_positions' || key === 'right_positions') {
+  if (
+    key === 'left_positions' || key === 'right_positions'
+    || key === 'left_joint_names' || key === 'right_joint_names'
+  ) {
     return !truthy(params.enable_arms);
   }
   if (key === 'lift_position') return !truthy(params.enable_lift);
@@ -332,7 +350,7 @@ export default function BTParamPanel({
       ? ' !bg-[var(--mc-surface-hover)] !text-[var(--mc-text-subtle)] cursor-not-allowed'
       : '';
 
-    if (nodeType === 'ArmStateGate' && TARGET_POSITION_PARAM[key]) {
+    if (JOINT_SELECTOR_NODE_TYPES.has(nodeType) && TARGET_POSITION_PARAM[key]) {
       return renderTargetJointSelector(key, value, disabled);
     }
 
@@ -418,10 +436,13 @@ export default function BTParamPanel({
     );
   };
 
+  // The --mc-* tokens are scoped to .mission-canvas-page; outside it (BT
+  // Manager) the vars are undefined, so the panel chrome needs opaque
+  // fallbacks or the canvas nodes show through.
   return (
-    <div className="absolute right-0 top-0 bottom-0 w-[320px] bg-[var(--mc-surface-2)] border-l border-[var(--mc-border)] shadow-lg z-10 flex flex-col">
+    <div className="absolute right-0 top-0 bottom-0 w-[320px] bg-[var(--mc-surface-2,#ffffff)] border-l border-[var(--mc-border,#e5e7eb)] shadow-lg z-10 flex flex-col">
       {/* Header */}
-      <div className="flex items-start justify-between px-4 py-3 border-b border-[var(--mc-border)]">
+      <div className="flex items-start justify-between px-4 py-3 border-b border-[var(--mc-border,#e5e7eb)]">
         <div className="flex-1 min-w-0 pr-2">
           <div className="text-xs text-[var(--mc-text-muted)] mb-1 font-mono">{nodeType}</div>
           <input

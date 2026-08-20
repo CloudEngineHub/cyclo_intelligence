@@ -327,3 +327,81 @@ def test_arm_state_gate_catalog_entry_has_expected_ports():
     assert ports['detect_right_gripper']['type'] == 'bool'
     assert ports['gripper_threshold']['type'] == 'number'
     assert ports['timeout_sec']['type'] == 'number'
+
+
+def test_joint_control_catalog_exposes_per_joint_selection():
+    registry = build_registry()
+    catalog = {entry['tag']: entry for entry in catalog_payload(registry)}
+    port_names = [port['name'] for port in catalog['JointControl']['ports']]
+
+    # Selector renders above its positions field, so the catalog (ctor
+    # order) must list each joint_names port before its positions port.
+    assert port_names.index('left_joint_names') < port_names.index(
+        'left_positions'
+    )
+    assert port_names.index('right_joint_names') < port_names.index(
+        'right_positions'
+    )
+
+    ports = {port['name']: port for port in catalog['JointControl']['ports']}
+    assert ports['left_joint_names']['type'] == 'string'
+    assert ports['right_joint_names']['type'] == 'string'
+
+
+def test_joint_control_from_xml_params_forwards_selected_joints():
+    from orchestrator.bt.actions.joint_control import JointControl
+
+    class _PublishingNode(_DummyNode):
+        def create_publisher(self, *args, **kwargs):
+            return types.SimpleNamespace(publish=lambda msg: None)
+
+    context = types.SimpleNamespace(
+        node=_PublishingNode(),
+        topic_config={
+            'topic_map': {
+                'leader_arm_left': '/leader/arm_left',
+                'leader_arm_right': '/leader/arm_right',
+            },
+            'topic_type_map': {
+                'leader_arm_left': 'trajectory_msgs/msg/JointTrajectory',
+                'leader_arm_right': 'trajectory_msgs/msg/JointTrajectory',
+            },
+            'joint_order': {
+                'leader_arm_left': [
+                    f'arm_l_joint{i}' for i in range(1, 9)
+                ],
+                'leader_arm_right': [
+                    f'arm_r_joint{i}' for i in range(1, 9)
+                ],
+            },
+        },
+    )
+
+    action = JointControl.from_xml_params(context, 'JC', {
+        'enable_head': False,
+        'enable_arms': True,
+        'left_joint_names': 'arm_l_joint2, arm_l_joint4',
+        'left_positions': '0.5, -0.5',
+        'right_joint_names': 'arm_r_joint1',
+        'right_positions': '1.0',
+    })
+
+    by_group = {ch['group']: ch for ch in action._channels}
+    assert by_group['arm_left']['joint_names'] == [
+        'arm_l_joint2', 'arm_l_joint4',
+    ]
+    assert by_group['arm_left']['positions'] == [0.5, -0.5]
+    assert by_group['arm_right']['joint_names'] == ['arm_r_joint1']
+    assert by_group['arm_right']['positions'] == [1.0]
+
+    # Without joint_names the full robot-yaml joint order still applies.
+    legacy = JointControl.from_xml_params(context, 'JC', {
+        'enable_head': False,
+        'enable_arms': True,
+        'left_positions': '0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8',
+        'right_positions': '0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8',
+    })
+    legacy_left = {
+        ch['group']: ch for ch in legacy._channels
+    }['arm_left']
+    assert len(legacy_left['joint_names']) == 8

@@ -44,9 +44,23 @@ export const FALLBACK_CATALOG = [
       { name: 'head_positions', type: 'string', default: '0.0, 0.0' },
       { name: 'enable_arms', type: 'bool', default: 'false' },
       {
+        name: 'left_joint_names',
+        type: 'string',
+        default:
+          'arm_l_joint1, arm_l_joint2, arm_l_joint3, arm_l_joint4, '
+          + 'arm_l_joint5, arm_l_joint6, arm_l_joint7, gripper_l_joint1',
+      },
+      {
         name: 'left_positions',
         type: 'string',
         default: '0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0',
+      },
+      {
+        name: 'right_joint_names',
+        type: 'string',
+        default:
+          'arm_r_joint1, arm_r_joint2, arm_r_joint3, arm_r_joint4, '
+          + 'arm_r_joint5, arm_r_joint6, arm_r_joint7, gripper_r_joint1',
       },
       {
         name: 'right_positions',
