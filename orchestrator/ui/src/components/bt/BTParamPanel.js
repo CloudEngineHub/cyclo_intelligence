@@ -71,6 +71,28 @@ const TARGET_POSITION_PARAM = {
 // Node types whose joint params render as the chip selector.
 const JOINT_SELECTOR_NODE_TYPES = new Set(['ArmStateGate', 'JointControl']);
 
+// Nodes created before the per-joint params existed (or from a stale bt_node
+// catalog) lack left/right_joint_names entirely, so the selector would never
+// render for them. Synthesize the params with the full joint list — exactly
+// what the engine does when the names are omitted — inserting each one just
+// before its positions field so the selector renders above it.
+function withJointSelectionDefaults(params, nodeType) {
+  if (nodeType !== 'JointControl') return params;
+  const next = {};
+  const insertBefore = {
+    left_positions: ['left_joint_names', SG2_LEFT_JOINTS.join(', ')],
+    right_positions: ['right_joint_names', SG2_RIGHT_JOINTS.join(', ')],
+  };
+  Object.entries(params).forEach(([key, value]) => {
+    const missing = insertBefore[key];
+    if (missing && !(missing[0] in params)) {
+      next[missing[0]] = missing[1];
+    }
+    next[key] = value;
+  });
+  return next;
+}
+
 const csvParts = (value) =>
   String(value || '')
     .split(',')
@@ -215,7 +237,10 @@ export default function BTParamPanel({
   // Reset local state only when switching to a different node
   useEffect(() => {
     if (selectedNode) {
-      setLocalParams(selectedNode.data.params || {});
+      setLocalParams(withJointSelectionDefaults(
+        selectedNode.data.params || {},
+        selectedNode.data.nodeType,
+      ));
       setLocalName(selectedNode.data.label || '');
     }
     setShowPolicyBrowser(false);

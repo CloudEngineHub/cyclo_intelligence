@@ -159,3 +159,42 @@ test('JointControl joint chips are disabled while arms are disabled', () => {
 
   expect(screen.getByRole('button', { name: 'arm_l_joint1' })).toBeDisabled();
 });
+
+test('legacy JointControl nodes without joint_names still get the chips', () => {
+  const onParamChange = jest.fn();
+  const legacyNode = {
+    id: 'bt_4',
+    data: {
+      label: 'JointControl_4',
+      nodeType: 'JointControl',
+      params: {
+        enable_arms: 'true',
+        left_positions: '0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8',
+        right_positions: '0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0',
+        duration: '2.0',
+      },
+    },
+  };
+  render(
+    <BTParamPanel
+      nodes={[legacyNode]}
+      selectedNodeId={legacyNode.id}
+      onParamChange={onParamChange}
+      onNameChange={jest.fn()}
+    />,
+  );
+
+  // The synthesized selection defaults to the full joint list (what the
+  // engine does when names are omitted), so deselecting one joint keeps
+  // the other joints' existing positions aligned.
+  fireEvent.click(screen.getByRole('button', { name: 'gripper_l_joint1' }));
+  expect(onParamChange).toHaveBeenCalledWith(
+    'bt_4',
+    'left_joint_names',
+    'arm_l_joint1, arm_l_joint2, arm_l_joint3, arm_l_joint4, '
+    + 'arm_l_joint5, arm_l_joint6, arm_l_joint7',
+  );
+  expect(onParamChange).toHaveBeenCalledWith(
+    'bt_4', 'left_positions', '0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7',
+  );
+});
