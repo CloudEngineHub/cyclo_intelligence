@@ -74,6 +74,12 @@ export function getPgmImage(path) {
   return request(`/maps/pgm?path=${encodeURIComponent(path)}`);
 }
 
+export function deletePgmMap(path) {
+  return request(`/maps/pgm?path=${encodeURIComponent(path)}`, {
+    method: 'DELETE',
+  });
+}
+
 export function savePgmImage(
   path,
   width,

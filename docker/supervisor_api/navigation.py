@@ -48,6 +48,7 @@ from supervisor_api.navigation_grid_cache import (
     GRID_TOPICS,
     ensure_ros_grid_subscriber_started,
 )
+from supervisor_api.navigation_missions import remove_map_missions
 
 
 router = APIRouter(prefix="/navigation", tags=["navigation"])
@@ -1571,6 +1572,28 @@ def save_pgm(request: PgmSaveRequest):
         "width": request.width,
         "height": request.height,
         "saved": True,
+    }
+
+
+@router.delete("/maps/pgm")
+def delete_pgm(path: str):
+    """Delete a saved map: the .pgm plus its .yaml / annotations sidecars in
+    ai_worker, and every mission stored for the map on this side."""
+    resolved = _resolve_pgm_path(path)
+    code, _ = _exec(["test", "-f", str(resolved)])
+    if code != 0:
+        raise HTTPException(404, f"PGM file not found: {path}")
+    yaml_path = resolved.with_suffix(".yaml")
+    annotations_path = _resolve_map_annotations_path(resolved)
+    code, output = _exec(
+        ["rm", "-f", str(resolved), str(yaml_path), str(annotations_path)]
+    )
+    if code != 0:
+        raise HTTPException(503, output or f"Failed to delete {path}")
+    return {
+        "path": _relative_map_path(resolved),
+        "removed_missions": remove_map_missions(resolved.stem),
+        "deleted": True,
     }
 
 

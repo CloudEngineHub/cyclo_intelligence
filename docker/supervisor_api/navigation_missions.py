@@ -207,6 +207,28 @@ def _mission_root(map_name: str) -> Path:
     return candidate
 
 
+def remove_map_missions(map_name: str) -> int:
+    """Delete every mission stored for a map (used when the map itself is
+    deleted); returns how many missions were removed."""
+    with _MISSION_MUTATION_LOCK:
+        try:
+            mission_root = _mission_root(map_name)
+        except HTTPException:
+            return 0
+        if not mission_root.is_dir():
+            return 0
+        removed = sum(
+            1
+            for child in mission_root.iterdir()
+            if child.is_dir() and child.name not in _RESERVED_STORAGE_NAMES
+        )
+        if removed == 0 and (mission_root / "mission.json").is_file():
+            # Pre-mission-name legacy layout: one mission at the root.
+            removed = 1
+        shutil.rmtree(mission_root, ignore_errors=True)
+        return removed
+
+
 def _migrate_legacy_mission(map_name: str) -> None:
     """Move the pre-mission-name artifact layout into the default mission."""
     mission_root = _mission_root(map_name)

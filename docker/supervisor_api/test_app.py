@@ -206,6 +206,55 @@ def test_navigation_validates_map_name():
         navigation._validate_map_name("factory; reboot")
 
 
+def test_navigation_delete_pgm_removes_sidecars_and_missions(monkeypatch):
+    executed = []
+
+    def fake_exec(command, **kwargs):
+        executed.append(command)
+        return 0, ""
+
+    monkeypatch.setattr(navigation, "_exec", fake_exec)
+    monkeypatch.setattr(navigation, "remove_map_missions", lambda map_name: 2)
+
+    result = navigation.delete_pgm("factory.pgm")
+
+    assert result == {"path": "factory.pgm", "removed_missions": 2, "deleted": True}
+    rm_command = executed[-1]
+    assert rm_command[:2] == ["rm", "-f"]
+    assert str(navigation.MAPS_DIR / "factory.pgm") in rm_command
+    assert str(navigation.MAPS_DIR / "factory.yaml") in rm_command
+    assert str(navigation.MAPS_DIR / "factory.annotations.json") in rm_command
+
+
+def test_navigation_delete_pgm_missing_file(monkeypatch):
+    import pytest
+    from fastapi import HTTPException
+
+    monkeypatch.setattr(navigation, "_exec", lambda command, **kwargs: (1, ""))
+    monkeypatch.setattr(
+        navigation,
+        "remove_map_missions",
+        lambda map_name: pytest.fail("missions must survive a missing map"),
+    )
+
+    with pytest.raises(HTTPException) as excinfo:
+        navigation.delete_pgm("ghost.pgm")
+    assert excinfo.value.status_code == 404
+
+
+def test_missions_remove_map_missions(tmp_path, monkeypatch):
+    monkeypatch.setattr(navigation_missions, "NAVIGATION_DATA_ROOT", tmp_path)
+    mission_root = tmp_path / "missions" / "factory"
+    (mission_root / "default").mkdir(parents=True)
+    (mission_root / "patrol").mkdir()
+    (mission_root / ".staging").mkdir()
+
+    assert navigation_missions.remove_map_missions("factory") == 2
+    assert not mission_root.exists()
+    # A second call (or a map without missions) is a quiet no-op.
+    assert navigation_missions.remove_map_missions("factory") == 0
+
+
 def test_navigation_save_map_waits_for_artifacts(monkeypatch):
     calls = []
     signatures = [

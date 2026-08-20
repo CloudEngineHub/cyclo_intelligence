@@ -3,6 +3,7 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import MissionCanvasPage, { assembleMissionBtFilesForSave } from './MissionCanvasPage';
 import {
   configureDesignLocalizationAmcl,
+  deletePgmMap,
   getMapAnnotations,
   getPgmFiles,
   getPgmImage,
@@ -106,6 +107,7 @@ jest.mock('../components/navigation/MapViewer', () => ({
 
 jest.mock('../utils/navigationApi', () => ({
   configureDesignLocalizationAmcl: jest.fn().mockResolvedValue({ ok: true }),
+  deletePgmMap: jest.fn().mockResolvedValue({ deleted: true, removed_missions: 0 }),
   getMapAnnotations: jest.fn().mockResolvedValue({ path: 'map.pgm', annotations: [] }),
   getPgmFiles: jest.fn().mockResolvedValue({ files: [] }),
   getPgmImage: jest.fn().mockResolvedValue({
@@ -2786,10 +2788,49 @@ test('asks for a map name before saving from Mission Canvas', async () => {
   fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
   await waitFor(() => expect(saveNavigationMap).toHaveBeenCalledWith('factory'));
-  expect(getPgmFiles).not.toHaveBeenCalled();
   expect(getPgmImage).not.toHaveBeenCalled();
   expect(screen.queryByDisplayValue('factory.pgm')).not.toBeInTheDocument();
   expect(screen.getByText('Live mapping')).toBeInTheDocument();
+});
+
+test('deletes a saved map from the Mapping HUD behind a warning confirm popup', async () => {
+  getPgmFiles.mockResolvedValue({
+    files: [{ path: 'factory.pgm', name: 'factory.pgm' }],
+  });
+  getNavigationMissions.mockResolvedValue({ map_name: 'factory', missions: ['default', 'patrol'] });
+
+  render(<MissionCanvasPage />);
+
+  // The trash icon opens a saved-map list popover; picking a map opens the
+  // warning popup (and closes the list).
+  fireEvent.click(screen.getByRole('button', { name: 'Delete Map' }));
+  expect(screen.getByRole('menu', { name: 'Saved maps' })).toBeInTheDocument();
+  fireEvent.click(await screen.findByRole('button', { name: 'Delete map factory.pgm' }));
+  expect(screen.queryByRole('menu', { name: 'Saved maps' })).not.toBeInTheDocument();
+
+  // The popup spells out the cascade before asking.
+  expect(await screen.findByText('Delete this map?')).toBeInTheDocument();
+  await waitFor(() => expect(
+    screen.getByText('This map, its areas, and 2 missions will be deleted permanently.'),
+  ).toBeInTheDocument());
+  expect(deletePgmMap).not.toHaveBeenCalled();
+
+  // No closes without deleting.
+  fireEvent.click(screen.getByRole('button', { name: 'No' }));
+  expect(screen.queryByText('Delete this map?')).not.toBeInTheDocument();
+  expect(deletePgmMap).not.toHaveBeenCalled();
+
+  fireEvent.click(screen.getByRole('button', { name: 'Delete Map' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Delete map factory.pgm' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Yes' }));
+
+  await waitFor(() => expect(deletePgmMap).toHaveBeenCalledWith('factory.pgm'));
+  await waitFor(() => expect(screen.queryByText('Delete this map?')).not.toBeInTheDocument());
+
+  // The list refreshes: reopening the popover shows the empty state.
+  fireEvent.click(screen.getByRole('button', { name: 'Delete Map' }));
+  expect(await screen.findByText('No saved maps yet.')).toBeInTheDocument();
+  expect(screen.queryByText('factory.pgm')).not.toBeInTheDocument();
 });
 
 test('waits for an explicit saved-map selection in the mapping fix editor', async () => {

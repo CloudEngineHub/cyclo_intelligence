@@ -17,6 +17,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   MdAdd,
   MdAddLocationAlt,
@@ -36,6 +37,7 @@ import {
 import {
   cancelNavigateToPoseGoal,
   configureDesignLocalizationAmcl,
+  deletePgmMap,
   getServiceStatus,
   getPgmFiles,
   requestNoMotionUpdate,
@@ -1586,6 +1588,133 @@ function MappingSessionPanel() {
   );
 }
 
+// Confirm popup for deleting a saved map — the warning spells out the
+// cascade (areas + missions) before asking.
+function DeleteMapDialog({ file, missionCount, busy, onCancel, onConfirm }) {
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center px-4"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="mission-delete-map-title"
+      style={{ backgroundColor: "rgba(28,26,23,0.45)", backdropFilter: "blur(3px)" }}
+    >
+      <div
+        className="w-full max-w-sm grid gap-4 p-5"
+        style={{ color: "var(--mc-text)", backgroundColor: "var(--mc-surface)", border: "1px solid var(--mc-border)", borderRadius: 16, boxShadow: "var(--mc-shadow)" }}
+      >
+        <div id="mission-delete-map-title" className="text-[15px] font-bold">Delete this map?</div>
+        <div className="grid gap-1 text-[13px]">
+          <span className="font-mono truncate" title={file.path}>{file.path}</span>
+          <span style={{ color: "var(--mc-danger)" }}>
+            {missionCount === null
+              ? "This map, its areas, and its missions will be deleted permanently."
+              : missionCount === 0
+                ? "This map and its areas will be deleted permanently."
+                : `This map, its areas, and ${missionCount} mission${missionCount === 1 ? "" : "s"} will be deleted permanently.`}
+          </span>
+        </div>
+        <div className="flex justify-end gap-2">
+          <ActionButton disabled={busy} onClick={onCancel} variant="secondary">No</ActionButton>
+          <ActionButton disabled={busy} onClick={onConfirm} variant="danger">Yes</ActionButton>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Mapping HUD control: a trash icon opening a saved-map list popover (the
+// HUD popover idiom); picking a map raises the warning confirm popup, and
+// the delete cascades to sidecars and missions on the backend.
+function MapDeleteControl({ files, disabled = false, protectedPaths = [], onDelete, dialogHost }) {
+  const [open, setOpen] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [deleteMissionCount, setDeleteMissionCount] = useState(null);
+  const [deleting, setDeleting] = useState(false);
+  const deleteTargetPathRef = useRef("");
+  const requestDelete = (file) => {
+    deleteTargetPathRef.current = file.path;
+    setDeleteTarget(file);
+    setDeleteMissionCount(null);
+    setOpen(false);
+    getNavigationMissions(mapNameFromPgmPath(file.path))
+      .then((response) => {
+        if (deleteTargetPathRef.current !== file.path) return;
+        const missions = Array.isArray(response?.missions) ? response.missions : [];
+        setDeleteMissionCount(missions.length);
+      })
+      .catch(() => {
+        // Unknown count: the popup falls back to generic wording.
+      });
+  };
+  return (
+    <div className="relative">
+      <MapEditToolButton
+        label="Delete Map"
+        active={open}
+        disabled={disabled}
+        onClick={() => setOpen((value) => !value)}
+      >
+        <MdDelete size={16} aria-hidden="true" />
+      </MapEditToolButton>
+      {open && (
+        <div
+          className="absolute left-0 top-[calc(100%+6px)] grid w-64 max-h-64 gap-1.5 overflow-y-auto p-2"
+          role="menu"
+          aria-label="Saved maps"
+          style={{ borderRadius: 12, backgroundColor: "var(--mc-surface)", border: "1px solid var(--mc-border-strong)", boxShadow: "var(--mc-shadow)" }}
+        >
+          {files.map((file) => {
+            const inUse = protectedPaths.includes(file.path);
+            return (
+              <button
+                key={file.path}
+                type="button"
+                disabled={inUse}
+                aria-label={`Delete map ${file.path}`}
+                title={inUse ? "Stop navigation before deleting this map" : `Delete ${file.path}`}
+                onClick={() => requestDelete(file)}
+                className="h-8 w-full min-w-0 inline-flex items-center gap-2 px-2.5 text-left text-[12px] font-mono disabled:opacity-45"
+                style={{ borderRadius: 8, border: "1px solid var(--mc-border)", backgroundColor: "var(--mc-surface-2)", color: "var(--mc-text)" }}
+              >
+                <span className="flex-1 truncate">{file.path}</span>
+                <MdDelete size={13} aria-hidden="true" style={{ color: "var(--mc-danger)" }} />
+              </button>
+            );
+          })}
+          {files.length === 0 && (
+            <div className="text-[12px]" style={{ color: "var(--mc-text-muted)" }}>
+              No saved maps yet.
+            </div>
+          )}
+        </div>
+      )}
+      {/* Portal to the page root: escapes the HUD's backdrop-filter (which
+          hijacks position:fixed) while staying inside the --mc-* token
+          scope, so the popup centers on screen with a proper surface. */}
+      {deleteTarget && dialogHost?.current && createPortal(
+        <DeleteMapDialog
+          key={deleteTarget.path}
+          file={deleteTarget}
+          missionCount={deleteMissionCount}
+          busy={deleting}
+          onCancel={() => setDeleteTarget(null)}
+          onConfirm={async () => {
+            setDeleting(true);
+            try {
+              await onDelete(deleteTarget.path);
+              setDeleteTarget(null);
+            } finally {
+              setDeleting(false);
+            }
+          }}
+        />,
+        dialogHost.current,
+      )}
+    </div>
+  );
+}
+
 // Area management inside the Add Label popover. The list shows for every
 // area tool (Extend/Erase pick their target here; delete is two-step, rename
 // on double-click); the name input only for Area, which creates by dragging
@@ -2510,6 +2639,37 @@ export default function MissionCanvasPage() {
   // becomes available only after the first successful Run map load.
   const [runMapSnapshotInvalid, setRunMapSnapshotInvalid] = useState(true);
   const [mapEditorReloadToken, setMapEditorReloadToken] = useState(0);
+  // Dialog portal host: dialogs opened from inside a glass HUD must escape
+  // its backdrop-filter (which hijacks position:fixed) but stay inside
+  // .mission-canvas-page, where the --mc-* tokens are scoped.
+  const pageRootRef = useRef(null);
+  // Saved-map inventory for the Mapping HUD; refreshed on stage entry and
+  // whenever Save Map lands (the same token also refreshes the editor).
+  const [savedMaps, setSavedMaps] = useState([]);
+  useEffect(() => {
+    if (workspaceStage !== STAGE_MAPPING) return undefined;
+    let cancelled = false;
+    getPgmFiles()
+      .then((response) => {
+        if (!cancelled) setSavedMaps(response.files || []);
+      })
+      .catch(() => {
+        if (!cancelled) setSavedMaps([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [mapEditorReloadToken, workspaceStage]);
+
+  const handleDeleteSavedMap = useCallback(async (path) => {
+    try {
+      await deletePgmMap(path);
+      setSavedMaps((files) => files.filter((file) => file.path !== path));
+      setMessage(`Deleted map ${path}`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Failed to delete map");
+    }
+  }, []);
   const [layersByStage, setLayersByStage] = useState(() => ({
     [STAGE_MAPPING]: { ...LAYER_PRESETS[STAGE_MAPPING] },
     [STAGE_MAP_EDIT]: { ...LAYER_PRESETS[STAGE_MAP_EDIT] },
@@ -5775,6 +5935,7 @@ export default function MissionCanvasPage() {
 
   return (
     <div
+      ref={pageRootRef}
       className="mission-canvas-page h-full min-h-[560px] flex overflow-hidden"
       style={{ backgroundColor: MISSION_STAGE_FILL, color: MISSION_TEXT }}
     >
@@ -6371,6 +6532,23 @@ export default function MissionCanvasPage() {
               >
                 <MdStop size={18} aria-hidden="true" />
               </button>
+              <span className="h-5 w-px shrink-0" style={{ backgroundColor: "var(--mc-border)" }} aria-hidden="true" />
+              {/* Deleting saved maps also lives here — maps are created in
+                  this stage, so this is where they are removed too. Only a
+                  map the navigation runtime is actively using is locked;
+                  designMapPath is restored from storage and would otherwise
+                  pin the last-designed map forever. */}
+              <MapDeleteControl
+                files={savedMaps}
+                disabled={!!busy}
+                protectedPaths={
+                  (running || missionRunnerActive || runShutdownPending) && runMapPath
+                    ? [runMapPath]
+                    : []
+                }
+                onDelete={handleDeleteSavedMap}
+                dialogHost={pageRootRef}
+              />
             </div>
           )}
 
