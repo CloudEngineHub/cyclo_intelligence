@@ -118,8 +118,8 @@ test('orders the Cyclo Intelligence navigation into workflow sections', () => {
     'Home',
     'Record',
     'Data Tools',
-    'Inference',
     'Training Guide',
+    'Inference',
     'Nav',
     'BT Manager',
     'Mission Canvas',
@@ -134,7 +134,7 @@ test('orders the Cyclo Intelligence navigation into workflow sections', () => {
   expect(navigation.getByRole('button', { name: 'Inference' }).nextElementSibling)
     .toBe(separator);
   expect(separator.nextElementSibling)
-    .toBe(navigation.getByRole('button', { name: 'Training Guide' }));
+    .toBe(navigation.getByRole('button', { name: 'Nav' }));
 });
 
 test('stops Navigation after leaving the Nav page', async () => {

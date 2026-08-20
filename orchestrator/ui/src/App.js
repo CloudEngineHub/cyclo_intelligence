@@ -436,6 +436,20 @@ function App() {
             <span className="mt-1 text-sm whitespace-nowrap">Data Tools</span>
           </button>
 
+          {/* Training Guide page button */}
+          <button
+            className={clsx(classPageButton, {
+              'hover:bg-gray-200 active:bg-gray-400 dark:hover:bg-slate-800 dark:active:bg-slate-700': page !== PageType.TRAINING,
+              'bg-gray-300 dark:bg-slate-700': page === PageType.TRAINING,
+            })}
+            onClick={handleTrainingPageNavigation}
+          >
+            <GoGraph size={28} className="mb-1.5" />
+            <span className="mt-1 text-center text-sm leading-tight">
+              Training<br />Guide
+            </span>
+          </button>
+
           {/* Inference page button */}
           <button
             className={clsx(classPageButton, {
@@ -454,20 +468,6 @@ function App() {
             aria-label="Navigation sections"
             className="w-24 h-1 border-t-2 rounded-full border-gray-200 dark:border-slate-800 mt-3"
           />
-
-          {/* Training Guide page button */}
-          <button
-            className={clsx(classPageButton, {
-              'hover:bg-gray-200 active:bg-gray-400 dark:hover:bg-slate-800 dark:active:bg-slate-700': page !== PageType.TRAINING,
-              'bg-gray-300 dark:bg-slate-700': page === PageType.TRAINING,
-            })}
-            onClick={handleTrainingPageNavigation}
-          >
-            <GoGraph size={28} className="mb-1.5" />
-            <span className="mt-1 text-center text-sm leading-tight">
-              Training<br />Guide
-            </span>
-          </button>
 
           {/* Navigation page button */}
           <button
