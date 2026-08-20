@@ -23,6 +23,7 @@ import {
   MdContentCopy,
   MdDelete,
   MdEdit,
+  MdLabel,
   MdMyLocation,
   MdPlayArrow,
   MdRedo,
@@ -30,6 +31,7 @@ import {
   MdSave,
   MdStop,
   MdUndo,
+  MdVisibility,
 } from "react-icons/md";
 import {
   cancelNavigateToPoseGoal,
@@ -64,7 +66,15 @@ import {
 } from "../utils/navigationMissionsApi";
 import { useNavigationRosPublisher, useNavigationRosTopic } from "../hooks/useNavigationRosTopic";
 import { useMappingPoseSync } from "../hooks/useMappingPoseSync";
-import { MapEditorControls, SegButton, SegGroup, useMapEditor } from "../components/navigation/MapEditor";
+import {
+  ANNOTATION_ERASE_TOOL,
+  ANNOTATION_EXTEND_TOOL,
+  ANNOTATION_TOOL,
+  BRUSH_SIZE_OPTIONS,
+  EDIT_TOOLS,
+  nextAutoAreaLabel,
+  useMapEditor,
+} from "../components/navigation/MapEditor";
 import { MapViewer } from "../components/navigation/MapViewer";
 import MissionBtEditor from "../components/navigation/MissionBtEditor";
 import MissionBtRunView from "../components/navigation/MissionBtRunView";
@@ -130,12 +140,14 @@ const ROS2_WS_ODOM_TOPIC_OPTIONS = { throttleMs: 50, staleMs: 1000 };
 const BT_TOPIC_OPTIONS = { staleMs: 3000 };
 const SUPERVISOR_API_BASE = "/api";
 const STAGE_MAPPING = "mapping";
+const STAGE_MAP_EDIT = "map_edit";
 const STAGE_AUTHORING = "authoring";
 const STAGE_RUN = "run";
 const RUN_SHUTDOWN_RETRY_MAX_AGE_MS = 60_000;
 
 const WORKSPACE_STAGES = [
   { id: STAGE_MAPPING, label: "Mapping" },
+  { id: STAGE_MAP_EDIT, label: "Map Edit" },
   { id: STAGE_AUTHORING, label: "Design" },
   { id: STAGE_RUN, label: "Run" },
 ];
@@ -153,6 +165,8 @@ const LAYER_DEFINITIONS = {
 
 const STAGE_LAYER_IDS = {
   [STAGE_MAPPING]: ["map", "scan", "robotModel", "tf"],
+  // The map editor draws the PGM itself; no live layers to toggle.
+  [STAGE_MAP_EDIT]: [],
   [STAGE_AUTHORING]: ["map", "mapAreas", "scan", "robotModel", "tf"],
   [STAGE_RUN]: [
     "map",
@@ -167,6 +181,16 @@ const STAGE_LAYER_IDS = {
 };
 
 const LAYER_PRESETS = {
+  [STAGE_MAP_EDIT]: {
+    map: false,
+    scan: false,
+    robotModel: false,
+    tf: false,
+    globalCostmap: false,
+    localCostmap: false,
+    globalPlan: false,
+    mapAreas: false,
+  },
   [STAGE_MAPPING]: {
     map: true,
     scan: true,
@@ -211,6 +235,7 @@ const LAYER_TOPIC_IDS = {
 
 const STAGE_EXTRA_TOPIC_IDS = {
   [STAGE_MAPPING]: [],
+  [STAGE_MAP_EDIT]: [],
   [STAGE_AUTHORING]: [],
   [STAGE_RUN]: ["/bt/status", "/bt/active_nodes"],
 };
@@ -1549,24 +1574,143 @@ function SessionRow({ label, value, stacked = false }) {
   );
 }
 
-function MappingSessionPanel({ mappingEditorActive, selectedPath, dirty }) {
+function MappingSessionPanel() {
   return (
     <Panel title="Mapping Session" compact className="grid gap-1 content-start overflow-auto">
       <div className="grid gap-1">
-        <SessionRow
-          label="Source"
-          value={mappingEditorActive ? "Saved map" : "Live mapping"}
-        />
-        <SessionRow
-          label="Map"
-          value={mappingEditorActive && selectedPath ? selectedPath : "Not saved"}
-        />
-        <SessionRow
-          label="Edits"
-          value={mappingEditorActive && dirty ? "Unsaved changes" : "Clean"}
-        />
+        <SessionRow label="Source" value="Live mapping" />
+        <SessionRow label="Map" value="Not saved" />
+        <SessionRow label="Edits" value="Clean" />
       </div>
     </Panel>
+  );
+}
+
+// Area management inside the Add Label popover. The list shows for every
+// area tool (Extend/Erase pick their target here; delete is two-step, rename
+// on double-click); the name input only for Area, which creates by dragging
+// a rectangle on the map.
+function MapAreaManager({ mapEditor, showNameInput = false }) {
+  const [renamingId, setRenamingId] = useState("");
+  const [renameDraft, setRenameDraft] = useState("");
+  const [confirmDeleteId, setConfirmDeleteId] = useState("");
+  const confirmTimerRef = useRef(null);
+  useEffect(() => () => {
+    if (confirmTimerRef.current) clearTimeout(confirmTimerRef.current);
+  }, []);
+  const busy = mapEditor.busy;
+  const armConfirm = (id) => {
+    setConfirmDeleteId(id);
+    if (confirmTimerRef.current) clearTimeout(confirmTimerRef.current);
+    confirmTimerRef.current = setTimeout(() => setConfirmDeleteId(""), 4000);
+  };
+  const commitRename = (annotation) => {
+    mapEditor.renameAnnotation(annotation.id, renameDraft);
+    setRenamingId("");
+    setRenameDraft("");
+  };
+  return (
+    <div className="grid gap-2 w-full">
+      {showNameInput && (
+        <label className="grid gap-1">
+          <span className="text-[10px] font-mono tracking-[0.12em]" style={{ color: "var(--mc-text-subtle)" }}>
+            AREA NAME
+          </span>
+          <input
+            aria-label="Area name"
+            value={mapEditor.annotationLabel}
+            placeholder={nextAutoAreaLabel(mapEditor.annotations)}
+            disabled={busy}
+            onChange={(event) => mapEditor.setAnnotationLabel(event.currentTarget.value)}
+            className="h-8 w-full px-2.5 text-xs font-medium"
+            style={{ borderRadius: 8, color: "var(--mc-text)", backgroundColor: "var(--mc-surface-2)", border: "1px solid var(--mc-border-strong)" }}
+          />
+        </label>
+      )}
+      <div role="group" aria-label="Map areas" className="grid max-h-44 gap-2 content-start overflow-y-auto">
+        {mapEditor.annotations.map((annotation) => {
+          const selected = annotation.id === mapEditor.selectedAnnotationId;
+          const confirming = confirmDeleteId === annotation.id;
+          return (
+            <div key={annotation.id} className="flex items-center gap-1.5 min-w-0">
+              {renamingId === annotation.id ? (
+                <input
+                  autoFocus
+                  aria-label={`Rename area ${annotation.label}`}
+                  value={renameDraft}
+                  disabled={busy}
+                  onChange={(event) => setRenameDraft(event.currentTarget.value)}
+                  onBlur={() => commitRename(annotation)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      commitRename(annotation);
+                    }
+                    if (event.key === "Escape") {
+                      event.preventDefault();
+                      setRenamingId("");
+                      setRenameDraft("");
+                    }
+                  }}
+                  className="h-8 flex-1 px-2 text-[13px] min-w-0"
+                  style={{ borderRadius: 8, border: "1px solid var(--mc-border-strong)", backgroundColor: "var(--mc-surface)", color: "var(--mc-text)" }}
+                />
+              ) : (
+                <button
+                  type="button"
+                  aria-pressed={selected}
+                  disabled={busy}
+                  onClick={() => mapEditor.setSelectedAnnotationId(annotation.id)}
+                  onDoubleClick={() => {
+                    setRenamingId(annotation.id);
+                    setRenameDraft(annotation.label);
+                  }}
+                  title={`${annotation.label} — double-click to rename`}
+                  className="h-8 flex-1 px-2.5 min-w-0 inline-flex items-center gap-2 text-left text-[12.5px] font-semibold disabled:opacity-50"
+                  style={{
+                    borderRadius: 8,
+                    border: `1px solid ${selected ? "var(--mc-accent)" : "var(--mc-border)"}`,
+                    backgroundColor: selected ? "var(--mc-accent-soft)" : "var(--mc-surface-2)",
+                    color: "var(--mc-text)",
+                  }}
+                >
+                  <span aria-hidden="true" className="shrink-0" style={{ width: 8, height: 8, borderRadius: 999, backgroundColor: annotation.color }} />
+                  <span className="block truncate">{annotation.label}</span>
+                </button>
+              )}
+              <button
+                type="button"
+                disabled={busy}
+                aria-label={confirming ? `Confirm delete area ${annotation.label}` : `Delete area ${annotation.label}`}
+                title={confirming ? "Click again to delete" : `Delete ${annotation.label}`}
+                onClick={() => {
+                  if (confirming) {
+                    mapEditor.deleteAnnotationById(annotation.id);
+                    setConfirmDeleteId("");
+                    return;
+                  }
+                  armConfirm(annotation.id);
+                }}
+                className="h-8 w-8 shrink-0 inline-flex items-center justify-center active:translate-y-px disabled:opacity-50"
+                style={{
+                  borderRadius: 8,
+                  border: `1px solid ${confirming ? "var(--mc-danger)" : "var(--mc-border-strong)"}`,
+                  backgroundColor: confirming ? "var(--mc-danger)" : "var(--mc-surface)",
+                  color: confirming ? "var(--mc-accent-fg)" : "var(--mc-danger)",
+                }}
+              >
+                <MdDelete size={15} />
+              </button>
+            </div>
+          );
+        })}
+        {mapEditor.annotations.length === 0 && showNameInput && (
+          <div className="text-[12px]" style={{ color: "var(--mc-text-muted)" }}>
+            Drag on the map to mark a region.
+          </div>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -2034,6 +2178,13 @@ function StageIcon({ id, active }) {
       </svg>
     );
   }
+  if (id === "map_edit") {
+    return (
+      <svg {...common}>
+        <path d="M17 3a2.85 2.85 0 1 1 4 4L7.5 20.5 3 21.5l1-4.5L17 3z" />
+      </svg>
+    );
+  }
   if (id === "authoring") {
     return (
       <svg {...common}>
@@ -2108,6 +2259,69 @@ function WaypointOptionButton({ active = false, disabled = false, onClick, child
         backgroundColor: active ? MISSION_SURFACE_STRONG : MISSION_STAGE_EMPTY,
         color: MISSION_TEXT,
         boxShadow: active ? "none" : "var(--mc-shadow)",
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
+// The Map Edit HUD groups the editor tools behind two icons: "Map Edit"
+// (pixel tools + brush) and "Add Label" (area tools), each opening a
+// text-button popover below — the Design HUD's waypoint-options idiom.
+const MAP_EDIT_PIXEL_TOOL_IDS = EDIT_TOOLS.map((tool) => tool.id);
+const MAP_EDIT_AREA_TOOLS = [ANNOTATION_TOOL, ANNOTATION_EXTEND_TOOL, ANNOTATION_ERASE_TOOL];
+const MAP_EDIT_AREA_TOOL_IDS = MAP_EDIT_AREA_TOOLS.map((tool) => tool.id);
+
+// Brush-size row shared by both tool popovers — pixel painting and the
+// area extend/erase tools all stroke with the same brush.
+function MapEditBrushRow({ brushSize, setBrushSize, disabled = false }) {
+  return (
+    <div className="flex items-center gap-2">
+      <span className="shrink-0 pl-1 pr-1 text-[10px] font-mono tracking-[0.12em]" style={{ color: "var(--mc-text-subtle)" }}>
+        BRUSH
+      </span>
+      {BRUSH_SIZE_OPTIONS.map((option) => (
+        <button
+          key={option.value}
+          type="button"
+          aria-label={`Brush size ${option.label}`}
+          aria-pressed={brushSize === option.value}
+          disabled={disabled}
+          onClick={() => setBrushSize(option.value)}
+          title={`Brush ${option.label}: ${option.value}px`}
+          className="h-8 min-w-[34px] px-2 inline-flex items-center justify-center text-[11px] font-bold disabled:opacity-50"
+          style={{
+            borderRadius: 9,
+            border: `1px solid ${brushSize === option.value ? "var(--mc-accent)" : "var(--mc-border-strong)"}`,
+            backgroundColor: brushSize === option.value ? "var(--mc-accent-soft)" : "var(--mc-surface)",
+            color: "var(--mc-text)",
+          }}
+        >
+          {option.label === "Small" ? "S" : option.label === "Medium" ? "M" : option.label === "Large" ? "L" : "XL"}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+// Icon toggle for the Map Edit HUD — the Design HUD's Edit Route idiom
+// (accent-soft fill + accent border while the tool is active).
+function MapEditToolButton({ label, active = false, disabled = false, onClick, children }) {
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      aria-pressed={active}
+      aria-label={label}
+      title={label}
+      onClick={onClick}
+      className="h-8 w-8 inline-flex items-center justify-center disabled:opacity-45"
+      style={{
+        borderRadius: 9,
+        border: `1px solid ${active ? "var(--mc-accent)" : "var(--mc-border-strong)"}`,
+        backgroundColor: active ? "var(--mc-accent-soft)" : "var(--mc-surface)",
+        color: "var(--mc-text)",
       }}
     >
       {children}
@@ -2250,7 +2464,6 @@ export default function MissionCanvasPage() {
   ));
   const [tfBufferRevision, setTfBufferRevision] = useState(0);
   const [workspaceStage, setWorkspaceStage] = useState(() => initialWorkspaceStage(initialSession));
-  const [showPgmFix, setShowPgmFix] = useState(false);
   const [showSaveMapDialog, setShowSaveMapDialog] = useState(false);
   const [saveMapName, setSaveMapName] = useState(DEFAULT_MAP_NAME);
   const [showSaveMissionDialog, setShowSaveMissionDialog] = useState(false);
@@ -2282,6 +2495,11 @@ export default function MissionCanvasPage() {
   const [designMapBusy, setDesignMapBusy] = useState(false);
   const [designMissionLoadError, setDesignMissionLoadError] = useState("");
   const [designMapReloadToken, setDesignMapReloadToken] = useState(0);
+  const [showEditMapDialog, setShowEditMapDialog] = useState(false);
+  const [pendingEditMapPath, setPendingEditMapPath] = useState("");
+  // Map Edit HUD tool-group popovers (the Design HUD's waypoint-options idiom).
+  const [mapEditToolsOpen, setMapEditToolsOpen] = useState(false);
+  const [labelToolsOpen, setLabelToolsOpen] = useState(false);
   const [showRunMapDialog, setShowRunMapDialog] = useState(false);
   const [runMapFiles, setRunMapFiles] = useState([]);
   const [runMissionNames, setRunMissionNames] = useState([]);
@@ -2294,6 +2512,7 @@ export default function MissionCanvasPage() {
   const [mapEditorReloadToken, setMapEditorReloadToken] = useState(0);
   const [layersByStage, setLayersByStage] = useState(() => ({
     [STAGE_MAPPING]: { ...LAYER_PRESETS[STAGE_MAPPING] },
+    [STAGE_MAP_EDIT]: { ...LAYER_PRESETS[STAGE_MAP_EDIT] },
     [STAGE_AUTHORING]: { ...LAYER_PRESETS[STAGE_AUTHORING] },
     [STAGE_RUN]: { ...LAYER_PRESETS[STAGE_RUN] },
   }));
@@ -2400,7 +2619,7 @@ export default function MissionCanvasPage() {
   });
 
   const running = status?.is_up ?? false;
-  const mappingEditorActive = workspaceStage === STAGE_MAPPING && showPgmFix;
+  const mappingEditorActive = workspaceStage === STAGE_MAP_EDIT;
   const designMapActive = workspaceStage === STAGE_AUTHORING && !!designMapPath && missionMapLoaded;
   const robotPoseCaptureActive = workspaceStage === STAGE_AUTHORING && designMapActive;
   const mappingRuntimeActive = running && navigationRuntimeMode === "mapping";
@@ -3983,7 +4202,6 @@ export default function MissionCanvasPage() {
 
   const handleOpenDesignMapDialog = useCallback(() => {
     setWorkspaceStage(STAGE_AUTHORING);
-    setShowPgmFix(false);
     setShowWaypointOptions(false);
     setShowDesignMapDialog(true);
     setPendingDesignMapPath(designMapPath);
@@ -4521,11 +4739,22 @@ export default function MissionCanvasPage() {
     runPoseInitialized,
   ]);
 
+  const handleOpenEditMapDialog = useCallback(() => {
+    // useMapEditor already listed the PGM files on stage entry; preselect the
+    // current map (or the first file) the way the Design/Run dialogs do.
+    setPendingEditMapPath(mapEditor.selectedPath || mapEditor.files[0]?.path || "");
+    setShowEditMapDialog(true);
+  }, [mapEditor.files, mapEditor.selectedPath]);
+
+  const handleConfirmEditMap = useCallback(() => {
+    mapEditor.setSelectedPath(pendingEditMapPath);
+    setShowEditMapDialog(false);
+  }, [mapEditor.setSelectedPath, pendingEditMapPath]);
+
   const handleOpenRunMapDialog = useCallback(() => {
     const preferredRunMapName = runMapName || mapName || DEFAULT_MAP_NAME;
     const preferredRunMissionName = runMapName ? runMissionName : missionName;
     setWorkspaceStage(STAGE_RUN);
-    setShowPgmFix(false);
     setShowRunMapDialog(true);
     setRunMapBusy(true);
     setMessage("Loading saved missions");
@@ -4796,7 +5025,6 @@ export default function MissionCanvasPage() {
     "Mapping",
     async () => {
       setWorkspaceStage(STAGE_MAPPING);
-      setShowPgmFix(false);
       clearLocalizationPoseCache();
       resetMappingPoseSync();
       await startNavigation("map", mapName.trim() || DEFAULT_MAP_NAME);
@@ -4840,18 +5068,6 @@ export default function MissionCanvasPage() {
       },
     );
   }, [runCommand, saveMapName]);
-
-  // Record ↔ Edit segment switch for the Mapping stage. Re-clicking the
-  // selected segment is a no-op (segmented-control semantics).
-  const handleSelectMappingMode = useCallback((editing) => {
-    if (editing === showPgmFix) return;
-    setWorkspaceStage(STAGE_MAPPING);
-    setInteractionMode("view");
-    if (editing) {
-      setMessage("Loading saved maps");
-    }
-    setShowPgmFix(editing);
-  }, [showPgmFix]);
 
   const stopMissionRunner = missionRunner.stop;
   const handleStopNavigation = useCallback(() => runCommand(
@@ -5534,6 +5750,29 @@ export default function MissionCanvasPage() {
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [handleRedoDesign, handleUndoDesign, waypointBtLayerOpen, workspaceStage]);
 
+  // Same shortcuts in the Map Edit stage, wired to the pixel/area history —
+  // the HUD tooltips advertise them, so they must actually work here too.
+  // Suspended while the Load Map dialog is open: the overlay has no focus
+  // trap, so the shortcut would silently edit the map behind the modal.
+  useEffect(() => {
+    if (workspaceStage !== STAGE_MAP_EDIT || showEditMapDialog) return undefined;
+    const handleKeyDown = (event) => {
+      if (!(event.ctrlKey || event.metaKey) || isTextInputTarget(event.target)) return;
+      if (mapEditor.busy) return;
+      const key = event.key.toLowerCase();
+      if (key === "z") {
+        event.preventDefault();
+        if (event.shiftKey) mapEditor.redo();
+        else mapEditor.undo();
+      } else if (key === "y" && !event.shiftKey) {
+        event.preventDefault();
+        mapEditor.redo();
+      }
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [mapEditor.busy, mapEditor.redo, mapEditor.undo, showEditMapDialog, workspaceStage]);
+
   return (
     <div
       className="mission-canvas-page h-full min-h-[560px] flex overflow-hidden"
@@ -5654,6 +5893,18 @@ export default function MissionCanvasPage() {
         }}
         onSubmit={handleConfirmRunMap}
       />
+      <LoadMapDialog
+        open={showEditMapDialog}
+        files={mapEditor.files}
+        selectedPath={pendingEditMapPath}
+        busy={mapEditor.busy}
+        title="Load Map"
+        fieldLabel="Map"
+        selectAriaLabel="PGM map"
+        onChange={setPendingEditMapPath}
+        onCancel={() => setShowEditMapDialog(false)}
+        onSubmit={handleConfirmEditMap}
+      />
       {/* ── LEFT RAIL — brand + stage nav (Console shell) ── */}
       <aside
         className="shrink-0 flex flex-col p-4 border-r"
@@ -5680,13 +5931,17 @@ export default function MissionCanvasPage() {
         <nav className="grid gap-1" role="tablist" aria-label="Mission Canvas stages">
           {WORKSPACE_STAGES.map((stage) => {
             const selected = workspaceStage === stage.id;
+            // Editing a saved PGM while SLAM (or a run) may rewrite the same
+            // file would clobber one side silently — keep the old guard.
+            const editLocked = stage.id === STAGE_MAP_EDIT && !selected && (mappingRuntimeActive || runRuntimeActive);
             return (
               <button
                 key={stage.id}
                 type="button"
                 role="tab"
                 aria-selected={selected}
-                disabled={!!busy}
+                disabled={!!busy || editLocked}
+                title={editLocked ? "Stop mapping before editing saved maps" : undefined}
                 onClick={() => {
                   if (stage.id !== workspaceStage) {
                     cancelPendingDesignLocalization();
@@ -5697,9 +5952,10 @@ export default function MissionCanvasPage() {
                     setMissionRouteMode(false);
                     setMissionRouteSourceId("");
                     setBtLayerSpotId("");
+                    setMapEditToolsOpen(false);
+                    setLabelToolsOpen(false);
                   }
                   setWorkspaceStage(stage.id);
-                  if (stage.id !== STAGE_MAPPING) setShowPgmFix(false);
                 }}
                 className="flex items-center gap-3 px-3 py-2.5 text-[13px] font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50"
                 style={{
@@ -5763,34 +6019,18 @@ export default function MissionCanvasPage() {
             <span className="text-[16px] font-bold tracking-tight" style={{ color: MISSION_TEXT }}>
               {WORKSPACE_STAGES.find((stage) => stage.id === workspaceStage)?.label}
             </span>
-            {/* Record ↔ Edit mode switch: recording drives SLAM (Start/Stop/
-                Save Map actions), editing opens the saved-map editor with its
-                own toolbar. Splitting the header per mode replaces the old
-                four-buttons-in-a-row layout. */}
-            {workspaceStage === STAGE_MAPPING && (
-              <div className="shrink-0">
-                <SegGroup ariaLabel="Mapping mode">
-                  <SegButton selected={!mappingEditorActive} disabled={!!busy} onClick={() => handleSelectMappingMode(false)}>
-                    Record Map
-                  </SegButton>
-                  <SegButton
-                    selected={mappingEditorActive}
-                    disabled={!!busy || mappingRuntimeActive || runRuntimeActive}
-                    title={mappingRuntimeActive || runRuntimeActive ? "Stop mapping before editing saved maps" : undefined}
-                    onClick={() => handleSelectMappingMode(true)}
-                  >
-                    Edit Map
-                  </SegButton>
-                </SegGroup>
-              </div>
-            )}
           </div>
 
           <div className="flex items-center gap-2">
-            {workspaceStage === STAGE_MAPPING && !mappingEditorActive && (
-              // Stop / Save Map moved onto the map canvas as the mapping HUD;
+            {workspaceStage === STAGE_MAPPING && (
+              // Stop / Save Map live on the map canvas as the mapping HUD;
               // the header keeps only the session-level Start Mapping.
               <ActionButton active={busy === "Mapping" || mappingRuntimeActive} disabled={!!busy || mappingRuntimeActive || runRuntimeActive || runShutdownPending} onClick={handleStartMapping} variant="secondary">Start Mapping</ActionButton>
+            )}
+            {workspaceStage === STAGE_MAP_EDIT && (
+              // The PGM picker moved out of the editor panel; the header keeps
+              // the session-level Load Map like the Design and Run stages.
+              <ActionButton active={showEditMapDialog || mapEditor.busy} disabled={!!busy || mapEditor.busy} onClick={handleOpenEditMapDialog} variant="secondary">Load Map</ActionButton>
             )}
             {workspaceStage === STAGE_AUTHORING && (
               // Undo/Redo moved into the design HUD on the map; the header
@@ -5819,38 +6059,9 @@ export default function MissionCanvasPage() {
           )}
         </header>
 
-        {/* map editor sub-toolbar (only in mapping + editor mode) */}
-        {workspaceStage === STAGE_MAPPING && mappingEditorActive && (
-          <div className="shrink-0 flex flex-wrap items-center gap-2 px-6 py-2 border-b" style={{ borderColor: MISSION_BORDER }}>
-            <MapEditorControls
-              files={mapEditor.files}
-              selectedPath={mapEditor.selectedPath}
-              setSelectedPath={mapEditor.setSelectedPath}
-              tool={mapEditor.tool}
-              setTool={mapEditor.setTool}
-              brushSize={mapEditor.brushSize}
-              setBrushSize={mapEditor.setBrushSize}
-              busy={mapEditor.busy}
-              image={mapEditor.image}
-              dirty={mapEditor.dirty}
-              canUndo={mapEditor.canUndo}
-              canRedo={mapEditor.canRedo}
-              undo={mapEditor.undo}
-              redo={mapEditor.redo}
-              save={mapEditor.save}
-              enableAnnotations
-              annotations={mapEditor.annotations}
-              annotationLabel={mapEditor.annotationLabel}
-              setAnnotationLabel={mapEditor.setAnnotationLabel}
-              selectedAnnotationId={mapEditor.selectedAnnotationId}
-              setSelectedAnnotationId={mapEditor.setSelectedAnnotationId}
-              deleteAnnotationById={mapEditor.deleteAnnotationById}
-              renameAnnotation={mapEditor.renameAnnotation}
-            />
-          </div>
-        )}
-
         {/* content: map + inspector */}
+        {/* Map Edit has no aside — every control lives on the map HUD, so the
+            canvas takes the full width. */}
         <div className={`flex-1 min-h-0 grid grid-cols-1 ${waypointBtLayer || mappingEditorActive ? "" : "xl:grid-cols-[minmax(460px,1fr)_380px]"}`}>
           <section className="min-h-0 overflow-hidden relative" style={{ backgroundColor: "var(--mc-surface)", borderRight: "1px solid var(--mc-border)" }}>
           <MapViewer
@@ -5932,7 +6143,7 @@ export default function MissionCanvasPage() {
                   : "mission-design:none"
                 : `mission:${mapName}:${displayedMap ? "ready" : "wait"}`}
             waitingLabel={mappingEditorActive
-              ? "Select a PGM"
+              ? "Load a map"
               : workspaceStage === STAGE_AUTHORING
                 ? designMapActive ? "Loading selected map" : "Load a map"
                 : running
@@ -6119,31 +6330,13 @@ export default function MissionCanvasPage() {
             </div>
           )}
 
-          {/* Mapping HUD — Stop / Save Map float over the map as icon
-              buttons while recording (the Edit Map mode has its own
-              toolbar); Start Mapping stays in the header. */}
-          {workspaceStage === STAGE_MAPPING && !mappingEditorActive && (
+          {/* Mapping HUD — Save Map / Stop float over the map as icon
+              buttons while recording; Start Mapping stays in the header. */}
+          {workspaceStage === STAGE_MAPPING && (
             <div
               className="absolute top-5 left-5 z-10 flex items-center gap-2 p-2"
               style={{ borderRadius: 14, backgroundColor: "color-mix(in srgb, var(--mc-surface) 88%, transparent)", border: "1px solid var(--mc-border)", boxShadow: "var(--mc-shadow)", backdropFilter: "blur(8px)" }}
             >
-              <button
-                type="button"
-                onClick={handleStopNavigation}
-                disabled={!!busy || !mappingRuntimeActive}
-                aria-label="Stop"
-                aria-pressed={busy === "Stop" ? true : undefined}
-                title="Stop mapping"
-                className="h-8 w-8 inline-flex items-center justify-center disabled:opacity-45"
-                style={{
-                  borderRadius: 9,
-                  border: "1px solid var(--mc-danger-border)",
-                  backgroundColor: busy === "Stop" ? "var(--mc-danger)" : "var(--mc-surface)",
-                  color: busy === "Stop" ? "var(--mc-accent-fg)" : "var(--mc-danger)",
-                }}
-              >
-                <MdStop size={18} aria-hidden="true" />
-              </button>
               <button
                 type="button"
                 onClick={handleOpenSaveMapDialog}
@@ -6161,6 +6354,178 @@ export default function MissionCanvasPage() {
               >
                 <MdSave size={17} aria-hidden="true" />
               </button>
+              <button
+                type="button"
+                onClick={handleStopNavigation}
+                disabled={!!busy || !mappingRuntimeActive}
+                aria-label="Stop"
+                aria-pressed={busy === "Stop" ? true : undefined}
+                title="Stop mapping"
+                className="h-8 w-8 inline-flex items-center justify-center disabled:opacity-45"
+                style={{
+                  borderRadius: 9,
+                  border: "1px solid var(--mc-danger-border)",
+                  backgroundColor: busy === "Stop" ? "var(--mc-danger)" : "var(--mc-surface)",
+                  color: busy === "Stop" ? "var(--mc-accent-fg)" : "var(--mc-danger)",
+                }}
+              >
+                <MdStop size={18} aria-hidden="true" />
+              </button>
+            </div>
+          )}
+
+          {/* Map Edit HUD — View / Map Edit / Add Label / Undo / Redo / Save
+              icons on one glass row; Map Edit and Add Label open text-button
+              popovers below (the Design HUD's waypoint-options idiom). */}
+          {workspaceStage === STAGE_MAP_EDIT && (
+            <div
+              className="absolute top-5 left-5 z-10 flex items-center gap-2 p-2"
+              style={{ borderRadius: 14, backgroundColor: "color-mix(in srgb, var(--mc-surface) 88%, transparent)", border: "1px solid var(--mc-border)", boxShadow: "var(--mc-shadow)", backdropFilter: "blur(8px)" }}
+            >
+              <MapEditToolButton
+                label="View"
+                active={mapEditor.tool === "view"}
+                disabled={mapEditor.busy || !mapEditor.image}
+                onClick={() => {
+                  mapEditor.setTool("view");
+                  setMapEditToolsOpen(false);
+                  setLabelToolsOpen(false);
+                }}
+              >
+                <MdVisibility size={17} aria-hidden="true" />
+              </MapEditToolButton>
+              <div className="relative">
+                <MapEditToolButton
+                  label="Map Edit"
+                  active={mapEditToolsOpen || MAP_EDIT_PIXEL_TOOL_IDS.includes(mapEditor.tool)}
+                  disabled={mapEditor.busy || !mapEditor.image}
+                  onClick={() => {
+                    setMapEditToolsOpen((open) => !open);
+                    setLabelToolsOpen(false);
+                  }}
+                >
+                  <MdEdit size={16} aria-hidden="true" />
+                </MapEditToolButton>
+                {mapEditToolsOpen && (
+                  <div
+                    className="absolute left-0 top-[calc(100%+6px)] grid gap-2 p-2"
+                    role="menu"
+                    aria-label="Map edit tools"
+                    style={{ borderRadius: 12, backgroundColor: "var(--mc-surface)", border: "1px solid var(--mc-border-strong)", boxShadow: "var(--mc-shadow)" }}
+                  >
+                    <div className="flex items-center gap-2">
+                      {EDIT_TOOLS.map((editTool) => (
+                        <WaypointOptionButton
+                          key={editTool.id}
+                          active={mapEditor.tool === editTool.id}
+                          disabled={mapEditor.busy}
+                          onClick={() => mapEditor.setTool(editTool.id)}
+                        >
+                          {editTool.label}
+                        </WaypointOptionButton>
+                      ))}
+                    </div>
+                    <MapEditBrushRow brushSize={mapEditor.brushSize} setBrushSize={mapEditor.setBrushSize} disabled={mapEditor.busy} />
+                  </div>
+                )}
+              </div>
+              <div className="relative">
+                <MapEditToolButton
+                  label="Add Label"
+                  active={labelToolsOpen || MAP_EDIT_AREA_TOOL_IDS.includes(mapEditor.tool)}
+                  disabled={mapEditor.busy || !mapEditor.image}
+                  onClick={() => {
+                    setLabelToolsOpen((open) => !open);
+                    setMapEditToolsOpen(false);
+                  }}
+                >
+                  <MdLabel size={16} aria-hidden="true" />
+                </MapEditToolButton>
+                {labelToolsOpen && (
+                  <div
+                    className="absolute left-0 top-[calc(100%+6px)] grid gap-2 p-2"
+                    role="menu"
+                    aria-label="Map labeling tools"
+                    style={{ borderRadius: 12, backgroundColor: "var(--mc-surface)", border: "1px solid var(--mc-border-strong)", boxShadow: "var(--mc-shadow)" }}
+                  >
+                    <div className="flex items-center gap-2">
+                      {MAP_EDIT_AREA_TOOLS.map((areaTool) => (
+                        <WaypointOptionButton
+                          key={areaTool.id}
+                          active={mapEditor.tool === areaTool.id}
+                          disabled={mapEditor.busy}
+                          onClick={() => mapEditor.setTool(areaTool.id)}
+                        >
+                          {areaTool.label}
+                        </WaypointOptionButton>
+                      ))}
+                    </div>
+                    {/* Contextual rows: Area drags a rectangle (no brush) and
+                        gets the name input; Extend/Erase stroke with the
+                        shared brush and pick their target in the list, which
+                        every area tool shares. */}
+                    {(mapEditor.tool === ANNOTATION_EXTEND_TOOL.id || mapEditor.tool === ANNOTATION_ERASE_TOOL.id) && (
+                      <MapEditBrushRow brushSize={mapEditor.brushSize} setBrushSize={mapEditor.setBrushSize} disabled={mapEditor.busy} />
+                    )}
+                    {MAP_EDIT_AREA_TOOL_IDS.includes(mapEditor.tool) && (
+                      <MapAreaManager mapEditor={mapEditor} showNameInput={mapEditor.tool === ANNOTATION_TOOL.id} />
+                    )}
+                  </div>
+                )}
+              </div>
+              <span className="h-5 w-px shrink-0" style={{ backgroundColor: "var(--mc-border)" }} aria-hidden="true" />
+              <button
+                type="button"
+                onClick={mapEditor.undo}
+                disabled={mapEditor.busy || !mapEditor.canUndo}
+                aria-label="Undo"
+                title="Undo (Ctrl+Z)"
+                className="h-8 w-8 inline-flex items-center justify-center disabled:opacity-45"
+                style={{ borderRadius: 9, border: "1px solid var(--mc-border-strong)", backgroundColor: "var(--mc-surface)", color: "var(--mc-text)" }}
+              >
+                <MdUndo size={17} aria-hidden="true" />
+              </button>
+              <button
+                type="button"
+                onClick={mapEditor.redo}
+                disabled={mapEditor.busy || !mapEditor.canRedo}
+                aria-label="Redo"
+                title="Redo (Ctrl+Shift+Z)"
+                className="h-8 w-8 inline-flex items-center justify-center disabled:opacity-45"
+                style={{ borderRadius: 9, border: "1px solid var(--mc-border-strong)", backgroundColor: "var(--mc-surface)", color: "var(--mc-text)" }}
+              >
+                <MdRedo size={17} aria-hidden="true" />
+              </button>
+              <span className="h-5 w-px shrink-0" style={{ backgroundColor: "var(--mc-border)" }} aria-hidden="true" />
+              <button
+                type="button"
+                onClick={mapEditor.save}
+                disabled={mapEditor.busy || !mapEditor.dirty}
+                aria-label="Save"
+                title="Save map changes"
+                className="h-8 w-8 inline-flex items-center justify-center disabled:opacity-45"
+                style={{ borderRadius: 9, border: "1px solid var(--mc-border-strong)", backgroundColor: "var(--mc-surface)", color: "var(--mc-text)" }}
+              >
+                <MdSave size={17} aria-hidden="true" />
+              </button>
+            </div>
+          )}
+
+          {/* Loaded-file chip — the Map Edit aside is gone, so the current
+              PGM and its unsaved state surface here (top-right, where the
+              other stages put the Layers popover). */}
+          {workspaceStage === STAGE_MAP_EDIT && mapEditor.selectedPath && (
+            <div
+              className="absolute top-5 right-5 z-10 flex h-9 items-center gap-1.5 px-3.5 text-[11px] font-mono"
+              style={{ borderRadius: 999, backgroundColor: "color-mix(in srgb, var(--mc-surface) 88%, transparent)", border: "1px solid var(--mc-border)", boxShadow: "var(--mc-shadow)", backdropFilter: "blur(8px)", color: "var(--mc-text-muted)" }}
+            >
+              <span className="max-w-[260px] truncate">{mapEditor.selectedPath}</span>
+              {mapEditor.image && (
+                <span className="shrink-0" style={{ color: "var(--mc-text-subtle)" }}>
+                  {mapEditor.image.width} × {mapEditor.image.height}
+                </span>
+              )}
+              {mapEditor.dirty && <span className="shrink-0" style={{ color: "var(--mc-accent)" }}>· unsaved</span>}
             </div>
           )}
 
@@ -6381,12 +6746,9 @@ export default function MissionCanvasPage() {
             </div>
           </aside>
         ) : null) : mappingEditorActive ? null : (
-          // The saved-map editor gets the full width: it has no live topics,
-          // and its unsaved state already shows in the editor toolbar.
           <aside className="min-h-0 grid gap-4 overflow-auto p-4 content-start">
-            {/* Teleop drives the robot while recording; it has no role in the
-                saved-map editor, so hide it there. */}
-            {workspaceStage === STAGE_MAPPING && !mappingEditorActive && (
+            {/* Teleop drives the robot while recording, so it's mapping-only. */}
+            {workspaceStage === STAGE_MAPPING && (
               <MappingTeleopPanel
                 disabled={teleopDisabled}
                 onPublish={publishTeleopCommand}
@@ -6394,11 +6756,7 @@ export default function MissionCanvasPage() {
               />
             )}
             {workspaceStage === STAGE_MAPPING ? (
-              <MappingSessionPanel
-                mappingEditorActive={mappingEditorActive}
-                selectedPath={mapEditor.selectedPath}
-                dirty={mapEditor.dirty}
-              />
+              <MappingSessionPanel />
             ) : (
               // The BT node lifecycle is run-owned (Run Mission activates it on
               // demand and the runner releases it afterwards), so there is no

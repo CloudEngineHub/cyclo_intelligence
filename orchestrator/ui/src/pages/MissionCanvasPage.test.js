@@ -86,12 +86,18 @@ async function loadRunMapFromDialog(path = 'map.pgm') {
 }
 
 async function openMappingEditorAndSelect(path = 'factory.pgm') {
-  fireEvent.click(screen.getByRole('button', { name: 'Edit Map' }));
+  fireEvent.click(screen.getByRole('tab', { name: 'Map Edit' }));
   await waitFor(() => expect(getPgmFiles).toHaveBeenCalled());
-  const mapSelect = screen.getByRole('combobox', { name: 'PGM map' });
-  await waitFor(() => expect(mapSelect).toBeEnabled());
+  // Load Map stays disabled until the PGM listing lands (mapEditor.busy).
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Load Map' })).toBeEnabled());
+  fireEvent.click(screen.getByRole('button', { name: 'Load Map' }));
+  const mapSelect = await screen.findByRole('combobox', { name: 'PGM map' });
   fireEvent.change(mapSelect, { target: { value: path } });
   await waitFor(() => expect(mapSelect).toHaveValue(path));
+  fireEvent.click(screen.getByRole('button', { name: 'Load' }));
+  await waitFor(() => expect(screen.queryByRole('combobox', { name: 'PGM map' })).not.toBeInTheDocument());
+  // The HUD tools stay disabled until the PGM image itself has loaded.
+  await waitFor(() => expect(screen.getByRole('button', { name: 'View' })).toBeEnabled());
 }
 
 jest.mock('../components/navigation/MapViewer', () => ({
@@ -340,16 +346,12 @@ test('renders Mission Canvas foundation', async () => {
   const stopButton = screen.getByRole('button', { name: 'Stop' });
   const saveMapButton = screen.getByRole('button', { name: 'Save Map' });
   expect(startMappingButton).toHaveClass('rounded-md');
-  expect(Boolean(startMappingButton.compareDocumentPosition(stopButton) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
-  expect(Boolean(stopButton.compareDocumentPosition(saveMapButton) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
-  // Record/Edit mode segments precede the record-mode action buttons.
-  expect(screen.getByRole('group', { name: 'Mapping mode' })).toBeInTheDocument();
-  const recordSegment = screen.getByRole('button', { name: 'Record Map' });
-  const editSegment = screen.getByRole('button', { name: 'Edit Map' });
-  expect(recordSegment).toHaveAttribute('aria-pressed', 'true');
-  expect(editSegment).toHaveAttribute('aria-pressed', 'false');
-  expect(Boolean(recordSegment.compareDocumentPosition(editSegment) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
-  expect(Boolean(editSegment.compareDocumentPosition(startMappingButton) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
+  // The HUD puts Save Map before Stop: saving is the primary action while
+  // recording; Stop ends the session.
+  expect(Boolean(startMappingButton.compareDocumentPosition(saveMapButton) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
+  expect(Boolean(saveMapButton.compareDocumentPosition(stopButton) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
+  // Map editing is its own top-level stage now.
+  expect(screen.getByRole('tab', { name: 'Map Edit' })).toBeInTheDocument();
   expect(screen.getByText('Mobile Teleop')).toBeInTheDocument();
   expect(screen.getByText('Mobile Teleop').parentElement).toHaveClass('overflow-auto');
   expect(screen.getByText('Mobile Teleop').parentElement).toHaveClass('rounded-md');
@@ -1598,7 +1600,7 @@ test('loads and saves each waypoint XML through its mission-local storage path',
   expect(saveNavigationMission).not.toHaveBeenCalled();
   act(() => latestMapViewerProps().onBtLayerClose());
   fireEvent.click(await screen.findByRole('button', { name: 'New Mission' }));
-  expect(screen.queryByText('Unsaved changes')).not.toBeInTheDocument();
+  expect(screen.queryByText('· unsaved')).not.toBeInTheDocument();
   await waitFor(() => expect(latestMapViewerProps().spots).toEqual([]));
 });
 
@@ -2718,16 +2720,16 @@ test('locks mapping controls while mapping is running', async () => {
   await waitFor(() => expect(screen.getByRole('button', { name: 'Stop' })).toBeEnabled());
   expect(screen.getByRole('button', { name: 'Save Map' })).toBeEnabled();
   expect(screen.getByRole('button', { name: 'Start Mapping' })).toBeDisabled();
-  expect(screen.getByRole('button', { name: 'Edit Map' })).toBeDisabled();
-  expect(screen.getByRole('button', { name: 'Record Map' })).toBeEnabled();
+  // Editing a saved PGM while SLAM may rewrite it would clobber one side.
+  expect(screen.getByRole('tab', { name: 'Map Edit' })).toBeDisabled();
 
   fireEvent.click(screen.getByRole('button', { name: 'Stop' }));
 
   await waitFor(() => expect(stopNavigation).toHaveBeenCalled());
   await waitFor(() => expect(screen.getByRole('button', { name: 'Start Mapping' })).toBeEnabled());
-  expect(screen.getByRole('button', { name: 'Edit Map' })).toBeEnabled();
   expect(screen.getByRole('button', { name: 'Save Map' })).toBeDisabled();
   expect(screen.getByRole('button', { name: 'Stop' })).toBeDisabled();
+  expect(screen.getByRole('tab', { name: 'Map Edit' })).toBeEnabled();
 });
 
 test('publishes keyboard teleop commands without mapping runtime', async () => {
@@ -2807,32 +2809,63 @@ test('waits for an explicit saved-map selection in the mapping fix editor', asyn
 
   render(<MissionCanvasPage />);
 
-  fireEvent.click(screen.getByRole('button', { name: 'Edit Map' }));
+  fireEvent.click(screen.getByRole('tab', { name: 'Map Edit' }));
+
+  // The header Load Map stays disabled until the PGM listing lands, so the
+  // dialog can never open on an empty pending path.
+  expect(screen.getByRole('button', { name: 'Load Map' })).toBeDisabled();
 
   await waitFor(() => expect(getPgmFiles).toHaveBeenCalled());
-  const mapSelect = screen.getByRole('combobox', { name: 'PGM map' });
-  await waitFor(() => expect(mapSelect).toBeEnabled());
-  expect(mapSelect).toHaveValue('');
-  expect(screen.getByRole('option', { name: 'Select a PGM' })).toBeInTheDocument();
+  // Entering the stage loads nothing: the picker lives in the header dialog.
+  expect(screen.queryByRole('combobox', { name: 'PGM map' })).not.toBeInTheDocument();
+  // The HUD tools stay dimmed until a map is loaded, like the other stages.
+  expect(screen.getByRole('button', { name: 'View' })).toBeDisabled();
+  expect(screen.getByRole('button', { name: 'Map Edit' })).toBeDisabled();
+  expect(screen.getByRole('button', { name: 'Add Label' })).toBeDisabled();
   expect(getPgmImage).not.toHaveBeenCalled();
   expect(latestMapViewerProps().map).toBeNull();
-  expect(latestMapViewerProps().waitingLabel).toBe('Select a PGM');
+  expect(latestMapViewerProps().waitingLabel).toBe('Load a map');
 
-  fireEvent.change(mapSelect, { target: { value: 'factory.pgm' } });
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Load Map' })).toBeEnabled());
+  fireEvent.click(screen.getByRole('button', { name: 'Load Map' }));
+  const mapSelect = await screen.findByRole('combobox', { name: 'PGM map' });
+  // The dialog preselects the first saved map, but nothing loads before Load.
+  expect(mapSelect).toHaveValue('factory.pgm');
+  expect(getPgmImage).not.toHaveBeenCalled();
+
+  fireEvent.click(screen.getByRole('button', { name: 'Load' }));
   await waitFor(() => expect(getPgmImage).toHaveBeenCalledWith('factory.pgm'));
-  expect(screen.getByDisplayValue('factory.pgm')).toBeInTheDocument();
-  // The editor takes the full width: no session/topics side panels.
+  await waitFor(() => expect(screen.queryByRole('combobox', { name: 'PGM map' })).not.toBeInTheDocument());
+  // The panel names the loaded map; no session/topics side panels.
   expect(screen.queryByText('Mapping Session')).not.toBeInTheDocument();
   expect(screen.queryByText('Topics')).not.toBeInTheDocument();
   expect(screen.getAllByText('factory.pgm').length).toBeGreaterThan(0);
   expect(latestMapViewerProps().showScan).toBe(false);
   expect(latestMapViewerProps().showMap).toBe(true);
-  expect(latestMapViewerProps().waitingLabel).toBe('Select a PGM');
+  expect(latestMapViewerProps().waitingLabel).toBe('Load a map');
   // The editor shows the raw grid; floor-plan refinement is viewer-only.
   expect(latestMapViewerProps().mapRefined).toBe(false);
 });
 
-test('switches the mapping header between record and edit modes', async () => {
+test('cancels the Map Edit load dialog without loading anything', async () => {
+  getPgmFiles.mockResolvedValue({
+    files: [{ path: 'factory.pgm', name: 'factory.pgm' }],
+  });
+
+  render(<MissionCanvasPage />);
+
+  fireEvent.click(screen.getByRole('tab', { name: 'Map Edit' }));
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Load Map' })).toBeEnabled());
+  fireEvent.click(screen.getByRole('button', { name: 'Load Map' }));
+  await screen.findByRole('combobox', { name: 'PGM map' });
+
+  fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+  await waitFor(() => expect(screen.queryByRole('combobox', { name: 'PGM map' })).not.toBeInTheDocument());
+  expect(getPgmImage).not.toHaveBeenCalled();
+  expect(screen.queryByText('factory.pgm')).not.toBeInTheDocument();
+});
+
+test('switches between the Mapping and Map Edit stages via the rail tabs', async () => {
   getPgmFiles.mockResolvedValue({
     files: [{ path: 'factory.pgm', name: 'factory.pgm' }],
   });
@@ -2846,9 +2879,9 @@ test('switches the mapping header between record and edit modes', async () => {
 
   render(<MissionCanvasPage />);
 
-  // Record mode is the default: SLAM actions, teleop, and layers visible.
-  expect(screen.getByRole('button', { name: 'Record Map' })).toHaveAttribute('aria-pressed', 'true');
-  expect(screen.getByRole('button', { name: 'Edit Map' })).toHaveAttribute('aria-pressed', 'false');
+  // Mapping is the default stage: SLAM actions, teleop, and layers visible.
+  expect(screen.getByRole('tab', { name: 'Mapping' })).toHaveAttribute('aria-selected', 'true');
+  expect(screen.getByRole('tab', { name: 'Map Edit' })).toHaveAttribute('aria-selected', 'false');
   expect(screen.getByRole('button', { name: 'Start Mapping' })).toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Stop' })).toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Save Map' })).toBeInTheDocument();
@@ -2858,9 +2891,9 @@ test('switches the mapping header between record and edit modes', async () => {
   await openMappingEditorAndSelect();
 
   await waitFor(() => expect(getPgmFiles).toHaveBeenCalled());
-  expect(screen.getByRole('button', { name: 'Edit Map' })).toHaveAttribute('aria-pressed', 'true');
-  expect(screen.getByRole('button', { name: 'Record Map' })).toHaveAttribute('aria-pressed', 'false');
-  // Record-mode chrome is gone: SLAM actions, teleop, and the layers popover.
+  expect(screen.getByRole('tab', { name: 'Map Edit' })).toHaveAttribute('aria-selected', 'true');
+  expect(screen.getByRole('tab', { name: 'Mapping' })).toHaveAttribute('aria-selected', 'false');
+  // Mapping-stage chrome is gone: SLAM actions, teleop, and the layers popover.
   expect(screen.queryByRole('button', { name: 'Start Mapping' })).not.toBeInTheDocument();
   expect(screen.queryByRole('button', { name: 'Stop' })).not.toBeInTheDocument();
   expect(screen.queryByRole('button', { name: 'Save Map' })).not.toBeInTheDocument();
@@ -2870,10 +2903,10 @@ test('switches the mapping header between record and edit modes', async () => {
   expect(screen.queryByText('Mapping Session')).not.toBeInTheDocument();
   expect(screen.queryByText('Topics')).not.toBeInTheDocument();
 
-  fireEvent.click(screen.getByRole('button', { name: 'Record Map' }));
+  fireEvent.click(screen.getByRole('tab', { name: 'Mapping' }));
 
-  expect(screen.getByRole('button', { name: 'Record Map' })).toHaveAttribute('aria-pressed', 'true');
-  expect(screen.getByRole('button', { name: 'Edit Map' })).toHaveAttribute('aria-pressed', 'false');
+  expect(screen.getByRole('tab', { name: 'Mapping' })).toHaveAttribute('aria-selected', 'true');
+  expect(screen.getByRole('tab', { name: 'Map Edit' })).toHaveAttribute('aria-selected', 'false');
   expect(screen.getByRole('button', { name: 'Start Mapping' })).toBeEnabled();
   expect(screen.getByText('Live mapping')).toBeInTheDocument();
 });
@@ -2901,14 +2934,11 @@ test('keeps edit mode when the mapping runtime comes up', async () => {
   fireEvent(document, new Event('visibilitychange'));
 
   await waitFor(() => expect(screen.getByText('Status: running')).toBeInTheDocument());
-  const editSegment = screen.getByRole('button', { name: 'Edit Map' });
-  expect(editSegment).toHaveAttribute('aria-pressed', 'true');
-  expect(editSegment).toBeDisabled();
-  expect(screen.getByRole('button', { name: 'Record Map' })).toBeEnabled();
+  expect(screen.getByRole('tab', { name: 'Map Edit' })).toHaveAttribute('aria-selected', 'true');
   expect(screen.queryByRole('button', { name: 'Stop' })).not.toBeInTheDocument();
   expect(screen.queryByRole('button', { name: 'Save Map' })).not.toBeInTheDocument();
 
-  fireEvent.click(screen.getByRole('button', { name: 'Record Map' }));
+  fireEvent.click(screen.getByRole('tab', { name: 'Mapping' }));
 
   await waitFor(() => expect(screen.getByRole('button', { name: 'Stop' })).toBeEnabled());
   expect(screen.getByRole('button', { name: 'Save Map' })).toBeEnabled();
@@ -2935,7 +2965,13 @@ test('edits and saves loaded map pixels from the fix editor', async () => {
   await openMappingEditorAndSelect();
 
   await waitFor(() => expect(getPgmImage).toHaveBeenCalledWith('factory.pgm'));
-  // Brush size is now a segmented S/M/L/XL group (XL = 10 cells) instead of a <select>.
+  // A clean load arms nothing: Undo/Redo/Save all disabled, no unsaved badge.
+  expect(screen.getByRole('button', { name: 'Undo' })).toBeDisabled();
+  expect(screen.getByRole('button', { name: 'Redo' })).toBeDisabled();
+  expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
+  expect(screen.queryByText('· unsaved')).not.toBeInTheDocument();
+  // Pixel tools + brush sizes live in the Map Edit popover.
+  fireEvent.click(screen.getByRole('button', { name: 'Map Edit' }));
   fireEvent.click(screen.getByRole('button', { name: 'Brush size XL' }));
   expect(screen.getByRole('button', { name: 'Brush size XL' })).toHaveAttribute('aria-pressed', 'true');
 
@@ -2954,6 +2990,14 @@ test('edits and saves loaded map pixels from the fix editor', async () => {
   await waitFor(() => expect(screen.getByRole('button', { name: 'Redo' })).toBeEnabled());
 
   fireEvent.click(screen.getByRole('button', { name: 'Redo' }));
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Redo' })).toBeDisabled());
+
+  // The HUD tooltips advertise Ctrl+Z / Ctrl+Shift+Z — they must work here too.
+  fireEvent.keyDown(document, { key: 'z', ctrlKey: true });
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Redo' })).toBeEnabled());
+  fireEvent.keyDown(document, { key: 'z', ctrlKey: true, shiftKey: true });
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Redo' })).toBeDisabled());
+
   await waitFor(() => expect(screen.getByRole('button', { name: 'Save' })).toBeEnabled());
   fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
@@ -2964,6 +3008,9 @@ test('edits and saves loaded map pixels from the fix editor', async () => {
     255,
     'AA==',
   ));
+  // A successful save clears the dirty state: badge gone, Save re-disabled.
+  await waitFor(() => expect(screen.queryByText('· unsaved')).not.toBeInTheDocument());
+  expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
 });
 
 test('marks unknown map pixels from the fix editor', async () => {
@@ -2986,6 +3033,7 @@ test('marks unknown map pixels from the fix editor', async () => {
   await openMappingEditorAndSelect();
   await waitFor(() => expect(getPgmImage).toHaveBeenCalledWith('factory.pgm'));
 
+  fireEvent.click(screen.getByRole('button', { name: 'Map Edit' }));
   fireEvent.click(screen.getByRole('button', { name: 'Mark Unknown' }));
   await waitFor(() => expect(latestMapViewerProps().editorActive).toBe(true));
   await act(async () => {
@@ -3019,6 +3067,7 @@ test('paints continuous map pixel segments while dragging', async () => {
   await openMappingEditorAndSelect();
 
   await waitFor(() => expect(getPgmImage).toHaveBeenCalledWith('factory.pgm'));
+  fireEvent.click(screen.getByRole('button', { name: 'Map Edit' }));
   fireEvent.click(screen.getByRole('button', { name: 'Add Obstacle' }));
   await waitFor(() => expect(latestMapViewerProps().editorActive).toBe(true));
 
@@ -3067,7 +3116,10 @@ test('marks free-space areas with automatic color and undo/redo support', async 
   await waitFor(() => expect(getPgmImage).toHaveBeenCalledWith('factory.pgm'));
   await waitFor(() => expect(getMapAnnotations).toHaveBeenCalledWith('factory.pgm'));
 
+  fireEvent.click(screen.getByRole('button', { name: 'Add Label' }));
   fireEvent.click(screen.getByRole('button', { name: 'Area' }));
+  // Area drags a rectangle — no brush row in this mode.
+  expect(screen.queryByRole('button', { name: 'Brush size XL' })).not.toBeInTheDocument();
   fireEvent.change(screen.getByLabelText('Area name'), {
     target: { value: 'Dock' },
   });
@@ -3146,6 +3198,7 @@ test('auto-numbers and auto-selects areas created by rectangle drag', async () =
   await openMappingEditorAndSelect();
   await waitFor(() => expect(getMapAnnotations).toHaveBeenCalledWith('factory.pgm'));
 
+  fireEvent.click(screen.getByRole('button', { name: 'Add Label' }));
   fireEvent.click(screen.getByRole('button', { name: 'Area' }));
   expect(screen.getByLabelText('Area name')).toHaveAttribute('placeholder', 'Area 1');
   await waitFor(() => expect(latestMapViewerProps().editorAreaSelection).toBe(true));
@@ -3204,7 +3257,9 @@ test('removes an area from the chip list', async () => {
     expect.objectContaining({ label: 'Dock', color: '#3B241F' }),
   ]));
 
-  // Whole-area delete now lives on the area chip (two-click confirm).
+  fireEvent.click(screen.getByRole('button', { name: 'Add Label' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Area' }));
+  // Whole-area delete now lives in the popover's area list (two-click confirm).
   fireEvent.click(screen.getByRole('button', { name: 'Delete area Dock' }));
   fireEvent.click(screen.getByRole('button', { name: 'Confirm delete area Dock' }));
 
@@ -3252,6 +3307,8 @@ test('renames a map area from the chip list', async () => {
   await openMappingEditorAndSelect();
 
   await waitFor(() => expect(getMapAnnotations).toHaveBeenCalledWith('factory.pgm'));
+  fireEvent.click(screen.getByRole('button', { name: 'Add Label' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Area' }));
   await waitFor(() => expect(screen.getByRole('button', { name: 'Dock' })).toBeInTheDocument());
 
   fireEvent.click(screen.getByRole('button', { name: 'Dock' }));
@@ -3333,7 +3390,9 @@ test('freezes visible area cells when deleting an overlapping area', async () =>
     expect.objectContaining({ label: 'Back' }),
   ]));
 
-  // Whole-area delete now lives on the area chip (two-click confirm).
+  fireEvent.click(screen.getByRole('button', { name: 'Add Label' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Area' }));
+  // Whole-area delete now lives in the popover's area list (two-click confirm).
   fireEvent.click(screen.getByRole('button', { name: 'Delete area Front' }));
   fireEvent.click(screen.getByRole('button', { name: 'Confirm delete area Front' }));
 
@@ -3384,9 +3443,13 @@ test('extends the selected area with the extend brush', async () => {
 
   await openMappingEditorAndSelect();
   await waitFor(() => expect(getMapAnnotations).toHaveBeenCalledWith('factory.pgm'));
-  await waitFor(() => expect(screen.getByRole('button', { name: 'Dock' })).toBeInTheDocument());
 
+  fireEvent.click(screen.getByRole('button', { name: 'Add Label' }));
+  // Brush sizes belong to the stroke tools only (Extend/Erase), never Area.
+  expect(screen.queryByRole('button', { name: 'Brush size XL' })).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: 'Extend' }));
+  expect(screen.getByRole('button', { name: 'Brush size XL' })).toBeInTheDocument();
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Dock' })).toBeInTheDocument());
   await waitFor(() => expect(latestMapViewerProps().editorActive).toBe(true));
   expect(latestMapViewerProps().editorAreaSelection).toBe(false);
   // Brush tools surface a pointer-following ring spec to the viewer.
@@ -3471,6 +3534,7 @@ test('erases map area pixels with brush drag', async () => {
     expect.objectContaining({ label: 'Dock' }),
   ]));
 
+  fireEvent.click(screen.getByRole('button', { name: 'Add Label' }));
   fireEvent.click(screen.getByRole('button', { name: 'Erase Area' }));
   await act(async () => {
     latestMapViewerProps().onEditorMapPoint(0.5, 0.5, 'start');
@@ -3592,8 +3656,6 @@ test('enables navigation runtime layers in the run stage', async () => {
   expect(screen.queryByRole('button', { name: 'Navigation' })).not.toBeInTheDocument();
   expect(screen.queryByRole('button', { name: 'Run BT' })).not.toBeInTheDocument();
   expect(screen.queryByRole('button', { name: 'Save Map' })).not.toBeInTheDocument();
-  // The Record/Edit mode switch is Mapping-only.
-  expect(screen.queryByRole('button', { name: 'Edit Map' })).not.toBeInTheDocument();
   expect(screen.getByText('/global_costmap/costmap')).toBeInTheDocument();
   expect(screen.getByText('/local_costmap/costmap')).toBeInTheDocument();
   expect(screen.getByText('/plan')).toBeInTheDocument();

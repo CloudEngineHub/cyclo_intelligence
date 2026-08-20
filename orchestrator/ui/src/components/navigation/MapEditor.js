@@ -26,21 +26,21 @@ const FREE_THRESHOLD = 250;
 const OCCUPIED_THRESHOLD = 50;
 const DEFAULT_BRUSH_SIZE_CELLS = 1;
 const MAX_BRUSH_SIZE_CELLS = 10;
-const BRUSH_SIZE_OPTIONS = [
+export const BRUSH_SIZE_OPTIONS = [
     { label: "Small", value: 1 },
     { label: "Medium", value: 3 },
     { label: "Large", value: 6 },
     { label: "XL", value: 10 },
 ];
-const EDIT_TOOLS = [
+export const EDIT_TOOLS = [
     { id: "erase_black", label: "Clear Space" },
     { id: "draw_black", label: "Add Obstacle" },
     { id: "draw_unknown", label: "Mark Unknown" },
 ];
 const PIXEL_TOOL_IDS = new Set(EDIT_TOOLS.map((tool) => tool.id));
-const ANNOTATION_TOOL = { id: "label_marker", label: "Area" };
-const ANNOTATION_EXTEND_TOOL = { id: "extend_area", label: "Extend" };
-const ANNOTATION_ERASE_TOOL = { id: "erase_area", label: "Erase Area" };
+export const ANNOTATION_TOOL = { id: "label_marker", label: "Area" };
+export const ANNOTATION_EXTEND_TOOL = { id: "extend_area", label: "Extend" };
+export const ANNOTATION_ERASE_TOOL = { id: "erase_area", label: "Erase Area" };
 // Area colors deliberately avoid green and orange/amber hues — those belong to
 // the marker language (sage = waypoints/actions, amber = decorators + local
 // costmap, clay = selection) and areas must not read as markers. Pastel base
@@ -535,7 +535,7 @@ function chooseAnnotationColor(existingAnnotations) {
     }
     return hslToHex(safeAnnotationHue(used.size * 137.508), 0.52, 0.32);
 }
-function nextAutoAreaLabel(annotations) {
+export function nextAutoAreaLabel(annotations) {
     let max = 0;
     (annotations || []).forEach((annotation) => {
         const match = /^Area (\d+)$/.exec(String((annotation === null || annotation === void 0 ? void 0 : annotation.label) || "").trim());
@@ -1127,7 +1127,7 @@ export function useMapEditor({ open, mapName, onMessage, reloadToken = 0, autoSe
     };
 }
 // Warm segmented map-editor controls (see design handoff, turn 8).
-const TOOL_ICONS = {
+export const TOOL_ICONS = {
     view: (
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
             <path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6-10-6-10-6z" /><circle cx="12" cy="12" r="2.6" />
@@ -1191,7 +1191,7 @@ export function SegButton({ selected, disabled, onClick, title, ariaLabel, child
             onClick={onClick}
             title={title}
             aria-label={ariaLabel}
-            className={`h-[30px] ${narrow ? "min-w-[42px] px-2 justify-center" : "px-3"} inline-flex items-center gap-1.5 text-[12.5px] font-semibold transition-colors disabled:opacity-50`}
+            className={`h-[30px] ${narrow ? "min-w-[42px] px-2 justify-center" : "px-3"} inline-flex items-center gap-1.5 whitespace-nowrap text-[12.5px] font-semibold transition-colors disabled:opacity-50`}
             style={{
                 borderRadius: 9,
                 border: "none",
@@ -1218,7 +1218,7 @@ function EditorSection({ label, children }) {
     );
 }
 
-export function MapEditorControls({ files, selectedPath, setSelectedPath, tool, setTool, brushSize, setBrushSize, busy, image, dirty, canUndo = false, canRedo = false, undo, redo, save, enableAnnotations = false, annotations = [], annotationLabel = "Area", setAnnotationLabel = () => { }, selectedAnnotationId = "", setSelectedAnnotationId = () => { }, deleteAnnotationById = () => { }, renameAnnotation = () => { }, }) {
+export function MapEditorControls({ files, selectedPath, setSelectedPath, tool, setTool, brushSize, setBrushSize, busy, image, dirty, canUndo = false, canRedo = false, undo, redo, save, enableAnnotations = false, annotations = [], annotationLabel = "Area", setAnnotationLabel = () => { }, selectedAnnotationId = "", setSelectedAnnotationId = () => { }, deleteAnnotationById = () => { }, renameAnnotation = () => { } }) {
     const [renamingId, setRenamingId] = useState("");
     const [renameDraft, setRenameDraft] = useState("");
     const [confirmDeleteId, setConfirmDeleteId] = useState("");
@@ -1247,6 +1247,93 @@ export function MapEditorControls({ files, selectedPath, setSelectedPath, tool, 
         setRenamingId("");
         setRenameDraft("");
     };
+
+    const areasChips = enableAnnotations && annotations.length > 0 && (
+        <div role="group" aria-label="Map areas" className="flex max-h-24 w-full flex-wrap items-center gap-1.5 overflow-y-auto">
+            {annotations.map((annotation) => {
+                const selected = annotation.id === selectedAnnotationId;
+                const confirming = confirmDeleteId === annotation.id;
+                if (renamingId === annotation.id) {
+                    return (
+                        <input
+                            key={annotation.id}
+                            autoFocus
+                            aria-label={`Rename area ${annotation.label}`}
+                            value={renameDraft}
+                            disabled={busy}
+                            onChange={(event) => setRenameDraft(event.currentTarget.value)}
+                            onBlur={() => commitRename(annotation)}
+                            onKeyDown={(event) => {
+                                if (event.key === "Enter") {
+                                    event.preventDefault();
+                                    commitRename(annotation);
+                                }
+                                if (event.key === "Escape") {
+                                    event.preventDefault();
+                                    setRenamingId("");
+                                    setRenameDraft("");
+                                }
+                            }}
+                            className="h-8 w-32 px-3 text-[12px] font-semibold"
+                            style={{ borderRadius: 9, color: "var(--mc-text)", backgroundColor: "var(--mc-surface)", border: "1px solid var(--mc-border-strong)" }}
+                        />
+                    );
+                }
+                return (
+                    <span
+                        key={annotation.id}
+                        className="inline-flex h-8 items-center gap-1 pl-2.5 pr-1"
+                        style={{
+                            borderRadius: 999,
+                            border: `1px solid ${selected ? "var(--mc-text)" : "var(--mc-border-strong)"}`,
+                            backgroundColor: selected ? "var(--mc-surface-hover)" : "var(--mc-surface)",
+                        }}
+                    >
+                        <button
+                            type="button"
+                            aria-pressed={selected}
+                            disabled={busy}
+                            onClick={() => setSelectedAnnotationId(annotation.id)}
+                            onDoubleClick={() => {
+                                setRenamingId(annotation.id);
+                                setRenameDraft(annotation.label);
+                            }}
+                            title={`${annotation.label} — double-click to rename`}
+                            className="inline-flex items-center gap-1.5 text-[12px] font-semibold disabled:opacity-50"
+                            style={{ border: "none", backgroundColor: "transparent", color: "var(--mc-text)" }}
+                        >
+                            <span aria-hidden="true" className="shrink-0" style={{ width: 8, height: 8, borderRadius: 999, backgroundColor: annotation.color }} />
+                            {annotation.label}
+                        </button>
+                        <button
+                            type="button"
+                            disabled={busy}
+                            aria-label={confirming ? `Confirm delete area ${annotation.label}` : `Delete area ${annotation.label}`}
+                            onClick={() => {
+                                if (confirming) {
+                                    deleteAnnotationById(annotation.id);
+                                    disarmConfirms();
+                                    return;
+                                }
+                                setConfirmDeleteId(annotation.id);
+                                armConfirmTimer();
+                            }}
+                            className="inline-flex h-6 w-6 items-center justify-center text-[13px] leading-none disabled:opacity-50"
+                            style={{
+                                borderRadius: 999,
+                                border: "none",
+                                backgroundColor: confirming ? "var(--mc-danger)" : "transparent",
+                                color: confirming ? "var(--mc-accent-fg)" : "var(--mc-danger)",
+                            }}
+                        >
+                            ×
+                        </button>
+                    </span>
+                );
+            })}
+        </div>
+    );
+
 
     return (
         <div className="flex w-full flex-col gap-2">
@@ -1374,91 +1461,7 @@ export function MapEditorControls({ files, selectedPath, setSelectedPath, tool, 
                 </span>
             </div>
 
-            {enableAnnotations && annotations.length > 0 && (
-                <div role="group" aria-label="Map areas" className="flex max-h-24 w-full flex-wrap items-center gap-1.5 overflow-y-auto">
-                    {annotations.map((annotation) => {
-                        const selected = annotation.id === selectedAnnotationId;
-                        const confirming = confirmDeleteId === annotation.id;
-                        if (renamingId === annotation.id) {
-                            return (
-                                <input
-                                    key={annotation.id}
-                                    autoFocus
-                                    aria-label={`Rename area ${annotation.label}`}
-                                    value={renameDraft}
-                                    disabled={busy}
-                                    onChange={(event) => setRenameDraft(event.currentTarget.value)}
-                                    onBlur={() => commitRename(annotation)}
-                                    onKeyDown={(event) => {
-                                        if (event.key === "Enter") {
-                                            event.preventDefault();
-                                            commitRename(annotation);
-                                        }
-                                        if (event.key === "Escape") {
-                                            event.preventDefault();
-                                            setRenamingId("");
-                                            setRenameDraft("");
-                                        }
-                                    }}
-                                    className="h-8 w-32 px-3 text-[12px] font-semibold"
-                                    style={{ borderRadius: 9, color: "var(--mc-text)", backgroundColor: "var(--mc-surface)", border: "1px solid var(--mc-border-strong)" }}
-                                />
-                            );
-                        }
-                        return (
-                            <span
-                                key={annotation.id}
-                                className="inline-flex h-8 items-center gap-1 pl-2.5 pr-1"
-                                style={{
-                                    borderRadius: 999,
-                                    border: `1px solid ${selected ? "var(--mc-text)" : "var(--mc-border-strong)"}`,
-                                    backgroundColor: selected ? "var(--mc-surface-hover)" : "var(--mc-surface)",
-                                }}
-                            >
-                                <button
-                                    type="button"
-                                    aria-pressed={selected}
-                                    disabled={busy}
-                                    onClick={() => setSelectedAnnotationId(annotation.id)}
-                                    onDoubleClick={() => {
-                                        setRenamingId(annotation.id);
-                                        setRenameDraft(annotation.label);
-                                    }}
-                                    title={`${annotation.label} — double-click to rename`}
-                                    className="inline-flex items-center gap-1.5 text-[12px] font-semibold disabled:opacity-50"
-                                    style={{ border: "none", backgroundColor: "transparent", color: "var(--mc-text)" }}
-                                >
-                                    <span aria-hidden="true" className="shrink-0" style={{ width: 8, height: 8, borderRadius: 999, backgroundColor: annotation.color }} />
-                                    {annotation.label}
-                                </button>
-                                <button
-                                    type="button"
-                                    disabled={busy}
-                                    aria-label={confirming ? `Confirm delete area ${annotation.label}` : `Delete area ${annotation.label}`}
-                                    onClick={() => {
-                                        if (confirming) {
-                                            deleteAnnotationById(annotation.id);
-                                            disarmConfirms();
-                                            return;
-                                        }
-                                        setConfirmDeleteId(annotation.id);
-                                        armConfirmTimer();
-                                    }}
-                                    className="inline-flex h-6 w-6 items-center justify-center text-[13px] leading-none disabled:opacity-50"
-                                    style={{
-                                        borderRadius: 999,
-                                        border: "none",
-                                        backgroundColor: confirming ? "var(--mc-danger)" : "transparent",
-                                        color: confirming ? "var(--mc-accent-fg)" : "var(--mc-danger)",
-                                    }}
-                                >
-                                    ×
-                                </button>
-                            </span>
-                        );
-                    })}
-                </div>
-            )}
+            {areasChips}
         </div>
     );
 }
