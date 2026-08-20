@@ -361,7 +361,10 @@ function App() {
 
   return (
     <div className="flex min-h-screen w-screen bg-white text-gray-900 dark:bg-slate-950 dark:text-slate-100">
-      <aside className="w-30 min-w-28 bg-gray-100 dark:bg-slate-900 min-h-screen flex flex-col items-center gap-4 shadow-[inset_0_0_2px_rgba(0,0,0,0.1)] dark:shadow-[inset_0_0_0_1px_rgba(148,163,184,0.12)]">
+      <aside
+        aria-label="Cyclo Intelligence navigation"
+        className="w-30 min-w-28 bg-gray-100 dark:bg-slate-900 min-h-screen flex flex-col items-center gap-4 shadow-[inset_0_0_2px_rgba(0,0,0,0.1)] dark:shadow-[inset_0_0_0_1px_rgba(148,163,184,0.12)]"
+      >
         <div className="w-full h-screen flex flex-col gap-2 items-center overflow-y-auto scrollbar-thin">
           <div className="w-full px-2 pt-3 pb-2 flex flex-col gap-2 border-b border-gray-200 dark:border-slate-800">
             <ThemeToggle />
@@ -421,6 +424,37 @@ function App() {
             <MdVideocam size={32} className="mb-1.5" />
             <span className="mt-1 text-sm">Record</span>
           </button>
+          {/* Edit dataset page button */}
+          <button
+            className={clsx(classPageButton, {
+              'hover:bg-gray-200 active:bg-gray-400 dark:hover:bg-slate-800 dark:active:bg-slate-700': page !== PageType.EDIT_DATASET,
+              'bg-gray-300 dark:bg-slate-700': page === PageType.EDIT_DATASET,
+            })}
+            onClick={handleEditDatasetPageNavigation}
+          >
+            <MdWidgets size={28} className="mb-2" />
+            <span className="mt-1 text-sm whitespace-nowrap">Data Tools</span>
+          </button>
+
+          {/* Inference page button */}
+          <button
+            className={clsx(classPageButton, {
+              'hover:bg-gray-200 active:bg-gray-400 dark:hover:bg-slate-800 dark:active:bg-slate-700': page !== PageType.INFERENCE,
+              'bg-gray-300 dark:bg-slate-700': page === PageType.INFERENCE,
+            })}
+            onClick={handleInferencePageNavigation}
+          >
+            <MdMemory size={32} className="mb-1.5" />
+            <span className="mt-1 text-sm">Inference</span>
+          </button>
+
+          {/* Divider line */}
+          <div
+            role="separator"
+            aria-label="Navigation sections"
+            className="w-24 h-1 border-t-2 rounded-full border-gray-200 dark:border-slate-800 mt-3"
+          />
+
           {/* Training Guide page button */}
           <button
             className={clsx(classPageButton, {
@@ -434,16 +468,17 @@ function App() {
               Training<br />Guide
             </span>
           </button>
-          {/* Inference page button */}
+
+          {/* Navigation page button */}
           <button
             className={clsx(classPageButton, {
-              'hover:bg-gray-200 active:bg-gray-400 dark:hover:bg-slate-800 dark:active:bg-slate-700': page !== PageType.INFERENCE,
-              'bg-gray-300 dark:bg-slate-700': page === PageType.INFERENCE,
+              'hover:bg-gray-200 active:bg-gray-400 dark:hover:bg-slate-800 dark:active:bg-slate-700': page !== PageType.NAVIGATION,
+              'bg-gray-300 dark:bg-slate-700': page === PageType.NAVIGATION,
             })}
-            onClick={handleInferencePageNavigation}
+            onClick={handleNavigationPageNavigation}
           >
-            <MdMemory size={32} className="mb-1.5" />
-            <span className="mt-1 text-sm">Inference</span>
+            <MdNavigation size={30} className="mb-2" />
+            <span className="mt-1 text-sm whitespace-nowrap">Nav</span>
           </button>
 
           {/* BT Manager page button */}
@@ -470,33 +505,6 @@ function App() {
             <span className="mt-1 text-center text-sm leading-tight">
               Mission<br />Canvas
             </span>
-          </button>
-
-          {/* Divider line */}
-          <div className="w-24 h-1 border-t-2 rounded-full border-gray-200 dark:border-slate-800 mt-3"></div>
-
-          {/* Edit dataset page button */}
-          <button
-            className={clsx(classPageButton, {
-              'hover:bg-gray-200 active:bg-gray-400 dark:hover:bg-slate-800 dark:active:bg-slate-700': page !== PageType.EDIT_DATASET,
-              'bg-gray-300 dark:bg-slate-700': page === PageType.EDIT_DATASET,
-            })}
-            onClick={handleEditDatasetPageNavigation}
-          >
-            <MdWidgets size={28} className="mb-2" />
-            <span className="mt-1 text-sm whitespace-nowrap">Data Tools</span>
-          </button>
-
-          {/* Navigation page button - keep this as the last sidebar item. */}
-          <button
-            className={clsx(classPageButton, {
-              'hover:bg-gray-200 active:bg-gray-400 dark:hover:bg-slate-800 dark:active:bg-slate-700': page !== PageType.NAVIGATION,
-              'bg-gray-300 dark:bg-slate-700': page === PageType.NAVIGATION,
-            })}
-            onClick={handleNavigationPageNavigation}
-          >
-            <MdNavigation size={30} className="mb-2" />
-            <span className="mt-1 text-sm whitespace-nowrap">Nav</span>
           </button>
 
         </div>

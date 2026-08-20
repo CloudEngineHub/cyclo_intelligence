@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import { Provider } from 'react-redux';
 import App from './App';
 import { ThemeProvider } from './contexts/ThemeContext';
@@ -102,6 +102,39 @@ test('renders the Cyclo Intelligence shell navigation', () => {
   expect(screen.getByRole('button', { name: /Inference/i }))
     .toBeInTheDocument();
   expect(screen.getByText('Home Page')).toBeInTheDocument();
+});
+
+test('orders the Cyclo Intelligence navigation into workflow sections', () => {
+  render(
+    <Provider store={store}>
+      <ThemeProvider>
+        <App />
+      </ThemeProvider>
+    </Provider>
+  );
+
+  const navigation = within(screen.getByLabelText('Cyclo Intelligence navigation'));
+  const pageButtons = [
+    'Home',
+    'Record',
+    'Data Tools',
+    'Inference',
+    'Training Guide',
+    'Nav',
+    'BT Manager',
+    'Mission Canvas',
+  ].map((name) => navigation.getByRole('button', { name }));
+
+  pageButtons.slice(1).forEach((button, index) => {
+    expect(pageButtons[index].compareDocumentPosition(button))
+      .toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+  });
+
+  const separator = navigation.getByRole('separator', { name: 'Navigation sections' });
+  expect(navigation.getByRole('button', { name: 'Inference' }).nextElementSibling)
+    .toBe(separator);
+  expect(separator.nextElementSibling)
+    .toBe(navigation.getByRole('button', { name: 'Training Guide' }));
 });
 
 test('stops Navigation after leaving the Nav page', async () => {
