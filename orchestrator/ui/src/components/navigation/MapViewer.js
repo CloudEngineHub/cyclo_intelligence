@@ -1567,6 +1567,11 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, scanPose = n
     const lastMotionPoseRef = useRef(null);
     const renderActiveUntilRef = useRef(0);
     const renderInteractionActiveRef = useRef(false);
+    // True while an active-waypoint halo is pulsing: the animation needs the
+    // 60fps cadence or main-thread contention (BT split view) makes the
+    // 10fps idle ticks visibly stutter.
+    const pulseActiveRef = useRef(false);
+    pulseActiveRef.current = Boolean(activeWaypointId);
     const latestFootprintRef = useRef(null);
     const tfSyncedFootprintRef = useRef(null);
     const [dragPreviewPose, setDragPreviewPose] = useState(null);
@@ -1697,6 +1702,7 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, scanPose = n
                 const renderActive = (
                     renderInteractionActiveRef.current ||
                     followCameraMoving ||
+                    pulseActiveRef.current ||
                     now < renderActiveUntilRef.current
                 );
                 const frameInterval = mapRenderIntervalMs({
@@ -1710,7 +1716,7 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, scanPose = n
                 // the camera to keep the robot centered while it navigates.
                 const wave = 0.5 + 0.5 * Math.sin(elapsed * 3.2);
                 const activeLayers = layersRef.current;
-                if (activeLayers) {
+                if (activeLayers && pulseActiveRef.current) {
                     activeLayers.traverse((object) => {
                         if (object.userData && object.userData.pulse && object.material) {
                             object.material.opacity = object.userData.pulseBase * (0.35 + 0.65 * wave);

@@ -143,7 +143,10 @@ const AUTO_LOCALIZE_XY_COVARIANCE_MAX = 0.6;
 const AUTO_LOCALIZE_YAW_COVARIANCE_MAX = 0.5;
 const ROS2_WS_FAST_TOPIC_OPTIONS = { throttleMs: 100 };
 const ROS2_WS_ODOM_TOPIC_OPTIONS = { throttleMs: 50, staleMs: 1000 };
-const BT_TOPIC_OPTIONS = { staleMs: 3000 };
+// throttleMs: the BT glow only needs ~7fps; unthrottled status messages
+// re-render the whole page per message and starve the map's pulse loop
+// while the BT split view is open.
+const BT_TOPIC_OPTIONS = { staleMs: 3000, throttleMs: 150 };
 const SUPERVISOR_API_BASE = "/api";
 const STAGE_MAPPING = "mapping";
 const STAGE_MAP_EDIT = "map_edit";
@@ -3632,6 +3635,10 @@ export default function MissionCanvasPage({ onBackHome = null }) {
       pose: { position: { x, y, z: 0 }, orientation: orientationFromYaw(yaw) },
     });
     setNavGoalStatus("driving");
+    // One-shot arm: return to view mode so OrbitControls (scroll zoom) work
+    // while the camera follows the drive, and a stray click cannot send a
+    // second goal. Re-arm Set Goal for the next target.
+    setInteractionMode("view");
     setMessage(`Goal ${x.toFixed(2)}, ${y.toFixed(2)}`);
     try {
       const result = await sendMissionGoal(x, y, yaw);
@@ -3804,7 +3811,7 @@ export default function MissionCanvasPage({ onBackHome = null }) {
   const missionFollowRobot = (
     missionRunnerActive
     && (missionRunner.phase === "nav-sent" || missionRunner.phase === "awaiting-nav-result")
-  );
+  ) || (workspaceStage === STAGE_NAVIGATE && navGoalStatus === "driving");
 
   const waypointBtEditor = selectedBtLayerSpot ? (
     <MissionBtEditor

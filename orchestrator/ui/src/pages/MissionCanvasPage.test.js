@@ -5462,6 +5462,10 @@ test('drives to a clicked goal from the Navigate stage', async () => {
   expect(latestMapViewerProps().goalPose).not.toBeNull();
   expect(latestMapViewerProps().showGoalPose).toBe(true);
   expect(screen.getByText('Driving')).toBeInTheDocument();
+  // Sending is one-shot: the map returns to view mode (scroll zoom works)
+  // and the camera follows the robot for the duration of the drive.
+  expect(latestMapViewerProps().interactionMode).toBe('view');
+  expect(latestMapViewerProps().missionFollowRobot).toBe(true);
 
   // Stop while driving cancels the goal only — navigation stays up for the
   // next goal.
@@ -5469,6 +5473,7 @@ test('drives to a clicked goal from the Navigate stage', async () => {
   await waitFor(() => expect(cancelNavigateToPoseGoal).toHaveBeenCalled());
   expect(stopNavigation).not.toHaveBeenCalled();
   await waitFor(() => expect(screen.queryByText('Driving')).not.toBeInTheDocument());
+  expect(latestMapViewerProps().missionFollowRobot).toBe(false);
   expect(screen.getByRole('button', { name: 'Localize' })).toBeEnabled();
 
   await act(async () => {
