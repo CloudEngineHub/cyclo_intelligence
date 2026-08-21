@@ -102,6 +102,8 @@ export function useMissionRunner({
   const abortRef = useRef(null);
   const isRunningRef = useRef(false);
   const stopCleanupRef = useRef(Promise.resolve());
+  const btLoadPromiseRef = useRef(null);
+  const btNeedsStopRef = useRef(false);
 
   useEffect(() => { spotsRef.current = orderedSpots || []; }, [orderedSpots]);
 
@@ -127,6 +129,20 @@ export function useMissionRunner({
 
   const emit = useCallback((message) => {
     if (message && typeof onMessageRef.current === "function") onMessageRef.current(message);
+  }, []);
+
+  // A navigation-only mission must never stop a tree owned by the standalone
+  // workspace. Once this runner has issued /bt/load_and_run, however, it owns
+  // that execution and Stop must be ordered after any in-flight load request;
+  // otherwise a late load response can restart the tree after Stop returned.
+  const stopEngagedBt = useCallback(async () => {
+    const pendingLoad = btLoadPromiseRef.current;
+    if (pendingLoad) {
+      try { await pendingLoad; } catch { /* ownership is still best-effort */ }
+    }
+    if (!btNeedsStopRef.current || typeof stopBtRef.current !== "function") return;
+    await stopBtRef.current();
+    btNeedsStopRef.current = false;
   }, []);
 
   // Keep the newly-loaded tree ticking until it reports a FRESH terminal status.
@@ -156,20 +172,26 @@ export function useMissionRunner({
 
     dispatch({ type: "runBt", index });
     let loadResult;
+    const loadPromise = Promise.resolve().then(() => callServiceRef.current(
+      "/bt/load_and_run",
+      "interfaces/srv/LoadAndRunTree",
+      { tree_xml: xml },
+      30000,
+    ));
+    btNeedsStopRef.current = true;
+    btLoadPromiseRef.current = loadPromise;
     try {
-      loadResult = await callServiceRef.current(
-        "/bt/load_and_run",
-        "interfaces/srv/LoadAndRunTree",
-        { tree_xml: xml },
-        30000,
-      );
+      loadResult = await loadPromise;
       throwIfAborted(signal);
     } catch (error) {
       if (signal.aborted || isAbort(error)) throw error;
       dispatch({ type: "fail", reason: `BT load failed at ${label}: ${error.message || error}`, index });
       return false;
+    } finally {
+      if (btLoadPromiseRef.current === loadPromise) btLoadPromiseRef.current = null;
     }
     if (loadResult && loadResult.success === false) {
+      btNeedsStopRef.current = false;
       dispatch({ type: "fail", reason: `BT rejected at ${label}: ${loadResult.message || ""}`, index });
       return false;
     }
@@ -177,6 +199,7 @@ export function useMissionRunner({
 
     const outcome = await awaitBtTerminal(signal);
     if (outcome === "completed") {
+      btNeedsStopRef.current = false;
       dispatch({ type: "finish", index, skipped: false });
       return true;
     }
@@ -185,12 +208,14 @@ export function useMissionRunner({
       timeout: `Behavior tree timed out at ${label}`,
       nostart: `Behavior tree did not start at ${label}`,
     };
-    if (outcome === "timeout" || outcome === "nostart") {
-      try { await stopBtRef.current(); } catch (error) { /* best-effort */ }
+    if (outcome === "failed") {
+      btNeedsStopRef.current = false;
+    } else if (outcome === "timeout" || outcome === "nostart") {
+      try { await stopEngagedBt(); } catch (error) { /* best-effort */ }
     }
     dispatch({ type: "fail", reason: reasonByOutcome[outcome] || `Behavior tree error at ${label}`, index });
     return false;
-  }, [awaitBtTerminal]);
+  }, [awaitBtTerminal, stopEngagedBt]);
 
   const runNavigationBatch = useCallback(async (startIndex, signal) => {
     const spots = spotsRef.current;
@@ -302,6 +327,8 @@ export function useMissionRunner({
     abortRef.current = controller;
     isRunningRef.current = true;
     stopCleanupRef.current = Promise.resolve();
+    btLoadPromiseRef.current = null;
+    btNeedsStopRef.current = false;
     setLifecycleBusy(true);
     dispatch({ type: "start" });
 
@@ -345,6 +372,7 @@ export function useMissionRunner({
         // shut down resources already acquired by a newer run.
         try {
           await stopCleanupRef.current;
+          await stopEngagedBt().catch(() => {});
           if (needsBt && releaseBtRef.current) {
             await Promise.resolve().then(releaseBtRef.current).catch(() => {});
           }
@@ -357,7 +385,7 @@ export function useMissionRunner({
         }
       }
     })();
-  }, [emit, runNavigationBatch]);
+  }, [emit, runNavigationBatch, stopEngagedBt]);
 
   const stop = useCallback(() => {
     const controller = abortRef.current;
@@ -365,7 +393,7 @@ export function useMissionRunner({
     dispatch({ type: "cancel" });
     const cleanup = Promise.allSettled([
       Promise.resolve().then(() => (cancelGoalRef.current ? cancelGoalRef.current() : null)),
-      Promise.resolve().then(() => (stopBtRef.current ? stopBtRef.current() : null)),
+      Promise.resolve().then(stopEngagedBt),
     ]);
     stopCleanupRef.current = cleanup;
     cleanup.then((results) => {
@@ -373,7 +401,7 @@ export function useMissionRunner({
         emit("Stop sent, but the robot may still be executing");
       }
     });
-  }, [emit]);
+  }, [emit, stopEngagedBt]);
 
   // Abort on unmount, but only if a run is genuinely in flight (guards against
   // React StrictMode's double effect invocation spuriously cancelling).
@@ -382,9 +410,9 @@ export function useMissionRunner({
       abortRef.current.abort();
       isRunningRef.current = false;
       if (cancelGoalRef.current) Promise.resolve().then(cancelGoalRef.current).catch(() => {});
-      if (stopBtRef.current) Promise.resolve().then(stopBtRef.current).catch(() => {});
+      Promise.resolve().then(stopEngagedBt).catch(() => {});
     }
-  }, []);
+  }, [stopEngagedBt]);
 
   const activeSpotId = (
     state.currentIndex >= 0

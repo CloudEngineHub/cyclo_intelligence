@@ -28,7 +28,6 @@ import RecordPage from './pages/RecordPage';
 import InferencePage from './pages/InferencePage';
 import TrainingPage from './pages/TrainingPage';
 import EditDatasetPage from './pages/EditDatasetPage';
-import BTManagerPage from './pages/BTManagerPage';
 import { useRosTopicSubscription } from './hooks/useRosTopicSubscription';
 import rosConnectionManager from './utils/rosConnectionManager';
 import { stopNavigation } from './utils/navigationApi';
@@ -36,7 +35,6 @@ import { useDispatch, useSelector } from 'react-redux';
 import { moveToPage, persistCurrentPage } from './features/ui/uiSlice';
 import { persistRobotType } from './features/tasks/taskSlice';
 import PageType from './constants/pageType';
-import { BT_UNSUPPORTED_ROBOT_MESSAGE, isBtRobotSupported } from './constants/btSupport';
 
 const NavigationPage = React.lazy(() => import('./pages/NavigationPage'));
 const MissionCanvasPage = React.lazy(() => import('./pages/MissionCanvasPage'));
@@ -291,18 +289,6 @@ function App() {
     dispatch(moveToPage(PageType.EDIT_DATASET));
   };
 
-  const handleBTManagerPageNavigation = () => {
-    if (!isBtRobotSupported(robotType)) {
-      toast.error(BT_UNSUPPORTED_ROBOT_MESSAGE, {
-        duration: 4000,
-      });
-      return;
-    }
-
-    isFirstLoad.current = false;
-    dispatch(moveToPage(PageType.BT_MANAGER));
-  };
-
   const handleNavigationPageNavigation = () => {
     isFirstLoad.current = false;
     dispatch(moveToPage(PageType.NAVIGATION));
@@ -481,18 +467,6 @@ function App() {
             <span className="mt-1 text-sm whitespace-nowrap">Nav</span>
           </button>
 
-          {/* BT Manager page button */}
-          <button
-            className={clsx(classPageButton, {
-              'hover:bg-gray-200 active:bg-gray-400 dark:hover:bg-slate-800 dark:active:bg-slate-700': page !== PageType.BT_MANAGER,
-              'bg-gray-300 dark:bg-slate-700': page === PageType.BT_MANAGER,
-            })}
-            onClick={handleBTManagerPageNavigation}
-          >
-            <MdAccountTree size={28} className="mb-2" />
-            <span className="mt-1 text-sm whitespace-nowrap">BT Manager</span>
-          </button>
-
           {/* Mission Canvas page button */}
           <button
             className={clsx(classPageButton, {
@@ -520,8 +494,6 @@ function App() {
           <TrainingPage isActive={page === PageType.TRAINING} />
         ) : page === PageType.EDIT_DATASET ? (
           <EditDatasetPage isActive={page === PageType.EDIT_DATASET} />
-        ) : page === PageType.BT_MANAGER ? (
-          <BTManagerPage isActive={page === PageType.BT_MANAGER} />
         ) : page === PageType.MISSION_CANVAS ? (
           <React.Suspense fallback={<div className="flex-1 flex items-center justify-center">Loading Mission Canvas...</div>}>
             <MissionCanvasPage />

@@ -1546,6 +1546,7 @@ function WaypointBtFocusLayer({ layer, onClose }) {
 // Scene background per theme (warm-minimal). Light uses warm paper; dark uses a
 // warm near-black so the occupancy palette (free ~245, occupied ~28) still reads
 // as a clean floor-plan without retuning makeOccupancyTexture.
+// Keep these values aligned with the Mission Canvas `--mc-canvas` theme token.
 const SCENE_BG = { light: 0xefece3, dark: 0x1b1916 };
 
 export function MapViewer({ map, globalCostmap, localCostmap, scan, scanPose = null, pose, plan, goalPose, footprint, tf, showMap, showGlobalCostmap, showLocalCostmap, showScan, showGlobalPlan, showGoalPose, showTf, showRobotModel, interactionDisabled, interactionMode, editorActive, editorPaintOnDrag = true, editorAreaSelection = false, editorBrush = null, mapRefined = true, viewKey, isDark = false, waitingLabel = "Waiting for /map", fitContainer = false, spots = [], selectedSpotId = "", activeWaypointId = "", missionFollowRobot = false, behaviorNodes = [], selectedBehaviorNodeId = "", behaviorPreviewNode = null, missionRouteOrder = [], missionRouteClosed = false, missionRouteMode = false, selectedMissionRouteSourceId = "", mapAnnotations = [], selectedMapAnnotationId = "", btLayer = null, onBtLayerClose, onSpotClick, onBehaviorNodeClick, onMissionRouteSpotClick, onMissionRouteMapClick, onSpotPoseChange, onBehaviorNodePoseChange, onEditorMapPoint, onEditorMapArea, onMapClick, onMapPose, }) {

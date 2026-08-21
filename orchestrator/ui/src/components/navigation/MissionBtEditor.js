@@ -35,6 +35,7 @@ import clsx from "clsx";
 import toast from "react-hot-toast";
 import {
   MdAutoFixHigh,
+  MdDeleteSweep,
   MdDriveFileRenameOutline,
   MdRedo,
   MdSave,
@@ -113,7 +114,7 @@ function computeHiddenIds(nodes, edges) {
   return hidden;
 }
 
-// Shared with the BT Manager editor; re-exported to keep existing imports.
+// Shared with the standalone Behavior Trees editor; re-exported to keep existing imports.
 export { isValidBtConnection } from "../../utils/btConnection";
 
 function layoutVisibleOnly(nodes, edges, { anchorNodeId = null } = {}) {
@@ -158,7 +159,10 @@ export default function MissionBtEditor({
   const [pendingLoadPath, setPendingLoadPath] = useState(filePath || "");
   const [showSaveAsDialog, setShowSaveAsDialog] = useState(false);
   const [saveAsName, setSaveAsName] = useState("");
+  const [clearTreeArmed, setClearTreeArmed] = useState(false);
   const reactFlowRef = useRef(null);
+  const clearTreeTimerRef = useRef(null);
+  const clearTreeTargetRef = useRef(null);
   const nodesRef = useRef(nodes);
   const edgesRef = useRef(edges);
   const nodeDataMapRef = useRef(nodeDataMap);
@@ -175,6 +179,12 @@ export default function MissionBtEditor({
 
   useEffect(() => {
     fileActionRequestRef.current += 1;
+    if (clearTreeTimerRef.current) {
+      clearTimeout(clearTreeTimerRef.current);
+      clearTreeTimerRef.current = null;
+    }
+    clearTreeTargetRef.current = null;
+    setClearTreeArmed(false);
     setFileAction("");
     setShowLoadDialog(false);
     setPendingLoadPath(filePath || "");
@@ -189,7 +199,6 @@ export default function MissionBtEditor({
   ), [fileOptions, filePath]);
 
   const getHistorySnapshot = useCallback(() => {
-    if (nodes.length === 0) return null;
     return JSON.stringify({
       nodes: nodes.map(({ data: { isActive: _active, isSelected: _selected, ...data }, ...node }) => ({
         ...node,
@@ -225,6 +234,54 @@ export default function MissionBtEditor({
     getSnapshot: getHistorySnapshot,
     applySnapshot: applyHistorySnapshot,
   });
+
+  const disarmClearTree = useCallback(() => {
+    if (clearTreeTimerRef.current) {
+      clearTimeout(clearTreeTimerRef.current);
+      clearTreeTimerRef.current = null;
+    }
+    clearTreeTargetRef.current = null;
+    setClearTreeArmed(false);
+  }, []);
+
+  const armClearTree = useCallback((snapshot) => {
+    if (clearTreeTimerRef.current) clearTimeout(clearTreeTimerRef.current);
+    clearTreeTargetRef.current = snapshot;
+    setClearTreeArmed(true);
+    clearTreeTimerRef.current = setTimeout(() => {
+      clearTreeTimerRef.current = null;
+      clearTreeTargetRef.current = null;
+      setClearTreeArmed(false);
+    }, 4000);
+  }, []);
+
+  useEffect(() => () => {
+    if (clearTreeTimerRef.current) clearTimeout(clearTreeTimerRef.current);
+  }, []);
+
+  useEffect(() => {
+    if (!clearTreeArmed) return;
+    if (
+      nodes.length === 0
+      || loading
+      || fileActionsDisabled
+      || Boolean(fileAction)
+      || Boolean(parseError)
+      || hydratedPath !== filePath
+    ) {
+      disarmClearTree();
+    }
+  }, [
+    clearTreeArmed,
+    disarmClearTree,
+    fileAction,
+    fileActionsDisabled,
+    filePath,
+    hydratedPath,
+    loading,
+    nodes.length,
+    parseError,
+  ]);
 
   const captureCoalescedEditHistory = useCallback((key) => {
     const now = Date.now();
@@ -372,8 +429,55 @@ export default function MissionBtEditor({
     setNodes(layoutVisibleOnly(nodesRef.current, edgesRef.current));
   }, [captureHistory, setNodes]);
 
+  const handleClearTree = useCallback(() => {
+    if (
+      nodesRef.current.length === 0
+      || loading
+      || fileActionsDisabled
+      || Boolean(fileAction)
+      || Boolean(parseError)
+      || hydratedPath !== filePath
+    ) {
+      return;
+    }
+
+    const currentSnapshot = getHistorySnapshot();
+    if (!clearTreeArmed) {
+      armClearTree(currentSnapshot);
+      return;
+    }
+    if (clearTreeTargetRef.current !== currentSnapshot) {
+      armClearTree(currentSnapshot);
+      return;
+    }
+
+    captureHistory();
+    setNodes([]);
+    setEdges([]);
+    setNodeDataMap(new Map());
+    setSelectedNodeId(null);
+    setParseError(null);
+    coalescedEditRef.current = { key: "", lastChangeAt: 0 };
+    disarmClearTree();
+    toast.success("Waypoint BT canvas cleared");
+  }, [
+    armClearTree,
+    captureHistory,
+    clearTreeArmed,
+    disarmClearTree,
+    fileAction,
+    fileActionsDisabled,
+    filePath,
+    getHistorySnapshot,
+    hydratedPath,
+    loading,
+    parseError,
+    setEdges,
+    setNodes,
+  ]);
+
   // Local waypoint XML is owned by the mission store. Keep file I/O behind
-  // parent callbacks so this editor never reaches into BT Manager's global
+  // parent callbacks so this editor never reaches into the standalone library's global
   // orchestrator/bt/trees template directory.
   const serializeCurrentXml = useCallback(() => serializeFromGraph(
     nodesRef.current,
@@ -612,6 +716,15 @@ export default function MissionBtEditor({
     });
   }, [activeNodeNames, edges, handleToggleCollapse, nodes, selectedNodeId]);
 
+  const canClearTree = (
+    nodes.length > 0
+    && !loading
+    && !fileActionsDisabled
+    && !fileAction
+    && !parseError
+    && hydratedPath === filePath
+  );
+
   return (
     <div className="h-full min-h-0 relative flex bg-[var(--mc-bg)] text-[var(--mc-text)]">
       <div
@@ -660,6 +773,27 @@ export default function MissionBtEditor({
             )}
           >
             <MdAutoFixHigh size={18} />
+          </button>
+          <button
+            type="button"
+            onClick={handleClearTree}
+            disabled={!canClearTree}
+            aria-label={clearTreeArmed
+              ? "Confirm clear current waypoint BT"
+              : "Clear current waypoint BT"}
+            title={clearTreeArmed
+              ? "Click again to clear the current waypoint BT"
+              : "Clear current waypoint BT"}
+            className={clsx(
+              "h-8 w-8 rounded-lg flex items-center justify-center border transition-colors",
+              !canClearTree
+                ? "border-[var(--mc-border)] bg-[var(--mc-surface)] text-[var(--mc-text-subtle)] cursor-not-allowed opacity-50"
+                : clearTreeArmed
+                  ? "border-[var(--mc-danger)] bg-[var(--mc-danger)] text-[var(--mc-accent-fg)] shadow-[var(--mc-shadow)]"
+                  : "border-[var(--mc-danger-border)] bg-[var(--mc-surface)] text-[var(--mc-danger)] shadow-[var(--mc-shadow)] hover:bg-[var(--mc-surface-hover)]",
+            )}
+          >
+            <MdDeleteSweep size={18} aria-hidden="true" />
           </button>
           <button
             type="button"
@@ -831,6 +965,7 @@ export default function MissionBtEditor({
             onParamChange={handleParamChange}
             onNameChange={handleNameChange}
             onClose={() => setSelectedNodeId(null)}
+            variant="mission-canvas"
           />
         )}
         {showLoadDialog && (

@@ -19,6 +19,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
+  MdAccountTree,
   MdAdd,
   MdAddLocationAlt,
   MdContentCopy,
@@ -26,6 +27,7 @@ import {
   MdEdit,
   MdLabel,
   MdMyLocation,
+  MdOutlinedFlag,
   MdPlayArrow,
   MdRedo,
   MdRoute,
@@ -80,6 +82,7 @@ import {
 import { MapViewer } from "../components/navigation/MapViewer";
 import MissionBtEditor from "../components/navigation/MissionBtEditor";
 import MissionBtRunView from "../components/navigation/MissionBtRunView";
+import StandaloneBtWorkspace from "../components/navigation/StandaloneBtWorkspace";
 import {
   applyPoseSyncToTf,
   mergeTfMessages,
@@ -145,6 +148,8 @@ const STAGE_MAPPING = "mapping";
 const STAGE_MAP_EDIT = "map_edit";
 const STAGE_AUTHORING = "authoring";
 const STAGE_RUN = "run";
+const WORKSPACE_MISSION = "mission";
+const WORKSPACE_STANDALONE_BT = "standalone_bt";
 const RUN_SHUTDOWN_RETRY_MAX_AGE_MS = 60_000;
 
 const WORKSPACE_STAGES = [
@@ -1160,6 +1165,12 @@ function saveMissionSession(patch) {
 function initialWorkspaceStage(session) {
   const stage = session?.workspaceStage;
   return WORKSPACE_STAGES.some((item) => item.id === stage) ? stage : STAGE_MAPPING;
+}
+
+function initialWorkspaceKind(session) {
+  return session?.workspaceKind === WORKSPACE_STANDALONE_BT
+    ? WORKSPACE_STANDALONE_BT
+    : WORKSPACE_MISSION;
 }
 
 function recentRunShutdownMarker(session) {
@@ -2499,6 +2510,7 @@ export default function MissionCanvasPage() {
   const amclPoseRef = useRef(null);
   const btStatusRef = useRef("stopped");
   const btNodeReleaseRef = useRef(Promise.resolve());
+  const missionBtNodeOwnedRef = useRef(false);
   const behaviorNodeSerialRef = useRef(0);
   const legacySpotLoadGenerationRef = useRef(0);
   const designMissionLoadGenerationRef = useRef(0);
@@ -2592,6 +2604,8 @@ export default function MissionCanvasPage() {
     initialRunShutdownPending(initialSession)
   ));
   const [tfBufferRevision, setTfBufferRevision] = useState(0);
+  const [workspaceKind, setWorkspaceKind] = useState(() => initialWorkspaceKind(initialSession));
+  const missionWorkspaceActive = workspaceKind === WORKSPACE_MISSION;
   const [workspaceStage, setWorkspaceStage] = useState(() => initialWorkspaceStage(initialSession));
   const [showSaveMapDialog, setShowSaveMapDialog] = useState(false);
   const [saveMapName, setSaveMapName] = useState(DEFAULT_MAP_NAME);
@@ -2647,7 +2661,7 @@ export default function MissionCanvasPage() {
   // whenever Save Map lands (the same token also refreshes the editor).
   const [savedMaps, setSavedMaps] = useState([]);
   useEffect(() => {
-    if (workspaceStage !== STAGE_MAPPING) return undefined;
+    if (!missionWorkspaceActive || workspaceStage !== STAGE_MAPPING) return undefined;
     let cancelled = false;
     getPgmFiles()
       .then((response) => {
@@ -2659,7 +2673,7 @@ export default function MissionCanvasPage() {
     return () => {
       cancelled = true;
     };
-  }, [mapEditorReloadToken, workspaceStage]);
+  }, [mapEditorReloadToken, missionWorkspaceActive, workspaceStage]);
 
   const handleDeleteSavedMap = useCallback(async (path) => {
     try {
@@ -2779,36 +2793,40 @@ export default function MissionCanvasPage() {
   });
 
   const running = status?.is_up ?? false;
-  const mappingEditorActive = workspaceStage === STAGE_MAP_EDIT;
-  const designMapActive = workspaceStage === STAGE_AUTHORING && !!designMapPath && missionMapLoaded;
-  const robotPoseCaptureActive = workspaceStage === STAGE_AUTHORING && designMapActive;
+  const mappingEditorActive = missionWorkspaceActive && workspaceStage === STAGE_MAP_EDIT;
+  const designMapActive = missionWorkspaceActive && workspaceStage === STAGE_AUTHORING && !!designMapPath && missionMapLoaded;
+  const robotPoseCaptureActive = missionWorkspaceActive && workspaceStage === STAGE_AUTHORING && designMapActive;
   const mappingRuntimeActive = running && navigationRuntimeMode === "mapping";
   const runRuntimeActive = running && navigationRuntimeMode === "run";
   const designLocalizationActive = (
+    missionWorkspaceActive &&
     workspaceStage === STAGE_AUTHORING &&
     designMapActive &&
     running &&
     navigationRuntimeMode === "localization"
   );
   const mappingTopicsActive = (
+    missionWorkspaceActive &&
     workspaceStage === STAGE_MAPPING &&
     mappingRuntimeActive &&
     busy !== "Stop" &&
     !mappingEditorActive
   );
   const mappingPoseSubscriptionActive = (
+    missionWorkspaceActive &&
     workspaceStage === STAGE_MAPPING &&
     !mappingEditorActive &&
     busy !== "Stop"
   );
   const runTopicsActive = (
+    missionWorkspaceActive &&
     workspaceStage === STAGE_RUN &&
     runRuntimeActive &&
     busy !== "Stop"
   );
   const stageNavigationTopicsActive = mappingTopicsActive || runTopicsActive;
   const activeLayers = layersByStage[workspaceStage] || LAYER_PRESETS[workspaceStage];
-  const runSessionActive = workspaceStage === STAGE_RUN;
+  const runSessionActive = missionWorkspaceActive && workspaceStage === STAGE_RUN;
   const currentMapName = (runSessionActive ? runMapName : mapName).trim() || DEFAULT_MAP_NAME;
   const activeSpots = runSessionActive ? runSpots : spots;
   const activeMissionBtFiles = runSessionActive ? runMissionBtFiles : missionBtFiles;
@@ -2830,11 +2848,11 @@ export default function MissionCanvasPage() {
   // Run stage shows the saved floor plan (with its resolution/origin) so loaded
   // waypoints are framed correctly before the live /map arrives from nav2.
   const runDisplayMapEditor = useMapEditor({
-    open: workspaceStage === STAGE_RUN && missionMapLoaded,
+    open: missionWorkspaceActive && workspaceStage === STAGE_RUN && missionMapLoaded,
     mapName: currentMapName,
     onMessage: setMessage,
   });
-  const runBtMapLightweight = workspaceStage === STAGE_RUN && runBtVisualizationActive;
+  const runBtMapLightweight = missionWorkspaceActive && workspaceStage === STAGE_RUN && runBtVisualizationActive;
   const needsGlobalCostmap = (
     stageNavigationTopicsActive && activeLayers.globalCostmap && !runBtMapLightweight
   );
@@ -2866,7 +2884,7 @@ export default function MissionCanvasPage() {
     stageNavigationTopicsActive ||
     designLocalizationActive
   ) && activeLayers.map;
-  const needsBtTopics = workspaceStage === STAGE_RUN;
+  const needsBtTopics = missionWorkspaceActive && workspaceStage === STAGE_RUN;
   const activeBehaviorNodes = useMemo(
     () => behaviorNodes.filter((node) => node.map_name === currentMapName),
     [behaviorNodes, currentMapName],
@@ -3516,17 +3534,24 @@ export default function MissionCanvasPage() {
     }));
     return sendNavigateThroughPosesGoalsAndWait({ poses }, signal);
   }, []);
-  const stopMissionBt = useCallback(
-    () => callService("/bt/set_running", "std_srvs/srv/SetBool", { data: false }),
-    [callService],
-  );
+  const stopMissionBt = useCallback(async () => {
+    const result = await callService(
+      "/bt/set_running",
+      "std_srvs/srv/SetBool",
+      { data: false },
+    );
+    if (result?.success === false) {
+      throw new Error(result.message || "BT stop rejected");
+    }
+    return result;
+  }, [callService]);
   const missionRunnerFlags = useCallback(
     () => ({ navRunning: running, btNodeIsUp }),
     [btNodeIsUp, running],
   );
-  // Run owns the BT node lifecycle: Run Mission brings the node up on demand
-  // and the runner releases it when the mission ends, so the Run stage has no
-  // manual Activate/Deactivate panel.
+  // Run borrows an already-up BT node, or owns the process only when it starts
+  // one on demand. Cleanup must never stop a node owned by the standalone
+  // workspace (or another external client).
   const ensureMissionBtActive = useCallback(async () => {
     // A completed/failed mission releases bt_node asynchronously. Serialize a
     // quick retry behind that shutdown so an old stop cannot kill the new node.
@@ -3559,8 +3584,28 @@ export default function MissionCanvasPage() {
 
     setBtNodeBusy("activate");
     try {
-      if ((await readState()) !== "up") {
+      const initialState = await readState();
+      missionBtNodeOwnedRef.current = false;
+      if (initialState === "up") {
+        const executionStatus = String(btStatusRef.current || "").trim().toLowerCase();
+        if (executionStatus === "running" || executionStatus === "stopping") {
+          setMessage("BT runtime is already running another tree. Stop it before running this mission.");
+          return false;
+        }
+        if (!["stopped", "completed", "failed"].includes(executionStatus)) {
+          // Failing closed is intentional: /bt/load_and_run replaces the
+          // current tree, so an unknown status must not be treated as idle.
+          setMessage("Unable to verify that the BT runtime is idle. Wait for BT status and try again.");
+          return false;
+        }
+      }
+      if (initialState !== "up" && initialState !== "down") {
+        setMessage("Unable to verify the BT node state. Try again after its status is available.");
+        return false;
+      }
+      if (initialState === "down") {
         await setBtNodeServiceActive(true);
+        missionBtNodeOwnedRef.current = true;
       }
       for (let attempt = 0; attempt < BT_NODE_ACTIVATION_POLL_ATTEMPTS; attempt += 1) {
         if ((await readState()) === "up" && await servicesAreReady()) return true;
@@ -3575,6 +3620,17 @@ export default function MissionCanvasPage() {
   }, [callService]);
   const releaseMissionBt = useCallback(async () => {
     const release = (async () => {
+      if (!missionBtNodeOwnedRef.current) {
+        try {
+          setBtNodeStatus(await getBtNodeServiceStatus());
+        } catch {
+          setBtNodeStatus({ state: "unknown", raw: "status failed" });
+        }
+        return;
+      }
+      // Clear ownership before the request so duplicate cleanup paths cannot
+      // stop a process that a later run has already borrowed or restarted.
+      missionBtNodeOwnedRef.current = false;
       setBtNodeBusy("deactivate");
       try {
         await setBtNodeServiceActive(false);
@@ -3653,6 +3709,7 @@ export default function MissionCanvasPage() {
     />
   ) : null;
   const waypointBtLayer = (
+    missionWorkspaceActive &&
     workspaceStage === STAGE_AUTHORING &&
     selectedBtLayerSpot
   ) ? {
@@ -3663,7 +3720,8 @@ export default function MissionCanvasPage() {
   // While the runner is executing a waypoint's BT, surface a read-only view of
   // that tree beside the map with the ticking node glowing.
   const runActiveSpot = (
-    workspaceStage === STAGE_RUN
+    missionWorkspaceActive
+    && workspaceStage === STAGE_RUN
     && missionRunner.status === RunnerStatus.RUNNING_BT
     && missionRunner.activeSpotId
   )
@@ -3686,18 +3744,18 @@ export default function MissionCanvasPage() {
   }, [runBtViewActive]);
 
   useEffect(() => {
-    if (workspaceStage !== STAGE_AUTHORING) return;
+    if (!missionWorkspaceActive || workspaceStage !== STAGE_AUTHORING) return;
     setMissionFlowNodes((current) => syncMissionFlowNodesWithSpots(current, visibleSpots));
     setMissionFlowEdges((current) => filterMissionFlowEdges(current, visibleSpots));
-  }, [setMissionFlowEdges, setMissionFlowNodes, visibleSpots, workspaceStage]);
+  }, [missionWorkspaceActive, setMissionFlowEdges, setMissionFlowNodes, visibleSpots, workspaceStage]);
 
   useEffect(() => {
-    if (workspaceStage === STAGE_AUTHORING && designMapAvailable) {
+    if (missionWorkspaceActive && workspaceStage === STAGE_AUTHORING && designMapAvailable) {
       return;
     }
     setMissionRouteMode(false);
     setMissionRouteSourceId("");
-  }, [designMapAvailable, workspaceStage]);
+  }, [designMapAvailable, missionWorkspaceActive, workspaceStage]);
 
   const layerToggles = useMemo(() => (
     STAGE_LAYER_IDS[workspaceStage].map((id) => ({
@@ -3852,6 +3910,7 @@ export default function MissionCanvasPage() {
   }, [applySpots]);
 
   useEffect(() => {
+    if (!missionWorkspaceActive) return undefined;
     void loadStatus();
     const interval = window.setInterval(loadStatus, STATUS_POLL_MS);
     const handleVisibilityChange = () => {
@@ -3862,7 +3921,7 @@ export default function MissionCanvasPage() {
       window.clearInterval(interval);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
-  }, [loadStatus]);
+  }, [loadStatus, missionWorkspaceActive]);
 
   // A keepalive request may still be dropped while a document is unloading.
   // Confirm a pending Run shutdown before status polling is allowed to restore
@@ -3958,12 +4017,13 @@ export default function MissionCanvasPage() {
   useEffect(() => {
     if (!btLayerSpotId) return;
     if (
+      !missionWorkspaceActive ||
       workspaceStage !== STAGE_AUTHORING ||
       !visibleSpots.some((spot) => spot.id === btLayerSpotId)
     ) {
       setBtLayerSpotId("");
     }
-  }, [btLayerSpotId, visibleSpots, workspaceStage]);
+  }, [btLayerSpotId, missionWorkspaceActive, visibleSpots, workspaceStage]);
 
   useEffect(() => {
     if (!selectedBtLayerSpot || !selectedBtLayerPath) return undefined;
@@ -4040,6 +4100,7 @@ export default function MissionCanvasPage() {
     );
     saveMissionSession({
       mapName,
+      workspaceKind,
       workspaceStage,
       designMapPath,
       navigationRuntimeMode,
@@ -4056,7 +4117,7 @@ export default function MissionCanvasPage() {
       missionName,
       runMissionName,
     });
-  }, [designMapPath, designPoseInitialized, mapName, missionName, navigationRuntimeMode, runMissionName, runRuntimeOwned, runShutdownPending, workspaceStage]);
+  }, [designMapPath, designPoseInitialized, mapName, missionName, navigationRuntimeMode, runMissionName, runRuntimeOwned, runShutdownPending, workspaceKind, workspaceStage]);
 
   useEffect(() => {
     if (!designLocalizationActive || !designPoseInitialized) {
@@ -5873,6 +5934,7 @@ export default function MissionCanvasPage() {
 
   const waypointBtLayerOpen = !!waypointBtLayer;
   const designHistoryLocked = (
+    !missionWorkspaceActive ||
     workspaceStage !== STAGE_AUTHORING ||
     !designMapAvailable ||
     !!busy ||
@@ -5893,7 +5955,7 @@ export default function MissionCanvasPage() {
   }, [canRedoDesign, designHistoryLocked, redoDesignHistory]);
 
   useEffect(() => {
-    if (workspaceStage !== STAGE_AUTHORING || waypointBtLayerOpen) return undefined;
+    if (!missionWorkspaceActive || workspaceStage !== STAGE_AUTHORING || waypointBtLayerOpen) return undefined;
     const handleKeyDown = (event) => {
       if (!(event.ctrlKey || event.metaKey) || isTextInputTarget(event.target)) return;
       const key = event.key.toLowerCase();
@@ -5908,14 +5970,14 @@ export default function MissionCanvasPage() {
     };
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [handleRedoDesign, handleUndoDesign, waypointBtLayerOpen, workspaceStage]);
+  }, [handleRedoDesign, handleUndoDesign, missionWorkspaceActive, waypointBtLayerOpen, workspaceStage]);
 
   // Same shortcuts in the Map Edit stage, wired to the pixel/area history —
   // the HUD tooltips advertise them, so they must actually work here too.
   // Suspended while the Load Map dialog is open: the overlay has no focus
   // trap, so the shortcut would silently edit the map behind the modal.
   useEffect(() => {
-    if (workspaceStage !== STAGE_MAP_EDIT || showEditMapDialog) return undefined;
+    if (!missionWorkspaceActive || workspaceStage !== STAGE_MAP_EDIT || showEditMapDialog) return undefined;
     const handleKeyDown = (event) => {
       if (!(event.ctrlKey || event.metaKey) || isTextInputTarget(event.target)) return;
       if (mapEditor.busy) return;
@@ -5931,7 +5993,40 @@ export default function MissionCanvasPage() {
     };
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [mapEditor.busy, mapEditor.redo, mapEditor.undo, showEditMapDialog, workspaceStage]);
+  }, [mapEditor.busy, mapEditor.redo, mapEditor.undo, missionWorkspaceActive, showEditMapDialog, workspaceStage]);
+
+  const workspaceSwitchLocked = (
+    !!busy
+    || !!btNodeBusy
+    || mapEditor.dirty
+    || designMapEditor.dirty
+    || mappingRuntimeActive
+    || runRuntimeActive
+    || designLocalizationActive
+    || missionRunnerActive
+    || runShutdownPending
+  );
+  const workspaceSwitchLockTitle = mapEditor.dirty || designMapEditor.dirty
+    ? "Save the current map edits before switching workspaces"
+    : "Stop the active operation before switching workspaces";
+
+  const selectWorkspaceKind = (nextKind) => {
+    if (
+      nextKind === workspaceKind
+      || (nextKind === WORKSPACE_STANDALONE_BT && workspaceSwitchLocked)
+    ) return;
+    setShowSaveMapDialog(false);
+    setShowSaveMissionDialog(false);
+    setShowRenameMissionDialog(false);
+    setShowDuplicateMissionDialog(false);
+    setShowDeleteMissionDialog(false);
+    setShowDesignMapDialog(false);
+    setShowRunMapDialog(false);
+    setShowEditMapDialog(false);
+    setShowWaypointOptions(false);
+    setBtLayerSpotId("");
+    setWorkspaceKind(nextKind);
+  };
 
   return (
     <div
@@ -6087,10 +6182,62 @@ export default function MissionCanvasPage() {
         </div>
 
         <div className="text-[10px] font-mono tracking-[0.12em] px-1 pb-2" style={{ color: "var(--mc-text-subtle)" }}>
-          STAGES
+          WORKSPACES
         </div>
-        <nav className="grid gap-1" role="tablist" aria-label="Mission Canvas stages">
-          {WORKSPACE_STAGES.map((stage) => {
+        <nav className="grid gap-1" role="tablist" aria-label="Mission Canvas workspaces">
+          {[
+            { id: WORKSPACE_STANDALONE_BT, label: "Behavior Trees" },
+            { id: WORKSPACE_MISSION, label: "Mission" },
+          ].map((workspace) => {
+            const selected = workspaceKind === workspace.id;
+            return (
+              <button
+                key={workspace.id}
+                type="button"
+                role="tab"
+                aria-selected={selected}
+                disabled={workspace.id === WORKSPACE_STANDALONE_BT && workspaceSwitchLocked && !selected}
+                title={workspace.id === WORKSPACE_STANDALONE_BT && workspaceSwitchLocked && !selected ? workspaceSwitchLockTitle : undefined}
+                onClick={() => selectWorkspaceKind(workspace.id)}
+                className="flex items-center gap-3 px-3 py-2.5 text-[13px] font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50"
+                style={{
+                  borderRadius: 10,
+                  color: selected ? MISSION_TEXT : MISSION_TEXT_MUTED,
+                  backgroundColor: selected ? MISSION_STAGE_EMPTY : "transparent",
+                  border: `1px solid ${selected ? MISSION_BORDER : "transparent"}`,
+                  boxShadow: selected ? "var(--mc-shadow)" : "none",
+                }}
+              >
+                {workspace.id === WORKSPACE_STANDALONE_BT
+                  ? <MdAccountTree size={17} aria-hidden="true" className="shrink-0" />
+                  : <MdOutlinedFlag
+                      size={17}
+                      aria-hidden="true"
+                      data-testid="mission-workspace-icon"
+                      className="shrink-0"
+                      style={{ color: selected ? "var(--mc-accent)" : "currentColor" }}
+                    />}
+                {workspace.label}
+              </button>
+            );
+          })}
+        </nav>
+
+        {workspaceKind === WORKSPACE_MISSION && (
+          <section
+            aria-label="Mission workspace stages"
+            className="mission-pipeline-group relative ml-5 mt-1 pl-3 pt-3"
+          >
+            <span
+              aria-hidden="true"
+              className="absolute bottom-2 left-0 top-0 w-px"
+              style={{ backgroundColor: "var(--mc-border-strong)" }}
+            />
+            <div className="text-[9.5px] font-mono tracking-[0.12em] px-1 pb-2" style={{ color: "var(--mc-text-subtle)" }}>
+              MISSION PIPELINE
+            </div>
+            <nav className="grid gap-1" role="tablist" aria-label="Mission Canvas stages">
+              {WORKSPACE_STAGES.map((stage) => {
             const selected = workspaceStage === stage.id;
             // Editing a saved PGM while SLAM (or a run) may rewrite the same
             // file would clobber one side silently — keep the old guard.
@@ -6118,24 +6265,31 @@ export default function MissionCanvasPage() {
                   }
                   setWorkspaceStage(stage.id);
                 }}
-                className="flex items-center gap-3 px-3 py-2.5 text-[13px] font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50"
+                className="relative flex items-center gap-2.5 px-2.5 py-2 text-[12.5px] font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50"
                 style={{
-                  borderRadius: 10,
-                  color: selected ? MISSION_TEXT : MISSION_TEXT_MUTED,
-                  backgroundColor: selected ? MISSION_STAGE_EMPTY : "transparent",
-                  border: `1px solid ${selected ? MISSION_BORDER : "transparent"}`,
-                  boxShadow: selected ? "var(--mc-shadow)" : "none",
+                  borderRadius: 9,
+                  color: selected ? "var(--mc-accent-hover)" : MISSION_TEXT_MUTED,
+                  backgroundColor: selected ? "var(--mc-accent-soft)" : "transparent",
+                  border: "1px solid transparent",
+                  boxShadow: "none",
                 }}
               >
                 <StageIcon id={stage.id} active={selected} />
                 {stage.label}
               </button>
             );
-          })}
-        </nav>
+              })}
+            </nav>
+          </section>
+        )}
       </aside>
 
       {/* WORKSPACE */}
+      {workspaceKind === WORKSPACE_STANDALONE_BT ? (
+        <main className="flex-1 min-w-0 min-h-0" aria-label="Behavior Trees workspace">
+          <StandaloneBtWorkspace isActive title="Behavior Trees" variant="mission-canvas" />
+        </main>
+      ) : (
       <div className="flex-1 min-w-0 flex flex-col">
         {/* TOP BAR — stage title + contextual actions + status */}
         <header
@@ -6936,9 +7090,9 @@ export default function MissionCanvasPage() {
             {workspaceStage === STAGE_MAPPING ? (
               <MappingSessionPanel />
             ) : (
-              // The BT node lifecycle is run-owned (Run Mission activates it on
-              // demand and the runner releases it afterwards), so there is no
-              // manual Activate/Deactivate panel in Mission Canvas.
+              // Run Mission activates a missing BT node on demand and only
+              // releases a process it started itself, so this panel needs no
+              // manual Activate/Deactivate controls.
               <RunSessionPanel
                 mapName={currentMapName}
                 running={running}
@@ -6955,6 +7109,7 @@ export default function MissionCanvasPage() {
         )}
       </div>
       </div>
+      )}
     </div>
   );
 }

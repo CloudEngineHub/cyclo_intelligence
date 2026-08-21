@@ -300,6 +300,7 @@ body {
  */
 .mission-canvas-page {
   --mc-bg: #f3f1ea;            /* app / stage fill (warm paper) */
+  --mc-canvas: #efece3;        /* map + behavior-tree canvas */
   --mc-surface: #ffffff;        /* cards, panels */
   --mc-surface-2: #f6f4ee;      /* inset surfaces, inputs */
   --mc-surface-hover: #efece3;  /* hover / active surface */
@@ -338,6 +339,7 @@ body {
 
 .dark .mission-canvas-page {
   --mc-bg: #211f1b;             /* warm near-black */
+  --mc-canvas: #1b1916;         /* map + behavior-tree canvas */
   --mc-surface: #2b2823;
   --mc-surface-2: #242019;
   --mc-surface-hover: #322e28;

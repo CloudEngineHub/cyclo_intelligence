@@ -265,7 +265,18 @@ test("does not accept a stale latched completed as fresh BT completion", async (
   expect(h.view.result.current.reason).toMatch(/did not start/);
 });
 
-test("stop while awaiting navigation cancels without becoming failed", async () => {
+test("stop while idle leaves an externally running BT alone", async () => {
+  const h = makeHarness();
+
+  await act(async () => {
+    h.view.result.current.stop();
+    await Promise.resolve();
+  });
+
+  expect(h.stopBt).not.toHaveBeenCalled();
+});
+
+test("stop while awaiting navigation cancels without stopping an external BT", async () => {
   const sendGoal = jest.fn((x, y, yaw, signal) => new Promise((resolve, reject) => {
     signal.addEventListener("abort", () => {
       reject(new DOMException("Aborted", "AbortError"));
@@ -283,9 +294,37 @@ test("stop while awaiting navigation cancels without becoming failed", async () 
   await waitFor(() => expect(h.view.result.current.status).toBe(RunnerStatus.CANCELLED));
   expect(h.view.result.current.activeSpotId).toBe("");
   expect(h.cancelGoal).toHaveBeenCalledTimes(1);
-  expect(h.stopBt).toHaveBeenCalledTimes(1);
+  expect(h.stopBt).not.toHaveBeenCalled();
   expect(h.callService).not.toHaveBeenCalled();
   expect(h.view.result.current.progress[0].state).toBe(WaypointState.PENDING);
+});
+
+test("stop cleans up a BT that starts after an in-flight load resolves", async () => {
+  let resolveLoad;
+  const callService = jest.fn(() => new Promise((resolve) => {
+    resolveLoad = resolve;
+  }));
+  const h = makeHarness({
+    orderedSpots: [SPOTS[0]],
+    callService,
+  });
+  act(() => { h.view.result.current.start(); });
+  await waitFor(() => expect(callService).toHaveBeenCalledTimes(1));
+
+  await act(async () => {
+    h.view.result.current.stop();
+    await Promise.resolve();
+  });
+  expect(h.stopBt).not.toHaveBeenCalled();
+
+  await act(async () => {
+    resolveLoad({ success: true });
+    await Promise.resolve();
+  });
+
+  await waitFor(() => expect(h.stopBt).toHaveBeenCalledTimes(1));
+  await waitFor(() => expect(h.view.result.current.status).toBe(RunnerStatus.CANCELLED));
+  expect(h.stopBt).toHaveBeenCalledTimes(1);
 });
 
 test("stop while awaiting NavigateThroughPoses resets the whole batch", async () => {

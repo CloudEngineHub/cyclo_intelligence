@@ -35,6 +35,7 @@ import {
   MdUndo,
   MdRedo,
   MdAutoFixHigh,
+  MdDeleteSweep,
   MdPowerSettingsNew,
 } from 'react-icons/md';
 
@@ -162,20 +163,26 @@ function getSimulationInferenceNodeNames(nodeDataMap) {
 
 export default function BTEditorSurface({
   isActive = true,
-  title = 'BT Manager',
+  title = 'Behavior Trees',
   className = 'w-full h-full',
+  variant = 'legacy',
 }) {
   const dispatch = useDispatch();
   const { callService } = useRosServiceCaller();
   const { catalog: nodeCatalog = [], refreshCatalog } = useBTNodeCatalog();
   const rosbridgeUrl = useSelector((state) => state.ros.rosbridgeUrl);
   const robotType = useSelector((state) => state.tasks.robotType);
+  const missionCanvasVariant = variant === 'mission-canvas';
 
   const treeXml = useSelector((state) => state.btmanager.treeXml);
   const treeFileName = useSelector((state) => state.btmanager.treeFileName);
   const btStatus = useSelector((state) => state.btmanager.btStatus);
   const activeNodeNames = useSelector((state) => state.btmanager.activeNodeNames);
   const selectedNodeId = useSelector((state) => state.btmanager.selectedNodeId);
+  // A non-empty Redux document is parsed asynchronously after the first
+  // render. Until that graph is actually installed, an early workspace switch
+  // must not persist the temporary [] state over the saved draft.
+  const graphHydratedRef = useRef(!treeXml);
 
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
@@ -186,14 +193,18 @@ export default function BTEditorSurface({
   const [showSaveDialog, setShowSaveDialog] = useState(false);
   const [saveFileName, setSaveFileName] = useState('');
   const [saveConflict, setSaveConflict] = useState(null);
+  const [clearTreeArmed, setClearTreeArmed] = useState(false);
   const [btNodeStatus, setBtNodeStatus] = useState({
     state: 'unknown',
     raw: 'not checked',
   });
   const [btNodePendingAction, setBtNodePendingAction] = useState(null);
+  const [btExecutionPending, setBtExecutionPending] = useState(null);
 
   // ReactFlow instance for coordinate conversion on drop
   const reactFlowRef = useRef(null);
+  const clearTreeTimerRef = useRef(null);
+  const clearTreeTargetRef = useRef(null);
   const nodesRef = useRef(nodes);
   const edgesRef = useRef(edges);
   const nodeDataMapRef = useRef(nodeDataMap);
@@ -202,11 +213,12 @@ export default function BTEditorSurface({
   nodeDataMapRef.current = nodeDataMap;
 
   // ── History ──────────────────────────────────────────────────────────────
-  // Snapshots are JSON strings encoding {nodes, edges, nodeDataMap}.
+  // Snapshots encode the graph plus its file identity. Empty graphs are valid
+  // snapshots so clearing the canvas (and adding the first node) remains fully
+  // undoable and redoable.
   // isActive / isSelected are annotation-only and excluded.
 
   const getHistorySnapshot = useCallback(() => {
-    if (nodes.length === 0) return null;
     return JSON.stringify({
       nodes: nodes.map(({ data: { isActive: _a, isSelected: _s, ...d }, ...n }) => ({
         ...n,
@@ -214,17 +226,24 @@ export default function BTEditorSurface({
       })),
       edges,
       nodeDataMap: [...nodeDataMap.entries()],
+      treeFileName,
     });
-  }, [nodes, edges, nodeDataMap]);
+  }, [nodes, edges, nodeDataMap, treeFileName]);
 
   const applyHistorySnapshot = useCallback((snap) => {
     try {
-      const { nodes: n, edges: e, nodeDataMap: ndm } = JSON.parse(snap);
+      const {
+        nodes: n,
+        edges: e,
+        nodeDataMap: ndm,
+        treeFileName: restoredFileName = '',
+      } = JSON.parse(snap);
       setNodes(n);
       setEdges(e);
       setNodeDataMap(new Map(ndm));
       setParseError(null);
       dispatch(setSelectedNodeId(null));
+      dispatch(setTreeFileName(restoredFileName));
     } catch (err) {
       setParseError(err.message);
     }
@@ -242,9 +261,51 @@ export default function BTEditorSurface({
     applySnapshot: applyHistorySnapshot,
   });
 
+  const disarmClearTree = useCallback(() => {
+    if (clearTreeTimerRef.current) {
+      clearTimeout(clearTreeTimerRef.current);
+      clearTreeTimerRef.current = null;
+    }
+    clearTreeTargetRef.current = null;
+    setClearTreeArmed(false);
+  }, []);
+
+  const armClearTree = useCallback((snapshot) => {
+    if (clearTreeTimerRef.current) clearTimeout(clearTreeTimerRef.current);
+    clearTreeTargetRef.current = snapshot;
+    setClearTreeArmed(true);
+    clearTreeTimerRef.current = setTimeout(() => {
+      clearTreeTimerRef.current = null;
+      clearTreeTargetRef.current = null;
+      setClearTreeArmed(false);
+    }, 4000);
+  }, []);
+
+  useEffect(() => () => {
+    if (clearTreeTimerRef.current) clearTimeout(clearTreeTimerRef.current);
+  }, []);
+
+  useEffect(() => {
+    if (!clearTreeArmed) return;
+    if (
+      btExecutionPending ||
+      btNodePendingAction ||
+      ['running', 'stopping'].includes(normalizeBtStatus(btStatus))
+    ) {
+      disarmClearTree();
+    }
+  }, [
+    btExecutionPending,
+    btNodePendingAction,
+    btStatus,
+    clearTreeArmed,
+    disarmClearTree,
+  ]);
+
   // ── Initial load from Redux treeXml (e.g. on page mount) ─────────────────
   useEffect(() => {
     if (!treeXml) {
+      graphHydratedRef.current = true;
       setNodes([]);
       setEdges([]);
       setNodeDataMap(new Map());
@@ -253,11 +314,13 @@ export default function BTEditorSurface({
     }
     try {
       const { nodes: n, edges: e, nodeDataMap: ndm } = parseBTXml(treeXml);
+      graphHydratedRef.current = n.length === 0;
       setNodes(n);
       setEdges(e);
       setNodeDataMap(ndm);
       setParseError(null);
     } catch (err) {
+      graphHydratedRef.current = false;
       setParseError(err.message);
       setNodes([]);
       setEdges([]);
@@ -266,6 +329,12 @@ export default function BTEditorSurface({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // run once on mount to restore Redux-persisted tree
 
+  useEffect(() => {
+    if (!graphHydratedRef.current && nodes.length > 0) {
+      graphHydratedRef.current = true;
+    }
+  }, [nodes.length]);
+
   // ── Persist working tree to Redux so it survives page switches ────────────
   // The graph state (nodes/edges/nodeDataMap) lives in local useState, which
   // is torn down on unmount. Without this, navigating away and back to the BT
@@ -273,10 +342,12 @@ export default function BTEditorSurface({
   // so a flurry of edits doesn't dispatch on every keystroke, and again on
   // unmount to catch whatever's still in the debounce window.
   useEffect(() => {
-    if (nodes.length === 0) return;
+    if (!graphHydratedRef.current) return undefined;
     const t = setTimeout(() => {
       try {
-        dispatch(setTreeXml(serializeFromGraph(nodes, edges, nodeDataMap)));
+        dispatch(setTreeXml(
+          nodes.length === 0 ? '' : serializeFromGraph(nodes, edges, nodeDataMap),
+        ));
       } catch {
         // Partial graphs (e.g. mid-drag, disconnected nodes) can throw here.
         // Drop the snapshot rather than nuking the previously-good treeXml.
@@ -290,9 +361,9 @@ export default function BTEditorSurface({
       const n = nodesRef.current;
       const e = edgesRef.current;
       const m = nodeDataMapRef.current;
-      if (n.length === 0) return;
+      if (!graphHydratedRef.current) return;
       try {
-        dispatch(setTreeXml(serializeFromGraph(n, e, m)));
+        dispatch(setTreeXml(n.length === 0 ? '' : serializeFromGraph(n, e, m)));
       } catch {
         // Same swallow as the debounced path — preserve last good state.
       }
@@ -318,6 +389,7 @@ export default function BTEditorSurface({
       setNodeDataMap(ndm);
       setParseError(null);
 
+      disarmClearTree();
       resetHistory();
       dispatch(setSelectedNodeId(null));
       dispatch(setTreeXml(xmlContent));
@@ -326,7 +398,7 @@ export default function BTEditorSurface({
     } catch (err) {
       toast.error(`Failed to load file: ${err.message}`);
     }
-  }, [rosbridgeUrl, dispatch, setNodes, setEdges, resetHistory]);
+  }, [disarmClearTree, rosbridgeUrl, dispatch, setNodes, setEdges, resetHistory]);
 
   // ── Node click handler ────────────────────────────────────────────────────
   const handleNodeClick = useCallback((event, node) => {
@@ -435,6 +507,49 @@ export default function BTEditorSurface({
     captureHistory();
     setNodes(layoutVisibleOnly(nodesRef.current, edgesRef.current));
   }, [captureHistory, setNodes]);
+
+  const handleClearTree = useCallback(() => {
+    if (nodesRef.current.length === 0) return;
+    if (
+      ['running', 'stopping'].includes(normalizeBtStatus(btStatus)) ||
+      btNodePendingAction ||
+      btExecutionPending
+    ) {
+      return;
+    }
+    const currentSnapshot = getHistorySnapshot();
+    if (!clearTreeArmed) {
+      armClearTree(currentSnapshot);
+      return;
+    }
+    if (clearTreeTargetRef.current !== currentSnapshot) {
+      armClearTree(currentSnapshot);
+      return;
+    }
+
+    captureHistory();
+    setNodes([]);
+    setEdges([]);
+    setNodeDataMap(new Map());
+    setParseError(null);
+    dispatch(setSelectedNodeId(null));
+    dispatch(setTreeXml(''));
+    dispatch(setTreeFileName(''));
+    disarmClearTree();
+    toast.success('BT canvas cleared');
+  }, [
+    armClearTree,
+    btExecutionPending,
+    btNodePendingAction,
+    btStatus,
+    captureHistory,
+    clearTreeArmed,
+    disarmClearTree,
+    dispatch,
+    getHistorySnapshot,
+    setEdges,
+    setNodes,
+  ]);
 
   // ── Collapse/expand toggle on Control nodes ───────────────────────────────
   // Flips data.collapsed on the target Control node in both nodes[] and
@@ -629,7 +744,21 @@ export default function BTEditorSurface({
       toast.error('BT node is not running');
       return;
     }
+    if (btExecutionPending) return;
+    setBtExecutionPending('start');
     try {
+      const executionStatus = normalizeBtStatus(btStatus);
+      if (['completed', 'failed', 'failure'].includes(executionStatus)) {
+        const cleanupResult = await callService(
+          '/bt/set_running',
+          'std_srvs/srv/SetBool',
+          { data: false },
+        );
+        if (!cleanupResult?.success) {
+          throw new Error(cleanupResult?.message || 'Failed to clean up the completed BT');
+        }
+      }
+
       const currentXml = getSerializedXml();
       const simulationInferenceNodes = getSimulationInferenceNodeNames(nodeDataMap);
       if (simulationInferenceNodes.length > 0) {
@@ -654,11 +783,15 @@ export default function BTEditorSurface({
       }
     } catch (err) {
       toast.error(`Failed to start BT: ${err.message}`);
+    } finally {
+      setBtExecutionPending(null);
     }
-  }, [callService, dispatch, nodes.length, getSerializedXml, btNodeStatus.state, nodeDataMap]);
+  }, [btExecutionPending, btNodeStatus.state, btStatus, callService, dispatch, getSerializedXml, nodeDataMap, nodes.length]);
 
   // ── BT Stop ───────────────────────────────────────────────────────────────
   const handleStop = useCallback(async () => {
+    if (btExecutionPending) return;
+    setBtExecutionPending('stop');
     try {
       const result = await callService('/bt/set_running', 'std_srvs/srv/SetBool', { data: false });
       if (!result.success) {
@@ -670,8 +803,10 @@ export default function BTEditorSurface({
       toast.success('BT stopped');
     } catch (err) {
       toast.error(`Failed to stop BT: ${err.message}`);
+    } finally {
+      setBtExecutionPending(null);
     }
-  }, [callService, dispatch]);
+  }, [btExecutionPending, callService, dispatch]);
 
   // ── BT node process lifecycle via supervisor API ─────────────────────────
   const refreshBtNodeStatus = useCallback(async ({ quiet = false } = {}) => {
@@ -750,6 +885,17 @@ export default function BTEditorSurface({
 
   const handleBtNodeOff = useCallback(async () => {
     try {
+      const executionStatus = normalizeBtStatus(btStatus);
+      if (['completed', 'failed', 'failure'].includes(executionStatus)) {
+        const result = await callService(
+          '/bt/set_running',
+          'std_srvs/srv/SetBool',
+          { data: false },
+        );
+        if (!result?.success) {
+          throw new Error(result?.message || 'Failed to clean up the completed BT');
+        }
+      }
       await callBtNodeService('stop');
       dispatch(setBtStatus('stopped'));
       dispatch(setActiveNodeNames([]));
@@ -759,7 +905,7 @@ export default function BTEditorSurface({
       toast.error(`Failed to stop BT node: ${err.message}`);
       await refreshBtNodeStatus({ quiet: true });
     }
-  }, [callBtNodeService, dispatch, refreshBtNodeStatus]);
+  }, [btStatus, callBtNodeService, callService, dispatch, refreshBtNodeStatus]);
 
   // ── BT status / active-nodes subscription ────────────────────────────────
   useEffect(() => {
@@ -860,36 +1006,75 @@ export default function BTEditorSurface({
   const normalizedBtStatus = normalizeBtStatus(btStatus);
   const isBtNodeUp = btNodeStatus.state === 'up';
   const isBtNodeBusy = Boolean(btNodePendingAction);
+  const isBtExecutionBusy = Boolean(btExecutionPending);
   const isBtRunning = normalizedBtStatus === 'running';
   const isBtBusy = isBtRunning || normalizedBtStatus === 'stopping';
   const isBtTerminal = ['completed', 'failed', 'failure'].includes(normalizedBtStatus);
-  const canStartBt = hasTree && isBtNodeUp && !isBtBusy && !isBtNodeBusy;
-  const canStopBt = isBtNodeUp && (isBtRunning || isBtTerminal) && !isBtNodeBusy;
-  const canStartBtNode = !isBtNodeUp && !isBtNodeBusy;
-  const canStopBtNode = isBtNodeUp && normalizedBtStatus === 'stopped' && !isBtNodeBusy;
-  const statusColor =
-    isBtRunning ? 'bg-green-500' :
-    normalizedBtStatus === 'completed' ? 'bg-yellow-400' :
-    ['failed', 'failure'].includes(normalizedBtStatus) ? 'bg-red-500' :
-    normalizedBtStatus === 'stopping' ? 'bg-orange-400' :
-    'bg-gray-400';
+  const canStartBt = hasTree && isBtNodeUp && !isBtBusy && !isBtNodeBusy && !isBtExecutionBusy;
+  const canStopBt = isBtNodeUp && isBtRunning && !isBtNodeBusy && !isBtExecutionBusy;
+  const canClearTree = hasTree && !isBtBusy && !isBtNodeBusy && !isBtExecutionBusy;
+  const canStartBtNode = !isBtNodeUp && !isBtNodeBusy && !isBtExecutionBusy;
+  const canStopBtNode = isBtNodeUp &&
+    (normalizedBtStatus === 'stopped' || isBtTerminal) &&
+    !isBtNodeBusy &&
+    !isBtExecutionBusy;
+  const statusColor = missionCanvasVariant
+    ? isBtRunning ? 'bg-[var(--mc-success)]' :
+      normalizedBtStatus === 'completed' ? 'bg-[var(--mc-warning)]' :
+      ['failed', 'failure'].includes(normalizedBtStatus) ? 'bg-[var(--mc-danger)]' :
+      normalizedBtStatus === 'stopping' ? 'bg-[var(--mc-warning)]' :
+      'bg-[var(--mc-text-subtle)]'
+    : isBtRunning ? 'bg-green-500' :
+      normalizedBtStatus === 'completed' ? 'bg-yellow-400' :
+      ['failed', 'failure'].includes(normalizedBtStatus) ? 'bg-red-500' :
+      normalizedBtStatus === 'stopping' ? 'bg-orange-400' :
+      'bg-gray-400';
   const statusLabel = getBtStatusLabel(btStatus);
-  const btNodeStatusColor =
-    isBtNodeUp ? 'bg-green-500' :
-    btNodeStatus.state === 'down' ? 'bg-gray-400' :
-    'bg-yellow-400';
+  const btNodeStatusColor = missionCanvasVariant
+    ? isBtNodeUp ? 'bg-[var(--mc-success)]' :
+      btNodeStatus.state === 'down' ? 'bg-[var(--mc-text-subtle)]' :
+      'bg-[var(--mc-warning)]'
+    : isBtNodeUp ? 'bg-green-500' :
+      btNodeStatus.state === 'down' ? 'bg-gray-400' :
+      'bg-yellow-400';
   const btNodeStatusLabel =
     isBtNodeUp ? 'Running' :
     btNodeStatus.state === 'down' ? 'Stopped' :
     'Unknown';
 
   return (
-    <div className={clsx(className, 'flex flex-col')}>
+    <div
+      data-variant={variant}
+      className={clsx(
+        className,
+        'bt-editor-surface flex flex-col',
+        missionCanvasVariant && 'bg-[var(--mc-bg)] text-[var(--mc-text)]',
+      )}
+    >
       {/* Header */}
-      <div className="flex items-center justify-between px-6 py-4 border-b border-black bg-white">
-        <h1 className="text-xl font-bold text-gray-800">{title}</h1>
+      <div className={clsx(
+        'flex items-center justify-between px-6 border-b',
+        missionCanvasVariant
+          ? 'h-14 border-[var(--mc-border)] bg-[var(--mc-surface-2)]'
+          : 'py-4 border-black bg-white',
+      )}>
+        <div className="min-w-0">
+          <h1 className={clsx(
+            'font-bold truncate',
+            missionCanvasVariant
+              ? 'text-[16px] tracking-tight text-[var(--mc-text)]'
+              : 'text-xl text-gray-800',
+          )}>
+            {title}
+          </h1>
+        </div>
         <div className="flex items-center gap-3">
-          <span className="text-sm text-gray-500">
+          <span className={clsx(
+            'max-w-[220px] truncate font-mono',
+            missionCanvasVariant
+              ? 'text-[11px] text-[var(--mc-text-muted)]'
+              : 'text-sm text-gray-500',
+          )}>
             {treeFileName || 'No file loaded'}
           </span>
           <button
@@ -898,7 +1083,11 @@ export default function BTEditorSurface({
             title="Undo (Ctrl+Z)"
             className={clsx(
               'flex items-center justify-center w-9 h-9 rounded-lg transition-colors duration-150',
-              canUndo
+              missionCanvasVariant
+                ? canUndo
+                  ? 'border border-[var(--mc-border-strong)] bg-[var(--mc-surface)] hover:bg-[var(--mc-surface-hover)] text-[var(--mc-text-muted)] shadow-[var(--mc-shadow)] cursor-pointer'
+                  : 'border border-[var(--mc-border)] bg-[var(--mc-surface)] text-[var(--mc-text-subtle)] cursor-not-allowed opacity-50'
+                : canUndo
                 ? 'bg-gray-100 hover:bg-gray-200 text-gray-700 cursor-pointer'
                 : 'bg-gray-100 text-gray-300 cursor-not-allowed'
             )}
@@ -911,7 +1100,11 @@ export default function BTEditorSurface({
             title="Redo (Ctrl+Shift+Z)"
             className={clsx(
               'flex items-center justify-center w-9 h-9 rounded-lg transition-colors duration-150',
-              canRedo
+              missionCanvasVariant
+                ? canRedo
+                  ? 'border border-[var(--mc-border-strong)] bg-[var(--mc-surface)] hover:bg-[var(--mc-surface-hover)] text-[var(--mc-text-muted)] shadow-[var(--mc-shadow)] cursor-pointer'
+                  : 'border border-[var(--mc-border)] bg-[var(--mc-surface)] text-[var(--mc-text-subtle)] cursor-not-allowed opacity-50'
+                : canRedo
                 ? 'bg-gray-100 hover:bg-gray-200 text-gray-700 cursor-pointer'
                 : 'bg-gray-100 text-gray-300 cursor-not-allowed'
             )}
@@ -924,12 +1117,39 @@ export default function BTEditorSurface({
             title="Auto Layout"
             className={clsx(
               'flex items-center justify-center w-9 h-9 rounded-lg transition-colors duration-150',
-              hasTree
+              missionCanvasVariant
+                ? hasTree
+                  ? 'border border-[var(--mc-border-strong)] bg-[var(--mc-surface)] hover:bg-[var(--mc-surface-hover)] text-[var(--mc-text-muted)] shadow-[var(--mc-shadow)] cursor-pointer'
+                  : 'border border-[var(--mc-border)] bg-[var(--mc-surface)] text-[var(--mc-text-subtle)] cursor-not-allowed opacity-50'
+                : hasTree
                 ? 'bg-gray-100 hover:bg-gray-200 text-gray-700 cursor-pointer'
                 : 'bg-gray-100 text-gray-300 cursor-not-allowed'
             )}
           >
             <MdAutoFixHigh size={18} />
+          </button>
+          <button
+            type="button"
+            onClick={handleClearTree}
+            disabled={!canClearTree}
+            aria-label={clearTreeArmed ? 'Confirm clear current BT' : 'Clear current BT'}
+            title={clearTreeArmed ? 'Click again to clear the current BT' : 'Clear current BT'}
+            className={clsx(
+              'flex items-center justify-center w-9 h-9 rounded-lg transition-colors duration-150',
+              missionCanvasVariant
+                ? !canClearTree
+                  ? 'border border-[var(--mc-border)] bg-[var(--mc-surface)] text-[var(--mc-text-subtle)] cursor-not-allowed opacity-50'
+                  : clearTreeArmed
+                    ? 'border border-[var(--mc-danger)] bg-[var(--mc-danger)] text-[var(--mc-accent-fg)] shadow-[var(--mc-shadow)] cursor-pointer'
+                    : 'border border-[var(--mc-danger-border)] bg-[var(--mc-surface)] text-[var(--mc-danger)] shadow-[var(--mc-shadow)] hover:bg-[var(--mc-surface-hover)] cursor-pointer'
+                : !canClearTree
+                  ? 'bg-gray-100 text-gray-300 cursor-not-allowed'
+                  : clearTreeArmed
+                    ? 'bg-red-600 text-white cursor-pointer'
+                    : 'bg-red-50 hover:bg-red-100 text-red-600 cursor-pointer',
+            )}
+          >
+            <MdDeleteSweep size={18} aria-hidden="true" />
           </button>
           <button
             onClick={() => {
@@ -941,7 +1161,11 @@ export default function BTEditorSurface({
             className={clsx(
               'flex items-center gap-2 px-4 py-2 rounded-lg',
               'text-sm font-medium transition-colors duration-150',
-              hasTree
+              missionCanvasVariant
+                ? hasTree
+                  ? 'border border-[var(--mc-accent)] bg-[var(--mc-surface)] hover:bg-[var(--mc-surface-hover)] text-[var(--mc-accent-hover)] shadow-[var(--mc-shadow)] cursor-pointer'
+                  : 'border border-[var(--mc-border)] bg-[var(--mc-surface)] text-[var(--mc-text-subtle)] cursor-not-allowed opacity-50'
+                : hasTree
                 ? 'bg-blue-50 hover:bg-blue-100 text-blue-700 cursor-pointer'
                 : 'bg-gray-100 text-gray-400 cursor-not-allowed'
             )}
@@ -953,7 +1177,9 @@ export default function BTEditorSurface({
             onClick={() => setShowTreeList(true)}
             className={clsx(
               'flex items-center gap-2 px-4 py-2 rounded-lg cursor-pointer',
-              'bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-medium',
+              missionCanvasVariant
+                ? 'border border-[var(--mc-border-strong)] bg-[var(--mc-surface)] hover:bg-[var(--mc-surface-hover)] text-[var(--mc-text-muted)] shadow-[var(--mc-shadow)] text-sm font-medium'
+                : 'bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-medium',
               'transition-colors duration-150'
             )}
           >
@@ -964,22 +1190,34 @@ export default function BTEditorSurface({
       </div>
 
       {/* React Flow Canvas */}
-      <div className="flex-1 relative flex">
+      <div className={clsx(
+        'flex-1 relative flex min-h-0',
+        missionCanvasVariant && 'bg-[var(--mc-bg)]',
+      )}>
         <BTNodePalette canUpdateCatalog={isBtNodeUp} />
         <div
-          className="flex-1 relative"
+          className={clsx(
+            'flex-1 relative',
+            missionCanvasVariant && 'bg-[var(--mc-canvas)]',
+          )}
           onDragOver={handleCanvasDragOver}
           onDrop={handleCanvasDrop}
         >
           {parseError ? (
             <div className="flex items-center justify-center h-full">
-              <div className="text-red-500 text-center">
+              <div className={clsx(
+                'text-center',
+                missionCanvasVariant ? 'text-[var(--mc-danger)]' : 'text-red-500',
+              )}>
                 <p className="font-semibold">Parse Error</p>
                 <p className="text-sm mt-1">{parseError}</p>
               </div>
             </div>
           ) : nodes.length === 0 ? (
-            <div className="flex items-center justify-center h-full text-gray-400">
+            <div className={clsx(
+              'flex items-center justify-center h-full',
+              missionCanvasVariant ? 'text-[var(--mc-text-subtle)]' : 'text-gray-400',
+            )}>
               <div className="text-center">
                 <p className="text-lg">No behavior tree loaded</p>
                 <p className="text-sm mt-1">Click "Load XML" or drag nodes from the palette</p>
@@ -1014,7 +1252,7 @@ export default function BTEditorSurface({
               autoPanOnConnect={false}
             >
               <Controls showInteractive={false} />
-              <Background color="#e5e7eb" gap={16} />
+              <Background color={missionCanvasVariant ? 'var(--mc-border)' : '#e5e7eb'} gap={16} />
             </ReactFlow>
           )}
         </div>
@@ -1024,23 +1262,41 @@ export default function BTEditorSurface({
             selectedNodeId={selectedNodeId}
             onParamChange={handleParamChange}
             onNameChange={handleNameChange}
+            variant={variant}
           />
         )}
       </div>
 
       {/* Bottom Control Bar */}
-      <div className="flex items-center justify-between px-6 py-3 border-t border-black bg-white">
+      <div className={clsx(
+        'flex items-center justify-between px-6 border-t',
+        missionCanvasVariant
+          ? 'h-14 border-[var(--mc-border)] bg-[var(--mc-surface-2)]'
+          : 'py-3 border-black bg-white',
+      )}>
         <div className="flex items-center gap-3">
-          <div className="flex items-center gap-2 pr-3 mr-1 border-r border-gray-200">
+          <div className={clsx(
+            'flex items-center gap-2 pr-3 mr-1 border-r',
+            missionCanvasVariant ? 'border-[var(--mc-border)]' : 'border-gray-200',
+          )}>
             <div className={clsx('w-3 h-3 rounded-full', btNodeStatusColor)} />
-            <span className="text-sm text-gray-600">BT Node {btNodeStatusLabel}</span>
+            <span className={clsx(
+              'text-sm',
+              missionCanvasVariant ? 'text-[var(--mc-text-muted)]' : 'text-gray-600',
+            )}>
+              BT Node {btNodeStatusLabel}
+            </span>
             <button
               onClick={handleBtNodeOn}
               disabled={!canStartBtNode}
               title="Start BT node"
               className={clsx(
                 'flex items-center gap-1 px-3 py-2 rounded-lg text-sm font-medium transition-colors',
-                !canStartBtNode
+                missionCanvasVariant
+                  ? !canStartBtNode
+                    ? 'border border-[var(--mc-border)] bg-[var(--mc-surface)] text-[var(--mc-text-subtle)] cursor-not-allowed opacity-50'
+                    : 'border border-[var(--mc-success)] bg-[var(--mc-success)] text-[var(--mc-accent-fg)] shadow-[var(--mc-shadow)] hover:opacity-90'
+                  : !canStartBtNode
                   ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
                   : 'bg-blue-600 hover:bg-blue-700 text-white'
               )}
@@ -1054,7 +1310,11 @@ export default function BTEditorSurface({
               title="Stop BT node"
               className={clsx(
                 'flex items-center gap-1 px-3 py-2 rounded-lg text-sm font-medium transition-colors',
-                !canStopBtNode
+                missionCanvasVariant
+                  ? !canStopBtNode
+                    ? 'border border-[var(--mc-border)] bg-[var(--mc-surface)] text-[var(--mc-text-subtle)] cursor-not-allowed opacity-50'
+                    : 'border border-[var(--mc-danger)] bg-[var(--mc-danger)] text-[var(--mc-accent-fg)] shadow-[var(--mc-shadow)] hover:opacity-90'
+                  : !canStopBtNode
                   ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
                   : 'bg-red-600 hover:bg-red-700 text-white'
               )}
@@ -1068,7 +1328,11 @@ export default function BTEditorSurface({
             disabled={!canStartBt}
             className={clsx(
               'flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-medium transition-colors',
-              !canStartBt
+              missionCanvasVariant
+                ? !canStartBt
+                  ? 'border border-[var(--mc-border)] bg-[var(--mc-surface)] text-[var(--mc-text-subtle)] cursor-not-allowed opacity-50'
+                  : 'border border-[var(--mc-success)] bg-[var(--mc-success)] text-[var(--mc-accent-fg)] shadow-[var(--mc-shadow)] hover:opacity-90'
+                : !canStartBt
                 ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
                 : 'bg-green-600 hover:bg-green-700 text-white'
             )}
@@ -1081,7 +1345,11 @@ export default function BTEditorSurface({
             disabled={!canStopBt}
             className={clsx(
               'flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-medium transition-colors',
-              !canStopBt
+              missionCanvasVariant
+                ? !canStopBt
+                  ? 'border border-[var(--mc-border)] bg-[var(--mc-surface)] text-[var(--mc-text-subtle)] cursor-not-allowed opacity-50'
+                  : 'border border-[var(--mc-danger)] bg-[var(--mc-danger)] text-[var(--mc-accent-fg)] shadow-[var(--mc-shadow)] hover:opacity-90'
+                : !canStopBt
                 ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
                 : 'bg-red-600 hover:bg-red-700 text-white'
             )}
@@ -1093,7 +1361,12 @@ export default function BTEditorSurface({
 
         <div className="flex items-center gap-2">
           <div className={clsx('w-3 h-3 rounded-full', statusColor)} />
-          <span className="text-sm text-gray-600">{statusLabel}</span>
+          <span className={clsx(
+            'text-sm',
+            missionCanvasVariant ? 'text-[var(--mc-text-muted)]' : 'text-gray-600',
+          )}>
+            {statusLabel}
+          </span>
         </div>
       </div>
 
@@ -1102,14 +1375,30 @@ export default function BTEditorSurface({
         isOpen={showTreeList}
         onClose={() => setShowTreeList(false)}
         onSelect={handleServerFileSelect}
+        variant={variant}
       />
 
       {/* Save As Dialog */}
       {showSaveDialog && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-          <div className="bg-white rounded-xl shadow-xl p-6 w-80">
-            <h2 className="text-base font-semibold text-gray-800 mb-4">Save Tree As</h2>
-            <div className="flex items-center gap-1 border border-gray-300 rounded-lg px-3 py-2 focus-within:ring-2 focus-within:ring-blue-400">
+          <div className={clsx(
+            'rounded-2xl p-6 w-80',
+            missionCanvasVariant
+              ? 'border border-[var(--mc-border)] bg-[var(--mc-surface)] text-[var(--mc-text)] shadow-[var(--mc-shadow)]'
+              : 'bg-white shadow-xl',
+          )}>
+            <h2 className={clsx(
+              'text-base font-semibold mb-4',
+              missionCanvasVariant ? 'text-[var(--mc-text)]' : 'text-gray-800',
+            )}>
+              Save Tree As
+            </h2>
+            <div className={clsx(
+              'flex items-center gap-1 border rounded-lg px-3 py-2 focus-within:ring-2',
+              missionCanvasVariant
+                ? 'border-[var(--mc-border-strong)] bg-[var(--mc-surface-2)] focus-within:ring-[var(--mc-accent)]'
+                : 'border-gray-300 focus-within:ring-blue-400',
+            )}>
               <input
                 autoFocus
                 type="text"
@@ -1126,12 +1415,25 @@ export default function BTEditorSurface({
                   }
                 }}
                 placeholder="filename"
-                className="flex-1 text-sm outline-none"
+                className={clsx(
+                  'flex-1 min-w-0 text-sm outline-none bg-transparent',
+                  missionCanvasVariant && 'text-[var(--mc-text)] placeholder:text-[var(--mc-text-subtle)]',
+                )}
               />
-              <span className="text-sm text-gray-400">.xml</span>
+              <span className={clsx(
+                'text-sm',
+                missionCanvasVariant ? 'text-[var(--mc-text-subtle)]' : 'text-gray-400',
+              )}>
+                .xml
+              </span>
             </div>
             {saveConflict && (
-              <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+              <div className={clsx(
+                'mt-3 rounded-lg border px-3 py-2 text-sm',
+                missionCanvasVariant
+                  ? 'border-[var(--mc-warning)] bg-[var(--mc-surface-2)] text-[var(--mc-warning)]'
+                  : 'border-amber-200 bg-amber-50 text-amber-800',
+              )}>
                 <div className="font-medium">File already exists</div>
                 <div className="mt-1">
                   Choose another name or overwrite {saveConflict.filename || 'this file'}.
@@ -1144,14 +1446,24 @@ export default function BTEditorSurface({
                   setShowSaveDialog(false);
                   setSaveConflict(null);
                 }}
-                className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+                className={clsx(
+                  'px-4 py-2 text-sm rounded-lg transition-colors',
+                  missionCanvasVariant
+                    ? 'text-[var(--mc-text-muted)] hover:bg-[var(--mc-surface-hover)]'
+                    : 'text-gray-600 hover:bg-gray-100',
+                )}
               >
                 Cancel
               </button>
               {saveConflict && (
                 <button
                   onClick={() => handleSaveAs({ overwrite: true })}
-                  className="px-4 py-2 text-sm font-medium rounded-lg transition-colors bg-red-50 hover:bg-red-100 text-red-700"
+                  className={clsx(
+                    'px-4 py-2 text-sm font-medium rounded-lg transition-colors',
+                    missionCanvasVariant
+                      ? 'border border-[var(--mc-danger-border)] bg-[var(--mc-surface)] text-[var(--mc-danger)] hover:bg-[var(--mc-surface-hover)]'
+                      : 'bg-red-50 hover:bg-red-100 text-red-700',
+                  )}
                 >
                   Overwrite
                 </button>
@@ -1161,7 +1473,11 @@ export default function BTEditorSurface({
                 disabled={!saveFileName.trim()}
                 className={clsx(
                   'px-4 py-2 text-sm font-medium rounded-lg transition-colors',
-                  saveFileName.trim()
+                  missionCanvasVariant
+                    ? saveFileName.trim()
+                      ? 'bg-[var(--mc-accent)] hover:bg-[var(--mc-accent-hover)] text-[var(--mc-accent-fg)]'
+                      : 'bg-[var(--mc-surface-hover)] text-[var(--mc-text-subtle)] cursor-not-allowed'
+                    : saveFileName.trim()
                     ? 'bg-blue-600 hover:bg-blue-700 text-white'
                     : 'bg-gray-200 text-gray-400 cursor-not-allowed'
                 )}

@@ -38,6 +38,9 @@ import {
 } from '../utils/navigationMissionsApi';
 
 const mockMapViewer = jest.fn(() => <div>Mission Canvas Map</div>);
+const mockStandaloneBtWorkspace = jest.fn(() => (
+  <div data-testid="standalone-bt-workspace">Standalone BT Workspace</div>
+));
 const mockPublishRosTopic = jest.fn();
 const mockCallService = jest.fn();
 const mockTopicDataByName = {};
@@ -103,6 +106,11 @@ async function openMappingEditorAndSelect(path = 'factory.pgm') {
 
 jest.mock('../components/navigation/MapViewer', () => ({
   MapViewer: (props) => mockMapViewer(props),
+}));
+
+jest.mock('../components/navigation/StandaloneBtWorkspace', () => ({
+  __esModule: true,
+  default: (props) => mockStandaloneBtWorkspace(props),
 }));
 
 jest.mock('../utils/navigationApi', () => ({
@@ -319,6 +327,9 @@ beforeEach(() => {
   startNavigation.mockResolvedValue({ ok: true });
   stopNavigation.mockResolvedValue({ ok: true });
   mockMapViewer.mockImplementation(() => <div>Mission Canvas Map</div>);
+  mockStandaloneBtWorkspace.mockImplementation(() => (
+    <div data-testid="standalone-bt-workspace">Standalone BT Workspace</div>
+  ));
 });
 
 afterEach(() => {
@@ -375,6 +386,82 @@ test('renders Mission Canvas foundation', async () => {
   expect(screen.queryByText('/bt/status')).not.toBeInTheDocument();
   await waitFor(() => expect(getServiceStatus).toHaveBeenCalled());
   expect(getNavigationSpots).not.toHaveBeenCalled();
+});
+
+test('switches between the mapless Behavior Trees workspace and the previous Mission stage', async () => {
+  render(<MissionCanvasPage />);
+
+  const missionWorkspaceTab = screen.getByRole('tab', { name: 'Mission' });
+  expect(missionWorkspaceTab).toHaveAttribute('aria-selected', 'true');
+  expect(within(missionWorkspaceTab).getByTestId('mission-workspace-icon'))
+    .toHaveAttribute('aria-hidden', 'true');
+  expect(screen.getByRole('tab', { name: 'Behavior Trees' })).toHaveAttribute('aria-selected', 'false');
+  expect(screen.getByRole('tab', { name: 'Mapping' })).toHaveAttribute('aria-selected', 'true');
+  expect(screen.getByText('Mission Canvas Map')).toBeInTheDocument();
+
+  const missionPipeline = screen.getByRole('region', { name: 'Mission workspace stages' });
+  expect(missionPipeline).toHaveClass('mission-pipeline-group');
+  expect(within(missionPipeline).getByText('MISSION PIPELINE')).toBeInTheDocument();
+  expect(within(missionPipeline).getByRole('tablist', { name: 'Mission Canvas stages' }))
+    .toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole('tab', { name: 'Design' }));
+  expect(screen.getByRole('tab', { name: 'Design' })).toHaveAttribute('aria-selected', 'true');
+
+  fireEvent.click(screen.getByRole('tab', { name: 'Behavior Trees' }));
+
+  expect(screen.getByRole('tab', { name: 'Behavior Trees' })).toHaveAttribute('aria-selected', 'true');
+  expect(screen.getByTestId('standalone-bt-workspace')).toBeInTheDocument();
+  expect(mockStandaloneBtWorkspace).toHaveBeenLastCalledWith(expect.objectContaining({
+    isActive: true,
+    title: 'Behavior Trees',
+    variant: 'mission-canvas',
+  }));
+  expect(screen.queryByRole('tab', { name: 'Mapping' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('tab', { name: 'Design' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('region', { name: 'Mission workspace stages' })).not.toBeInTheDocument();
+  expect(screen.queryByText('Mission Canvas Map')).not.toBeInTheDocument();
+  await waitFor(() => expect(
+    JSON.parse(window.sessionStorage.getItem('mission_canvas_session')).workspaceKind,
+  ).toBe('standalone_bt'));
+
+  fireEvent.click(screen.getByRole('tab', { name: 'Mission' }));
+
+  expect(screen.getByRole('tab', { name: 'Mission' })).toHaveAttribute('aria-selected', 'true');
+  expect(screen.getByRole('tab', { name: 'Design' })).toHaveAttribute('aria-selected', 'true');
+  expect(screen.getByText('Mission Canvas Map')).toBeInTheDocument();
+  expect(screen.queryByTestId('standalone-bt-workspace')).not.toBeInTheDocument();
+});
+
+test('restores the standalone workspace from the Mission Canvas session', () => {
+  window.sessionStorage.setItem('mission_canvas_session', JSON.stringify({
+    workspaceKind: 'standalone_bt',
+    workspaceStage: 'authoring',
+  }));
+
+  render(<MissionCanvasPage />);
+
+  expect(screen.getByRole('tab', { name: 'Behavior Trees' })).toHaveAttribute('aria-selected', 'true');
+  expect(screen.getByTestId('standalone-bt-workspace')).toBeInTheDocument();
+  expect(screen.queryByRole('tab', { name: 'Design' })).not.toBeInTheDocument();
+  expect(screen.queryByText('Mission Canvas Map')).not.toBeInTheDocument();
+  expect(getPgmFiles).not.toHaveBeenCalled();
+  expect(getPgmImage).not.toHaveBeenCalled();
+  expect(getNavigationSpots).not.toHaveBeenCalled();
+});
+
+test('defaults legacy Mission Canvas sessions without workspaceKind to Mission', () => {
+  window.sessionStorage.setItem('mission_canvas_session', JSON.stringify({
+    workspaceStage: 'authoring',
+    mapName: 'factory',
+  }));
+
+  render(<MissionCanvasPage />);
+
+  expect(screen.getByRole('tab', { name: 'Mission' })).toHaveAttribute('aria-selected', 'true');
+  expect(screen.getByRole('tab', { name: 'Design' })).toHaveAttribute('aria-selected', 'true');
+  expect(screen.getByText('Mission Canvas Map')).toBeInTheDocument();
+  expect(screen.queryByTestId('standalone-bt-workspace')).not.toBeInTheDocument();
 });
 
 test('updates mapping topics when layer toggles change', async () => {
@@ -3054,6 +3141,39 @@ test('edits and saves loaded map pixels from the fix editor', async () => {
   expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
 });
 
+test('keeps unsaved Map Edit pixels in place by locking workspace switches', async () => {
+  const latestMapViewerProps = () => (
+    mockMapViewer.mock.calls[mockMapViewer.mock.calls.length - 1][0]
+  );
+  getPgmFiles.mockResolvedValue({
+    files: [{ path: 'factory.pgm', name: 'factory.pgm' }],
+  });
+  getPgmImage.mockResolvedValue({
+    path: 'factory.pgm',
+    width: 1,
+    height: 1,
+    maxval: 255,
+    pixels_base64: '/g==',
+  });
+
+  render(<MissionCanvasPage />);
+  await openMappingEditorAndSelect();
+  fireEvent.click(screen.getByRole('button', { name: 'Map Edit' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Add Obstacle' }));
+  await act(async () => {
+    latestMapViewerProps().onEditorMapPoint(0, 0);
+  });
+
+  const behaviorTreesTab = screen.getByRole('tab', { name: 'Behavior Trees' });
+  expect(behaviorTreesTab).toBeDisabled();
+  expect(behaviorTreesTab).toHaveAttribute(
+    'title',
+    'Save the current map edits before switching workspaces',
+  );
+  expect(screen.getByText('· unsaved')).toBeInTheDocument();
+  expect(screen.queryByTestId('standalone-bt-workspace')).not.toBeInTheDocument();
+});
+
 test('marks unknown map pixels from the fix editor', async () => {
   const latestMapViewerProps = () => (
     mockMapViewer.mock.calls[mockMapViewer.mock.calls.length - 1][0]
@@ -4488,7 +4608,7 @@ test('run mission activates the BT node on demand and releases it on stop', asyn
       btUp = false;
       return Promise.resolve(mockJsonResponse({ ok: true }));
     }
-    return Promise.resolve(mockJsonResponse({ name: 'bt_node', state: btUp ? 'up' : 'inactive', raw: '' }));
+    return Promise.resolve(mockJsonResponse({ name: 'bt_node', state: btUp ? 'up' : 'down', raw: '' }));
   });
   const navigationRequests = [];
   sendNavigateToPoseGoalAndWait.mockImplementation((goal, signal) => new Promise((resolve, reject) => {
@@ -4632,6 +4752,10 @@ test('run mission activates the BT node on demand and releases it on stop', asyn
     '/api/services/bt_node/stop',
     expect.objectContaining({ method: 'POST' }),
   ));
+  expect(global.fetch.mock.calls.filter(([url, options]) => (
+    String(url) === '/api/services/bt_node/stop'
+    && options?.method === 'POST'
+  ))).toHaveLength(1);
   const reloadMapButton = screen.getByRole('button', { name: 'Load Map' });
   await waitFor(() => expect(reloadMapButton).toBeEnabled());
   fireEvent.click(reloadMapButton);
@@ -4640,6 +4764,145 @@ test('run mission activates the BT node on demand and releases it on stop', asyn
   fireEvent.click(screen.getByRole('button', { name: 'Load' }));
   await waitFor(() => expect(latestMapViewerProps().spots).toHaveLength(2));
   expect(latestMapViewerProps().activeWaypointId).toBe('');
+}, 20000);
+
+test.each([
+  ['is stopped by the operator', false],
+  ['completes', true],
+])('does not stop a pre-existing BT node when the mission %s', async (_ending, completesNaturally) => {
+  const latestMapViewerProps = () => (
+    mockMapViewer.mock.calls[mockMapViewer.mock.calls.length - 1][0]
+  );
+  const filledBt = [
+    '<root BTCPP_format="4" main_tree_to_execute="MainTree">',
+    '  <BehaviorTree ID="MainTree"><Wait duration="0.1"/></BehaviorTree>',
+    '</root>',
+  ].join('\n');
+
+  // The idle process belongs to another workspace and remains up throughout
+  // this Mission Run. Mission may borrow its ROS services, but must not stop
+  // the supervisor process when the run ends.
+  global.fetch.mockImplementation((url) => {
+    const target = String(url);
+    if (target.endsWith('/services/bt_node/status')) {
+      return Promise.resolve(mockJsonResponse({ name: 'bt_node', state: 'up', raw: 'up' }));
+    }
+    return Promise.resolve(mockJsonResponse({ ok: true }));
+  });
+
+  if (completesNaturally) {
+    sendNavigateToPoseGoalAndWait.mockResolvedValue({
+      ok: true,
+      status: 'SUCCEEDED',
+      message: 'Goal succeeded',
+    });
+  } else {
+    sendNavigateToPoseGoalAndWait.mockImplementation((_goal, signal) => new Promise((resolve, reject) => {
+      signal.addEventListener('abort', () => {
+        reject(new DOMException('Aborted', 'AbortError'));
+      }, { once: true });
+    }));
+  }
+  getPgmFiles.mockResolvedValue({
+    files: [{ path: 'factory.pgm', name: 'factory.pgm' }],
+  });
+  getNavigationMission.mockImplementation((mapName) => Promise.resolve(
+    mapName === 'factory'
+      ? {
+        exists: true,
+        map_name: 'factory',
+        global_bt: 'global.xml',
+        waypoints: [
+          { id: 'wp1', label: 'Kitchen', pose: { frame_id: 'map', x: 1, y: 0, yaw: 0 }, local_bt: 'locals/wp1.xml', metadata: {} },
+          { id: 'wp2', label: 'Living Room', pose: { frame_id: 'map', x: 4, y: 0, yaw: 0 }, local_bt: 'locals/wp2.xml', metadata: {} },
+        ],
+        metadata: {
+          mission_flow: {
+            nodes: [{ id: 'wp1', position: { x: 80, y: 72 } }, { id: 'wp2', position: { x: 300, y: 72 } }],
+            edges: [{ id: 'e1', source: 'wp1', target: 'wp2' }],
+          },
+        },
+      }
+      : { exists: false, map_name: mapName, global_bt: 'global.xml', waypoints: [], metadata: {} },
+  ));
+  getNavigationMissionBtFile.mockImplementation((mapName, path) => Promise.resolve(
+    path === 'locals/wp1.xml'
+      ? { path, content: filledBt, exists: true }
+      : { path, content: '', exists: false },
+  ));
+  sendInitialPoseEstimate.mockImplementation(async () => {
+    mockTopicDataByName['/amcl_pose'] = amclPoseMessage(0.6, 0.4, 0.1);
+    return { ok: true };
+  });
+  mockTopicDataByName['/bt/status'] = stringTopicMessage('stopped');
+  let resolveBtLoad;
+  mockCallService.mockImplementation((serviceName) => {
+    if (serviceName === '/bt/load_and_run' && completesNaturally) {
+      return new Promise((resolve) => { resolveBtLoad = resolve; });
+    }
+    return Promise.resolve({ success: true, catalog_json: '[]' });
+  });
+
+  const { rerender } = render(<MissionCanvasPage />);
+
+  fireEvent.click(screen.getByRole('tab', { name: 'Run' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Load Map' }));
+  const mapSelect = await screen.findByRole('combobox', { name: 'Run mission map file' });
+  await waitFor(() => expect(mapSelect).toHaveValue('factory.pgm'));
+  fireEvent.click(screen.getByRole('button', { name: 'Load' }));
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Localize' })).toBeEnabled());
+
+  getServiceStatus.mockResolvedValue({ is_up: true, mode: 'nav' });
+  fireEvent.click(screen.getByRole('button', { name: 'Localize' }));
+  await waitFor(() => expect(startNavigation).toHaveBeenCalledWith('nav', 'factory'));
+  await waitFor(() => expect(latestMapViewerProps().interactionMode).toBe('initial'));
+  await act(async () => {
+    latestMapViewerProps().onMapPose(0.6, 0.4, 0.1);
+  });
+  await waitFor(() => expect(screen.getByText('Ready')).toBeInTheDocument(), { timeout: 6000 });
+
+  fireEvent.click(screen.getByRole('button', { name: 'Run Mission' }));
+  await waitFor(() => expect(mockCallService).toHaveBeenCalledWith(
+    '/bt/nodes/catalog',
+    'interfaces/srv/GetNodeCatalog',
+    {},
+    1000,
+  ));
+  await waitFor(() => expect(sendNavigateToPoseGoalAndWait).toHaveBeenCalledTimes(1));
+  expect(global.fetch.mock.calls.some(([url, options]) => (
+    String(url) === '/api/services/bt_node/start'
+    && options?.method === 'POST'
+  ))).toBe(false);
+
+  if (completesNaturally) {
+    await waitFor(() => expect(mockCallService).toHaveBeenCalledWith(
+      '/bt/load_and_run',
+      'interfaces/srv/LoadAndRunTree',
+      { tree_xml: filledBt },
+      30000,
+    ));
+    await act(async () => {
+      mockTopicDataByName['/bt/status'] = stringTopicMessage('running');
+      rerender(<MissionCanvasPage />);
+      resolveBtLoad({ success: true });
+      await Promise.resolve();
+    });
+    await act(async () => {
+      mockTopicDataByName['/bt/status'] = stringTopicMessage('completed');
+      rerender(<MissionCanvasPage />);
+    });
+    await waitFor(() => expect(sendNavigateToPoseGoalAndWait).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Run Mission' })).toBeEnabled());
+  } else {
+    fireEvent.click(screen.getByRole('button', { name: 'Stop' }));
+    await waitFor(() => expect(stopNavigation).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Stop' })).toBeDisabled());
+  }
+
+  expect(global.fetch.mock.calls.filter(([url, options]) => (
+    String(url) === '/api/services/bt_node/stop'
+    && options?.method === 'POST'
+  ))).toHaveLength(0);
 }, 20000);
 
 test('keeps Run localization active while the BT node is up', async () => {

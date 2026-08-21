@@ -213,6 +213,7 @@ export default function BTParamPanel({
   onParamChange,
   onNameChange,
   onClose,
+  variant = 'legacy',
 }) {
   const dispatch = useDispatch();
   const robotType = useSelector((state) => state.tasks?.robotType || '');
@@ -542,6 +543,7 @@ export default function BTParamPanel({
         initialPath={policyBrowserPath}
         defaultPath={policyBrowserPath}
         homePath={DEFAULT_PATHS.POLICY_CHECKPOINTS_PATH}
+        variant={variant}
       />
     </div>
   );

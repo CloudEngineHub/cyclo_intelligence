@@ -4,8 +4,10 @@ import App from './App';
 import { ThemeProvider } from './contexts/ThemeContext';
 import store from './store/store';
 import PageType from './constants/pageType';
-import { moveToPage } from './features/ui/uiSlice';
+import { CURRENT_PAGE_STORAGE_KEY, moveToPage } from './features/ui/uiSlice';
 import { stopNavigation } from './utils/navigationApi';
+
+const mockMissionCanvasPage = jest.fn();
 
 jest.mock('./components/ThemeToggle', () => {
   const React = require('react');
@@ -56,10 +58,11 @@ jest.mock('./pages/ReplayPage', () => {
   };
 });
 
-jest.mock('./pages/BTManagerPage', () => {
+jest.mock('./pages/MissionCanvasPage', () => {
   const React = require('react');
-  return function MockBTManagerPage() {
-    return React.createElement('div', null, 'BT Manager Page');
+  return function MockMissionCanvasPage(props) {
+    mockMissionCanvasPage(props);
+    return React.createElement('div', { 'data-testid': 'mission-canvas-page' }, 'Mission Canvas Page');
   };
 });
 
@@ -101,6 +104,8 @@ test('renders the Cyclo Intelligence shell navigation', () => {
     .toBeInTheDocument();
   expect(screen.getByRole('button', { name: /Inference/i }))
     .toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'BT Manager' }))
+    .not.toBeInTheDocument();
   expect(screen.getByText('Home Page')).toBeInTheDocument();
 });
 
@@ -121,7 +126,6 @@ test('orders the Cyclo Intelligence navigation into workflow sections', () => {
     'Training Guide',
     'Inference',
     'Nav',
-    'BT Manager',
     'Mission Canvas',
   ].map((name) => navigation.getByRole('button', { name }));
 
@@ -135,6 +139,8 @@ test('orders the Cyclo Intelligence navigation into workflow sections', () => {
     .toBe(separator);
   expect(separator.nextElementSibling)
     .toBe(navigation.getByRole('button', { name: 'Nav' }));
+  expect(navigation.queryByRole('button', { name: 'BT Manager' }))
+    .not.toBeInTheDocument();
 });
 
 test('stops Navigation after leaving the Nav page', async () => {
@@ -157,4 +163,37 @@ test('stops Navigation after leaving the Nav page', async () => {
   });
   await waitFor(() => expect(stopNavigation).toHaveBeenCalledTimes(1));
   view.unmount();
+});
+
+test('uses Mission Canvas as the canonical navigation entry point', async () => {
+  window.sessionStorage.clear();
+  act(() => {
+    store.dispatch(moveToPage(PageType.HOME));
+  });
+
+  const view = render(
+    <Provider store={store}>
+      <ThemeProvider>
+        <App />
+      </ThemeProvider>
+    </Provider>
+  );
+
+  act(() => {
+    screen.getByRole('button', { name: 'Mission Canvas' }).click();
+  });
+
+  expect(await screen.findByTestId('mission-canvas-page'))
+    .toHaveTextContent('Mission Canvas Page');
+  expect(mockMissionCanvasPage).toHaveBeenCalled();
+  await waitFor(() => {
+    expect(window.sessionStorage.getItem(CURRENT_PAGE_STORAGE_KEY))
+      .toBe(PageType.MISSION_CANVAS);
+    expect(store.getState().ui.currentPage).toBe(PageType.MISSION_CANVAS);
+  });
+  view.unmount();
+  act(() => {
+    store.dispatch(moveToPage(PageType.HOME));
+  });
+  window.sessionStorage.clear();
 });

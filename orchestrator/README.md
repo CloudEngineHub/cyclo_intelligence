@@ -30,7 +30,7 @@ orchestrator/
 │     ├── bt_nodes_loader.py   XML → runtime tree assembly via the
 │     │                        dynamic node registry.
 │     ├── node_registry.py     Scans actions/controls and builds the
-│     │                        BT Manager catalog from class signatures.
+│     │                        Behavior Trees catalog from class signatures.
 │     ├── blackboard.py        Shared-state blackboard.
 │     ├── constants.py         Runtime defaults for BT actions.
 │     ├── actions/             Built-in and user-defined action nodes.
@@ -103,7 +103,8 @@ The normal bringup launch no longer starts it automatically:
 ros2 launch orchestrator orchestrator_bringup.launch.py
 ```
 
-BT Manager owns the normal process lifecycle through the supervisor API:
+Mission Canvas → **Behavior Trees** owns the normal process lifecycle through
+the supervisor API:
 
 - **BT Node ON** starts the `bt_node` s6 service and refreshes the catalog.
 - **BT Node OFF** stops the `bt_node` s6 service, but only after BT execution
@@ -116,15 +117,20 @@ ros2 launch orchestrator bt_node.launch.py robot_type:=ffw_sg2_rev1
 
 `bt_node.launch.py` receives `robot_type`, derives joint/topic parameters
 from `shared/robot_configs/<robot_type>_config.yaml`, and starts with no
-preloaded tree. The BT Manager supplies tree XML through `/bt/load_and_run`.
+preloaded tree. The Behavior Trees workspace supplies tree XML through
+`/bt/load_and_run`.
 
-BT Manager Start/Stop controls tree execution, not the `bt_node` process:
+Behavior Trees **Start/Stop** controls tree execution, not the `bt_node`
+process:
 
-- **Start** serializes the current graph and calls `/bt/load_and_run`.
+- **Start** cleans up a previous terminal execution when needed, serializes the
+  current graph, and calls `/bt/load_and_run`.
 - **Stop** calls `/bt/set_running` with `false`.
 - **Start** is disabled while the `bt_node` process is down.
-- When a tree completes or fails, press **Stop** to return the runtime to
-  `stopped`; only then is **BT Node OFF** enabled.
+- While a tree is running, **Stop** is enabled and **Start** is disabled.
+- When a tree completes or fails, **Stop** is disabled and **Start** becomes
+  available again. **BT Node OFF** performs the required runtime cleanup before
+  stopping the process from one of these terminal states.
 
 ## Custom BT nodes
 
@@ -132,7 +138,7 @@ User-defined nodes are plain Python files under
 `orchestrator/orchestrator/bt/actions/` or
 `orchestrator/orchestrator/bt/controls/`. The BT registry scans those
 folders dynamically, so editing `actions/__init__.py` or `controls/__init__.py`
-is not required for BT Manager discovery or XML execution. Those files are
+is not required for Behavior Trees discovery or XML execution. Those files are
 only for package-level imports.
 
 Start from the templates in `orchestrator/orchestrator/bt/templates/`
@@ -143,7 +149,7 @@ Start from the templates in `orchestrator/orchestrator/bt/templates/`
 - `control_template.py` subclasses `BaseControl`, defines constructor kwargs,
   ticks children, reports active child IDs, and resets its child index.
 
-Class names become XML tags. Constructor kwargs become BT Manager ports; type
+Class names become XML tags. Constructor kwargs become Behavior Trees ports; type
 hints and defaults become port types and default values. No `META`,
 `NODE_TAG`, `PORT_METADATA`, or description block is required.
 
@@ -153,13 +159,15 @@ dependencies from the loader, such as the ROS node, topic config, joint names,
 or helper methods. Built-in examples include `Rotate`, `JointControl`, and
 `SendCommand`.
 
-After adding or deleting a node file, click **Refresh Nodes** in BT Manager.
+After adding or deleting a node file, open Mission Canvas → **Behavior Trees**
+and click **Refresh Nodes**.
 If running from an installed package instead of a source-mounted workspace,
 rebuild/restart first so the new file exists in the install space.
 
-## BT Manager XML saving
+## Behavior Trees XML saving
 
-BT Manager saves XML files through `cyclo_data`'s HTTP file server
+The Mission Canvas Behavior Trees workspace saves XML files through
+`cyclo_data`'s HTTP file server
 (`/bt/save_tree`) into `orchestrator/orchestrator/bt/trees/`. A duplicate file
 name is rejected by default to prevent accidental overwrite; the UI shows an
 explicit **Overwrite** action only after the server reports a name conflict.

@@ -13,7 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  *
- * Author: Kiwoong Park
+ * Author: Kiwoong Park, Seongwoo Kim
  */
 
 import { createSlice } from '@reduxjs/toolkit';
@@ -21,6 +21,8 @@ import { createSlice } from '@reduxjs/toolkit';
 import PageType from '../../constants/pageType';
 
 export const CURRENT_PAGE_STORAGE_KEY = 'cyclo_intelligence.current_page';
+export const MISSION_CANVAS_SESSION_STORAGE_KEY = 'mission_canvas_session';
+export const LEGACY_BT_MANAGER_PAGE = 'bt_manager';
 
 const validPages = new Set(Object.values(PageType));
 
@@ -42,16 +44,51 @@ export const resolveInitialPageState = (storage = getSessionStorage()) => {
       restoredPageFromSession: false,
     };
   }
+  let storedPage = null;
   try {
-    const storedPage = storage.getItem(CURRENT_PAGE_STORAGE_KEY);
-    if (validPages.has(storedPage)) {
-      return {
-        currentPage: storedPage,
-        restoredPageFromSession: true,
-      };
-    }
+    storedPage = storage.getItem(CURRENT_PAGE_STORAGE_KEY);
   } catch (_error) {
     // Ignore blocked storage and fall back to Home.
+    return {
+      currentPage: PageType.HOME,
+      restoredPageFromSession: false,
+    };
+  }
+
+  if (storedPage === LEGACY_BT_MANAGER_PAGE) {
+    // One-time migration for tabs saved before BT Manager moved into Mission
+    // Canvas. Preserve the rest of the Mission Canvas session and only select
+    // the mapless Behavior Trees workspace.
+    let missionSession = {};
+    try {
+      const rawMissionSession = storage.getItem(MISSION_CANVAS_SESSION_STORAGE_KEY);
+      const parsedMissionSession = rawMissionSession ? JSON.parse(rawMissionSession) : {};
+      if (parsedMissionSession && typeof parsedMissionSession === 'object') {
+        missionSession = parsedMissionSession;
+      }
+    } catch (_error) {
+      missionSession = {};
+    }
+    try {
+      storage.setItem(MISSION_CANVAS_SESSION_STORAGE_KEY, JSON.stringify({
+        ...missionSession,
+        workspaceKind: 'standalone_bt',
+      }));
+      storage.setItem(CURRENT_PAGE_STORAGE_KEY, PageType.MISSION_CANVAS);
+    } catch (_error) {
+      // A blocked write does not prevent this in-memory compatibility redirect.
+    }
+    return {
+      currentPage: PageType.MISSION_CANVAS,
+      restoredPageFromSession: true,
+    };
+  }
+
+  if (validPages.has(storedPage)) {
+    return {
+      currentPage: storedPage,
+      restoredPageFromSession: true,
+    };
   }
   return {
     currentPage: PageType.HOME,
@@ -85,7 +122,6 @@ const initialState = {
     home: true,
     record: true,
     inference: true,
-    btmanager: true,
   },
 };
 

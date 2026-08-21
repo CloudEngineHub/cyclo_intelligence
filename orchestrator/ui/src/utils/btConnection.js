@@ -11,9 +11,11 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+//
+// Author: Seongwoo Kim
 
 /**
- * Shared BT edge validation (Mission Canvas + BT Manager).
+ * Shared BT edge validation for Mission Canvas Behavior Tree editors.
  *
  * Standard behavior-tree structure: only control nodes are internal — actions
  * are always leaves, so an edge may only leave a btControl node. The engine

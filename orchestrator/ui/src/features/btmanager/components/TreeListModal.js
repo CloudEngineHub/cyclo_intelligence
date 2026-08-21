@@ -21,11 +21,17 @@ import { MdClose, MdDescription, MdRefresh } from 'react-icons/md';
 
 import { useRosServiceCaller } from '../../../hooks/useRosServiceCaller';
 
-export default function TreeListModal({ isOpen, onClose, onSelect }) {
+export default function TreeListModal({
+  isOpen,
+  onClose,
+  onSelect,
+  variant = 'legacy',
+}) {
   const { getTreeList } = useRosServiceCaller();
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState(null);
+  const missionCanvasVariant = variant === 'mission-canvas';
 
   const fetchTrees = useCallback(async () => {
     setLoading(true);
@@ -69,9 +75,20 @@ export default function TreeListModal({ isOpen, onClose, onSelect }) {
       <div className="fixed inset-0 bg-black bg-opacity-50 transition-opacity" />
 
       <div className="flex min-h-full items-center justify-center p-4">
-        <div className="relative bg-white rounded-lg shadow-xl max-w-lg w-full max-h-[80vh] flex flex-col">
-          <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
-            <h2 className="text-xl font-semibold text-gray-900">
+        <div className={clsx(
+          'relative max-w-lg w-full max-h-[80vh] flex flex-col',
+          missionCanvasVariant
+            ? 'rounded-2xl border border-[var(--mc-border)] bg-[var(--mc-surface)] text-[var(--mc-text)] shadow-[var(--mc-shadow)]'
+            : 'bg-white rounded-lg shadow-xl',
+        )}>
+          <div className={clsx(
+            'flex items-center justify-between px-6 py-4 border-b',
+            missionCanvasVariant ? 'border-[var(--mc-border)]' : 'border-gray-200',
+          )}>
+            <h2 className={clsx(
+              'font-semibold',
+              missionCanvasVariant ? 'text-[15px] text-[var(--mc-text)]' : 'text-xl text-gray-900',
+            )}>
               Select BT XML
             </h2>
             <div className="flex items-center gap-1">
@@ -80,7 +97,11 @@ export default function TreeListModal({ isOpen, onClose, onSelect }) {
                 disabled={loading}
                 className={clsx(
                   'p-2 rounded-lg transition-colors',
-                  loading
+                  missionCanvasVariant
+                    ? loading
+                      ? 'text-[var(--mc-text-subtle)] cursor-not-allowed opacity-50'
+                      : 'text-[var(--mc-text-muted)] hover:text-[var(--mc-text)] hover:bg-[var(--mc-surface-hover)]'
+                    : loading
                     ? 'text-gray-300 cursor-not-allowed'
                     : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'
                 )}
@@ -90,7 +111,12 @@ export default function TreeListModal({ isOpen, onClose, onSelect }) {
               </button>
               <button
                 onClick={onClose}
-                className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+                className={clsx(
+                  'p-2 rounded-lg transition-colors',
+                  missionCanvasVariant
+                    ? 'text-[var(--mc-text-subtle)] hover:text-[var(--mc-text)] hover:bg-[var(--mc-surface-hover)]'
+                    : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100',
+                )}
               >
                 <MdClose size={24} />
               </button>
@@ -99,24 +125,39 @@ export default function TreeListModal({ isOpen, onClose, onSelect }) {
 
           <div className="flex-1 overflow-y-auto px-2 py-2 min-h-[200px]">
             {loading ? (
-              <div className="flex items-center justify-center h-full py-12 text-gray-500 text-sm">
+              <div className={clsx(
+                'flex items-center justify-center h-full py-12 text-sm',
+                missionCanvasVariant ? 'text-[var(--mc-text-muted)]' : 'text-gray-500',
+              )}>
                 Loading trees…
               </div>
             ) : errorMsg ? (
               <div className="flex flex-col items-center justify-center h-full py-12 text-center">
-                <p className="text-red-500 text-sm font-medium">
+                <p className={clsx(
+                  'text-sm font-medium',
+                  missionCanvasVariant ? 'text-[var(--mc-danger)]' : 'text-red-500',
+                )}>
                   Failed to load trees
                 </p>
-                <p className="text-gray-500 text-xs mt-1 break-all px-4">
+                <p className={clsx(
+                  'text-xs mt-1 break-all px-4',
+                  missionCanvasVariant ? 'text-[var(--mc-text-muted)]' : 'text-gray-500',
+                )}>
                   {errorMsg}
                 </p>
               </div>
             ) : items.length === 0 ? (
-              <div className="flex items-center justify-center h-full py-12 text-gray-500 text-sm">
+              <div className={clsx(
+                'flex items-center justify-center h-full py-12 text-sm',
+                missionCanvasVariant ? 'text-[var(--mc-text-muted)]' : 'text-gray-500',
+              )}>
                 No tree XMLs found in bt/trees/
               </div>
             ) : (
-              <ul className="divide-y divide-gray-100">
+              <ul className={clsx(
+                'divide-y',
+                missionCanvasVariant ? 'divide-[var(--mc-border)]' : 'divide-gray-100',
+              )}>
                 {items.map((item) => (
                   <li key={item.full_path}>
                     <button
@@ -126,14 +167,19 @@ export default function TreeListModal({ isOpen, onClose, onSelect }) {
                       }}
                       className={clsx(
                         'w-full flex items-center gap-3 px-4 py-3',
-                        'text-left text-sm text-gray-800',
-                        'hover:bg-blue-50 hover:text-blue-700',
+                        'text-left text-sm',
+                        missionCanvasVariant
+                          ? 'text-[var(--mc-text)] hover:bg-[var(--mc-accent-soft)] hover:text-[var(--mc-accent-hover)]'
+                          : 'text-gray-800 hover:bg-blue-50 hover:text-blue-700',
                         'transition-colors rounded-md'
                       )}
                     >
                       <MdDescription
                         size={18}
-                        className="text-gray-400 flex-shrink-0"
+                        className={clsx(
+                          'flex-shrink-0',
+                          missionCanvasVariant ? 'text-[var(--mc-text-subtle)]' : 'text-gray-400',
+                        )}
                       />
                       <span className="font-mono break-all">{item.name}</span>
                     </button>

@@ -129,9 +129,9 @@ Browser UI
 │     ├─ Split mode
 │     └─ Runtime mode
 │
-├─ Legacy routes during migration
+├─ Legacy compatibility during migration
 │  ├─ Navigation Page
-│  └─ BT Manager Page
+│  └─ `bt_manager` session redirect → Mission Canvas / Behavior Trees
 │
 └─ Shared workspace state
    ├─ selected map
@@ -697,8 +697,9 @@ Tasks:
 
 ```text
 - Promote the split map/BT workspace to the Mission Canvas route.
-- Keep old Navigation and BT Manager routes as compatibility/debug views, or
-  remove them once feature parity is reached.
+- Keep the legacy `bt_manager` session value as a one-time redirect to Mission
+  Canvas → Behavior Trees; the standalone BT Manager page is removed now that
+  feature parity is reached.
 - Move shared route state into one workspace slice:
   - selected map
   - selected spot
