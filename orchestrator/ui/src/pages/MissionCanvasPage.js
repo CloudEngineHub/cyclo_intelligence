@@ -28,7 +28,6 @@ import {
   MdEdit,
   MdLabel,
   MdMyLocation,
-  MdOutlinedFlag,
   MdPlayArrow,
   MdRedo,
   MdRoute,
@@ -158,6 +157,15 @@ const WORKSPACE_STAGES = [
   { id: STAGE_MAP_EDIT, label: "Map Edit" },
   { id: STAGE_AUTHORING, label: "Design" },
   { id: STAGE_RUN, label: "Run" },
+];
+
+// The rail groups stages by the asset they manage (maps vs missions), which
+// mirrors the backend split: maps (pgm/yaml/annotations) live and die in
+// NAVIGATION, missions in MISSION, standalone trees under BEHAVIOR TREES.
+// Within each group the left-to-right order still reads as a mini pipeline.
+const WORKSPACE_NAV_GROUPS = [
+  { caption: "NAVIGATION", stageIds: [STAGE_MAPPING, STAGE_MAP_EDIT] },
+  { caption: "MISSION", stageIds: [STAGE_AUTHORING, STAGE_RUN] },
 ];
 
 const LAYER_DEFINITIONS = {
@@ -6080,6 +6088,28 @@ export default function MissionCanvasPage({ onBackHome = null }) {
     setWorkspaceKind(nextKind);
   };
 
+  // Rail stage tabs: selecting a stage from the BT Manager workspace first
+  // returns to the Mission workspace (subject to the same switch lock).
+  const handleSelectStageTab = (stageId) => {
+    if (workspaceKind !== WORKSPACE_MISSION) {
+      if (workspaceSwitchLocked) return;
+      selectWorkspaceKind(WORKSPACE_MISSION);
+    }
+    if (stageId !== workspaceStage) {
+      cancelPendingDesignLocalization();
+      setMissionMapLoaded(false);
+      setInteractionMode("view");
+      setPendingBehaviorNodeTag("");
+      setShowWaypointOptions(false);
+      setMissionRouteMode(false);
+      setMissionRouteSourceId("");
+      setBtLayerSpotId("");
+      setMapEditToolsOpen(false);
+      setLabelToolsOpen(false);
+    }
+    setWorkspaceStage(stageId);
+  };
+
   return (
     <div
       ref={pageRootRef}
@@ -6270,115 +6300,90 @@ export default function MissionCanvasPage({ onBackHome = null }) {
         className="shrink-0 flex flex-col p-4 border-r"
         style={{ width: 210, backgroundColor: MISSION_RAIL_BG, borderColor: MISSION_BORDER }}
       >
-        <div className="text-[10px] font-mono tracking-[0.12em] px-1 pb-2" style={{ color: "var(--mc-text-subtle)" }}>
-          WORKSPACES
-        </div>
         <nav className="grid gap-1" role="tablist" aria-label="Mission Canvas workspaces">
-          {[
-            { id: WORKSPACE_STANDALONE_BT, label: "Behavior Trees" },
-            { id: WORKSPACE_MISSION, label: "Mission" },
-          ].map((workspace) => {
-            const selected = workspaceKind === workspace.id;
-            return (
-              <button
-                key={workspace.id}
-                type="button"
-                role="tab"
-                aria-selected={selected}
-                disabled={workspaceSwitchLocked && !selected}
-                title={workspaceSwitchLocked && !selected ? workspaceSwitchLockTitle : undefined}
-                onClick={() => selectWorkspaceKind(workspace.id)}
-                className="flex items-center gap-3 px-3 py-2.5 text-[13px] font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50"
-                style={{
-                  borderRadius: 10,
-                  color: selected ? MISSION_TEXT : MISSION_TEXT_MUTED,
-                  backgroundColor: selected ? MISSION_STAGE_EMPTY : "transparent",
-                  border: `1px solid ${selected ? MISSION_BORDER : "transparent"}`,
-                  boxShadow: selected ? "var(--mc-shadow)" : "none",
-                }}
-              >
-                {workspace.id === WORKSPACE_STANDALONE_BT
-                  ? <MdAccountTree size={17} aria-hidden="true" className="shrink-0" />
-                  : <MdOutlinedFlag
-                      size={17}
-                      aria-hidden="true"
-                      data-testid="mission-workspace-icon"
-                      className="shrink-0"
-                      style={{ color: selected ? "var(--mc-accent)" : "currentColor" }}
-                    />}
-                {workspace.label}
-              </button>
-            );
-          })}
-        </nav>
-
-        {workspaceKind === WORKSPACE_MISSION && (
-          <section
-            aria-label="Mission workspace stages"
-            className="mission-pipeline-group relative ml-5 mt-1 pl-3 pt-3"
-          >
-            <span
-              aria-hidden="true"
-              className="absolute bottom-2 left-0 top-0 w-px"
-              style={{ backgroundColor: "var(--mc-border-strong)" }}
-            />
-            <div className="text-[9.5px] font-mono tracking-[0.12em] px-1 pb-2" style={{ color: "var(--mc-text-subtle)" }}>
-              MISSION PIPELINE
+          {/* The standalone BT library leads: skills exist without any map or
+              mission, so it sits above the navigation/mission workflow with a
+              divider marking where the map-bound pipeline begins. */}
+          <div className="grid gap-1 pb-4 mb-1" style={{ borderBottom: "1px solid var(--mc-border)" }}>
+            <div className="text-[10px] font-mono tracking-[0.12em] px-1 pb-1" style={{ color: "var(--mc-text-subtle)" }}>
+              BEHAVIOR TREES
             </div>
-            <nav className="grid gap-1" role="tablist" aria-label="Mission Canvas stages">
-              {WORKSPACE_STAGES.map((stage) => {
-            const selected = workspaceStage === stage.id;
-            // Editing a saved PGM while SLAM (or a run) may rewrite the same
-            // file would clobber one side silently — keep the old guard.
-            const editLocked = stage.id === STAGE_MAP_EDIT && !selected && (mappingRuntimeActive || runRuntimeActive);
-            return (
-              <button
-                key={stage.id}
-                type="button"
-                role="tab"
-                aria-selected={selected}
-                disabled={!!busy || editLocked}
-                title={editLocked ? "Stop mapping before editing saved maps" : undefined}
-                onClick={() => {
-                  if (stage.id !== workspaceStage) {
-                    cancelPendingDesignLocalization();
-                    setMissionMapLoaded(false);
-                    setInteractionMode("view");
-                    setPendingBehaviorNodeTag("");
-                    setShowWaypointOptions(false);
-                    setMissionRouteMode(false);
-                    setMissionRouteSourceId("");
-                    setBtLayerSpotId("");
-                    setMapEditToolsOpen(false);
-                    setLabelToolsOpen(false);
-                  }
-                  setWorkspaceStage(stage.id);
-                }}
-                className="relative flex items-center gap-2.5 px-2.5 py-2 text-[12.5px] font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50"
-                style={{
-                  borderRadius: 9,
-                  color: selected ? "var(--mc-accent-hover)" : MISSION_TEXT_MUTED,
-                  backgroundColor: selected ? "var(--mc-accent-soft)" : "transparent",
-                  border: "1px solid transparent",
-                  boxShadow: "none",
-                }}
-              >
-                <StageIcon id={stage.id} active={selected} />
-                {stage.label}
-              </button>
-            );
+            <button
+              type="button"
+              role="tab"
+              aria-selected={workspaceKind === WORKSPACE_STANDALONE_BT}
+              disabled={workspaceSwitchLocked && workspaceKind !== WORKSPACE_STANDALONE_BT}
+              title={
+                workspaceSwitchLocked && workspaceKind !== WORKSPACE_STANDALONE_BT
+                  ? workspaceSwitchLockTitle
+                  : undefined
+              }
+              onClick={() => selectWorkspaceKind(WORKSPACE_STANDALONE_BT)}
+              className="flex items-center gap-3 px-3 py-2.5 text-[13px] font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50"
+              style={{
+                borderRadius: 10,
+                color: workspaceKind === WORKSPACE_STANDALONE_BT ? MISSION_TEXT : MISSION_TEXT_MUTED,
+                backgroundColor: workspaceKind === WORKSPACE_STANDALONE_BT ? MISSION_STAGE_EMPTY : "transparent",
+                border: `1px solid ${workspaceKind === WORKSPACE_STANDALONE_BT ? MISSION_BORDER : "transparent"}`,
+                boxShadow: workspaceKind === WORKSPACE_STANDALONE_BT ? "var(--mc-shadow)" : "none",
+              }}
+            >
+              <MdAccountTree size={17} aria-hidden="true" className="shrink-0" />
+              BT Manager
+            </button>
+          </div>
+          {WORKSPACE_NAV_GROUPS.map((group, groupIndex) => (
+            <div key={group.caption} className={`grid gap-1 ${groupIndex === 0 ? "" : "mt-4"}`}>
+              <div className="text-[10px] font-mono tracking-[0.12em] px-1 pb-1" style={{ color: "var(--mc-text-subtle)" }}>
+                {group.caption}
+              </div>
+              {group.stageIds.map((stageId) => {
+                const stage = WORKSPACE_STAGES.find((item) => item.id === stageId);
+                const selected = missionWorkspaceActive && workspaceStage === stage.id;
+                // Editing a saved PGM while SLAM (or a run) may rewrite the
+                // same file would clobber one side silently — keep the guard.
+                const editLocked = stage.id === STAGE_MAP_EDIT && !selected && (mappingRuntimeActive || runRuntimeActive);
+                const kindLocked = !missionWorkspaceActive && workspaceSwitchLocked;
+                return (
+                  <button
+                    key={stage.id}
+                    type="button"
+                    role="tab"
+                    aria-selected={selected}
+                    disabled={!!busy || editLocked || kindLocked}
+                    title={
+                      kindLocked
+                        ? workspaceSwitchLockTitle
+                        : editLocked
+                          ? "Stop mapping before editing saved maps"
+                          : undefined
+                    }
+                    onClick={() => handleSelectStageTab(stage.id)}
+                    className="flex items-center gap-3 px-3 py-2.5 text-[13px] font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50"
+                    style={{
+                      borderRadius: 10,
+                      color: selected ? MISSION_TEXT : MISSION_TEXT_MUTED,
+                      backgroundColor: selected ? MISSION_STAGE_EMPTY : "transparent",
+                      border: `1px solid ${selected ? MISSION_BORDER : "transparent"}`,
+                      boxShadow: selected ? "var(--mc-shadow)" : "none",
+                    }}
+                  >
+                    <StageIcon id={stage.id} active={selected} />
+                    {stage.label}
+                  </button>
+                );
               })}
-            </nav>
-          </section>
-        )}
+            </div>
+          ))}
+        </nav>
       </aside>
 
       {/* WORKSPACE */}
       {workspaceKind === WORKSPACE_STANDALONE_BT ? (
-        <main className="flex-1 min-w-0 min-h-0" aria-label="Behavior Trees workspace">
+        <main className="flex-1 min-w-0 min-h-0" aria-label="BT Manager workspace">
           <StandaloneBtWorkspace
             isActive
-            title="Behavior Trees"
+            title="BT Manager"
             variant="mission-canvas"
             onExitStateChange={handleStandaloneBtExitStateChange}
           />

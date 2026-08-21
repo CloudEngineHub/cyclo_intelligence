@@ -563,7 +563,7 @@ test('keeps a restored runtime mode guarded while status confirmation is pending
   // the session-owned mode authoritative during that gap even though the HUD
   // does not yet have an `is_up` confirmation.
   expect(screen.getByText('Status: idle')).toBeInTheDocument();
-  const behaviorTreesTab = screen.getByRole('tab', { name: 'Behavior Trees' });
+  const behaviorTreesTab = screen.getByRole('tab', { name: 'BT Manager' });
   expect(behaviorTreesTab).toBeDisabled();
   expect(behaviorTreesTab).toHaveAttribute(
     'title',
@@ -613,7 +613,7 @@ test('uses standalone BT exit state to guard returning Home', async () => {
     expect(getServiceStatus).toHaveBeenCalled();
     expect(getPgmFiles).toHaveBeenCalled();
   });
-  fireEvent.click(screen.getByRole('tab', { name: 'Behavior Trees' }));
+  fireEvent.click(screen.getByRole('tab', { name: 'BT Manager' }));
   const exitStateChange = mockStandaloneBtWorkspace.mock.calls.at(-1)[0].onExitStateChange;
 
   act(() => exitStateChange({ active: true, busy: false }));
@@ -629,47 +629,44 @@ test('uses standalone BT exit state to guard returning Home', async () => {
     .toBeInTheDocument();
 });
 
-test('switches between the mapless Behavior Trees workspace and the previous Mission stage', async () => {
+test('switches between the mapless BT Manager workspace and the previous Mission stage', async () => {
   render(<MissionCanvasPage />);
 
-  const missionWorkspaceTab = screen.getByRole('tab', { name: 'Mission' });
-  expect(missionWorkspaceTab).toHaveAttribute('aria-selected', 'true');
-  expect(within(missionWorkspaceTab).getByTestId('mission-workspace-icon'))
-    .toHaveAttribute('aria-hidden', 'true');
-  expect(screen.getByRole('tab', { name: 'Behavior Trees' })).toHaveAttribute('aria-selected', 'false');
+  // One rail, three asset groups: stages split by what they manage and the
+  // BT library stands beside them as a peer.
+  const tablist = screen.getByRole('tablist', { name: 'Mission Canvas workspaces' });
+  expect(within(tablist).getByText('NAVIGATION')).toBeInTheDocument();
+  expect(within(tablist).getByText('MISSION')).toBeInTheDocument();
+  expect(within(tablist).getByText('BEHAVIOR TREES')).toBeInTheDocument();
+  expect(screen.getByRole('tab', { name: 'BT Manager' })).toHaveAttribute('aria-selected', 'false');
   expect(screen.getByRole('tab', { name: 'Mapping' })).toHaveAttribute('aria-selected', 'true');
   expect(screen.getByText('Mission Canvas Map')).toBeInTheDocument();
-
-  const missionPipeline = screen.getByRole('region', { name: 'Mission workspace stages' });
-  expect(missionPipeline).toHaveClass('mission-pipeline-group');
-  expect(within(missionPipeline).getByText('MISSION PIPELINE')).toBeInTheDocument();
-  expect(within(missionPipeline).getByRole('tablist', { name: 'Mission Canvas stages' }))
-    .toBeInTheDocument();
 
   fireEvent.click(screen.getByRole('tab', { name: 'Design' }));
   expect(screen.getByRole('tab', { name: 'Design' })).toHaveAttribute('aria-selected', 'true');
 
-  fireEvent.click(screen.getByRole('tab', { name: 'Behavior Trees' }));
+  fireEvent.click(screen.getByRole('tab', { name: 'BT Manager' }));
 
-  expect(screen.getByRole('tab', { name: 'Behavior Trees' })).toHaveAttribute('aria-selected', 'true');
+  expect(screen.getByRole('tab', { name: 'BT Manager' })).toHaveAttribute('aria-selected', 'true');
   expect(screen.getByTestId('standalone-bt-workspace')).toBeInTheDocument();
   expect(mockStandaloneBtWorkspace).toHaveBeenLastCalledWith(expect.objectContaining({
     isActive: true,
-    title: 'Behavior Trees',
+    title: 'BT Manager',
     variant: 'mission-canvas',
   }));
-  expect(screen.queryByRole('tab', { name: 'Mapping' })).not.toBeInTheDocument();
-  expect(screen.queryByRole('tab', { name: 'Design' })).not.toBeInTheDocument();
-  expect(screen.queryByRole('region', { name: 'Mission workspace stages' })).not.toBeInTheDocument();
+  // The stage tabs stay visible (unselected) so any stage is one click away.
+  expect(screen.getByRole('tab', { name: 'Mapping' })).toHaveAttribute('aria-selected', 'false');
+  expect(screen.getByRole('tab', { name: 'Design' })).toHaveAttribute('aria-selected', 'false');
   expect(screen.queryByText('Mission Canvas Map')).not.toBeInTheDocument();
   await waitFor(() => expect(
     JSON.parse(window.sessionStorage.getItem('mission_canvas_session')).workspaceKind,
   ).toBe('standalone_bt'));
 
-  fireEvent.click(screen.getByRole('tab', { name: 'Mission' }));
+  // Clicking a stage returns straight to the Mission workspace.
+  fireEvent.click(screen.getByRole('tab', { name: 'Design' }));
 
-  expect(screen.getByRole('tab', { name: 'Mission' })).toHaveAttribute('aria-selected', 'true');
   expect(screen.getByRole('tab', { name: 'Design' })).toHaveAttribute('aria-selected', 'true');
+  expect(screen.getByRole('tab', { name: 'BT Manager' })).toHaveAttribute('aria-selected', 'false');
   expect(screen.getByText('Mission Canvas Map')).toBeInTheDocument();
   expect(screen.queryByTestId('standalone-bt-workspace')).not.toBeInTheDocument();
 });
@@ -682,9 +679,9 @@ test('restores the standalone workspace from the Mission Canvas session', () => 
 
   render(<MissionCanvasPage />);
 
-  expect(screen.getByRole('tab', { name: 'Behavior Trees' })).toHaveAttribute('aria-selected', 'true');
+  expect(screen.getByRole('tab', { name: 'BT Manager' })).toHaveAttribute('aria-selected', 'true');
   expect(screen.getByTestId('standalone-bt-workspace')).toBeInTheDocument();
-  expect(screen.queryByRole('tab', { name: 'Design' })).not.toBeInTheDocument();
+  expect(screen.getByRole('tab', { name: 'Design' })).toHaveAttribute('aria-selected', 'false');
   expect(screen.queryByText('Mission Canvas Map')).not.toBeInTheDocument();
   expect(getPgmFiles).not.toHaveBeenCalled();
   expect(getPgmImage).not.toHaveBeenCalled();
@@ -699,7 +696,7 @@ test('defaults legacy Mission Canvas sessions without workspaceKind to Mission',
 
   render(<MissionCanvasPage />);
 
-  expect(screen.getByRole('tab', { name: 'Mission' })).toHaveAttribute('aria-selected', 'true');
+  expect(screen.getByRole('tab', { name: 'BT Manager' })).toHaveAttribute('aria-selected', 'false');
   expect(screen.getByRole('tab', { name: 'Design' })).toHaveAttribute('aria-selected', 'true');
   expect(screen.getByText('Mission Canvas Map')).toBeInTheDocument();
   expect(screen.queryByTestId('standalone-bt-workspace')).not.toBeInTheDocument();
@@ -3405,7 +3402,7 @@ test('keeps unsaved Map Edit pixels in place by locking workspace switches', asy
     latestMapViewerProps().onEditorMapPoint(0, 0);
   });
 
-  const behaviorTreesTab = screen.getByRole('tab', { name: 'Behavior Trees' });
+  const behaviorTreesTab = screen.getByRole('tab', { name: 'BT Manager' });
   expect(behaviorTreesTab).toBeDisabled();
   expect(behaviorTreesTab).toHaveAttribute(
     'title',
