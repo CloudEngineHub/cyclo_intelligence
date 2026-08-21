@@ -2,6 +2,7 @@ import { StrictMode } from 'react';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import MissionCanvasPage, { assembleMissionBtFilesForSave } from './MissionCanvasPage';
 import {
+  cancelNavigateToPoseGoal,
   configureDesignLocalizationAmcl,
   deletePgmMap,
   getMapAnnotations,
@@ -5383,5 +5384,77 @@ describe('assembleMissionBtFilesForSave', () => {
 
     expect(files['locals/spot_a/main.xml']).toBe(EDITED);
     expect(files['locals/spot_a_2/main.xml']).toBe(EDITED);
+  });
+});
+
+
+test('drives to a clicked goal from the Navigate stage', async () => {
+  const latestMapViewerProps = () => (
+    mockMapViewer.mock.calls[mockMapViewer.mock.calls.length - 1][0]
+  );
+  getPgmFiles.mockResolvedValue({ files: [{ path: 'factory.pgm', name: 'factory.pgm' }] });
+  getServiceStatus
+    .mockResolvedValueOnce({ is_up: false })
+    .mockResolvedValue({ is_up: true, mode: 'nav' });
+  mockTopicDataByName['/amcl_pose'] = amclPoseMessage(0, 0, 0);
+  sendInitialPoseEstimate.mockImplementationOnce(async () => {
+    mockTopicDataByName['/amcl_pose'] = amclPoseMessage(1, 2, 0.5);
+    return { ok: true };
+  });
+  let resolveGoal;
+  sendNavigateToPoseGoalAndWait.mockReturnValue(new Promise((resolve) => {
+    resolveGoal = resolve;
+  }));
+
+  render(<MissionCanvasPage />);
+
+  fireEvent.click(screen.getByRole('tab', { name: 'Navigate' }));
+  expect(screen.getByRole('button', { name: 'Set Goal' })).toBeDisabled();
+  expect(screen.getByRole('button', { name: 'Localize' })).toBeDisabled();
+
+  // The shared Run map dialog loads the map, and the stage stays Navigate.
+  fireEvent.click(screen.getByRole('button', { name: 'Load Map' }));
+  await screen.findByRole('combobox', { name: 'Run mission map file' });
+  fireEvent.click(screen.getByRole('button', { name: 'Load' }));
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Localize' })).toBeEnabled());
+  expect(screen.getByRole('tab', { name: 'Navigate' })).toHaveAttribute('aria-selected', 'true');
+  expect(screen.getByRole('tab', { name: 'Run' })).toHaveAttribute('aria-selected', 'false');
+
+  // Localize brings nav up and enters pose-set mode; clicking the map
+  // converges AMCL and unlocks Set Goal.
+  fireEvent.click(screen.getByRole('button', { name: 'Localize' }));
+  await waitFor(() => expect(startNavigation).toHaveBeenCalledWith('nav', 'factory'));
+  await waitFor(() => expect(latestMapViewerProps().interactionMode).toBe('initial'));
+  await act(async () => {
+    latestMapViewerProps().onMapPose(1, 2, 0.5);
+  });
+  await waitFor(
+    () => expect(screen.getByRole('button', { name: 'Set Goal' })).toBeEnabled(),
+    { timeout: 5000 },
+  );
+
+  // Arm goal mode and click the target: nav2 receives a NavigateToPose goal.
+  fireEvent.click(screen.getByRole('button', { name: 'Set Goal' }));
+  await waitFor(() => expect(latestMapViewerProps().interactionMode).toBe('goal'));
+  await act(async () => {
+    latestMapViewerProps().onMapPose(3, 4, 1.0);
+  });
+  await waitFor(() => expect(sendNavigateToPoseGoalAndWait).toHaveBeenCalled());
+  const [goalPayload] = sendNavigateToPoseGoalAndWait.mock.calls[0];
+  expect(goalPayload.pose.pose.position).toEqual({ x: 3, y: 4, z: 0 });
+  expect(latestMapViewerProps().goalPose).not.toBeNull();
+  expect(latestMapViewerProps().showGoalPose).toBe(true);
+  expect(screen.getByText('Driving')).toBeInTheDocument();
+
+  // Stop while driving cancels the goal only — navigation stays up for the
+  // next goal.
+  fireEvent.click(screen.getByRole('button', { name: 'Stop' }));
+  await waitFor(() => expect(cancelNavigateToPoseGoal).toHaveBeenCalled());
+  expect(stopNavigation).not.toHaveBeenCalled();
+  await waitFor(() => expect(screen.queryByText('Driving')).not.toBeInTheDocument());
+  expect(screen.getByRole('button', { name: 'Localize' })).toBeEnabled();
+
+  await act(async () => {
+    resolveGoal({ ok: true, status: 'CANCELED' });
   });
 });

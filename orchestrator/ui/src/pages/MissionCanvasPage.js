@@ -28,6 +28,7 @@ import {
   MdEdit,
   MdLabel,
   MdMyLocation,
+  MdOutlinedFlag,
   MdPlayArrow,
   MdRedo,
   MdRoute,
@@ -148,6 +149,8 @@ const STAGE_MAPPING = "mapping";
 const STAGE_MAP_EDIT = "map_edit";
 const STAGE_AUTHORING = "authoring";
 const STAGE_RUN = "run";
+// Direct point-to-point driving: localize on a saved map, click a goal, go.
+const STAGE_NAVIGATE = "navigate";
 const WORKSPACE_MISSION = "mission";
 const WORKSPACE_STANDALONE_BT = "standalone_bt";
 const RUN_SHUTDOWN_RETRY_MAX_AGE_MS = 60_000;
@@ -155,6 +158,7 @@ const RUN_SHUTDOWN_RETRY_MAX_AGE_MS = 60_000;
 const WORKSPACE_STAGES = [
   { id: STAGE_MAPPING, label: "Mapping" },
   { id: STAGE_MAP_EDIT, label: "Map Edit" },
+  { id: STAGE_NAVIGATE, label: "Navigate" },
   { id: STAGE_AUTHORING, label: "Design" },
   { id: STAGE_RUN, label: "Run" },
 ];
@@ -164,7 +168,7 @@ const WORKSPACE_STAGES = [
 // NAVIGATION, missions in MISSION, standalone trees under BEHAVIOR TREES.
 // Within each group the left-to-right order still reads as a mini pipeline.
 const WORKSPACE_NAV_GROUPS = [
-  { caption: "NAVIGATION", stageIds: [STAGE_MAPPING, STAGE_MAP_EDIT] },
+  { caption: "NAVIGATION", stageIds: [STAGE_MAPPING, STAGE_MAP_EDIT, STAGE_NAVIGATE] },
   { caption: "MISSION", stageIds: [STAGE_AUTHORING, STAGE_RUN] },
 ];
 
@@ -184,6 +188,16 @@ const STAGE_LAYER_IDS = {
   // The map editor draws the PGM itself; no live layers to toggle.
   [STAGE_MAP_EDIT]: [],
   [STAGE_AUTHORING]: ["map", "mapAreas", "scan", "robotModel", "tf"],
+  [STAGE_NAVIGATE]: [
+    "map",
+    "mapAreas",
+    "scan",
+    "robotModel",
+    "globalCostmap",
+    "localCostmap",
+    "globalPlan",
+    "tf",
+  ],
   [STAGE_RUN]: [
     "map",
     "mapAreas",
@@ -225,6 +239,16 @@ const LAYER_PRESETS = {
     globalCostmap: false,
     localCostmap: false,
     globalPlan: false,
+    mapAreas: true,
+  },
+  [STAGE_NAVIGATE]: {
+    map: true,
+    scan: true,
+    robotModel: true,
+    tf: false,
+    globalCostmap: true,
+    localCostmap: true,
+    globalPlan: true,
     mapAreas: true,
   },
   [STAGE_RUN]: {
@@ -1596,6 +1620,25 @@ function SessionRow({ label, value, stacked = false }) {
   );
 }
 
+function NavigateSessionPanel({ mapName, poseReady, goalStatus }) {
+  const goalLabel = goalStatus === "driving"
+    ? "Driving"
+    : goalStatus === "reached"
+      ? "Reached"
+      : goalStatus === "failed"
+        ? "Failed"
+        : "—";
+  return (
+    <Panel title="Navigate Session" compact className="grid gap-1 content-start overflow-auto">
+      <div className="grid gap-1">
+        <SessionRow label="Map" value={mapName} />
+        <SessionRow label="Pose" value={poseReady ? "Localized" : "Not localized"} />
+        <SessionRow label="Goal" value={goalLabel} />
+      </div>
+    </Panel>
+  );
+}
+
 function MappingSessionPanel() {
   return (
     <Panel title="Mapping Session" compact className="grid gap-1 content-start overflow-auto">
@@ -2616,6 +2659,14 @@ export default function MissionCanvasPage({ onBackHome = null }) {
   const [workspaceKind, setWorkspaceKind] = useState(() => initialWorkspaceKind(initialSession));
   const missionWorkspaceActive = workspaceKind === WORKSPACE_MISSION;
   const [workspaceStage, setWorkspaceStage] = useState(() => initialWorkspaceStage(initialSession));
+  // Run-family handlers (map load / localize) historically forced the Run
+  // stage; with Navigate sharing that runtime they must keep the stage the
+  // user is on. The ref avoids re-creating those callbacks per stage change.
+  const workspaceStageRef = useRef(workspaceStage);
+  workspaceStageRef.current = workspaceStage;
+  const runFamilyStageTarget = () => (
+    workspaceStageRef.current === STAGE_NAVIGATE ? STAGE_NAVIGATE : STAGE_RUN
+  );
   const [showSaveMapDialog, setShowSaveMapDialog] = useState(false);
   const [saveMapName, setSaveMapName] = useState(DEFAULT_MAP_NAME);
   const [showSaveMissionDialog, setShowSaveMissionDialog] = useState(false);
@@ -2700,6 +2751,7 @@ export default function MissionCanvasPage({ onBackHome = null }) {
   const [layersByStage, setLayersByStage] = useState(() => ({
     [STAGE_MAPPING]: { ...LAYER_PRESETS[STAGE_MAPPING] },
     [STAGE_MAP_EDIT]: { ...LAYER_PRESETS[STAGE_MAP_EDIT] },
+    [STAGE_NAVIGATE]: { ...LAYER_PRESETS[STAGE_NAVIGATE] },
     [STAGE_AUTHORING]: { ...LAYER_PRESETS[STAGE_AUTHORING] },
     [STAGE_RUN]: { ...LAYER_PRESETS[STAGE_RUN] },
   }));
@@ -2831,15 +2883,18 @@ export default function MissionCanvasPage({ onBackHome = null }) {
     !mappingEditorActive &&
     busy !== "Stop"
   );
+  // Navigate shares the Run runtime plumbing (map snapshot, localization,
+  // live topics); only the mission machinery stays Run-only.
+  const runFamilyStage = workspaceStage === STAGE_RUN || workspaceStage === STAGE_NAVIGATE;
   const runTopicsActive = (
     missionWorkspaceActive &&
-    workspaceStage === STAGE_RUN &&
+    runFamilyStage &&
     runRuntimeActive &&
     busy !== "Stop"
   );
   const stageNavigationTopicsActive = mappingTopicsActive || runTopicsActive;
   const activeLayers = layersByStage[workspaceStage] || LAYER_PRESETS[workspaceStage];
-  const runSessionActive = missionWorkspaceActive && workspaceStage === STAGE_RUN;
+  const runSessionActive = missionWorkspaceActive && runFamilyStage;
   const currentMapName = (runSessionActive ? runMapName : mapName).trim() || DEFAULT_MAP_NAME;
   const activeSpots = runSessionActive ? runSpots : spots;
   const activeMissionBtFiles = runSessionActive ? runMissionBtFiles : missionBtFiles;
@@ -2861,7 +2916,7 @@ export default function MissionCanvasPage({ onBackHome = null }) {
   // Run stage shows the saved floor plan (with its resolution/origin) so loaded
   // waypoints are framed correctly before the live /map arrives from nav2.
   const runDisplayMapEditor = useMapEditor({
-    open: missionWorkspaceActive && workspaceStage === STAGE_RUN && missionMapLoaded,
+    open: missionWorkspaceActive && runFamilyStage && missionMapLoaded,
     mapName: currentMapName,
     onMessage: setMessage,
   });
@@ -3017,7 +3072,7 @@ export default function MissionCanvasPage({ onBackHome = null }) {
     ? mapEditor.map
     : workspaceStage === STAGE_AUTHORING
       ? designMapActive ? designMapEditor.map : null
-      : workspaceStage === STAGE_RUN
+      : runFamilyStage
         ? (map || runDisplayMapEditor.map)
         : map;
   const designMapAvailable = designMapActive && !!designMapEditor.map;
@@ -3547,6 +3602,47 @@ export default function MissionCanvasPage({ onBackHome = null }) {
     }));
     return sendNavigateThroughPosesGoalsAndWait({ poses }, signal);
   }, []);
+
+  // ── Navigate stage: direct point-to-point goal (no mission) ───────────────
+  const [navGoalPose, setNavGoalPose] = useState(null);
+  // idle | driving | reached | failed
+  const [navGoalStatus, setNavGoalStatus] = useState("idle");
+  const navGoalSeqRef = useRef(0);
+  const navGoalDriving = navGoalStatus === "driving";
+
+  const handleSendNavGoal = useCallback(async (x, y, yaw) => {
+    const seq = navGoalSeqRef.current + 1;
+    navGoalSeqRef.current = seq;
+    setNavGoalPose({
+      pose: { position: { x, y, z: 0 }, orientation: orientationFromYaw(yaw) },
+    });
+    setNavGoalStatus("driving");
+    setMessage(`Goal ${x.toFixed(2)}, ${y.toFixed(2)}`);
+    try {
+      await sendMissionGoal(x, y, yaw);
+      if (navGoalSeqRef.current !== seq) return;
+      setNavGoalStatus("reached");
+      setMessage("Goal reached");
+    } catch (error) {
+      if (navGoalSeqRef.current !== seq) return;
+      setNavGoalStatus("failed");
+      setMessage(error instanceof Error ? error.message : "Navigation goal failed");
+    }
+  }, [sendMissionGoal]);
+
+  const handleCancelNavGoal = useCallback(async () => {
+    // Bump the sequence first so the in-flight goal promise cannot override
+    // the cancelled state when it settles.
+    navGoalSeqRef.current += 1;
+    setNavGoalStatus("idle");
+    setNavGoalPose(null);
+    try {
+      await cancelNavigateToPoseGoal();
+      setMessage("Navigation goal cancelled");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Failed to cancel the goal");
+    }
+  }, []);
   const stopMissionBt = useCallback(async () => {
     const result = await callService(
       "/bt/set_running",
@@ -3814,7 +3910,7 @@ export default function MissionCanvasPage({ onBackHome = null }) {
       selectedTopics.add("/pose");
       selectedTopics.add("/odom");
     }
-    if (workspaceStage === STAGE_RUN && robotPoseLayerActive) {
+    if (runFamilyStage && robotPoseLayerActive) {
       selectedTopics.add("/amcl_pose");
     }
     if (workspaceStage === STAGE_AUTHORING && !designLocalizationActive) {
@@ -4891,7 +4987,7 @@ export default function MissionCanvasPage({ onBackHome = null }) {
       "Localize",
       async () => {
         const runMapName = currentMapName;
-        setWorkspaceStage(STAGE_RUN);
+        setWorkspaceStage(runFamilyStageTarget());
         setNavigationRuntimeMode("run");
         setDesignPoseInitialized(false);
         setRunPoseInitialized(false);
@@ -4899,7 +4995,7 @@ export default function MissionCanvasPage({ onBackHome = null }) {
         setRunShutdownPending(false);
         saveMissionSession({
           mapName,
-          workspaceStage: STAGE_RUN,
+          workspaceStage: runFamilyStageTarget(),
           navigationRuntimeMode: "run",
           designPoseInitialized: false,
           runRuntimeOwned: true,
@@ -4988,7 +5084,7 @@ export default function MissionCanvasPage({ onBackHome = null }) {
   const handleOpenRunMapDialog = useCallback(() => {
     const preferredRunMapName = runMapName || mapName || DEFAULT_MAP_NAME;
     const preferredRunMissionName = runMapName ? runMissionName : missionName;
-    setWorkspaceStage(STAGE_RUN);
+    setWorkspaceStage(runFamilyStageTarget());
     setShowRunMapDialog(true);
     setRunMapBusy(true);
     setMessage("Loading saved missions");
@@ -5064,7 +5160,7 @@ export default function MissionCanvasPage({ onBackHome = null }) {
     setRunMissionFlowEdges([]);
     setRunMissionBtFiles({});
     setShowRunMapDialog(false);
-    setWorkspaceStage(STAGE_RUN);
+    setWorkspaceStage(runFamilyStageTarget());
     setInteractionMode("view");
     setRunMapBusy(true);
     loadRunMissionForMap(selectedMapName, selectedMissionName)
@@ -5308,6 +5404,9 @@ export default function MissionCanvasPage({ onBackHome = null }) {
     "Stop",
     async () => {
       stopMissionRunner();
+      navGoalSeqRef.current += 1;
+      setNavGoalPose(null);
+      setNavGoalStatus("idle");
       setInteractionMode("view");
       const result = await stopNavigation();
       clearLocalizationPoseCache();
@@ -5618,6 +5717,14 @@ export default function MissionCanvasPage({ onBackHome = null }) {
   }, [clearLocalizationPoseCache, runCommand, waitForAutoLocalizedPose]);
 
   const handleCreateSpotAtPose = useCallback(async (x, y, yaw) => {
+    if (workspaceStage === STAGE_NAVIGATE) {
+      if (interactionMode === "initial") {
+        void handleRunPoseEstimate(x, y, yaw);
+      } else if (interactionMode === "goal") {
+        void handleSendNavGoal(x, y, yaw);
+      }
+      return;
+    }
     if (workspaceStage === STAGE_RUN) {
       // The BT node being up is expected here; run pose estimation must not
       // fall through to the design-stage guards below.
@@ -5725,7 +5832,7 @@ export default function MissionCanvasPage({ onBackHome = null }) {
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Failed to create waypoint");
     }
-  }, [
+  }, [handleSendNavGoal, 
     currentMapName,
     clearLocalizationPoseCache,
     designMapPath,
@@ -6451,9 +6558,9 @@ export default function MissionCanvasPage({ onBackHome = null }) {
               // keeps only the session-level Load Map.
               <ActionButton active={showDesignMapDialog || designMapBusy} disabled={!!busy || designMapBusy} onClick={handleOpenDesignMapDialog} variant="secondary">Load Map</ActionButton>
             )}
-            {workspaceStage === STAGE_RUN && (
-              // Localize / Run Mission / Stop moved onto the map canvas as the
-              // run HUD; the header keeps only the session-level Load Map.
+            {runFamilyStage && (
+              // Localize / actions live on the map HUD; the header keeps only
+              // the session-level Load Map (shared by Run and Navigate).
               <ActionButton active={showRunMapDialog || runMapBusy} disabled={!!busy || running || missionRunnerActive || !!btNodeBusy || runMapBusy || runShutdownPending} onClick={handleOpenRunMapDialog} variant="secondary">Load Map</ActionButton>
             )}
             <div
@@ -6494,8 +6601,9 @@ export default function MissionCanvasPage({ onBackHome = null }) {
                     : null
             }
             pose={mappingEditorActive ? null : (designLocalizationActive || stageNavigationTopicsActive) ? currentPose : null}
+            goalPose={workspaceStage === STAGE_NAVIGATE ? navGoalPose : null}
+            showGoalPose={workspaceStage === STAGE_NAVIGATE && !!navGoalPose && navGoalStatus !== "reached"}
             plan={mappingEditorActive ? null : needsPlan ? plan : null}
-            goalPose={null}
             footprint={mappingEditorActive ? null : needsRobotModel ? footprint : null}
             tf={mappingEditorActive ? null : (needsTf || needsRobotModel) ? displayTf : null}
             spots={missionOverlayActive ? visibleSpots : []}
@@ -6536,7 +6644,6 @@ export default function MissionCanvasPage({ onBackHome = null }) {
             showLocalCostmap={mappingEditorActive ? false : needsLocalCostmap}
             showScan={mappingEditorActive ? false : needsScan}
             showGlobalPlan={mappingEditorActive ? false : needsPlan}
-            showGoalPose={false}
             showTf={mappingEditorActive ? false : needsTf && activeLayers.tf}
             showRobotModel={mappingEditorActive ? false : needsRobotModel}
             interactionDisabled={
@@ -7017,6 +7124,69 @@ export default function MissionCanvasPage({ onBackHome = null }) {
             </div>
           )}
 
+          {/* Navigate HUD — Localize / Set Goal / Stop. Set Goal arms the
+              map: click (or drag for heading) sends a NavigateToPose goal and
+              nav2 plans the path. Stop cancels a driving goal first; pressed
+              again while idle it tears the navigation runtime down. */}
+          {workspaceStage === STAGE_NAVIGATE && (
+            <div
+              className="absolute top-5 left-5 z-10 flex items-center gap-2 p-2"
+              style={{ borderRadius: 14, backgroundColor: "color-mix(in srgb, var(--mc-surface) 88%, transparent)", border: "1px solid var(--mc-border)", boxShadow: "var(--mc-shadow)", backdropFilter: "blur(8px)" }}
+            >
+              <button
+                type="button"
+                onClick={handleLocalize}
+                disabled={!!busy || runMapBusy || !missionMapLoaded || runMapSnapshotInvalid || runShutdownPending}
+                aria-label="Localize"
+                aria-pressed={(interactionMode === "initial" || busy === "Localize" || busy === "Set robot pose") ? true : undefined}
+                title="Bring navigation up and set the robot pose"
+                className="h-8 w-8 inline-flex items-center justify-center disabled:opacity-45"
+                style={{
+                  borderRadius: 9,
+                  border: `1px solid ${(interactionMode === "initial" || busy === "Localize" || busy === "Set robot pose") ? "var(--mc-accent)" : "var(--mc-border-strong)"}`,
+                  backgroundColor: (interactionMode === "initial" || busy === "Localize" || busy === "Set robot pose") ? "var(--mc-accent-soft)" : "var(--mc-surface)",
+                  color: "var(--mc-text)",
+                }}
+              >
+                <MdMyLocation size={17} aria-hidden="true" />
+              </button>
+              <button
+                type="button"
+                onClick={() => setInteractionMode((mode) => (mode === "goal" ? "view" : "goal"))}
+                disabled={!!busy || runMapBusy || !missionMapLoaded || !runPoseInitialized || runShutdownPending}
+                aria-label="Set Goal"
+                aria-pressed={interactionMode === "goal" ? true : undefined}
+                title="Click the map to send a navigation goal"
+                className="h-8 w-8 inline-flex items-center justify-center disabled:opacity-45"
+                style={{
+                  borderRadius: 9,
+                  border: `1px solid ${interactionMode === "goal" ? "var(--mc-accent)" : "var(--mc-border-strong)"}`,
+                  backgroundColor: interactionMode === "goal" ? "var(--mc-accent-soft)" : "var(--mc-surface)",
+                  color: "var(--mc-text)",
+                }}
+              >
+                <MdOutlinedFlag size={17} aria-hidden="true" />
+              </button>
+              <button
+                type="button"
+                onClick={navGoalDriving ? handleCancelNavGoal : handleStopNavigation}
+                disabled={!!busy || (!running && !navGoalDriving && !runShutdownPending)}
+                aria-label="Stop"
+                aria-pressed={(busy === "Stop" || runShutdownPending) ? true : undefined}
+                title={navGoalDriving ? "Stop the current goal (navigation stays up)" : "Stop navigation"}
+                className="h-8 w-8 inline-flex items-center justify-center disabled:opacity-45"
+                style={{
+                  borderRadius: 9,
+                  border: "1px solid var(--mc-danger-border)",
+                  backgroundColor: (busy === "Stop" || runShutdownPending) ? "var(--mc-danger)" : "var(--mc-surface)",
+                  color: (busy === "Stop" || runShutdownPending) ? "var(--mc-accent-fg)" : "var(--mc-danger)",
+                }}
+              >
+                <MdStop size={18} aria-hidden="true" />
+              </button>
+            </div>
+          )}
+
           {/* Layers popover — hidden during the BT split view and in the map
               editor, where every live layer is forced off anyway. */}
           {!activeBtLayer && !mappingEditorActive && <LayersPopover layerToggles={layerToggles} />}
@@ -7188,6 +7358,12 @@ export default function MissionCanvasPage({ onBackHome = null }) {
             )}
             {workspaceStage === STAGE_MAPPING ? (
               <MappingSessionPanel />
+            ) : workspaceStage === STAGE_NAVIGATE ? (
+              <NavigateSessionPanel
+                mapName={currentMapName}
+                poseReady={runPoseInitialized}
+                goalStatus={navGoalStatus}
+              />
             ) : (
               // Run Mission activates a missing BT node on demand and only
               // releases a process it started itself, so this panel needs no
