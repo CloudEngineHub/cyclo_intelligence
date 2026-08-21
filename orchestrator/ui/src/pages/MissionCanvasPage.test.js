@@ -5433,6 +5433,23 @@ test('drives to a clicked goal from the Navigate stage', async () => {
     { timeout: 5000 },
   );
 
+  // Run <-> Navigate share the loaded session: switching between them must
+  // not invalidate the map snapshot or localization.
+  fireEvent.click(screen.getByRole('tab', { name: 'Run' }));
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Localize' })).toBeEnabled());
+  fireEvent.click(screen.getByRole('tab', { name: 'Navigate' }));
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Set Goal' })).toBeEnabled());
+
+  // An accidental Localize re-click must not invalidate the pose: with the
+  // runtime already up the first click re-arms pose-set mode, the second
+  // disarms it, and Set Goal stays usable throughout.
+  fireEvent.click(screen.getByRole('button', { name: 'Localize' }));
+  await waitFor(() => expect(latestMapViewerProps().interactionMode).toBe('initial'));
+  expect(screen.getByRole('button', { name: 'Set Goal' })).toBeEnabled();
+  fireEvent.click(screen.getByRole('button', { name: 'Localize' }));
+  await waitFor(() => expect(latestMapViewerProps().interactionMode).toBe('view'));
+  expect(screen.getByRole('button', { name: 'Set Goal' })).toBeEnabled();
+
   // Arm goal mode and click the target: nav2 receives a NavigateToPose goal.
   fireEvent.click(screen.getByRole('button', { name: 'Set Goal' }));
   await waitFor(() => expect(latestMapViewerProps().interactionMode).toBe('goal'));
@@ -5457,4 +5474,51 @@ test('drives to a clicked goal from the Navigate stage', async () => {
   await act(async () => {
     resolveGoal({ ok: true, status: 'CANCELED' });
   });
+});
+
+
+test('reports a non-succeeded navigate goal as failed', async () => {
+  const latestMapViewerProps = () => (
+    mockMapViewer.mock.calls[mockMapViewer.mock.calls.length - 1][0]
+  );
+  getPgmFiles.mockResolvedValue({ files: [{ path: 'factory.pgm', name: 'factory.pgm' }] });
+  getServiceStatus
+    .mockResolvedValueOnce({ is_up: false })
+    .mockResolvedValue({ is_up: true, mode: 'nav' });
+  mockTopicDataByName['/amcl_pose'] = amclPoseMessage(0, 0, 0);
+  sendInitialPoseEstimate.mockImplementationOnce(async () => {
+    mockTopicDataByName['/amcl_pose'] = amclPoseMessage(1, 2, 0.5);
+    return { ok: true };
+  });
+  // nav2 reports non-success in-band: HTTP 200 with ok:false + a status.
+  sendNavigateToPoseGoalAndWait.mockResolvedValue({
+    ok: false, status: 'ABORTED', message: 'Goal aborted by nav2',
+  });
+
+  render(<MissionCanvasPage />);
+
+  fireEvent.click(screen.getByRole('tab', { name: 'Navigate' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Load Map' }));
+  await screen.findByRole('combobox', { name: 'Run mission map file' });
+  fireEvent.click(screen.getByRole('button', { name: 'Load' }));
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Localize' })).toBeEnabled());
+  fireEvent.click(screen.getByRole('button', { name: 'Localize' }));
+  await waitFor(() => expect(latestMapViewerProps().interactionMode).toBe('initial'));
+  await act(async () => {
+    latestMapViewerProps().onMapPose(1, 2, 0.5);
+  });
+  await waitFor(
+    () => expect(screen.getByRole('button', { name: 'Set Goal' })).toBeEnabled(),
+    { timeout: 5000 },
+  );
+
+  fireEvent.click(screen.getByRole('button', { name: 'Set Goal' }));
+  await waitFor(() => expect(latestMapViewerProps().interactionMode).toBe('goal'));
+  await act(async () => {
+    latestMapViewerProps().onMapPose(3, 4, 1.0);
+  });
+
+  await waitFor(() => expect(screen.getByText('Failed')).toBeInTheDocument());
+  // The intended target stays visible so the operator can see what failed.
+  expect(latestMapViewerProps().showGoalPose).toBe(true);
 });

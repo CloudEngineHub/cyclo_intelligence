@@ -2386,6 +2386,14 @@ function StageIcon({ id, active }) {
       </svg>
     );
   }
+  if (id === "navigate") {
+    // Compass needle: point-to-point driving.
+    return (
+      <svg {...common}>
+        <path d="M12 3 19 20l-7-4-7 4 7-17z" />
+      </svg>
+    );
+  }
   return (
     <svg {...common}>
       <polygon points="6 4 20 12 6 20 6 4" />
@@ -3608,9 +3616,16 @@ export default function MissionCanvasPage({ onBackHome = null }) {
   // idle | driving | reached | failed
   const [navGoalStatus, setNavGoalStatus] = useState("idle");
   const navGoalSeqRef = useRef(0);
+  const [navGoalCancelling, setNavGoalCancelling] = useState(false);
   const navGoalDriving = navGoalStatus === "driving";
 
   const handleSendNavGoal = useCallback(async (x, y, yaw) => {
+    if (navGoalCancelling) {
+      // The backend cancel sweeps ALL NavigateToPose goals; a goal sent now
+      // would be killed by it.
+      setMessage("Cancelling the previous goal — try again in a moment");
+      return;
+    }
     const seq = navGoalSeqRef.current + 1;
     navGoalSeqRef.current = seq;
     setNavGoalPose({
@@ -3619,8 +3634,16 @@ export default function MissionCanvasPage({ onBackHome = null }) {
     setNavGoalStatus("driving");
     setMessage(`Goal ${x.toFixed(2)}, ${y.toFixed(2)}`);
     try {
-      await sendMissionGoal(x, y, yaw);
+      const result = await sendMissionGoal(x, y, yaw);
       if (navGoalSeqRef.current !== seq) return;
+      // /goal/wait resolves 200 even for ABORTED/REJECTED/CANCELED/TIMEOUT —
+      // only SUCCEEDED means the robot actually arrived.
+      const status = String(result?.status || "").toUpperCase();
+      if (result?.ok === false || (status && status !== "SUCCEEDED")) {
+        setNavGoalStatus("failed");
+        setMessage(result?.message || `Navigation goal ${status || "failed"}`);
+        return;
+      }
       setNavGoalStatus("reached");
       setMessage("Goal reached");
     } catch (error) {
@@ -3628,7 +3651,7 @@ export default function MissionCanvasPage({ onBackHome = null }) {
       setNavGoalStatus("failed");
       setMessage(error instanceof Error ? error.message : "Navigation goal failed");
     }
-  }, [sendMissionGoal]);
+  }, [navGoalCancelling, sendMissionGoal]);
 
   const handleCancelNavGoal = useCallback(async () => {
     // Bump the sequence first so the in-flight goal promise cannot override
@@ -3636,11 +3659,14 @@ export default function MissionCanvasPage({ onBackHome = null }) {
     navGoalSeqRef.current += 1;
     setNavGoalStatus("idle");
     setNavGoalPose(null);
+    setNavGoalCancelling(true);
     try {
       await cancelNavigateToPoseGoal();
       setMessage("Navigation goal cancelled");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Failed to cancel the goal");
+    } finally {
+      setNavGoalCancelling(false);
     }
   }, []);
   const stopMissionBt = useCallback(async () => {
@@ -4983,6 +5009,15 @@ export default function MissionCanvasPage({ onBackHome = null }) {
       setMessage("Wait for the selected mission to finish loading");
       return;
     }
+    // Toggle: a second click while pose-set mode is armed just disarms it —
+    // an accidental re-click must not force the operator to re-localize.
+    if (interactionMode === "initial") {
+      setInteractionMode("view");
+      return;
+    }
+    // A completed localization stays valid until a NEW pose is actually
+    // clicked; only a runtime (re)start invalidates it.
+    const runtimeAlreadyUp = running && navigationRuntimeMode === "run";
     return runCommand(
       "Localize",
       async () => {
@@ -4990,7 +5025,7 @@ export default function MissionCanvasPage({ onBackHome = null }) {
         setWorkspaceStage(runFamilyStageTarget());
         setNavigationRuntimeMode("run");
         setDesignPoseInitialized(false);
-        setRunPoseInitialized(false);
+        if (!runtimeAlreadyUp) setRunPoseInitialized(false);
         setRunRuntimeOwned(true);
         setRunShutdownPending(false);
         saveMissionSession({
@@ -5037,6 +5072,7 @@ export default function MissionCanvasPage({ onBackHome = null }) {
     );
   }, [
     currentMapName,
+    interactionMode,
     mapName,
     navigationRuntimeMode,
     runCommand,
@@ -6203,8 +6239,15 @@ export default function MissionCanvasPage({ onBackHome = null }) {
       selectWorkspaceKind(WORKSPACE_MISSION);
     }
     if (stageId !== workspaceStage) {
+      // Run and Navigate share the nav runtime AND the loaded map snapshot:
+      // moving between them must not invalidate the session, or the sibling
+      // stage strands with every control disabled while nav is up.
+      const runFamilySwitch = (
+        (stageId === STAGE_RUN || stageId === STAGE_NAVIGATE)
+        && (workspaceStage === STAGE_RUN || workspaceStage === STAGE_NAVIGATE)
+      );
       cancelPendingDesignLocalization();
-      setMissionMapLoaded(false);
+      if (!runFamilySwitch) setMissionMapLoaded(false);
       setInteractionMode("view");
       setPendingBehaviorNodeTag("");
       setShowWaypointOptions(false);
@@ -6412,7 +6455,7 @@ export default function MissionCanvasPage({ onBackHome = null }) {
               mission, so it sits above the navigation/mission workflow with a
               divider marking where the map-bound pipeline begins. */}
           <div className="grid gap-1 pb-4 mb-1" style={{ borderBottom: "1px solid var(--mc-border)" }}>
-            <div className="text-[10px] font-mono tracking-[0.12em] px-1 pb-1" style={{ color: "var(--mc-text-subtle)" }}>
+            <div className="text-[11px] font-mono font-semibold tracking-[0.14em] px-1 pb-1.5" style={{ color: "var(--mc-text-muted)" }}>
               BEHAVIOR TREES
             </div>
             <button
@@ -6441,7 +6484,7 @@ export default function MissionCanvasPage({ onBackHome = null }) {
           </div>
           {WORKSPACE_NAV_GROUPS.map((group, groupIndex) => (
             <div key={group.caption} className={`grid gap-1 ${groupIndex === 0 ? "" : "mt-4"}`}>
-              <div className="text-[10px] font-mono tracking-[0.12em] px-1 pb-1" style={{ color: "var(--mc-text-subtle)" }}>
+              <div className="text-[11px] font-mono font-semibold tracking-[0.14em] px-1 pb-1.5" style={{ color: "var(--mc-text-muted)" }}>
                 {group.caption}
               </div>
               {group.stageIds.map((stageId) => {
@@ -6622,7 +6665,7 @@ export default function MissionCanvasPage({ onBackHome = null }) {
                 ? mapEditor.annotations
                 : workspaceStage === STAGE_AUTHORING && designMapActive && activeLayers.mapAreas
                   ? designMapEditor.annotations
-                  : workspaceStage === STAGE_RUN && missionMapLoaded && activeLayers.mapAreas
+                  : runFamilyStage && missionMapLoaded && activeLayers.mapAreas
                     ? runDisplayMapEditor.annotations
                     : []
             }
@@ -7170,7 +7213,7 @@ export default function MissionCanvasPage({ onBackHome = null }) {
               <button
                 type="button"
                 onClick={navGoalDriving ? handleCancelNavGoal : handleStopNavigation}
-                disabled={!!busy || (!running && !navGoalDriving && !runShutdownPending)}
+                disabled={!!busy || navGoalCancelling || (!running && !navGoalDriving && !runShutdownPending)}
                 aria-label="Stop"
                 aria-pressed={(busy === "Stop" || runShutdownPending) ? true : undefined}
                 title={navGoalDriving ? "Stop the current goal (navigation stays up)" : "Stop navigation"}
