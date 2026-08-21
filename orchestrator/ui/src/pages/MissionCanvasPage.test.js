@@ -388,6 +388,247 @@ test('renders Mission Canvas foundation', async () => {
   expect(getNavigationSpots).not.toHaveBeenCalled();
 });
 
+test('places the Back icon, robot brand, and Mission Canvas title in the top header', async () => {
+  render(<MissionCanvasPage onBackHome={jest.fn()} />);
+  await waitFor(() => {
+    expect(getServiceStatus).toHaveBeenCalled();
+    expect(getPgmFiles).toHaveBeenCalled();
+  });
+
+  const backHomeButton = screen.getByRole('button', { name: 'Back to Home' });
+  const topHeader = backHomeButton.closest('header');
+
+  expect(topHeader).not.toBeNull();
+  expect(backHomeButton.closest('aside')).toBeNull();
+  expect(backHomeButton).toHaveAccessibleName('Back to Home');
+  expect(backHomeButton.querySelector('svg')).toHaveAttribute('aria-hidden', 'true');
+  expect(within(backHomeButton).queryByText('Back to Home')).not.toBeInTheDocument();
+
+  const robotBrandIcon = within(topHeader).getByTestId('mission-canvas-brand-icon');
+  const missionCanvasTitle = within(topHeader).getByRole('heading', {
+    name: 'Mission Canvas',
+  });
+  expect(robotBrandIcon.tagName.toLowerCase()).toBe('svg');
+  expect(robotBrandIcon).toHaveAttribute('aria-hidden', 'true');
+  expect(robotBrandIcon.closest('header')).toBe(topHeader);
+  expect(
+    Boolean(
+      backHomeButton.compareDocumentPosition(robotBrandIcon)
+      & Node.DOCUMENT_POSITION_FOLLOWING
+    )
+  ).toBe(true);
+  expect(
+    Boolean(
+      robotBrandIcon.compareDocumentPosition(missionCanvasTitle)
+      & Node.DOCUMENT_POSITION_FOLLOWING
+    )
+  ).toBe(true);
+});
+
+test('returns Home immediately when Mission Canvas is clean and idle', async () => {
+  const onBackHome = jest.fn();
+
+  render(<MissionCanvasPage onBackHome={onBackHome} />);
+  await waitFor(() => {
+    expect(getServiceStatus).toHaveBeenCalled();
+    expect(getPgmFiles).toHaveBeenCalled();
+  });
+
+  fireEvent.click(screen.getByRole('button', { name: 'Back to Home' }));
+
+  expect(onBackHome).toHaveBeenCalledTimes(1);
+});
+
+test('guards returning Home with the existing unsaved Design dialog', async () => {
+  const latestMapViewerProps = () => (
+    mockMapViewer.mock.calls[mockMapViewer.mock.calls.length - 1][0]
+  );
+  const onBackHome = jest.fn();
+  getPgmFiles.mockResolvedValue({
+    files: [{ path: 'factory.pgm', name: 'factory.pgm' }],
+  });
+
+  render(<MissionCanvasPage onBackHome={onBackHome} />);
+
+  fireEvent.click(screen.getByRole('tab', { name: 'Design' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Load Map' }));
+  await screen.findByRole('combobox', { name: 'Design mission map file' });
+  fireEvent.click(screen.getByRole('button', { name: 'Load' }));
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Create Waypoint' })).toBeEnabled());
+
+  fireEvent.click(screen.getByRole('button', { name: 'Create Waypoint' }));
+  fireEvent.click(screen.getByRole('button', { name: 'On Map' }));
+  await act(async () => {
+    await latestMapViewerProps().onMapPose(1, 2, 0.25);
+  });
+  await waitFor(() => expect(latestMapViewerProps().spots).toHaveLength(1));
+
+  fireEvent.click(screen.getByRole('button', { name: 'Back to Home' }));
+  expect(screen.getByText('Unsaved changes')).toBeInTheDocument();
+  expect(onBackHome).not.toHaveBeenCalled();
+
+  fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+  expect(onBackHome).not.toHaveBeenCalled();
+
+  fireEvent.click(screen.getByRole('button', { name: 'Back to Home' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Discard' }));
+  expect(onBackHome).toHaveBeenCalledTimes(1);
+});
+
+test('keeps unsaved Map Edit changes in place when returning Home is requested', async () => {
+  const latestMapViewerProps = () => (
+    mockMapViewer.mock.calls[mockMapViewer.mock.calls.length - 1][0]
+  );
+  const onBackHome = jest.fn();
+  getPgmFiles.mockResolvedValue({
+    files: [{ path: 'factory.pgm', name: 'factory.pgm' }],
+  });
+  getPgmImage.mockResolvedValue({
+    path: 'factory.pgm',
+    width: 1,
+    height: 1,
+    maxval: 255,
+    pixels_base64: '/g==',
+  });
+
+  render(<MissionCanvasPage onBackHome={onBackHome} />);
+  await openMappingEditorAndSelect();
+  fireEvent.click(screen.getByRole('button', { name: 'Map Edit' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Add Obstacle' }));
+  await act(async () => {
+    latestMapViewerProps().onEditorMapPoint(0, 0);
+  });
+  await waitFor(() => expect(screen.getByText('· unsaved')).toBeInTheDocument());
+
+  const backHomeButton = screen.getByRole('button', { name: 'Back to Home' });
+  fireEvent.click(backHomeButton);
+
+  expect(onBackHome).not.toHaveBeenCalled();
+  const exitStatus = screen.getByRole('status');
+  expect(exitStatus).toHaveTextContent('Save the current map edits before returning Home');
+  expect(exitStatus).toHaveAttribute('aria-live', 'polite');
+  expect(exitStatus).toHaveAttribute('id', expect.stringMatching(/\S+/));
+  expect(backHomeButton).toHaveAttribute('aria-describedby', exitStatus.id);
+});
+
+test.each([
+  ['Mapping', 'mapping', 'map', false],
+  ['Run', 'run', 'nav', true],
+])('blocks returning Home while the %s runtime is active', async (
+  _label,
+  workspaceStage,
+  statusMode,
+  runRuntimeOwned,
+) => {
+  const onBackHome = jest.fn();
+  window.sessionStorage.setItem('mission_canvas_session', JSON.stringify({
+    workspaceKind: 'mission',
+    workspaceStage,
+    navigationRuntimeMode: workspaceStage,
+    runRuntimeOwned,
+    runShutdownPending: false,
+  }));
+  getServiceStatus.mockResolvedValue({ is_up: true, mode: statusMode });
+
+  render(<MissionCanvasPage onBackHome={onBackHome} />);
+  await waitFor(() => expect(getServiceStatus).toHaveBeenCalled());
+  if (workspaceStage === 'mapping') {
+    await waitFor(() => expect(screen.getByText('Status: running')).toBeInTheDocument());
+  } else {
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Load Map' })).toBeDisabled());
+  }
+
+  fireEvent.click(screen.getByRole('button', { name: 'Back to Home' }));
+
+  expect(onBackHome).not.toHaveBeenCalled();
+  expect(screen.getByText('Stop the active runtime before returning Home'))
+    .toBeInTheDocument();
+});
+
+test('keeps a restored runtime mode guarded while status confirmation is pending', async () => {
+  const onBackHome = jest.fn();
+  window.sessionStorage.setItem('mission_canvas_session', JSON.stringify({
+    workspaceKind: 'mission',
+    workspaceStage: 'mapping',
+    navigationRuntimeMode: 'mapping',
+    runRuntimeOwned: false,
+    runShutdownPending: false,
+  }));
+  getServiceStatus.mockReturnValue(new Promise(() => {}));
+
+  render(<MissionCanvasPage onBackHome={onBackHome} />);
+  await waitFor(() => expect(getServiceStatus).toHaveBeenCalled());
+
+  // The first status response can lag behind a successful runtime start. Keep
+  // the session-owned mode authoritative during that gap even though the HUD
+  // does not yet have an `is_up` confirmation.
+  expect(screen.getByText('Status: idle')).toBeInTheDocument();
+  const behaviorTreesTab = screen.getByRole('tab', { name: 'Behavior Trees' });
+  expect(behaviorTreesTab).toBeDisabled();
+  expect(behaviorTreesTab).toHaveAttribute(
+    'title',
+    'Stop the active operation before switching workspaces',
+  );
+
+  fireEvent.click(screen.getByRole('button', { name: 'Back to Home' }));
+
+  expect(onBackHome).not.toHaveBeenCalled();
+  expect(screen.getByText('Stop the active runtime before returning Home'))
+    .toBeInTheDocument();
+});
+
+test('waits for an in-flight Mission operation before returning Home', async () => {
+  const onBackHome = jest.fn();
+  let finishStartMapping;
+  startNavigation.mockReturnValue(new Promise((resolve) => {
+    finishStartMapping = resolve;
+  }));
+
+  render(<MissionCanvasPage onBackHome={onBackHome} />);
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Start Mapping' })).toBeEnabled());
+
+  fireEvent.click(screen.getByRole('button', { name: 'Start Mapping' }));
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Back to Home' })).toHaveAttribute(
+    'title',
+    'Wait for the current operation to finish before returning Home',
+  ));
+  fireEvent.click(screen.getByRole('button', { name: 'Back to Home' }));
+
+  expect(onBackHome).not.toHaveBeenCalled();
+  expect(screen.getByText('Wait for the current operation to finish before returning Home'))
+    .toBeInTheDocument();
+
+  await act(async () => {
+    finishStartMapping({ ok: true, message: 'started' });
+    await Promise.resolve();
+  });
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Start Mapping' })).toBeEnabled());
+});
+
+test('uses standalone BT exit state to guard returning Home', async () => {
+  const onBackHome = jest.fn();
+
+  render(<MissionCanvasPage onBackHome={onBackHome} />);
+  await waitFor(() => {
+    expect(getServiceStatus).toHaveBeenCalled();
+    expect(getPgmFiles).toHaveBeenCalled();
+  });
+  fireEvent.click(screen.getByRole('tab', { name: 'Behavior Trees' }));
+  const exitStateChange = mockStandaloneBtWorkspace.mock.calls.at(-1)[0].onExitStateChange;
+
+  act(() => exitStateChange({ active: true, busy: false }));
+  fireEvent.click(screen.getByRole('button', { name: 'Back to Home' }));
+  expect(onBackHome).not.toHaveBeenCalled();
+  expect(screen.getByText('Stop the active runtime before returning Home'))
+    .toBeInTheDocument();
+
+  act(() => exitStateChange({ active: false, busy: true }));
+  fireEvent.click(screen.getByRole('button', { name: 'Back to Home' }));
+  expect(onBackHome).not.toHaveBeenCalled();
+  expect(screen.getByText('Wait for the current operation to finish before returning Home'))
+    .toBeInTheDocument();
+});
+
 test('switches between the mapless Behavior Trees workspace and the previous Mission stage', async () => {
   render(<MissionCanvasPage />);
 

@@ -166,6 +166,7 @@ export default function BTEditorSurface({
   title = 'Behavior Trees',
   className = 'w-full h-full',
   variant = 'legacy',
+  onExitStateChange,
 }) {
   const dispatch = useDispatch();
   const { callService } = useRosServiceCaller();
@@ -200,6 +201,15 @@ export default function BTEditorSurface({
   });
   const [btNodePendingAction, setBtNodePendingAction] = useState(null);
   const [btExecutionPending, setBtExecutionPending] = useState(null);
+
+  useEffect(() => {
+    if (typeof onExitStateChange !== 'function') return;
+    const normalizedStatus = normalizeBtStatus(btStatus);
+    onExitStateChange({
+      active: ['running', 'stopping'].includes(normalizedStatus),
+      busy: Boolean(btNodePendingAction || btExecutionPending),
+    });
+  }, [btExecutionPending, btNodePendingAction, btStatus, onExitStateChange]);
 
   // ReactFlow instance for coordinate conversion on drop
   const reactFlowRef = useRef(null);

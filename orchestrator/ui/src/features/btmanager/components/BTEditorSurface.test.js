@@ -105,12 +105,13 @@ const parsedTree = {
   ]),
 };
 
-function renderEditor(variant, { isActive = false } = {}) {
+function renderEditor(variant, { isActive = false, onExitStateChange } = {}) {
   return render(
     <BTEditorSurface
       isActive={isActive}
       title="Behavior Trees"
       variant={variant}
+      onExitStateChange={onExitStateChange}
     />,
   );
 }
@@ -183,6 +184,31 @@ beforeEach(() => {
 
 afterEach(() => {
   jest.useRealTimers();
+});
+
+test('reports whether a standalone BT is active before the workspace can exit', async () => {
+  const onExitStateChange = jest.fn();
+  const view = renderEditor('mission-canvas', { onExitStateChange });
+
+  await waitFor(() => expect(onExitStateChange).toHaveBeenLastCalledWith({
+    active: false,
+    busy: false,
+  }));
+
+  mockState.btmanager.btStatus = 'running';
+  view.rerender(
+    <BTEditorSurface
+      isActive={false}
+      title="Behavior Trees"
+      variant="mission-canvas"
+      onExitStateChange={onExitStateChange}
+    />,
+  );
+
+  await waitFor(() => expect(onExitStateChange).toHaveBeenLastCalledWith({
+    active: true,
+    busy: false,
+  }));
 });
 
 test('uses elevated Mission Canvas surfaces for every header action', async () => {

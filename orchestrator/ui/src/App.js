@@ -347,10 +347,11 @@ function App() {
 
   return (
     <div className="flex min-h-screen w-screen bg-white text-gray-900 dark:bg-slate-950 dark:text-slate-100">
-      <aside
-        aria-label="Cyclo Intelligence navigation"
-        className="w-30 min-w-28 bg-gray-100 dark:bg-slate-900 min-h-screen flex flex-col items-center gap-4 shadow-[inset_0_0_2px_rgba(0,0,0,0.1)] dark:shadow-[inset_0_0_0_1px_rgba(148,163,184,0.12)]"
-      >
+      {page !== PageType.MISSION_CANVAS && (
+        <aside
+          aria-label="Cyclo Intelligence navigation"
+          className="w-30 min-w-28 bg-gray-100 dark:bg-slate-900 min-h-screen flex flex-col items-center gap-4 shadow-[inset_0_0_2px_rgba(0,0,0,0.1)] dark:shadow-[inset_0_0_0_1px_rgba(148,163,184,0.12)]"
+        >
         <div className="w-full h-screen flex flex-col gap-2 items-center overflow-y-auto scrollbar-thin">
           <div className="w-full px-2 pt-3 pb-2 flex flex-col gap-2 border-b border-gray-200 dark:border-slate-800">
             <ThemeToggle />
@@ -482,7 +483,8 @@ function App() {
           </button>
 
         </div>
-      </aside>
+        </aside>
+      )}
       <main className="flex-1 flex flex-col h-screen bg-white dark:bg-slate-950">
         {page === PageType.HOME ? (
           <HomePage />
@@ -496,7 +498,7 @@ function App() {
           <EditDatasetPage isActive={page === PageType.EDIT_DATASET} />
         ) : page === PageType.MISSION_CANVAS ? (
           <React.Suspense fallback={<div className="flex-1 flex items-center justify-center">Loading Mission Canvas...</div>}>
-            <MissionCanvasPage />
+            <MissionCanvasPage onBackHome={handleHomePageNavigation} />
           </React.Suspense>
         ) : page === PageType.NAVIGATION ? (
           <React.Suspense fallback={<div className="flex-1 flex items-center justify-center">Loading Navigation...</div>}>

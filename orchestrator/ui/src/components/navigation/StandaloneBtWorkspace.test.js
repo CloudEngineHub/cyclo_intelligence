@@ -8,13 +8,20 @@ import { BT_UNSUPPORTED_ROBOT_MESSAGE } from '../../constants/btSupport';
 
 jest.mock('../../features/btmanager/components/BTEditorSurface', () => {
   const React = require('react');
-  return function MockBTEditorSurface({ isActive, title, className, variant }) {
+  return function MockBTEditorSurface({
+    isActive,
+    title,
+    className,
+    variant,
+    onExitStateChange,
+  }) {
     return React.createElement(
       'div',
       {
         'data-testid': 'bt-editor-surface',
         'data-active': String(isActive),
         'data-variant': variant || 'legacy',
+        'data-has-exit-state-callback': String(typeof onExitStateChange === 'function'),
         className,
       },
       title,
@@ -50,10 +57,14 @@ test('renders the existing editor surface with workspace configuration', () => {
 });
 
 test('forwards the Mission Canvas visual variant to the shared editor surface', () => {
-  renderWithRobot('ffw_sg2_rev1', { variant: 'mission-canvas' });
+  renderWithRobot('ffw_sg2_rev1', {
+    variant: 'mission-canvas',
+    onExitStateChange: jest.fn(),
+  });
 
-  expect(screen.getByTestId('bt-editor-surface'))
-    .toHaveAttribute('data-variant', 'mission-canvas');
+  const editor = screen.getByTestId('bt-editor-surface');
+  expect(editor).toHaveAttribute('data-variant', 'mission-canvas');
+  expect(editor).toHaveAttribute('data-has-exit-state-callback', 'true');
 });
 
 test('keeps the unsupported robot guard inside the reusable workspace', () => {

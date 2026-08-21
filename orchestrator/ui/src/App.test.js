@@ -62,7 +62,16 @@ jest.mock('./pages/MissionCanvasPage', () => {
   const React = require('react');
   return function MockMissionCanvasPage(props) {
     mockMissionCanvasPage(props);
-    return React.createElement('div', { 'data-testid': 'mission-canvas-page' }, 'Mission Canvas Page');
+    return React.createElement(
+      'div',
+      { 'data-testid': 'mission-canvas-page' },
+      React.createElement('span', null, 'Mission Canvas Page'),
+      React.createElement(
+        'button',
+        { type: 'button', onClick: props.onBackHome },
+        'Back to Home'
+      )
+    );
   };
 });
 
@@ -91,7 +100,7 @@ jest.mock('./utils/rosConnectionManager', () => ({
   },
 }));
 
-test('renders the Cyclo Intelligence shell navigation', () => {
+test('renders the Cyclo Intelligence shell navigation for regular pages', () => {
   render(
     <Provider store={store}>
       <ThemeProvider>
@@ -101,6 +110,8 @@ test('renders the Cyclo Intelligence shell navigation', () => {
   );
 
   expect(screen.getByRole('button', { name: 'Cyclo Intelligence' }))
+    .toBeInTheDocument();
+  expect(screen.getByLabelText('Cyclo Intelligence navigation'))
     .toBeInTheDocument();
   expect(screen.getByRole('button', { name: /Inference/i }))
     .toBeInTheDocument();
@@ -185,11 +196,28 @@ test('uses Mission Canvas as the canonical navigation entry point', async () => 
 
   expect(await screen.findByTestId('mission-canvas-page'))
     .toHaveTextContent('Mission Canvas Page');
-  expect(mockMissionCanvasPage).toHaveBeenCalled();
+  expect(screen.queryByLabelText('Cyclo Intelligence navigation'))
+    .not.toBeInTheDocument();
+  expect(mockMissionCanvasPage).toHaveBeenLastCalledWith(
+    expect.objectContaining({ onBackHome: expect.any(Function) })
+  );
   await waitFor(() => {
     expect(window.sessionStorage.getItem(CURRENT_PAGE_STORAGE_KEY))
       .toBe(PageType.MISSION_CANVAS);
     expect(store.getState().ui.currentPage).toBe(PageType.MISSION_CANVAS);
+  });
+
+  act(() => {
+    screen.getByRole('button', { name: 'Back to Home' }).click();
+  });
+
+  expect(await screen.findByText('Home Page')).toBeInTheDocument();
+  expect(screen.getByLabelText('Cyclo Intelligence navigation'))
+    .toBeInTheDocument();
+  await waitFor(() => {
+    expect(window.sessionStorage.getItem(CURRENT_PAGE_STORAGE_KEY))
+      .toBe(PageType.HOME);
+    expect(store.getState().ui.currentPage).toBe(PageType.HOME);
   });
   view.unmount();
   act(() => {

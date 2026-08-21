@@ -37,9 +37,8 @@ export default function BTControlNode({ id, data }) {
     <div
       className={clsx(
         'relative px-4 py-3 rounded-xl border-2 min-w-[160px] text-center shadow-sm cursor-pointer',
-        isSelected
-          ? 'border-[#c96442] bg-[#f4e5dc] ring-2 ring-[#c96442]/30 dark:!bg-[#3d2a20] dark:border-[#d5794f] dark:ring-[#d5794f]/40'
-          : 'border-[#1c1a17] bg-white dark:!bg-[#2b2823] dark:border-[#ece7dd]',
+        'border-[#1c1a17] bg-white dark:!bg-[#2b2823] dark:border-[#ece7dd]',
+        isSelected && 'ring-2 ring-[#1c1a17]/20 dark:ring-[#ece7dd]/20',
         isActive && 'animate-pulse',
       )}
     >

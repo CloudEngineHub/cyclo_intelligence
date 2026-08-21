@@ -30,6 +30,7 @@ export default function StandaloneBtWorkspace({
   title = 'Behavior Trees',
   className = 'w-full h-full',
   variant = 'legacy',
+  onExitStateChange,
 }) {
   const robotType = useSelector((state) => state.tasks.robotType);
   const btRobotSupported = isBtRobotSupported(robotType);
@@ -100,6 +101,7 @@ export default function StandaloneBtWorkspace({
       title={title}
       className={className}
       variant={variant}
+      onExitStateChange={onExitStateChange}
     />
   );
 }

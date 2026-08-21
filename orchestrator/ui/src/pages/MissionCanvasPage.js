@@ -22,6 +22,7 @@ import {
   MdAccountTree,
   MdAdd,
   MdAddLocationAlt,
+  MdArrowBack,
   MdContentCopy,
   MdDelete,
   MdEdit,
@@ -2489,7 +2490,7 @@ function useIsDarkTheme() {
   return isDark;
 }
 
-export default function MissionCanvasPage() {
+export default function MissionCanvasPage({ onBackHome = null }) {
   const isDark = useIsDarkTheme();
   const initialSessionRef = useRef(null);
   if (initialSessionRef.current === null) {
@@ -2624,6 +2625,10 @@ export default function MissionCanvasPage() {
   const nonBtDesignDirtyRef = useRef(false);
   const [showUnsavedDialog, setShowUnsavedDialog] = useState(false);
   const pendingGuardActionRef = useRef(null);
+  const [standaloneBtExitState, setStandaloneBtExitState] = useState({
+    active: false,
+    busy: false,
+  });
   const [showDesignMapDialog, setShowDesignMapDialog] = useState(false);
   const [designMapFiles, setDesignMapFiles] = useState([]);
   const [designMissionNames, setDesignMissionNames] = useState([]);
@@ -6003,17 +6008,64 @@ export default function MissionCanvasPage() {
     || mappingRuntimeActive
     || runRuntimeActive
     || designLocalizationActive
+    || navigationRuntimeMode !== "idle"
     || missionRunnerActive
     || runShutdownPending
+    || standaloneBtExitState.active
+    || standaloneBtExitState.busy
   );
   const workspaceSwitchLockTitle = mapEditor.dirty || designMapEditor.dirty
     ? "Save the current map edits before switching workspaces"
     : "Stop the active operation before switching workspaces";
 
+  const handleStandaloneBtExitStateChange = useCallback((nextState) => {
+    const normalized = {
+      active: nextState?.active === true,
+      busy: nextState?.busy === true,
+    };
+    setStandaloneBtExitState((current) => (
+      current.active === normalized.active && current.busy === normalized.busy
+        ? current
+        : normalized
+    ));
+  }, []);
+
+  const homeExitBlockReason = (
+    busy
+    || btNodeBusy
+    || designMapBusy
+    || runMapBusy
+    || mapEditor.busy
+    || standaloneBtExitState.busy
+  )
+    ? "Wait for the current operation to finish before returning Home"
+    : (mapEditor.dirty || designMapEditor.dirty)
+      ? "Save the current map edits before returning Home"
+      : (
+        mappingRuntimeActive
+        || runRuntimeActive
+        || designLocalizationActive
+        || navigationRuntimeMode !== "idle"
+        || missionRunnerActive
+        || runShutdownPending
+        || standaloneBtExitState.active
+      )
+        ? "Stop the active runtime before returning Home"
+        : "";
+
+  const handleBackHome = () => {
+    if (typeof onBackHome !== "function") return;
+    if (homeExitBlockReason) {
+      setMessage(homeExitBlockReason);
+      return;
+    }
+    runGuardedDesignAction(onBackHome);
+  };
+
   const selectWorkspaceKind = (nextKind) => {
     if (
       nextKind === workspaceKind
-      || (nextKind === WORKSPACE_STANDALONE_BT && workspaceSwitchLocked)
+      || workspaceSwitchLocked
     ) return;
     setShowSaveMapDialog(false);
     setShowSaveMissionDialog(false);
@@ -6031,7 +6083,7 @@ export default function MissionCanvasPage() {
   return (
     <div
       ref={pageRootRef}
-      className="mission-canvas-page h-full min-h-[560px] flex overflow-hidden"
+      className="mission-canvas-page h-full min-h-[560px] flex flex-col overflow-hidden"
       style={{ backgroundColor: MISSION_STAGE_FILL, color: MISSION_TEXT }}
     >
       <SaveMapDialog
@@ -6161,26 +6213,63 @@ export default function MissionCanvasPage() {
         onCancel={() => setShowEditMapDialog(false)}
         onSubmit={handleConfirmEditMap}
       />
-      {/* ── LEFT RAIL — brand + stage nav (Console shell) ── */}
+      {/* ── APP BAR — leave the full-screen workspace + page identity ── */}
+      <header
+        className="shrink-0 h-14 flex items-center gap-3 px-4 border-b"
+        style={{ borderColor: MISSION_BORDER, backgroundColor: MISSION_SURFACE }}
+      >
+        <button
+          type="button"
+          onClick={handleBackHome}
+          aria-label="Back to Home"
+          aria-describedby={homeExitBlockReason ? "mission-home-exit-status" : undefined}
+          title={homeExitBlockReason || "Back to Cyclo Intelligence Home"}
+          className="h-10 w-10 shrink-0 inline-flex items-center justify-center rounded-[10px] transition-colors hover:bg-[var(--mc-surface-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--mc-accent)]"
+          style={{ color: MISSION_TEXT_MUTED }}
+        >
+          <MdArrowBack size={19} aria-hidden="true" />
+        </button>
+        <div className="flex min-w-0 items-center gap-2.5">
+          <div
+            aria-hidden="true"
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[9px]"
+            style={{ backgroundColor: MISSION_TEXT }}
+          >
+            <svg data-testid="mission-canvas-brand-icon" aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--mc-bg)" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="4" y="8" width="16" height="12" rx="3" />
+              <path d="M12 8V4" />
+              <circle cx="12" cy="3" r="1.4" fill="var(--mc-accent)" stroke="none" />
+              <path d="M9 13h.01M15 13h.01" />
+            </svg>
+          </div>
+          <h1
+            className="min-w-0 truncate text-[15px] font-bold tracking-tight"
+            aria-label="Mission Canvas"
+            style={{ color: MISSION_TEXT }}
+          >
+            Mission Canvas
+          </h1>
+        </div>
+        {homeExitBlockReason && (
+          <div
+            id="mission-home-exit-status"
+            role="status"
+            aria-live="polite"
+            title={homeExitBlockReason}
+            className="ml-auto min-w-0 max-w-[50vw] truncate text-right text-[11px] font-medium"
+            style={{ color: "var(--mc-text-subtle)" }}
+          >
+            {homeExitBlockReason}
+          </div>
+        )}
+      </header>
+
+      <div className="flex flex-1 min-h-0 overflow-hidden">
+      {/* ── LEFT RAIL — workspace + stage navigation ── */}
       <aside
         className="shrink-0 flex flex-col p-4 border-r"
         style={{ width: 210, backgroundColor: MISSION_RAIL_BG, borderColor: MISSION_BORDER }}
       >
-        <div className="flex items-center gap-3 px-1 pb-5">
-          <div
-            className="flex items-center justify-center shrink-0"
-            style={{ width: 34, height: 34, borderRadius: 10, backgroundColor: MISSION_TEXT }}
-          >
-            <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="var(--mc-bg)" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-              <rect x="4" y="8" width="16" height="12" rx="3" /><path d="M12 8V4" />
-              <circle cx="12" cy="3" r="1.4" fill="var(--mc-accent)" stroke="none" /><path d="M9 13h.01M15 13h.01" />
-            </svg>
-          </div>
-          <h1 className="font-bold leading-tight text-[15px] tracking-tight" aria-label="Mission Canvas" style={{ color: MISSION_TEXT }}>
-            Mission<br />Canvas
-          </h1>
-        </div>
-
         <div className="text-[10px] font-mono tracking-[0.12em] px-1 pb-2" style={{ color: "var(--mc-text-subtle)" }}>
           WORKSPACES
         </div>
@@ -6196,8 +6285,8 @@ export default function MissionCanvasPage() {
                 type="button"
                 role="tab"
                 aria-selected={selected}
-                disabled={workspace.id === WORKSPACE_STANDALONE_BT && workspaceSwitchLocked && !selected}
-                title={workspace.id === WORKSPACE_STANDALONE_BT && workspaceSwitchLocked && !selected ? workspaceSwitchLockTitle : undefined}
+                disabled={workspaceSwitchLocked && !selected}
+                title={workspaceSwitchLocked && !selected ? workspaceSwitchLockTitle : undefined}
                 onClick={() => selectWorkspaceKind(workspace.id)}
                 className="flex items-center gap-3 px-3 py-2.5 text-[13px] font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50"
                 style={{
@@ -6287,7 +6376,12 @@ export default function MissionCanvasPage() {
       {/* WORKSPACE */}
       {workspaceKind === WORKSPACE_STANDALONE_BT ? (
         <main className="flex-1 min-w-0 min-h-0" aria-label="Behavior Trees workspace">
-          <StandaloneBtWorkspace isActive title="Behavior Trees" variant="mission-canvas" />
+          <StandaloneBtWorkspace
+            isActive
+            title="Behavior Trees"
+            variant="mission-canvas"
+            onExitStateChange={handleStandaloneBtExitStateChange}
+          />
         </main>
       ) : (
       <div className="flex-1 min-w-0 flex flex-col">
@@ -7110,6 +7204,7 @@ export default function MissionCanvasPage() {
       </div>
       </div>
       )}
+      </div>
     </div>
   );
 }
