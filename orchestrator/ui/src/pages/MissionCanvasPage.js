@@ -2761,6 +2761,8 @@ export default function MissionCanvasPage({ onBackHome = null }) {
   const [mapEditToolsOpen, setMapEditToolsOpen] = useState(false);
   const [labelToolsOpen, setLabelToolsOpen] = useState(false);
   const [showRunMapDialog, setShowRunMapDialog] = useState(false);
+  const [runMapDialogStage, setRunMapDialogStage] = useState(STAGE_RUN);
+  const runMapDialogRequestRef = useRef(0);
   const [runMapFiles, setRunMapFiles] = useState([]);
   const [runMissionNames, setRunMissionNames] = useState([]);
   const [runMapPath, setRunMapPath] = useState("");
@@ -5063,8 +5065,11 @@ export default function MissionCanvasPage({ onBackHome = null }) {
   // mode so the operator can tell AMCL where the robot actually is. Localization
   // must happen before the route runs — a lost robot ignores nav goals.
   const handleLocalize = useCallback(() => {
-    if (runMapBusy || runMapSnapshotInvalid) {
-      setMessage("Wait for the selected mission to finish loading");
+    const missionSnapshotRequired = workspaceStageRef.current !== STAGE_NAVIGATE;
+    if (runMapBusy || (missionSnapshotRequired && runMapSnapshotInvalid)) {
+      setMessage(missionSnapshotRequired
+        ? "Wait for the selected mission to finish loading"
+        : "Wait for the selected map to finish loading");
       return;
     }
     // Toggle: a second click while pose-set mode is armed just disarms it —
@@ -5142,7 +5147,7 @@ export default function MissionCanvasPage({ onBackHome = null }) {
   // Step 2: with the robot localized, run the route. This only executes the
   // waypoint sequence — navigation is already up from the localize step.
   const handleRunMission = useCallback(() => {
-    if (runMapBusy || !missionMapLoaded) {
+    if (runMapBusy || !missionMapLoaded || runMapSnapshotInvalid) {
       setMessage("Wait for the selected mission to finish loading");
       return;
     }
@@ -5160,6 +5165,7 @@ export default function MissionCanvasPage({ onBackHome = null }) {
     missionRouteOrderedSpots.length,
     missionRunner,
     runMapBusy,
+    runMapSnapshotInvalid,
     runPoseInitialized,
   ]);
 
@@ -5176,22 +5182,33 @@ export default function MissionCanvasPage({ onBackHome = null }) {
   }, [mapEditor.setSelectedPath, pendingEditMapPath]);
 
   const handleOpenRunMapDialog = useCallback(() => {
+    const dialogStage = runFamilyStageTarget();
+    const mapOnly = dialogStage === STAGE_NAVIGATE;
+    const requestId = runMapDialogRequestRef.current + 1;
+    runMapDialogRequestRef.current = requestId;
     const preferredRunMapName = runMapName || mapName || DEFAULT_MAP_NAME;
     const preferredRunMissionName = runMapName ? runMissionName : missionName;
-    setWorkspaceStage(runFamilyStageTarget());
+    setRunMapDialogStage(dialogStage);
+    setWorkspaceStage(dialogStage);
     setShowRunMapDialog(true);
     setRunMapBusy(true);
-    setMessage("Loading saved missions");
+    setMessage(mapOnly ? "Loading saved maps" : "Loading saved missions");
     getPgmFiles()
       .then(async (response) => {
+        if (runMapDialogRequestRef.current !== requestId) return;
         const files = response.files || [];
         const preferred = files.find((file) => mapNameFromPgmPath(file.path) === preferredRunMapName)
           || files[0];
         setRunMapFiles(files);
         setRunMapPath(preferred?.path || "");
-        if (preferred?.path) {
+        if (mapOnly) {
+          // Navigate consumes only the selected floor map. Mission inventory
+          // remains a Run concern and must not be fetched as a side effect.
+          setRunMissionNames([]);
+        } else if (preferred?.path) {
           const selectedMapName = mapNameFromPgmPath(preferred.path);
           const available = await fetchMissionNames(selectedMapName);
+          if (runMapDialogRequestRef.current !== requestId) return;
           setRunMissionNames(available);
           setPendingRunMissionName(
             selectedMapName === preferredRunMapName && available.includes(preferredRunMissionName)
@@ -5207,13 +5224,22 @@ export default function MissionCanvasPage({ onBackHome = null }) {
         }
       })
       .catch((error) => {
+        if (runMapDialogRequestRef.current !== requestId) return;
         setMessage(error instanceof Error ? error.message : "Failed to list PGM files");
       })
-      .finally(() => setRunMapBusy(false));
+      .finally(() => {
+        if (runMapDialogRequestRef.current === requestId) setRunMapBusy(false);
+      });
   }, [fetchMissionNames, mapName, missionName, runMapName, runMissionName]);
 
   const handleRunMapChange = useCallback((nextPath) => {
+    const requestId = runMapDialogRequestRef.current + 1;
+    runMapDialogRequestRef.current = requestId;
     setRunMapPath(nextPath);
+    if (runMapDialogStage === STAGE_NAVIGATE) {
+      setRunMissionNames([]);
+      return;
+    }
     const selectedMapName = mapNameFromPgmPath(nextPath);
     if (!selectedMapName) {
       setRunMissionNames([]);
@@ -5223,21 +5249,52 @@ export default function MissionCanvasPage({ onBackHome = null }) {
     setRunMapBusy(true);
     fetchMissionNames(selectedMapName)
       .then((available) => {
+        if (runMapDialogRequestRef.current !== requestId) return;
         setRunMissionNames(available);
         setPendingRunMissionName(available[0] ?? DEFAULT_MISSION_NAME);
       })
       .catch((error) => {
+        if (runMapDialogRequestRef.current !== requestId) return;
         setRunMissionNames([]);
         setPendingRunMissionName("");
         setMessage(error instanceof Error ? error.message : "Failed to list missions");
       })
-      .finally(() => setRunMapBusy(false));
-  }, [fetchMissionNames]);
+      .finally(() => {
+        if (runMapDialogRequestRef.current === requestId) setRunMapBusy(false);
+      });
+  }, [fetchMissionNames, runMapDialogStage]);
 
   const handleConfirmRunMap = useCallback(() => {
     const selectedMapName = mapNameFromPgmPath(runMapPath);
     if (!selectedMapName) {
       setMessage("Map file required");
+      return;
+    }
+    if (runMapDialogStage === STAGE_NAVIGATE) {
+      const preservesRunMission = (
+        !runMapSnapshotInvalid
+        && runCatalog.mapName === selectedMapName
+      );
+      setShowRunMapDialog(false);
+      setWorkspaceStage(STAGE_NAVIGATE);
+      setInteractionMode("view");
+      setRunMapName(selectedMapName);
+      setMissionMapLoaded(true);
+      if (!preservesRunMission) {
+        // A mission snapshot is map-scoped. Loading a different Navigate map
+        // must not let Run later overlay or execute the previous map's route.
+        setRunMissionName("");
+        setRunCatalog({ mapName: "", names: [] });
+        setRunSpots([]);
+        setRunMissionFlowNodes([]);
+        setRunMissionFlowEdges([]);
+        setRunMissionBtFiles({});
+        setRunMapSnapshotInvalid(true);
+        setRunPoseInitialized(false);
+        setNavGoalPose(null);
+        setNavGoalStatus("idle");
+      }
+      setMessage(`Loaded map ${selectedMapName}`);
       return;
     }
     if (!pendingRunMissionName) {
@@ -5277,8 +5334,11 @@ export default function MissionCanvasPage({ onBackHome = null }) {
   }, [
     loadRunMissionForMap,
     pendingRunMissionName,
+    runCatalog.mapName,
+    runMapDialogStage,
     runMapPath,
     runMissionNames,
+    runMapSnapshotInvalid,
   ]);
 
   const handleMissionChange = useCallback((nextMissionName) => {
@@ -6476,17 +6536,23 @@ export default function MissionCanvasPage({ onBackHome = null }) {
         open={showRunMapDialog}
         files={runMapFiles}
         selectedPath={runMapPath}
-        missionNames={runMissionNames}
+        missionNames={runMapDialogStage === STAGE_NAVIGATE ? null : runMissionNames}
         selectedMissionName={pendingRunMissionName}
         busy={runMapBusy}
         title="Load Map"
         fieldLabel="Map"
-        selectAriaLabel="Run mission map file"
+        selectAriaLabel={runMapDialogStage === STAGE_NAVIGATE
+          ? "Navigation map file"
+          : "Run mission map file"}
         missionSelectAriaLabel="Run mission file"
         onChange={handleRunMapChange}
         onMissionChange={setPendingRunMissionName}
         onCancel={() => {
-          setPendingRunMissionName(missionName);
+          runMapDialogRequestRef.current += 1;
+          setRunMapBusy(false);
+          if (runMapDialogStage !== STAGE_NAVIGATE) {
+            setPendingRunMissionName(runMissionName);
+          }
           setShowRunMapDialog(false);
         }}
         onSubmit={handleConfirmRunMap}
@@ -7248,7 +7314,7 @@ export default function MissionCanvasPage({ onBackHome = null }) {
               <button
                 type="button"
                 onClick={handleRunMission}
-                disabled={!!busy || !!btNodeBusy || runMapBusy || !missionMapLoaded || !runPoseInitialized || missionRunnerActive || runShutdownPending}
+                disabled={!!busy || !!btNodeBusy || runMapBusy || !missionMapLoaded || runMapSnapshotInvalid || !runPoseInitialized || missionRunnerActive || runShutdownPending}
                 aria-label="Run Mission"
                 aria-pressed={(busy === "Run mission" || missionRunnerActive) ? true : undefined}
                 title="Run the mission route"
@@ -7289,7 +7355,7 @@ export default function MissionCanvasPage({ onBackHome = null }) {
               <button
                 type="button"
                 onClick={handleLocalize}
-                disabled={!!busy || runMapBusy || !missionMapLoaded || runMapSnapshotInvalid || runShutdownPending}
+                disabled={!!busy || runMapBusy || !missionMapLoaded || runShutdownPending}
                 aria-label="Localize"
                 aria-pressed={(interactionMode === "initial" || busy === "Localize" || busy === "Set robot pose") ? true : undefined}
                 title="Bring navigation up and set the robot pose"

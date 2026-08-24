@@ -5634,6 +5634,170 @@ describe('assembleMissionBtFilesForSave', () => {
 });
 
 
+test('invalidates a Run mission snapshot when Navigate loads a different map', async () => {
+  const latestMapViewerProps = () => (
+    mockMapViewer.mock.calls[mockMapViewer.mock.calls.length - 1][0]
+  );
+  getPgmFiles.mockResolvedValue({
+    files: [
+      { path: 'map-a.pgm', name: 'map-a.pgm' },
+      { path: 'map-b.pgm', name: 'map-b.pgm' },
+    ],
+  });
+  getNavigationMissions.mockImplementation((mapName) => Promise.resolve({
+    map_name: mapName,
+    missions: mapName === 'map-a' ? ['mission-a'] : [],
+  }));
+  getNavigationMission.mockResolvedValue({
+    exists: true,
+    map_name: 'map-a',
+    mission_name: 'mission-a',
+    revision: 11,
+    global_bt: 'global.xml',
+    waypoints: [
+      {
+        id: 'map_a_wp_1',
+        label: 'Map A Start',
+        pose: { frame_id: 'map', x: 1, y: 2, yaw: 0 },
+        local_bt: 'locals/map_a_wp_1/main.xml',
+        metadata: {},
+      },
+      {
+        id: 'map_a_wp_2',
+        label: 'Map A Finish',
+        pose: { frame_id: 'map', x: 3, y: 4, yaw: 0 },
+        local_bt: 'locals/map_a_wp_2/main.xml',
+        metadata: {},
+      },
+    ],
+    metadata: {
+      mission_flow: {
+        nodes: [
+          { id: 'map_a_wp_1', position: { x: 80, y: 72 } },
+          { id: 'map_a_wp_2', position: { x: 300, y: 72 } },
+        ],
+        edges: [{ id: 'map_a_route', source: 'map_a_wp_1', target: 'map_a_wp_2' }],
+      },
+    },
+  });
+  getNavigationMissionBtFile.mockImplementation((_mapName, path) => Promise.resolve({
+    path,
+    content: `<root><BehaviorTree ID="${path}"/></root>`,
+    exists: true,
+    revision: 11,
+  }));
+
+  render(<MissionCanvasPage />);
+
+  fireEvent.click(screen.getByRole('tab', { name: 'Run' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Load Map' }));
+  const runLoadDialog = await screen.findByRole('dialog', { name: 'Load Map' });
+  expect(within(runLoadDialog).getByRole('combobox', {
+    name: 'Run mission map file',
+  })).toHaveValue('map-a.pgm');
+  expect(await within(runLoadDialog).findByRole('combobox', {
+    name: 'Run mission file',
+  })).toHaveValue('mission-a');
+  fireEvent.click(within(runLoadDialog).getByRole('button', { name: 'Load' }));
+
+  await waitFor(() => expect(latestMapViewerProps().spots).toHaveLength(2));
+  expect(latestMapViewerProps().missionRouteOrder).toEqual([
+    { id: 'map_a_wp_1', order: 1 },
+    { id: 'map_a_wp_2', order: 2 },
+  ]);
+  expect(screen.getByRole('button', { name: 'Localize' })).toBeEnabled();
+  const missionCatalogCalls = getNavigationMissions.mock.calls.length;
+  const missionLoadCalls = getNavigationMission.mock.calls.length;
+  const missionBtCalls = getNavigationMissionBtFile.mock.calls.length;
+
+  fireEvent.click(screen.getByRole('tab', { name: 'Navigate' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Load Map' }));
+  const navigateLoadDialog = await screen.findByRole('dialog', { name: 'Load Map' });
+  const navigateMapSelect = within(navigateLoadDialog).getByRole('combobox', {
+    name: 'Navigation map file',
+  });
+  expect(within(navigateLoadDialog).getAllByRole('combobox')).toHaveLength(1);
+  fireEvent.change(navigateMapSelect, { target: { value: 'map-b.pgm' } });
+  fireEvent.click(within(navigateLoadDialog).getByRole('button', { name: 'Load' }));
+
+  await waitFor(() => expect(getPgmImage).toHaveBeenCalledWith('map-b.pgm'));
+  expect(getNavigationMissions).toHaveBeenCalledTimes(missionCatalogCalls);
+  expect(getNavigationMission).toHaveBeenCalledTimes(missionLoadCalls);
+  expect(getNavigationMissionBtFile).toHaveBeenCalledTimes(missionBtCalls);
+
+  fireEvent.click(screen.getByRole('tab', { name: 'Run' }));
+  await waitFor(() => expect(latestMapViewerProps().spots).toEqual([]));
+  expect(latestMapViewerProps().missionRouteOrder).toEqual([]);
+  expect(screen.getByRole('button', { name: 'Localize' })).toBeDisabled();
+  expect(screen.getByRole('button', { name: 'Run Mission' })).toBeDisabled();
+  expect(screen.getByRole('combobox', { name: 'Active mission' })).toBeDisabled();
+});
+
+
+test('loads a Navigate map without mission state while Run keeps its mission selector', async () => {
+  const latestMapViewerProps = () => (
+    mockMapViewer.mock.calls[mockMapViewer.mock.calls.length - 1][0]
+  );
+  getPgmFiles.mockResolvedValue({
+    files: [{ path: 'factory.pgm', name: 'factory.pgm' }],
+  });
+  getNavigationMissions.mockResolvedValue({
+    map_name: 'factory',
+    missions: ['inspection'],
+  });
+  getNavigationMission.mockResolvedValue({
+    exists: true,
+    map_name: 'factory',
+    mission_name: 'inspection',
+    global_bt: 'global.xml',
+    waypoints: [{
+      id: 'mission_only_waypoint',
+      label: 'Mission Only',
+      pose: { frame_id: 'map', x: 1, y: 2, yaw: 0 },
+      local_bt: 'locals/mission_only/main.xml',
+      local_bt_files: ['locals/mission_only/main.xml'],
+      metadata: {},
+    }],
+    metadata: {},
+  });
+
+  render(<MissionCanvasPage />);
+  fireEvent.click(screen.getByRole('tab', { name: 'Navigate' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Load Map' }));
+
+  const navigateLoadDialog = await screen.findByRole('dialog', { name: 'Load Map' });
+  const navigateSelectors = within(navigateLoadDialog).getAllByRole('combobox');
+  expect(navigateSelectors).toHaveLength(1);
+  expect(navigateSelectors[0]).toHaveValue('factory.pgm');
+  expect(within(navigateLoadDialog).queryByRole('combobox', {
+    name: 'Run mission file',
+  })).not.toBeInTheDocument();
+  expect(getNavigationMissions).not.toHaveBeenCalled();
+  expect(getNavigationMission).not.toHaveBeenCalled();
+  expect(getNavigationMissionBtFile).not.toHaveBeenCalled();
+
+  fireEvent.click(within(navigateLoadDialog).getByRole('button', { name: 'Load' }));
+  await waitFor(() => expect(getPgmImage).toHaveBeenCalledWith('factory.pgm'));
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Localize' })).toBeEnabled());
+  expect(getNavigationMissions).not.toHaveBeenCalled();
+  expect(getNavigationMission).not.toHaveBeenCalled();
+  expect(getNavigationMissionBtFile).not.toHaveBeenCalled();
+  expect(latestMapViewerProps().spots).toEqual([]);
+  expect(latestMapViewerProps().missionRouteOrder).toEqual([]);
+
+  fireEvent.click(screen.getByRole('tab', { name: 'Run' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Load Map' }));
+  const runLoadDialog = await screen.findByRole('dialog', { name: 'Load Map' });
+  expect(within(runLoadDialog).getByRole('combobox', {
+    name: 'Run mission map file',
+  })).toHaveValue('factory.pgm');
+  expect(await within(runLoadDialog).findByRole('combobox', {
+    name: 'Run mission file',
+  })).toHaveValue('inspection');
+  expect(getNavigationMissions).toHaveBeenCalledWith('factory');
+});
+
+
 test('drives to a clicked goal from the Navigate stage', async () => {
   const latestMapViewerProps = () => (
     mockMapViewer.mock.calls[mockMapViewer.mock.calls.length - 1][0]
@@ -5658,10 +5822,11 @@ test('drives to a clicked goal from the Navigate stage', async () => {
   expect(screen.getByRole('button', { name: 'Set Goal' })).toBeDisabled();
   expect(screen.getByRole('button', { name: 'Localize' })).toBeDisabled();
 
-  // The shared Run map dialog loads the map, and the stage stays Navigate.
+  // Navigate loads only a map, and the stage stays Navigate.
   fireEvent.click(screen.getByRole('button', { name: 'Load Map' }));
-  await screen.findByRole('combobox', { name: 'Run mission map file' });
-  fireEvent.click(screen.getByRole('button', { name: 'Load' }));
+  const navigateLoadDialog = await screen.findByRole('dialog', { name: 'Load Map' });
+  expect(within(navigateLoadDialog).getAllByRole('combobox')).toHaveLength(1);
+  fireEvent.click(within(navigateLoadDialog).getByRole('button', { name: 'Load' }));
   await waitFor(() => expect(screen.getByRole('button', { name: 'Localize' })).toBeEnabled());
   expect(screen.getByRole('tab', { name: 'Navigate' })).toHaveAttribute('aria-selected', 'true');
   expect(screen.getByRole('tab', { name: 'Run' })).toHaveAttribute('aria-selected', 'false');
@@ -5679,10 +5844,10 @@ test('drives to a clicked goal from the Navigate stage', async () => {
     { timeout: 5000 },
   );
 
-  // Run <-> Navigate share the loaded session: switching between them must
-  // not invalidate the map snapshot or localization.
+  // Run requires its own mission load and must not borrow Navigate's map-only
+  // readiness. Returning to Navigate still preserves its map and localization.
   fireEvent.click(screen.getByRole('tab', { name: 'Run' }));
-  await waitFor(() => expect(screen.getByRole('button', { name: 'Localize' })).toBeEnabled());
+  expect(screen.getByRole('button', { name: 'Localize' })).toBeDisabled();
   fireEvent.click(screen.getByRole('tab', { name: 'Navigate' }));
   await waitFor(() => expect(screen.getByRole('button', { name: 'Set Goal' })).toBeEnabled());
 
@@ -5750,8 +5915,9 @@ test('reports a non-succeeded navigate goal as failed', async () => {
 
   fireEvent.click(screen.getByRole('tab', { name: 'Navigate' }));
   fireEvent.click(screen.getByRole('button', { name: 'Load Map' }));
-  await screen.findByRole('combobox', { name: 'Run mission map file' });
-  fireEvent.click(screen.getByRole('button', { name: 'Load' }));
+  const navigateLoadDialog = await screen.findByRole('dialog', { name: 'Load Map' });
+  expect(within(navigateLoadDialog).getAllByRole('combobox')).toHaveLength(1);
+  fireEvent.click(within(navigateLoadDialog).getByRole('button', { name: 'Load' }));
   await waitFor(() => expect(screen.getByRole('button', { name: 'Localize' })).toBeEnabled());
   fireEvent.click(screen.getByRole('button', { name: 'Localize' }));
   await waitFor(() => expect(latestMapViewerProps().interactionMode).toBe('initial'));
