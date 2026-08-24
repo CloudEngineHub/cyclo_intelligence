@@ -5174,6 +5174,238 @@ test('lists the mission route waypoints in the run session panel', async () => {
   expect(within(waypointList).getByText('Return to Kitchen')).toBeInTheDocument();
 });
 
+test('clears the loaded Run map and mission snapshot when navigation stops', async () => {
+  const latestMapViewerProps = () => (
+    mockMapViewer.mock.calls[mockMapViewer.mock.calls.length - 1][0]
+  );
+  let navigationUp = false;
+  getServiceStatus.mockImplementation(() => Promise.resolve(
+    navigationUp ? { is_up: true, mode: 'nav' } : { is_up: false, mode: 'idle' },
+  ));
+  startNavigation.mockImplementation(() => {
+    navigationUp = true;
+    return Promise.resolve({ ok: true, message: 'started' });
+  });
+  let resolveStopNavigation;
+  stopNavigation.mockImplementation(() => {
+    navigationUp = false;
+    return new Promise((resolve) => {
+      resolveStopNavigation = () => resolve({ ok: true, message: 'stopped' });
+    });
+  });
+  getPgmFiles.mockResolvedValue({
+    files: [
+      { path: 'map.pgm', name: 'map.pgm' },
+      { path: 'factory.pgm', name: 'factory.pgm' },
+    ],
+  });
+  getNavigationMissions.mockResolvedValue({
+    map_name: 'factory',
+    missions: ['inspection'],
+  });
+  getNavigationMission.mockResolvedValue({
+    exists: true,
+    map_name: 'factory',
+    mission_name: 'inspection',
+    global_bt: 'global.xml',
+    waypoints: [
+      { id: 'wp1', label: 'Kitchen', pose: { frame_id: 'map', x: 1, y: 0, yaw: 0 }, local_bt: 'locals/wp1.xml', metadata: {} },
+      { id: 'wp2', label: 'Living Room', pose: { frame_id: 'map', x: 4, y: 0, yaw: 0 }, local_bt: 'locals/wp2.xml', metadata: {} },
+    ],
+    metadata: {
+      mission_flow: {
+        nodes: [
+          { id: 'wp1', position: { x: 80, y: 72 } },
+          { id: 'wp2', position: { x: 300, y: 72 } },
+        ],
+        edges: [{ id: 'e1', source: 'wp1', target: 'wp2' }],
+      },
+    },
+  });
+
+  render(<MissionCanvasPage />);
+
+  fireEvent.click(screen.getByRole('tab', { name: 'Run' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Load Map' }));
+  const initialLoadDialog = await screen.findByRole('dialog', { name: 'Load Map' });
+  const initialMapSelect = within(initialLoadDialog).getByRole('combobox', {
+    name: 'Run mission map file',
+  });
+  await waitFor(() => expect(initialMapSelect).toHaveValue('map.pgm'));
+  fireEvent.change(initialMapSelect, { target: { value: 'factory.pgm' } });
+  await waitFor(() => expect(initialMapSelect).toHaveValue('factory.pgm'));
+  await waitFor(() => expect(within(initialLoadDialog).getByRole('combobox', {
+    name: 'Run mission file',
+  })).toHaveValue('inspection'));
+  const initialLoadButton = within(initialLoadDialog).getByRole('button', { name: 'Load' });
+  await waitFor(() => expect(initialLoadButton).toBeEnabled());
+  fireEvent.click(initialLoadButton);
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Localize' })).toBeEnabled());
+
+  const runSessionPanel = screen.getByText('Run Session').parentElement;
+  expect(within(runSessionPanel).getByText('Selected map').parentElement)
+    .toHaveTextContent('factory');
+  expect(within(runSessionPanel).getByRole('combobox', { name: 'Active mission' }))
+    .toHaveValue('inspection');
+  await waitFor(() => expect(latestMapViewerProps().map).not.toBeNull());
+  await waitFor(() => expect(latestMapViewerProps().spots).toHaveLength(2));
+  expect(latestMapViewerProps().missionRouteOrder).toEqual([
+    { id: 'wp1', order: 1 },
+    { id: 'wp2', order: 2 },
+  ]);
+  expect(screen.getByRole('list', { name: 'Mission waypoints' })).toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole('button', { name: 'Localize' }));
+  await waitFor(() => expect(startNavigation).toHaveBeenCalledWith('nav', 'factory'));
+  const stopButton = screen.getByRole('button', { name: 'Stop' });
+  await waitFor(() => expect(stopButton).toBeEnabled());
+  fireEvent.click(stopButton);
+
+  await waitFor(() => expect(stopNavigation).toHaveBeenCalledTimes(1));
+  // The supervisor shutdown can take noticeably longer than the UI status/map
+  // transition. Reset the Run snapshot as part of the click itself instead of
+  // leaving the old map, mission and progress visible until this request
+  // eventually settles (or forever when it fails).
+  expect(resolveStopNavigation).toEqual(expect.any(Function));
+  expect(within(runSessionPanel).getByText('Selected map').parentElement)
+    .toHaveTextContent('Not selected');
+  expect(within(runSessionPanel).getByRole('combobox', { name: 'Active mission' }))
+    .toHaveValue('');
+  expect(screen.queryByRole('list', { name: 'Mission waypoints' })).not.toBeInTheDocument();
+
+  await act(async () => {
+    resolveStopNavigation();
+    await Promise.resolve();
+  });
+  await waitFor(() => expect(latestMapViewerProps().map).toBeNull());
+  await waitFor(() => expect(latestMapViewerProps().spots).toEqual([]));
+  expect(latestMapViewerProps().missionRouteOrder).toEqual([]);
+  expect(screen.queryByRole('list', { name: 'Mission waypoints' })).not.toBeInTheDocument();
+  expect(within(runSessionPanel).getByText('Selected map').parentElement)
+    .toHaveTextContent('Not selected');
+  expect(within(runSessionPanel).getByRole('combobox', { name: 'Active mission' }))
+    .toHaveValue('');
+  expect(within(runSessionPanel).getByRole('combobox', { name: 'Active mission' }))
+    .toBeDisabled();
+  await waitFor(() => expect(
+    JSON.parse(window.sessionStorage.getItem('mission_canvas_session')).runMissionName,
+  ).toBe(''));
+  expect(screen.getByRole('button', { name: 'Localize' })).toBeDisabled();
+  expect(screen.getByRole('button', { name: 'Run Mission' })).toBeDisabled();
+
+  // Reset the executable snapshot, but retain the last file choice so the
+  // operator can reload the same Run map without finding it again.
+  const pgmCallsBeforeReload = getPgmFiles.mock.calls.length;
+  fireEvent.click(screen.getByRole('button', { name: 'Load Map' }));
+  const reloadDialog = await screen.findByRole('dialog', { name: 'Load Map' });
+  await waitFor(() => expect(getPgmFiles.mock.calls.length)
+    .toBeGreaterThan(pgmCallsBeforeReload));
+  await waitFor(() => expect(within(reloadDialog).getByRole('button', { name: 'Load' }))
+    .toBeEnabled());
+  expect(within(reloadDialog).getByRole('combobox', {
+    name: 'Run mission map file',
+  })).toHaveValue('factory.pgm');
+});
+
+test('clears the Run snapshot on Stop intent while retaining ownership after a lost response', async () => {
+  const latestMapViewerProps = () => (
+    mockMapViewer.mock.calls[mockMapViewer.mock.calls.length - 1][0]
+  );
+  let navigationUp = false;
+  let rejectStopNavigation;
+  getServiceStatus.mockImplementation(() => Promise.resolve(
+    navigationUp ? { is_up: true, mode: 'nav' } : { is_up: false, mode: 'idle' },
+  ));
+  startNavigation.mockImplementation(() => {
+    navigationUp = true;
+    return Promise.resolve({ ok: true, message: 'started' });
+  });
+  stopNavigation.mockImplementation(() => new Promise((_resolve, reject) => {
+    rejectStopNavigation = reject;
+  }));
+  getNavigationMissions.mockResolvedValue({
+    map_name: 'factory',
+    missions: ['inspection'],
+  });
+  getNavigationMission.mockResolvedValue({
+    exists: true,
+    map_name: 'factory',
+    mission_name: 'inspection',
+    global_bt: 'global.xml',
+    waypoints: [
+      { id: 'wp1', label: 'Kitchen', pose: { frame_id: 'map', x: 1, y: 0, yaw: 0 }, local_bt: 'locals/wp1.xml', metadata: {} },
+      { id: 'wp2', label: 'Living Room', pose: { frame_id: 'map', x: 4, y: 0, yaw: 0 }, local_bt: 'locals/wp2.xml', metadata: {} },
+    ],
+    metadata: {
+      mission_flow: {
+        nodes: [
+          { id: 'wp1', position: { x: 80, y: 72 } },
+          { id: 'wp2', position: { x: 300, y: 72 } },
+        ],
+        edges: [{ id: 'e1', source: 'wp1', target: 'wp2' }],
+      },
+    },
+  });
+
+  render(<MissionCanvasPage />);
+
+  fireEvent.click(screen.getByRole('tab', { name: 'Run' }));
+  await loadRunMapFromDialog('factory.pgm');
+  const runSessionPanel = screen.getByText('Run Session').parentElement;
+  await screen.findByRole('list', { name: 'Mission waypoints' });
+  await waitFor(() => expect(latestMapViewerProps().map).not.toBeNull());
+
+  fireEvent.click(screen.getByRole('button', { name: 'Localize' }));
+  await waitFor(() => expect(startNavigation).toHaveBeenCalledWith('nav', 'factory'));
+  const stopButton = screen.getByRole('button', { name: 'Stop' });
+  await waitFor(() => expect(stopButton).toBeEnabled());
+  await waitFor(() => expect(
+    JSON.parse(window.sessionStorage.getItem('mission_canvas_session')),
+  ).toEqual(expect.objectContaining({
+    navigationRuntimeMode: 'run',
+    runRuntimeOwned: true,
+  })));
+
+  fireEvent.click(stopButton);
+
+  await waitFor(() => expect(stopNavigation).toHaveBeenCalledTimes(1));
+  expect(rejectStopNavigation).toEqual(expect.any(Function));
+  expect(latestMapViewerProps().map).toBeNull();
+  expect(latestMapViewerProps().spots).toEqual([]);
+  expect(latestMapViewerProps().missionRouteOrder).toEqual([]);
+  expect(within(runSessionPanel).getByText('Selected map').parentElement)
+    .toHaveTextContent('Not selected');
+  expect(within(runSessionPanel).getByRole('combobox', { name: 'Active mission' }))
+    .toHaveValue('');
+  expect(within(runSessionPanel).getByRole('combobox', { name: 'Active mission' }))
+    .toBeDisabled();
+  expect(screen.queryByRole('list', { name: 'Mission waypoints' })).not.toBeInTheDocument();
+  expect(JSON.parse(window.sessionStorage.getItem('mission_canvas_session')))
+    .toEqual(expect.objectContaining({
+      navigationRuntimeMode: 'run',
+      runMissionName: '',
+      runRuntimeOwned: true,
+      runShutdownPending: false,
+    }));
+
+  await act(async () => {
+    rejectStopNavigation(new Error('Stop response lost'));
+    await Promise.resolve();
+  });
+
+  await waitFor(() => expect(screen.getByText('Status: running')).toBeInTheDocument());
+  await waitFor(() => expect(stopButton).toBeEnabled());
+  expect(JSON.parse(window.sessionStorage.getItem('mission_canvas_session')))
+    .toEqual(expect.objectContaining({
+      navigationRuntimeMode: 'run',
+      runMissionName: '',
+      runRuntimeOwned: true,
+      runShutdownPending: false,
+    }));
+  expect(screen.getByRole('button', { name: 'Localize' })).toBeDisabled();
+  expect(screen.getByRole('button', { name: 'Run Mission' })).toBeDisabled();
+});
+
 test('hides run waypoints with the map after leaving and returning to Run', async () => {
   const latestMapViewerProps = () => (
     mockMapViewer.mock.calls[mockMapViewer.mock.calls.length - 1][0]
@@ -5486,6 +5718,8 @@ test('run mission activates the BT node on demand and releases it on stop', asyn
     await Promise.resolve();
   });
   await waitFor(() => expect(latestMapViewerProps().btLayer).not.toBeNull());
+  expect(screen.getByText('Behavior running')).toBeInTheDocument();
+  expect(screen.getAllByRole('button', { name: 'Stop' })).toHaveLength(1);
   await waitFor(() => expect(latestMapViewerProps()).toMatchObject({
     showMap: true,
     showGlobalCostmap: false,

@@ -1940,8 +1940,14 @@ function RunSessionPanel({
   missionSelectDisabled,
   onMissionChange,
 }) {
-  const showProgress = runner.total > 0;
-  const showReason = (runner.status === "failed" || runner.status === "cancelled") && runner.reason;
+  // Runner progress intentionally survives a cancellation internally so it can
+  // describe the last outcome. Once the loaded Run snapshot is cleared,
+  // however, none of that previous mission belongs in the session panel.
+  const hasLoadedSnapshot = Boolean(mapName);
+  const showProgress = hasLoadedSnapshot && runner.total > 0;
+  const showReason = hasLoadedSnapshot
+    && (runner.status === "failed" || runner.status === "cancelled")
+    && runner.reason;
   const phaseLabel = RUNNER_PHASE_LABEL[runner.phase];
   return (
     <Panel title="Run Session" className="grid gap-2">
@@ -1959,6 +1965,7 @@ function RunSessionPanel({
           className="min-w-0 max-w-[11rem] h-7 px-2 text-xs font-medium"
           style={{ borderRadius: 8, color: "var(--mc-text)", backgroundColor: "var(--mc-surface-2)", border: "1px solid var(--mc-border-strong)" }}
         >
+          {missionNames.length === 0 && <option value="">Not selected</option>}
           {missionNames.map((name) => <option key={name} value={name}>{name}</option>)}
         </select>
       </label>
@@ -5242,8 +5249,18 @@ export default function MissionCanvasPage({ onBackHome = null }) {
     const mapOnly = dialogStage === STAGE_NAVIGATE;
     const requestId = runMapDialogRequestRef.current + 1;
     runMapDialogRequestRef.current = requestId;
-    const preferredRunMapName = runMapName || mapName || DEFAULT_MAP_NAME;
-    const preferredRunMissionName = runMapName ? runMissionName : missionName;
+    // A stopped Run has no active map/mission identity, but keep the picker on
+    // its last choice so restarting the same session does not require finding
+    // both files again. Picker state is separate from the cleared snapshot.
+    const preferredRunMapName = (
+      runMapName
+      || mapNameFromPgmPath(runMapPath)
+      || mapName
+      || DEFAULT_MAP_NAME
+    );
+    const preferredRunMissionName = runMapName
+      ? runMissionName
+      : runMapPath ? pendingRunMissionName : missionName;
     setRunMapDialogStage(dialogStage);
     setWorkspaceStage(dialogStage);
     setShowRunMapDialog(true);
@@ -5267,7 +5284,7 @@ export default function MissionCanvasPage({ onBackHome = null }) {
           if (runMapDialogRequestRef.current !== requestId) return;
           setRunMissionNames(available);
           setPendingRunMissionName(
-            selectedMapName === preferredRunMapName && available.includes(preferredRunMissionName)
+            available.includes(preferredRunMissionName)
               ? preferredRunMissionName
               : available[0] ?? DEFAULT_MISSION_NAME,
           );
@@ -5286,7 +5303,15 @@ export default function MissionCanvasPage({ onBackHome = null }) {
       .finally(() => {
         if (runMapDialogRequestRef.current === requestId) setRunMapBusy(false);
       });
-  }, [fetchMissionNames, mapName, missionName, runMapName, runMissionName]);
+  }, [
+    fetchMissionNames,
+    mapName,
+    missionName,
+    pendingRunMissionName,
+    runMapName,
+    runMapPath,
+    runMissionName,
+  ]);
 
   const handleRunMapChange = useCallback((nextPath) => {
     const requestId = runMapDialogRequestRef.current + 1;
@@ -5614,11 +5639,32 @@ export default function MissionCanvasPage({ onBackHome = null }) {
   const handleStopNavigation = useCallback(() => runCommand(
     "Stop",
     async () => {
+      // This handler is shared by Mapping, Design localization, Navigate, and
+      // Run. Only the Run Stop button owns the loaded mission snapshot.
+      const clearRunSnapshot = workspaceStageRef.current === STAGE_RUN;
       stopMissionRunner();
       navGoalSeqRef.current += 1;
       setNavGoalPose(null);
       setNavGoalStatus("idle");
       setInteractionMode("view");
+      if (clearRunSnapshot) {
+        // Clear the operator-facing session immediately. Supervisor shutdown
+        // may take a while (or its HTTP response may be lost after the backend
+        // already stopped), so the old mission must not linger behind a map
+        // that has already disappeared.
+        runMissionLoadGenerationRef.current += 1;
+        setMissionMapLoaded(false);
+        setRunMapName("");
+        setRunMissionName("");
+        setRunCatalog({ mapName: "", names: [] });
+        setRunSpots([]);
+        setRunMissionFlowNodes([]);
+        setRunMissionFlowEdges([]);
+        setRunMissionBtFiles({});
+        setRunMapSnapshotInvalid(true);
+        setRunPoseInitialized(false);
+        saveMissionSession({ runMissionName: "" });
+      }
       const result = await stopNavigation();
       clearLocalizationPoseCache();
       resetMappingPoseSync();
@@ -5634,6 +5680,7 @@ export default function MissionCanvasPage({ onBackHome = null }) {
         runRuntimeOwned: false,
         runShutdownPending: false,
         runShutdownRequestedAt: null,
+        ...(clearRunSnapshot ? { runMissionName: "" } : {}),
       });
       return result;
     },
@@ -6936,7 +6983,6 @@ export default function MissionCanvasPage({ onBackHome = null }) {
                   <span className="w-2 h-2 rounded-full" style={{ backgroundColor: "var(--mc-success)" }} />
                   <span className="text-[12px] font-semibold" style={{ color: "var(--mc-success)" }}>Behavior running</span>
                 </div>
-                <ActionButton active={busy === "Stop"} disabled={!!busy} onClick={handleStopNavigation} variant="danger">Stop</ActionButton>
               </div>
             </>
           ) : (
@@ -7811,7 +7857,7 @@ export default function MissionCanvasPage({ onBackHome = null }) {
               // releases a process it started itself, so this panel needs no
               // manual Activate/Deactivate controls.
               <RunSessionPanel
-                mapName={currentMapName}
+                mapName={missionMapLoaded && !runMapSnapshotInvalid ? runMapName : ""}
                 running={running}
                 runner={missionRunner}
                 poseReady={runPoseInitialized}
