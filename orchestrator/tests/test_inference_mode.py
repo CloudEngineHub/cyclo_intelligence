@@ -98,6 +98,27 @@ class InferenceModeTests(unittest.TestCase):
             ),
         )
 
+    def test_runtime_signature_changes_with_initial_pose_sync(self) -> None:
+        base = inference_runtime_signature(
+            "/models/policy", "pytorch", "", "async", 100, 15, 0.3,
+            False, 5.0,
+        )
+
+        self.assertNotEqual(
+            base,
+            inference_runtime_signature(
+                "/models/policy", "pytorch", "", "async", 100, 15, 0.3,
+                True, 5.0,
+            ),
+        )
+        self.assertNotEqual(
+            base,
+            inference_runtime_signature(
+                "/models/policy", "pytorch", "", "async", 100, 15, 0.3,
+                False, 7.5,
+            ),
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

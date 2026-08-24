@@ -38,21 +38,26 @@ class FakeControlLoop:
         self.configures = []
         self.starts = []
         self.task_instructions = []
+        self.start_result = False
+        self.start_error = None
 
     def configure(self, **kwargs) -> None:
         self.configures.append(kwargs)
 
-    def start(self, publish_to_robot=None) -> None:
+    def start(self, publish_to_robot=None) -> bool:
         self.starts.append(publish_to_robot)
+        if self.start_error is not None:
+            raise self.start_error
+        return self.start_result
 
     def set_task_instruction(self, task_instruction: str) -> None:
         self.task_instructions.append(task_instruction)
 
-    def pause(self) -> None:
-        pass
+    def pause(self) -> bool:
+        return True
 
-    def stop(self) -> None:
-        pass
+    def stop(self) -> bool:
+        return True
 
     def deconfigure(self) -> None:
         pass
@@ -153,6 +158,22 @@ class ServiceHandlerPublishModeTests(unittest.TestCase):
         self.assertEqual(loop.configures[0]["inference_hz"], 0)
         self.assertEqual(loop.configures[0]["chunk_align_window_s"], 0.0)
 
+    def test_load_configures_initial_pose_sync(self) -> None:
+        handler, _session, loop = self._handler()
+
+        response = handler.handle(SimpleNamespace(
+            command=CMD_LOAD,
+            model_path="/models/policy",
+            robot_type="ffw",
+            task_instruction="pick",
+            initial_pose_sync=True,
+            initial_pose_sync_duration_s=7.5,
+        ))
+
+        self.assertTrue(response.success)
+        self.assertTrue(loop.configures[0]["initial_pose_sync"])
+        self.assertEqual(loop.configures[0]["initial_pose_sync_duration_s"], 7.5)
+
     def test_start_applies_publish_mode(self) -> None:
         handler, _session, loop = self._handler()
         handler.handle(SimpleNamespace(
@@ -170,6 +191,43 @@ class ServiceHandlerPublishModeTests(unittest.TestCase):
 
         self.assertTrue(response.success)
         self.assertEqual(loop.starts[-1], True)
+
+    def test_start_reports_syncing_and_marks_session_running(self) -> None:
+        handler, session, loop = self._handler()
+        handler.handle(SimpleNamespace(
+            command=CMD_LOAD,
+            model_path="/models/policy",
+            robot_type="ffw",
+            task_instruction="pick",
+        ))
+        loop.start_result = True
+
+        response = handler.handle(SimpleNamespace(
+            command=CMD_START,
+            publish_to_robot=True,
+        ))
+
+        self.assertTrue(response.success)
+        self.assertEqual(response.message, "syncing")
+        self.assertTrue(session.running)
+
+    def test_failed_initial_sync_does_not_mark_session_running(self) -> None:
+        handler, session, loop = self._handler()
+        handler.handle(SimpleNamespace(
+            command=CMD_LOAD,
+            model_path="/models/policy",
+            robot_type="ffw",
+            task_instruction="pick",
+        ))
+        loop.start_error = RuntimeError("sync failed")
+
+        response = handler.handle(SimpleNamespace(
+            command=CMD_START,
+            publish_to_robot=True,
+        ))
+
+        self.assertFalse(response.success)
+        self.assertFalse(session.running)
 
     def test_resume_applies_publish_mode(self) -> None:
         handler, _session, loop = self._handler()

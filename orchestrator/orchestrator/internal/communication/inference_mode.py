@@ -52,6 +52,8 @@ def inference_runtime_signature(
     control_hz: int,
     inference_hz: int,
     chunk_align_window_s: float,
+    initial_pose_sync: bool = False,
+    initial_pose_sync_duration_s: float = 5.0,
 ) -> tuple:
     """Return the LOAD-only values that determine policy runtime reuse."""
     return (
@@ -62,6 +64,8 @@ def inference_runtime_signature(
         control_hz,
         inference_hz,
         chunk_align_window_s,
+        initial_pose_sync,
+        initial_pose_sync_duration_s,
     )
 
 

@@ -379,6 +379,8 @@ class ContainerServiceClient:
         control_hz: int = 0,
         inference_hz: int = 0,
         chunk_align_window_s: float = 0.0,
+        initial_pose_sync: bool = False,
+        initial_pose_sync_duration_s: float = 5.0,
         timeout_sec: Optional[float] = None,
     ) -> ServiceResponse:
         """Call /{prefix}/inference_command (InferenceCommand.srv).
@@ -421,6 +423,12 @@ class ContainerServiceClient:
         if hasattr(request, "chunk_align_window_s"):
             request.chunk_align_window_s = _positive_float_or_zero(
                 chunk_align_window_s
+            )
+        if hasattr(request, "initial_pose_sync"):
+            request.initial_pose_sync = bool(initial_pose_sync)
+        if hasattr(request, "initial_pose_sync_duration_s"):
+            request.initial_pose_sync_duration_s = float(
+                initial_pose_sync_duration_s
             )
 
         if timeout_sec is None:

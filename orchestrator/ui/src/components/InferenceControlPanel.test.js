@@ -127,6 +127,125 @@ describe('InferenceControlPanel deploy safety', () => {
     });
   });
 
+  test('shows the configured initial pose sync duration in the robot warning', async () => {
+    renderPanel({
+      inferenceMode: 'robot',
+      taskOverrides: {
+        initialPoseSync: true,
+        initialPoseSyncDurationS: 7.5,
+      },
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /start inference/i }));
+
+    expect(await screen.findByText('Initial Pose Sync: 7.5 s')).toBeInTheDocument();
+  });
+
+  test('resumes a regular robot session without another deploy warning', async () => {
+    const { store, sendRecordCommand } = renderPanel({
+      inferenceMode: 'robot',
+      taskOverrides: {
+        initialPoseSync: true,
+        initialPoseSyncDurationS: 10.0,
+      },
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /start inference/i }));
+    fireEvent.click(await screen.findByRole('button', { name: /^Real Robot Deploy$/i }));
+    await waitFor(() => {
+      expect(sendRecordCommand).toHaveBeenCalledWith('start_inference', {
+        inferenceMode: 'robot',
+      });
+    });
+
+    act(() => {
+      store.dispatch(setInferenceStatus({ inferencePhase: InferencePhase.INFERENCING }));
+    });
+    act(() => {
+      store.dispatch(setInferenceStatus({ inferencePhase: InferencePhase.PAUSED }));
+    });
+    sendRecordCommand.mockClear();
+
+    fireEvent.click(screen.getByRole('button', { name: /resume inference/i }));
+
+    await waitFor(() => {
+      expect(sendRecordCommand).toHaveBeenCalledWith('resume_inference', {
+        inferenceMode: 'robot',
+      });
+    });
+    expect(screen.queryByRole('dialog', { name: /real robot deploy/i }))
+      .not.toBeInTheDocument();
+  });
+
+  test('resumes an interrupted sync without another deploy warning', async () => {
+    const { store, sendRecordCommand } = renderPanel({
+      inferenceMode: 'robot',
+      taskOverrides: {
+        initialPoseSync: true,
+        initialPoseSyncDurationS: 10.0,
+      },
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /start inference/i }));
+    fireEvent.click(await screen.findByRole('button', { name: /^Real Robot Deploy$/i }));
+    await waitFor(() => {
+      expect(sendRecordCommand).toHaveBeenCalledWith('start_inference', {
+        inferenceMode: 'robot',
+      });
+    });
+
+    act(() => {
+      store.dispatch(setInferenceStatus({ inferencePhase: InferencePhase.SYNCING }));
+    });
+    act(() => {
+      store.dispatch(setInferenceStatus({ inferencePhase: InferencePhase.PAUSED }));
+    });
+    sendRecordCommand.mockClear();
+
+    fireEvent.click(screen.getByRole('button', { name: /resume inference/i }));
+
+    await waitFor(() => {
+      expect(sendRecordCommand).toHaveBeenCalledWith('resume_inference', {
+        inferenceMode: 'robot',
+      });
+    });
+    expect(screen.queryByRole('dialog', { name: /real robot deploy/i }))
+      .not.toBeInTheDocument();
+  });
+
+  test('rejects an invalid initial pose sync duration before robot confirmation', async () => {
+    const { sendRecordCommand } = renderPanel({
+      inferenceMode: 'robot',
+      taskOverrides: {
+        initialPoseSync: true,
+        initialPoseSyncDurationS: 0.5,
+      },
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /start inference/i }));
+
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith(
+        'Initial Pose Sync duration must be between 1 and 60 seconds'
+      );
+    });
+    expect(screen.queryByRole('dialog', { name: /real robot deploy/i }))
+      .not.toBeInTheDocument();
+    expect(sendRecordCommand).not.toHaveBeenCalled();
+  });
+
+  test('keeps Stop and Clear enabled while initial pose sync is active', () => {
+    renderPanel({
+      inferenceMode: 'robot',
+      inferencePhase: InferencePhase.SYNCING,
+    });
+
+    expect(screen.getByRole('button', { name: /start inference/i })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /pause inference/i })).toBeEnabled();
+    expect(screen.getByRole('button', { name: /unload model/i })).toBeEnabled();
+    expect(screen.getByText('Synchronizing initial robot pose...')).toBeInTheDocument();
+  });
+
   test('can switch the pending start to 3D Sim Deploy from the warning', async () => {
     const { store, sendRecordCommand } = renderPanel({ inferenceMode: 'robot' });
 

@@ -216,6 +216,33 @@ class TestContainerServiceClient(unittest.TestCase):
         self.assertEqual(request.inference_hz, 0)
         self.assertEqual(request.chunk_align_window_s, 0.0)
 
+    def test_12_initial_pose_sync_fields_are_sent_on_load(self):
+        """Test LOAD forwards initial-pose synchronization settings."""
+        from orchestrator.internal.communication.container_service_client import (
+            ContainerServiceClient,
+            ServiceResponse,
+        )
+
+        client = ContainerServiceClient(node=None, service_prefix="/lerobot")
+        captured = {}
+
+        def capture_call(_client, request, _service_name, **_kwargs):
+            captured["request"] = request
+            return ServiceResponse(True, "ok", {}, "")
+
+        client._call_service = capture_call
+        result = client.inference_command(
+            ContainerServiceClient.CMD_LOAD,
+            initial_pose_sync=True,
+            initial_pose_sync_duration_s=7.5,
+        )
+
+        self.assertTrue(result.success)
+        self.assertTrue(captured["request"].initial_pose_sync)
+        self.assertEqual(
+            captured["request"].initial_pose_sync_duration_s,
+            7.5,
+        )
 
 
 class TestServiceResponse(unittest.TestCase):
