@@ -1488,7 +1488,7 @@ function ConfirmDialog({
 }) {
   if (!open) return null;
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center px-4" role="dialog" aria-modal="true" aria-labelledby="mission-confirm-title"
+    <div className="fixed inset-0 z-[60] flex items-center justify-center px-4" role="dialog" aria-modal="true" aria-labelledby="mission-confirm-title"
       style={{ backgroundColor: "rgba(28,26,23,0.45)", backdropFilter: "blur(3px)" }}>
       <div
         className="w-full max-w-sm grid gap-4 p-5"
@@ -5034,19 +5034,28 @@ export default function MissionCanvasPage({ onBackHome = null }) {
 
   const resolveUnsavedDialog = useCallback(async (mode) => {
     const action = pendingGuardActionRef.current;
-    pendingGuardActionRef.current = null;
-    setShowUnsavedDialog(false);
-    if (!action) return;
+    if (!action) {
+      setShowUnsavedDialog(false);
+      return;
+    }
     if (mode === "discard") {
+      pendingGuardActionRef.current = null;
+      setShowUnsavedDialog(false);
       clearDesignDirty();
       action();
       return;
     }
     if (mode === "save") {
       await saveDesignMission(missionName);
-      // saveDesignMission clears the ref on success; a failed save keeps the
-      // edits (and the dirty flag) so the action does not proceed.
-      if (!designDirtyRef.current) action();
+      // saveDesignMission clears the dirty ref on success; a failed save keeps the
+      // edits (and the dirty flag) so the prompt remains available to retry or
+      // cancel. Keeping it open also prevents the suspended Load dialog from
+      // resurfacing while the save is still in flight.
+      if (!designDirtyRef.current) {
+        pendingGuardActionRef.current = null;
+        setShowUnsavedDialog(false);
+        action();
+      }
     }
   }, [clearDesignDirty, missionName, saveDesignMission]);
 
@@ -6444,7 +6453,7 @@ export default function MissionCanvasPage({ onBackHome = null }) {
         }}
       />
       <LoadMapDialog
-        open={showDesignMapDialog}
+        open={showDesignMapDialog && !showUnsavedDialog}
         files={designMapFiles}
         selectedPath={pendingDesignMapPath}
         missionNames={designMissionNames}

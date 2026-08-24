@@ -1146,6 +1146,78 @@ test('starts a fresh mission and guards unsaved changes', async () => {
   await waitFor(() => expect(latestMapViewerProps().spots).toEqual([]));
 });
 
+test('temporarily replaces Design Load Map with unsaved confirmation', async () => {
+  const latestMapViewerProps = () => (
+    mockMapViewer.mock.calls[mockMapViewer.mock.calls.length - 1][0]
+  );
+  getPgmFiles.mockResolvedValue({
+    files: [
+      { path: 'factory.pgm', name: 'factory.pgm' },
+      { path: 'warehouse.pgm', name: 'warehouse.pgm' },
+    ],
+  });
+  getNavigationMissions.mockImplementation((mapName) => Promise.resolve({
+    map_name: mapName,
+    missions: ['default'],
+  }));
+  getNavigationMission.mockImplementation((mapName) => Promise.resolve({
+    exists: true,
+    revision: 0,
+    map_name: mapName,
+    mission_name: 'default',
+    global_bt: 'global.xml',
+    waypoints: [],
+    metadata: {},
+  }));
+
+  render(<MissionCanvasPage />);
+  fireEvent.click(screen.getByRole('tab', { name: 'Design' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Load Map' }));
+  const initialMapSelect = await screen.findByRole('combobox', {
+    name: 'Design mission map file',
+  });
+  await waitFor(() => expect(initialMapSelect).toHaveValue('factory.pgm'));
+  fireEvent.click(screen.getByRole('button', { name: 'Load' }));
+  await waitFor(() => expect(latestMapViewerProps().map).not.toBeNull());
+
+  fireEvent.click(screen.getByRole('button', { name: 'Create Waypoint' }));
+  fireEvent.click(screen.getByRole('button', { name: 'On Map' }));
+  await act(async () => {
+    await latestMapViewerProps().onMapPose(1, 2, 0.25);
+  });
+  await waitFor(() => expect(latestMapViewerProps().spots).toHaveLength(1));
+
+  fireEvent.click(screen.getByRole('button', { name: 'Load Map' }));
+  const pendingMapSelect = await screen.findByRole('combobox', {
+    name: 'Design mission map file',
+  });
+  fireEvent.change(pendingMapSelect, { target: { value: 'warehouse.pgm' } });
+  await waitFor(() => expect(pendingMapSelect).toHaveValue('warehouse.pgm'));
+  fireEvent.click(screen.getByRole('button', { name: 'Load' }));
+
+  const unsavedDialog = screen.getByRole('dialog', { name: 'Unsaved changes' });
+  expect(screen.getAllByRole('dialog')).toEqual([unsavedDialog]);
+  expect(screen.queryByRole('dialog', { name: 'Load Map' })).not.toBeInTheDocument();
+
+  fireEvent.click(within(unsavedDialog).getByRole('button', { name: 'Cancel' }));
+  expect(screen.queryByRole('dialog', { name: 'Unsaved changes' })).not.toBeInTheDocument();
+  const restoredLoadDialog = screen.getByRole('dialog', { name: 'Load Map' });
+  expect(screen.getAllByRole('dialog')).toEqual([restoredLoadDialog]);
+  expect(within(restoredLoadDialog).getByRole('combobox', {
+    name: 'Design mission map file',
+  })).toHaveValue('warehouse.pgm');
+
+  fireEvent.click(within(restoredLoadDialog).getByRole('button', { name: 'Load' }));
+  const repeatedUnsavedDialog = screen.getByRole('dialog', { name: 'Unsaved changes' });
+  expect(screen.getAllByRole('dialog')).toEqual([repeatedUnsavedDialog]);
+  expect(screen.queryByRole('dialog', { name: 'Load Map' })).not.toBeInTheDocument();
+  fireEvent.click(within(repeatedUnsavedDialog).getByRole('button', { name: 'Discard' }));
+
+  await waitFor(() => expect(getNavigationMission).toHaveBeenCalledWith('warehouse', ''));
+  await waitFor(() => expect(getPgmImage).toHaveBeenCalledWith('warehouse.pgm'));
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+});
+
 test('renames the active mission from the rail', async () => {
   getPgmFiles.mockResolvedValue({
     files: [{ path: 'factory.pgm', name: 'factory.pgm' }],
