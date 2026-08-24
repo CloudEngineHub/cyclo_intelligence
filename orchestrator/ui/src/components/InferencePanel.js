@@ -76,12 +76,14 @@ const InferencePanel = () => {
       : 'async';
   const isGrootModel = info.serviceType === 'groot';
   const isTensorRtEnabled = info.accelerationMode === 'tensorrt_dit';
+  const initialPoseSyncEnabled = Boolean(info.initialPoseSync);
   const trtTaskInstruction = (info.taskInstruction?.[0] || '').trim();
   const isModeSwitchLocked =
     inferenceStatus.inferencePhase === InferencePhase.LOADING;
   const isModelActive = [
     InferencePhase.INFERENCING,
     InferencePhase.PAUSED,
+    InferencePhase.SYNCING,
   ].includes(inferenceStatus.inferencePhase);
   const disabled = isTaskRunning;
   const [isEditable, setIsEditable] = useState(!disabled);
@@ -591,6 +593,57 @@ const InferencePanel = () => {
           </button>
         </div>
       </div>
+
+      <div className={clsx('flex', 'items-center', 'mb-2.5')}>
+        <div className={clsx(classLabel, 'flex', 'items-center', 'gap-1')}>
+          <Tooltip
+            content="Move slowly to the first predicted robot pose before inference."
+            position="bottom"
+          >
+            <MdInfoOutline className="text-gray-400 hover:text-gray-600 cursor-help" size={14} />
+          </Tooltip>
+          <span>Initial Pose Sync</span>
+        </div>
+        <label className={clsx('flex', 'items-center', 'gap-2', 'text-sm')}>
+          <input
+            type="checkbox"
+            className={clsx('w-4 h-4', {
+              'cursor-not-allowed opacity-50': !isEditable || !isRobotMode,
+              'cursor-pointer': isEditable && isRobotMode,
+            })}
+            checked={initialPoseSyncEnabled}
+            onChange={(e) => handleChange('initialPoseSync', e.target.checked)}
+            disabled={!isEditable || !isRobotMode}
+            aria-label="Initial Pose Sync"
+          />
+          <span className="text-gray-500">Enable</span>
+        </label>
+      </div>
+
+      {initialPoseSyncEnabled && (
+        <div className={clsx('flex', 'items-center', 'mb-2.5')}>
+          <span className={classLabel}>Duration (s)</span>
+          <input
+            className={clsx(classTextInput, {
+              'bg-gray-100 cursor-not-allowed': !isEditable || !isRobotMode,
+            })}
+            type="number"
+            step="0.5"
+            min="1"
+            max="60"
+            value={info.initialPoseSyncDurationS ?? 5.0}
+            onChange={(e) => {
+              const value = e.target.value;
+              handleChange(
+                'initialPoseSyncDurationS',
+                value === '' ? '' : Number(value)
+              );
+            }}
+            disabled={!isEditable || !isRobotMode}
+            aria-label="Initial Pose Sync duration"
+          />
+        </div>
+      )}
 
       <div className={clsx('flex', 'items-center', 'mb-2.5')}>
         <div className={clsx(classLabel, 'flex', 'items-center', 'gap-1')}>

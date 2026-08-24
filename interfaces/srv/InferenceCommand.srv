@@ -43,6 +43,10 @@ string acceleration_mode
 # Optional engine file/directory. Empty lets the backend use its model-local
 # default path.
 string acceleration_engine_path
+# LOAD-time initial-pose synchronization settings. Ignored unless
+# publish_to_robot is true.
+bool initial_pose_sync
+float64 initial_pose_sync_duration_s
 ---
 bool success
 string message

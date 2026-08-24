@@ -65,6 +65,8 @@ bool publish_to_robot
 string action_request_mode
 string acceleration_mode
 string acceleration_engine_path
+bool initial_pose_sync
+float64 initial_pose_sync_duration_s
 """
 
 INFERENCE_COMMAND_RESPONSE_DEF = """\

@@ -3,6 +3,8 @@ import PageType from '../constants/pageType';
 import {
   getInferenceTaskInfoKey,
   hasRosTaskInfoPayload,
+  normalizeInferenceTaskInfo,
+  rosTaskInfoToUiTaskInfo,
   shouldApplyServerTaskInfoToPage,
 } from './taskInfoSync';
 
@@ -92,5 +94,25 @@ describe('taskInfoSync echo routing', () => {
       inferenceHz: 15,
       chunkAlignWindowS: 0.3,
     }));
+  });
+
+  test('preserves initial pose sync settings across ROS task info conversion', () => {
+    const converted = rosTaskInfoToUiTaskInfo({
+      task_type: 'inference',
+      initial_pose_sync: true,
+      initial_pose_sync_duration_s: 7.5,
+    });
+
+    expect(normalizeInferenceTaskInfo(converted)).toMatchObject({
+      initialPoseSync: true,
+      initialPoseSyncDurationS: 7.5,
+    });
+  });
+
+  test('uses the initial pose sync default for legacy ROS task info', () => {
+    const converted = rosTaskInfoToUiTaskInfo({ task_type: 'inference' });
+
+    expect(converted.initialPoseSync).toBe(false);
+    expect(converted.initialPoseSyncDurationS).toBe(5.0);
   });
 });

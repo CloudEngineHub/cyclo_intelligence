@@ -47,6 +47,11 @@ export const normalizeInferenceTaskInfo = (taskInfo = {}) => ({
   actionRequestMode: actionRequestModeOrDefault(taskInfo.actionRequestMode),
   accelerationMode: String(taskInfo.accelerationMode ?? 'pytorch').trim(),
   accelerationEnginePath: String(taskInfo.accelerationEnginePath ?? '').trim(),
+  initialPoseSync: Boolean(taskInfo.initialPoseSync),
+  initialPoseSyncDurationS: numberOrDefault(
+    taskInfo.initialPoseSyncDurationS ?? 5.0,
+    5.0
+  ),
 });
 
 export const getRecordTaskInfoKey = (taskInfo = {}) =>
@@ -68,6 +73,11 @@ export const rosTaskInfoToUiTaskInfo = (taskInfo = {}) => ({
   actionRequestMode: actionRequestModeOrDefault(taskInfo.action_request_mode),
   accelerationMode: taskInfo.acceleration_mode || 'pytorch',
   accelerationEnginePath: taskInfo.acceleration_engine_path || '',
+  initialPoseSync: Boolean(taskInfo.initial_pose_sync),
+  initialPoseSyncDurationS: numberOrDefault(
+    taskInfo.initial_pose_sync_duration_s,
+    5.0
+  ),
   userId: taskInfo.user_id || '',
   controlHz: taskInfo.control_hz || 100,
   inferenceHz: taskInfo.inference_hz || 15,

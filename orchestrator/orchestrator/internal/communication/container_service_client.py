@@ -359,6 +359,8 @@ class ContainerServiceClient:
         action_request_mode: str = "async",
         acceleration_mode: str = "",
         acceleration_engine_path: str = "",
+        initial_pose_sync: bool = False,
+        initial_pose_sync_duration_s: float = 5.0,
         timeout_sec: Optional[float] = None,
     ) -> ServiceResponse:
         """Call /{prefix}/inference_command (InferenceCommand.srv).
@@ -391,6 +393,12 @@ class ContainerServiceClient:
             request.acceleration_mode = str(acceleration_mode or "")
         if hasattr(request, "acceleration_engine_path"):
             request.acceleration_engine_path = str(acceleration_engine_path or "")
+        if hasattr(request, "initial_pose_sync"):
+            request.initial_pose_sync = bool(initial_pose_sync)
+        if hasattr(request, "initial_pose_sync_duration_s"):
+            request.initial_pose_sync_duration_s = float(
+                initial_pose_sync_duration_s
+            )
 
         if timeout_sec is None:
             timeout_sec = (

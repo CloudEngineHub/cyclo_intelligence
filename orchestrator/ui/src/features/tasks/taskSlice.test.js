@@ -47,6 +47,8 @@ describe('taskSlice task ownership', () => {
     expect(inferenceInfo.inferenceMode).toBe('simulation');
     expect(inferenceInfo.actionRequestMode).toBe('async');
     expect(inferenceInfo.accelerationMode).toBe('pytorch');
+    expect(inferenceInfo.initialPoseSync).toBe(false);
+    expect(inferenceInfo.initialPoseSyncDurationS).toBe(5.0);
   });
 
   test('sets inference mode without changing record identity', () => {
