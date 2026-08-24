@@ -2479,76 +2479,6 @@ function WaypointOptionButton({ active = false, disabled = false, onClick, child
   );
 }
 
-function MissionRouteInsertControl({
-  label,
-  options,
-  open,
-  disabled = false,
-  onToggle,
-  onInsert,
-}) {
-  if (!options.length) return null;
-  return (
-    <div className="grid gap-1 py-0.5 pl-[34px] pr-1">
-      <button
-        type="button"
-        aria-label={label}
-        aria-expanded={open}
-        disabled={disabled}
-        onClick={onToggle}
-        className="h-6 justify-self-start px-2 inline-flex items-center gap-1 text-[10.5px] font-semibold disabled:opacity-45 active:translate-y-px"
-        style={{
-          borderRadius: 999,
-          border: `1px dashed ${open ? "var(--mc-accent)" : "var(--mc-border-strong)"}`,
-          backgroundColor: open ? "var(--mc-accent-soft)" : "var(--mc-surface)",
-          color: open ? "var(--mc-accent-hover)" : "var(--mc-text-muted)",
-        }}
-      >
-        <MdAdd size={13} aria-hidden="true" />
-        Insert
-      </button>
-      {open && (
-        <div
-          role="group"
-          aria-label={`${label} options`}
-          className="max-h-36 overflow-auto grid gap-1 p-1.5"
-          style={{
-            borderRadius: 10,
-            border: "1px solid var(--mc-border-strong)",
-            backgroundColor: "var(--mc-surface)",
-            boxShadow: "var(--mc-shadow)",
-          }}
-        >
-          {options.map((spot) => {
-            const spotLabel = spot.label || spot.id;
-            return (
-              <button
-                key={spot.id}
-                type="button"
-                aria-label={`Insert ${spotLabel} here`}
-                disabled={disabled}
-                onClick={() => onInsert(spot.id)}
-                className="min-h-8 px-2.5 text-left text-[11.5px] font-semibold disabled:opacity-45"
-                style={{
-                  borderRadius: 8,
-                  border: "1px solid var(--mc-border)",
-                  backgroundColor: "var(--mc-surface-2)",
-                  color: "var(--mc-text)",
-                }}
-              >
-                <span className="block truncate">{spotLabel}</span>
-              </button>
-            );
-          })}
-          <div className="px-1 pt-0.5 text-[9.5px]" style={{ color: "var(--mc-text-subtle)" }}>
-            Or click an unused waypoint on the map.
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
 // The Map Edit HUD groups the editor tools behind two icons: "Map Edit"
 // (pixel tools + brush) and "Add Label" (area tools), each opening a
 // text-button popover below — the Design HUD's waypoint-options idiom.
@@ -2692,7 +2622,6 @@ export default function MissionCanvasPage({ onBackHome = null }) {
   const localBtFileOperationRef = useRef(0);
   const waypointCreatePendingRef = useRef(false);
   const routeMutationLockRef = useRef(false);
-  const routeModeBeforeInsertionRef = useRef(false);
   const saveDesignMissionRef = useRef(null);
   const [deletedMissionBtPaths, setDeletedMissionBtPaths] = useState([]);
   const [missionFlowNodes, setMissionFlowNodes] = useState([]);
@@ -2712,7 +2641,6 @@ export default function MissionCanvasPage({ onBackHome = null }) {
   const [runMissionFlowEdges, setRunMissionFlowEdges] = useState([]);
   const [missionRouteMode, setMissionRouteMode] = useState(false);
   const [missionRouteSourceId, setMissionRouteSourceId] = useState("");
-  const [missionRouteInsertIndex, setMissionRouteInsertIndex] = useState(null);
   const [missionBtLoadingPath, setMissionBtLoadingPath] = useState("");
   const [busy, setBusy] = useState("");
   // Status strings are no longer surfaced anywhere (the header status line
@@ -2925,7 +2853,6 @@ export default function MissionCanvasPage({ onBackHome = null }) {
           : "",
       );
       setMissionRouteSourceId("");
-      setMissionRouteInsertIndex(null);
       setEditingSpotId("");
       setEditingSpotLabel("");
       setBtLayerSpotId("");
@@ -3253,14 +3180,6 @@ export default function MissionCanvasPage({ onBackHome = null }) {
     [designDocumentReady, missionRouteTreeSpots],
   );
   const designPanelRouteClosed = designDocumentReady && missionRouteClosed;
-  const designPanelRouteIds = useMemo(
-    () => designPanelRouteSpots.map((spot) => spot.id),
-    [designPanelRouteSpots],
-  );
-  const designPanelAvailableRouteSpots = useMemo(() => {
-    const routeIds = new Set(designPanelRouteIds);
-    return designPanelSpots.filter((spot) => !routeIds.has(spot.id));
-  }, [designPanelRouteIds, designPanelSpots]);
   const selectedBtLayerSpot = useMemo(
     () => visibleSpots.find((spot) => spot.id === btLayerSpotId) || null,
     [btLayerSpotId, visibleSpots],
@@ -4001,7 +3920,6 @@ export default function MissionCanvasPage({ onBackHome = null }) {
     }
     setMissionRouteMode(false);
     setMissionRouteSourceId("");
-    setMissionRouteInsertIndex(null);
   }, [designMapAvailable, missionWorkspaceActive, workspaceStage]);
 
   const layerToggles = useMemo(() => (
@@ -4751,7 +4669,6 @@ export default function MissionCanvasPage({ onBackHome = null }) {
     setInteractionMode("view");
     setMissionRouteMode(false);
     setMissionRouteSourceId("");
-    setMissionRouteInsertIndex(null);
     setBtLayerSpotId("");
     setDesignMapReloadToken((value) => value + 1);
     setMissionName(pendingDesignMissionName);
@@ -5089,7 +5006,6 @@ export default function MissionCanvasPage({ onBackHome = null }) {
     setDeletedMissionBtPaths([]);
     setMissionRouteMode(false);
     setMissionRouteSourceId("");
-    setMissionRouteInsertIndex(null);
     setEditingSpotId("");
     setEditingSpotLabel("");
     clearDesignDirty();
@@ -5450,7 +5366,6 @@ export default function MissionCanvasPage({ onBackHome = null }) {
     setBtLayerSpotId("");
     setMissionRouteMode(false);
     setMissionRouteSourceId("");
-    setMissionRouteInsertIndex(null);
     designDirtyRef.current = false;
     setDesignDirty(false);
     setDesignMapBusy(true);
@@ -5720,7 +5635,6 @@ export default function MissionCanvasPage({ onBackHome = null }) {
     setShowWaypointOptions(false);
     setMissionRouteMode(false);
     setMissionRouteSourceId("");
-    setMissionRouteInsertIndex(null);
     setInteractionMode("view");
     setBtLayerSpotId(spotId);
     setMessage(`Editing ${spot.label || spot.id} local BT`);
@@ -5746,11 +5660,11 @@ export default function MissionCanvasPage({ onBackHome = null }) {
     setMissionRouteSourceId(
       !keepClosed && validIds.length > 1 ? validIds[validIds.length - 1] : "",
     );
-    setMissionRouteInsertIndex(null);
     return true;
   }, [busy, markDesignDirty, missionRouteClosed, missionRouteTreeSpots, visibleSpots]);
 
-  const handleInsertRouteSpot = useCallback((spotId, insertIndex) => {
+  const handleAppendMissionRouteSpot = useCallback((spotId) => {
+    if (!missionRouteMode || routeMutationLockRef.current || busy) return false;
     const spot = visibleSpots.find((item) => item.id === spotId);
     if (!spot) return false;
     const currentIds = missionRouteTreeSpots.map((item) => item.id);
@@ -5758,71 +5672,21 @@ export default function MissionCanvasPage({ onBackHome = null }) {
       setMessage(`${spot.label || spot.id} is already in the route`);
       return false;
     }
-    const safeIndex = Math.max(0, Math.min(Number(insertIndex), currentIds.length));
-    const nextIds = [
-      ...currentIds.slice(0, safeIndex),
-      spotId,
-      ...currentIds.slice(safeIndex),
-    ];
-    if (!handleSetMissionRouteOrder(nextIds)) return false;
-    const restoreRouteMode = missionRouteInsertIndex !== null;
     setSelectedSpotId(spotId);
     setSelectedBehaviorNodeId("");
-    setMissionRouteInsertIndex(null);
-    if (restoreRouteMode) {
-      setMissionRouteMode(routeModeBeforeInsertionRef.current);
+    if (currentIds.length === 0) {
+      setMissionRouteSourceId(spotId);
+      setMessage(`Route start: ${spot.label || spot.id}`);
+      return true;
     }
-    setMissionRouteSourceId(
-      restoreRouteMode && !routeModeBeforeInsertionRef.current ? "" : spotId,
-    );
+    if (!handleSetMissionRouteOrder([...currentIds, spotId])) return false;
     setMessage(`${spot.label || spot.id} added to route`);
     return true;
   }, [
-    handleSetMissionRouteOrder,
-    missionRouteInsertIndex,
-    missionRouteTreeSpots,
-    visibleSpots,
-  ]);
-
-  const handleArmRouteInsertion = useCallback((insertIndex) => {
-    if (
-      routeMutationLockRef.current
-      || busy
-      || !designMapAvailable
-      || !designPanelAvailableRouteSpots.length
-    ) return;
-    cancelPendingDesignLocalization();
-    setPendingBehaviorNodeTag("");
-    setShowWaypointOptions(false);
-    setBtLayerSpotId("");
-    setInteractionMode("view");
-    if (missionRouteInsertIndex === insertIndex) {
-      setMissionRouteInsertIndex(null);
-      setMissionRouteSourceId("");
-      setMissionRouteMode(routeModeBeforeInsertionRef.current);
-      setMessage("Route insertion cancelled");
-      return;
-    }
-    if (missionRouteInsertIndex === null) {
-      routeModeBeforeInsertionRef.current = missionRouteMode;
-    }
-    setMissionRouteMode(true);
-    const routeIds = designPanelRouteSpots.map((spot) => spot.id);
-    const anchorId = insertIndex > 0 ? routeIds[insertIndex - 1] || "" : "";
-    const anchor = visibleSpots.find((spot) => spot.id === anchorId);
-    setMissionRouteInsertIndex(insertIndex);
-    setMissionRouteSourceId(anchorId);
-    setMessage(anchor
-      ? `Choose a waypoint to insert after ${anchor.label || anchor.id}`
-      : "Choose a waypoint to insert at the start of the route");
-  }, [
     busy,
-    cancelPendingDesignLocalization,
-    designMapAvailable,
-    designPanelAvailableRouteSpots,
-    designPanelRouteSpots,
-    missionRouteInsertIndex,
+    handleSetMissionRouteOrder,
     missionRouteMode,
+    missionRouteTreeSpots,
     visibleSpots,
   ]);
 
@@ -5838,16 +5702,22 @@ export default function MissionCanvasPage({ onBackHome = null }) {
     setShowWaypointOptions(false);
     setBtLayerSpotId("");
     setInteractionMode("view");
-    setMissionRouteInsertIndex(null);
     setMissionRouteMode((value) => {
       const next = !value;
-      if (!next) setMissionRouteSourceId("");
+      setMissionRouteSourceId("");
+      setMessage(next
+        ? "Click a waypoint to append it to the mission route"
+        : "Mission route editing finished");
       return next;
     });
-  }, [busy, cancelPendingDesignLocalization, designMapAvailable]);
+  }, [
+    busy,
+    cancelPendingDesignLocalization,
+    designMapAvailable,
+  ]);
 
   const handleMissionRouteSpotClick = useCallback((spotId) => {
-    if (routeMutationLockRef.current || busy) return;
+    if (!missionRouteMode || routeMutationLockRef.current || busy) return;
     const spot = visibleSpots.find((item) => item.id === spotId);
     if (!spot) return;
     setSelectedSpotId(spotId);
@@ -5858,68 +5728,41 @@ export default function MissionCanvasPage({ onBackHome = null }) {
     setBtLayerSpotId("");
     setShowWaypointOptions(false);
     setInteractionMode("view");
-    if (!missionRouteMode) return;
 
     const routeIds = missionRouteTreeSpots.map((item) => item.id);
     const targetIndex = routeIds.indexOf(spotId);
-    if (missionRouteInsertIndex !== null) {
-      if (targetIndex < 0) {
-        handleInsertRouteSpot(spotId, missionRouteInsertIndex);
-      } else {
-        setMissionRouteInsertIndex(targetIndex + 1);
-        setMissionRouteSourceId(spotId);
-        setMessage(`Choose a waypoint to insert after ${spot.label || spot.id}`);
-      }
+    if (targetIndex < 0) {
+      handleAppendMissionRouteSpot(spotId);
       return;
     }
 
-    if (!missionRouteSourceId) {
-      if (routeIds.length > 1 && targetIndex < 0) {
-        setMessage("Select a route waypoint before inserting a new waypoint");
-        return;
-      }
-      setMissionRouteSourceId(spotId);
-      setMessage(targetIndex >= 0 && routeIds.length > 1
-        ? `Insert after ${spot.label || spot.id}`
-        : `Route start: ${spot.label || spot.id}`);
-      return;
-    }
-    if (missionRouteSourceId === spotId) {
-      setMissionRouteSourceId("");
-      setMessage("Route source cleared");
-      return;
-    }
-
-    const sourceIndex = routeIds.indexOf(missionRouteSourceId);
     const sourceSpot = visibleSpots.find((item) => item.id === missionRouteSourceId);
-    if (sourceIndex >= 0 && targetIndex < 0) {
-      handleInsertRouteSpot(spotId, sourceIndex + 1);
+    const closesOpenRoute = (
+      !missionRouteClosed
+      && routeIds.length > 1
+      && missionRouteSourceId === routeIds[routeIds.length - 1]
+      && targetIndex === 0
+    );
+    if (closesOpenRoute) {
+      markDesignDirty();
+      setMissionFlowEdges(missionFlowEdgesForRouteOrder(routeIds, true));
+      setMissionRouteSourceId("");
+      setMessage(`Route closed: ${sourceSpot?.label || missionRouteSourceId} -> ${spot.label || spot.id}`);
       return;
     }
-    if (targetIndex >= 0) {
-      const closesOpenRoute = (
-        !missionRouteClosed
-        && routeIds.length > 1
-        && sourceIndex === routeIds.length - 1
-        && targetIndex === 0
-      );
-      if (closesOpenRoute) {
-        markDesignDirty();
-        setMissionFlowEdges(missionFlowEdgesForRouteOrder(routeIds, true));
-        setMissionRouteSourceId("");
-        setMissionRouteInsertIndex(null);
-        setMessage(`Route closed: ${sourceSpot?.label || missionRouteSourceId} -> ${spot.label || spot.id}`);
-        return;
-      }
+
+    if (!missionRouteClosed && targetIndex === routeIds.length - 1) {
       setMissionRouteSourceId(spotId);
-      setMessage(`Insert after ${spot.label || spot.id}`);
+      setMessage(`Route end: ${spot.label || spot.id}`);
+      return;
     }
+
+    setMessage(`${spot.label || spot.id} is already in the route`);
   }, [
     busy,
-    handleInsertRouteSpot,
+    handleAppendMissionRouteSpot,
     markDesignDirty,
     missionRouteClosed,
-    missionRouteInsertIndex,
     missionRouteMode,
     missionRouteSourceId,
     missionRouteTreeSpots,
@@ -5929,35 +5772,30 @@ export default function MissionCanvasPage({ onBackHome = null }) {
   const handleMissionRouteMapClick = useCallback(() => {
     if (!missionRouteMode) return;
     setMissionRouteSourceId("");
-    if (missionRouteInsertIndex !== null) {
-      setMissionRouteMode(routeModeBeforeInsertionRef.current);
-    }
-    setMissionRouteInsertIndex(null);
-    setMessage("Route source cleared");
-  }, [missionRouteInsertIndex, missionRouteMode]);
+    setMessage("Route selection cleared");
+  }, [missionRouteMode]);
 
   // Remove every route edge (waypoints stay).
   const handleClearMissionRoute = useCallback(() => {
-    if (routeMutationLockRef.current || busy || !missionFlowEdges.length) return;
+    if (!missionRouteMode || routeMutationLockRef.current || busy || !missionFlowEdges.length) return;
     markDesignDirty();
     setMissionFlowEdges([]);
     setMissionRouteSourceId("");
-    setMissionRouteInsertIndex(null);
     setMessage("Route cleared");
-  }, [busy, markDesignDirty, missionFlowEdges.length]);
+  }, [busy, markDesignDirty, missionFlowEdges.length, missionRouteMode]);
 
   const handleOpenMissionRouteLoop = useCallback(() => {
-    if (routeMutationLockRef.current || busy || !missionRouteClosed) return;
+    if (!missionRouteMode || routeMutationLockRef.current || busy || !missionRouteClosed) return;
     const routeIds = missionRouteTreeSpots.map((spot) => spot.id);
     if (routeIds.length < 2) return;
     markDesignDirty();
     setMissionFlowEdges(missionFlowEdgesForRouteOrder(routeIds, false));
-    setMissionRouteSourceId("");
-    setMissionRouteInsertIndex(null);
+    setMissionRouteSourceId(routeIds[routeIds.length - 1]);
     setMessage("Loop opened");
-  }, [busy, markDesignDirty, missionRouteClosed, missionRouteTreeSpots]);
+  }, [busy, markDesignDirty, missionRouteClosed, missionRouteMode, missionRouteTreeSpots]);
 
   const handleMoveRouteSpot = useCallback((spotId, direction) => {
+    if (!missionRouteMode || routeMutationLockRef.current || busy) return;
     const currentIds = missionRouteTreeSpots.map((spot) => spot.id);
     const index = currentIds.indexOf(spotId);
     const nextIndex = index + direction;
@@ -5965,18 +5803,19 @@ export default function MissionCanvasPage({ onBackHome = null }) {
     const nextIds = [...currentIds];
     [nextIds[index], nextIds[nextIndex]] = [nextIds[nextIndex], nextIds[index]];
     handleSetMissionRouteOrder(nextIds);
-  }, [handleSetMissionRouteOrder, missionRouteTreeSpots]);
+  }, [busy, handleSetMissionRouteOrder, missionRouteMode, missionRouteTreeSpots]);
 
   // Take a waypoint out of the route only — the spot itself stays. Neighbors
   // are stitched back together (and a closed loop stays closed).
   const handleRemoveRouteSpot = useCallback((spotId) => {
+    if (!missionRouteMode || routeMutationLockRef.current || busy) return;
     const currentIds = missionRouteTreeSpots.map((spot) => spot.id);
     if (!currentIds.includes(spotId)) return;
     const spot = missionRouteTreeSpots.find((item) => item.id === spotId);
     if (handleSetMissionRouteOrder(currentIds.filter((id) => id !== spotId))) {
       setMessage(`${spot?.label || spotId} removed from route`);
     }
-  }, [handleSetMissionRouteOrder, missionRouteTreeSpots]);
+  }, [busy, handleSetMissionRouteOrder, missionRouteMode, missionRouteTreeSpots]);
 
   const handleClearMapSelection = useCallback(() => {
     if (btLayerSpotId) {
@@ -6013,7 +5852,6 @@ export default function MissionCanvasPage({ onBackHome = null }) {
     setShowWaypointOptions(false);
     setMissionRouteMode(false);
     setMissionRouteSourceId("");
-    setMissionRouteInsertIndex(null);
     setInteractionMode("behavior");
     setMessage(`${tag} selected`);
   }, [cancelPendingDesignLocalization]);
@@ -6278,7 +6116,6 @@ export default function MissionCanvasPage({ onBackHome = null }) {
     setSelectedSpotId("");
     setMissionRouteMode(false);
     setMissionRouteSourceId("");
-    setMissionRouteInsertIndex(null);
     setShowWaypointOptions(false);
     setDesignPoseInitialized(false);
     clearLocalizationPoseCache();
@@ -6451,7 +6288,6 @@ export default function MissionCanvasPage({ onBackHome = null }) {
             ? remainingRouteIds[remainingRouteIds.length - 1]
             : "",
         );
-        setMissionRouteInsertIndex(null);
       }
       setDeletedMissionBtPaths((current) => ([
         ...new Set([...current, ...localBtPaths]),
@@ -6655,7 +6491,6 @@ export default function MissionCanvasPage({ onBackHome = null }) {
       setShowWaypointOptions(false);
       setMissionRouteMode(false);
       setMissionRouteSourceId("");
-      setMissionRouteInsertIndex(null);
       setBtLayerSpotId("");
       setMapEditToolsOpen(false);
       setLabelToolsOpen(false);
@@ -7655,8 +7490,6 @@ export default function MissionCanvasPage({ onBackHome = null }) {
                 {designPanelSpots.map((spot) => {
                   const selected = spot.id === selectedSpotId;
                   const editing = editingSpotId === spot.id;
-                  const routeIndex = designPanelRouteIds.indexOf(spot.id);
-                  const canAppendToRoute = designPanelRouteIds.length > 0 && routeIndex < 0;
                   return (
                     <div key={spot.id} className="grid gap-1.5 min-w-0" style={{ padding: 8, borderRadius: 12, border: `1px solid ${selected ? "var(--mc-accent)" : "var(--mc-border)"}`, backgroundColor: selected ? "var(--mc-accent-soft)" : "var(--mc-surface-2)" }}>
                       <div className="flex items-center gap-1.5 min-w-0">
@@ -7667,24 +7500,17 @@ export default function MissionCanvasPage({ onBackHome = null }) {
                             onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void handleCommitSpotRename(spot); } if (e.key === "Escape") { e.preventDefault(); handleCancelSpotRename(); } }}
                             className="h-8 flex-1 px-2 text-[13px] min-w-0" style={{ borderRadius: 8, border: "1px solid var(--mc-border-strong)", backgroundColor: "var(--mc-surface)", color: "var(--mc-text)" }} />
                         ) : (
-                          <button type="button" onClick={() => handleSelectSpot(spot.id)} onDoubleClick={() => handleStartRenameSpot(spot)}
+                          <button
+                            type="button"
+                            onClick={() => (
+                              missionRouteMode
+                                ? handleMissionRouteSpotClick(spot.id)
+                                : handleSelectSpot(spot.id)
+                            )}
+                            onDoubleClick={missionRouteMode ? undefined : () => handleStartRenameSpot(spot)}
                             className="h-8 flex-1 px-2.5 text-left text-[12.5px] font-semibold min-w-0"
                             style={{ borderRadius: 8, border: "1px solid var(--mc-border)", backgroundColor: "var(--mc-surface)", color: "var(--mc-text)" }}>
                             <span className="block truncate">{spot.label || spot.id}</span>
-                          </button>
-                        )}
-                        {canAppendToRoute && (
-                          <button
-                            type="button"
-                            aria-label={`Add ${spot.label || spot.id} to route`}
-                            title="Add to end of route"
-                            disabled={!!busy}
-                            onClick={() => handleInsertRouteSpot(spot.id, designPanelRouteIds.length)}
-                            className="h-8 shrink-0 px-2 inline-flex items-center gap-1 text-[11px] font-semibold disabled:opacity-45 active:translate-y-px"
-                            style={{ borderRadius: 8, border: "1px solid var(--mc-border-strong)", backgroundColor: "var(--mc-surface)", color: "var(--mc-accent-hover)" }}
-                          >
-                            <MdAdd size={14} aria-hidden="true" />
-                            Route
                           </button>
                         )}
                         <button
@@ -7737,7 +7563,7 @@ export default function MissionCanvasPage({ onBackHome = null }) {
                     {/* Only while a route exists — map clicks can only ADD
                         edges, so this is the sole way to discard a route (or a
                         closed loop) without deleting waypoints. */}
-                    {designDocumentReady && missionFlowEdges.length > 0 && (
+                    {missionRouteMode && designDocumentReady && missionFlowEdges.length > 0 && (
                       <button
                         type="button"
                         onClick={handleClearMissionRoute}
@@ -7754,16 +7580,6 @@ export default function MissionCanvasPage({ onBackHome = null }) {
                 </div>
                 <div className="min-h-0 overflow-auto pr-1">
                   <div className="grid gap-0">
-                    {designPanelRouteSpots.length > 0 && (
-                      <MissionRouteInsertControl
-                        label={`Insert waypoint before ${designPanelRouteSpots[0].label || designPanelRouteSpots[0].id}`}
-                        options={designPanelAvailableRouteSpots}
-                        open={missionRouteInsertIndex === 0}
-                        disabled={!!busy}
-                        onToggle={() => handleArmRouteInsertion(0)}
-                        onInsert={(spotId) => handleInsertRouteSpot(spotId, 0)}
-                      />
-                    )}
                     {designPanelRouteSpots.map((spot, index) => {
                       const selected = spot.id === selectedSpotId;
                       const routeEnd = index === designPanelRouteSpots.length - 1;
@@ -7776,11 +7592,19 @@ export default function MissionCanvasPage({ onBackHome = null }) {
                               {!last && <span className="flex-1 my-0.5" style={{ width: 2, backgroundColor: "var(--mc-border)" }} />}
                             </div>
                             <div className="flex-1 mb-2 grid grid-cols-[1fr_auto] items-center gap-2 min-w-0" style={{ padding: 10, borderRadius: 11, border: `1px solid ${selected ? "var(--mc-accent)" : "var(--mc-border)"}`, backgroundColor: selected ? "var(--mc-accent-soft)" : "var(--mc-surface-2)" }}>
-                              <button type="button" onClick={() => handleSelectSpot(spot.id)} className="min-w-0 text-left">
+                              <button
+                                type="button"
+                                onClick={() => (
+                                  missionRouteMode
+                                    ? handleMissionRouteSpotClick(spot.id)
+                                    : handleSelectSpot(spot.id)
+                                )}
+                                className="min-w-0 text-left"
+                              >
                                 <span className="block truncate text-[12.5px] font-semibold" style={{ color: "var(--mc-text)" }}>{spot.label || spot.id}</span>
                                 <span className="block truncate text-[10px] font-mono" style={{ color: "var(--mc-text-subtle)" }}>{localBtPathForSpot(spot)}</span>
                               </button>
-                              <div className="flex items-center gap-1">
+                              {missionRouteMode && <div className="flex items-center gap-1">
                                 <button type="button" aria-label={`Move ${spot.label || spot.id} up`} disabled={!!busy || index === 0} onClick={() => handleMoveRouteSpot(spot.id, -1)} className="h-7 w-7 text-[12px] font-semibold disabled:opacity-40" style={{ borderRadius: 7, border: "1px solid var(--mc-border-strong)", backgroundColor: "var(--mc-surface)", color: "var(--mc-text-muted)" }}>↑</button>
                                 <button type="button" aria-label={`Move ${spot.label || spot.id} down`} disabled={!!busy || routeEnd} onClick={() => handleMoveRouteSpot(spot.id, 1)} className="h-7 w-7 text-[12px] font-semibold disabled:opacity-40" style={{ borderRadius: 7, border: "1px solid var(--mc-border-strong)", backgroundColor: "var(--mc-surface)", color: "var(--mc-text-muted)" }}>↓</button>
                                 {/* Route membership only — deleting the spot
@@ -7790,17 +7614,9 @@ export default function MissionCanvasPage({ onBackHome = null }) {
                                   style={{ borderRadius: 7, border: "1px solid var(--mc-border-strong)", backgroundColor: "var(--mc-surface)", color: "var(--mc-danger)" }}>
                                   ×
                                 </button>
-                              </div>
+                              </div>}
                             </div>
                           </div>
-                          <MissionRouteInsertControl
-                            label={`Insert waypoint after ${spot.label || spot.id}`}
-                            options={designPanelAvailableRouteSpots}
-                            open={missionRouteInsertIndex === index + 1}
-                            disabled={!!busy}
-                            onToggle={() => handleArmRouteInsertion(index + 1)}
-                            onInsert={(spotId) => handleInsertRouteSpot(spotId, index + 1)}
-                          />
                         </div>
                       );
                     })}
@@ -7816,19 +7632,25 @@ export default function MissionCanvasPage({ onBackHome = null }) {
                             </span>
                             <span className="block truncate text-[10px] font-mono" style={{ color: "var(--mc-text-subtle)" }}>Loop closure</span>
                           </div>
-                          {/* A closed loop rejects every map-click edit, so the
-                              closure row carries its own remove affordance. */}
-                          <button type="button" aria-label="Open loop" title="Remove the loop closure so the route can be edited again"
-                            disabled={!!busy}
-                            onClick={handleOpenMissionRouteLoop}
-                            className="h-7 w-7 shrink-0 inline-flex items-center justify-center text-[13px] leading-none active:translate-y-px disabled:opacity-40"
-                            style={{ borderRadius: 7, border: "1px solid var(--mc-border-strong)", backgroundColor: "var(--mc-surface)", color: "var(--mc-danger)" }}>
-                            ×
-                          </button>
+                          {missionRouteMode && (
+                            <button type="button" aria-label="Open loop" title="Remove the loop closure so the route can be edited again"
+                              disabled={!!busy}
+                              onClick={handleOpenMissionRouteLoop}
+                              className="h-7 w-7 shrink-0 inline-flex items-center justify-center text-[13px] leading-none active:translate-y-px disabled:opacity-40"
+                              style={{ borderRadius: 7, border: "1px solid var(--mc-border-strong)", backgroundColor: "var(--mc-surface)", color: "var(--mc-danger)" }}>
+                              ×
+                            </button>
+                          )}
                         </div>
                       </div>
                     )}
-                    {designPanelRouteSpots.length === 0 && <div className="text-[12px]" style={{ color: "var(--mc-text-muted)" }}>Select a waypoint and add it to the route.</div>}
+                    {designPanelRouteSpots.length === 0 && (
+                      <div className="text-[12px]" style={{ color: "var(--mc-text-muted)" }}>
+                        {missionRouteMode
+                          ? "Click waypoints on the map or in the list to build the route."
+                          : "Turn on Edit Route to build the mission route."}
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>

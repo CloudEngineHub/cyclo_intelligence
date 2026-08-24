@@ -3110,7 +3110,7 @@ async function loadPersistedRouteDesign() {
   fireEvent.click(within(loadDialog).getByRole('button', { name: 'Load' }));
 }
 
-test('inserts into and removes from a persisted open route with undo and redo', async () => {
+test('only appends an unused waypoint while route edit mode is active', async () => {
   const latestMapViewerProps = () => (
     mockMapViewer.mock.calls[mockMapViewer.mock.calls.length - 1][0]
   );
@@ -3126,23 +3126,45 @@ test('inserts into and removes from a persisted open route with undo and redo', 
   expect(latestMapViewerProps().missionRouteMode).toBe(false);
   expect(latestMapViewerProps().spots).toHaveLength(4);
   expect(screen.getByRole('button', { name: 'Undo' })).toBeDisabled();
-  expect(screen.getByRole('button', { name: 'Insert waypoint before Waypoint A' })).toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Add Waypoint D to route' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: /^Insert waypoint/ })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: /^Insert .* here$/ })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Clear Route' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Move Waypoint A down' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Remove Waypoint A from route' })).not.toBeInTheDocument();
 
-  // The explicit route-list slot inserts D between B and C without dropping
-  // the existing suffix. The popover offers only waypoints outside the route.
-  fireEvent.click(screen.getByRole('button', { name: 'Insert waypoint after Waypoint B' }));
+  // A callback captured by an older MapViewer render must not bypass the edit
+  // toggle after route editing has been turned off.
+  act(() => {
+    latestMapViewerProps().onMissionRouteSpotClick('spot_d');
+  });
+  expect(latestMapViewerProps().missionRouteOrder).toEqual([
+    { id: 'spot_a', order: 1 },
+    { id: 'spot_b', order: 2 },
+    { id: 'spot_c', order: 3 },
+  ]);
+  expect(screen.getByRole('button', { name: 'Undo' })).toBeDisabled();
+
+  fireEvent.click(screen.getByRole('button', { name: 'Edit On Map' }));
   await waitFor(() => expect(latestMapViewerProps().missionRouteMode).toBe(true));
-  expect(await screen.findByRole('button', { name: 'Insert Waypoint D here' })).toBeInTheDocument();
-  expect(screen.queryByRole('button', { name: 'Insert Waypoint A here' })).not.toBeInTheDocument();
-  fireEvent.click(screen.getByRole('button', { name: 'Insert Waypoint D here' }));
+  expect(screen.queryByRole('button', { name: 'Add Waypoint D to route' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: /^Insert waypoint/ })).not.toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Clear Route' })).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Move Waypoint A down' })).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Remove Waypoint A from route' })).toBeInTheDocument();
+
+  // One map click appends an unused waypoint. There is no insertion-slot UI.
+  act(() => {
+    latestMapViewerProps().onMissionRouteSpotClick('spot_d');
+  });
   await waitFor(() => expect(latestMapViewerProps().missionRouteOrder).toEqual([
     { id: 'spot_a', order: 1 },
     { id: 'spot_b', order: 2 },
-    { id: 'spot_d', order: 3 },
-    { id: 'spot_c', order: 4 },
+    { id: 'spot_c', order: 3 },
+    { id: 'spot_d', order: 4 },
   ]));
   expect(latestMapViewerProps().missionRouteClosed).toBe(false);
-  expect(latestMapViewerProps().missionRouteMode).toBe(false);
+  expect(latestMapViewerProps().missionRouteMode).toBe(true);
   expect(screen.getByRole('button', { name: 'Undo' })).toBeEnabled();
 
   fireEvent.click(screen.getByRole('button', { name: 'Undo' }));
@@ -3152,44 +3174,21 @@ test('inserts into and removes from a persisted open route with undo and redo', 
     { id: 'spot_c', order: 3 },
   ]));
   expect(screen.getByRole('button', { name: 'Redo' })).toBeEnabled();
-  fireEvent.click(screen.getByRole('button', { name: 'Redo' }));
-  await waitFor(() => expect(latestMapViewerProps().missionRouteOrder).toEqual([
+
+  fireEvent.click(screen.getByRole('button', { name: 'Edit On Map' }));
+  await waitFor(() => expect(latestMapViewerProps().missionRouteMode).toBe(false));
+  expect(screen.queryByRole('button', { name: 'Clear Route' })).not.toBeInTheDocument();
+  act(() => {
+    latestMapViewerProps().onMissionRouteSpotClick('spot_d');
+  });
+  expect(latestMapViewerProps().missionRouteOrder).toEqual([
     { id: 'spot_a', order: 1 },
     { id: 'spot_b', order: 2 },
-    { id: 'spot_d', order: 3 },
-    { id: 'spot_c', order: 4 },
-  ]));
-
-  // Removing a middle route member stitches A directly to D. The waypoint
-  // itself and its local BT remain part of the mission document.
-  fireEvent.click(screen.getByRole('button', { name: 'Remove Waypoint B from route' }));
-  await waitFor(() => expect(latestMapViewerProps().missionRouteOrder).toEqual([
-    { id: 'spot_a', order: 1 },
-    { id: 'spot_d', order: 2 },
     { id: 'spot_c', order: 3 },
-  ]));
-  expect(latestMapViewerProps().spots.map((spot) => spot.id)).toEqual([
-    'spot_a', 'spot_b', 'spot_c', 'spot_d',
   ]);
-  expect(deleteNavigationSpot).not.toHaveBeenCalled();
-  expect(deleteNavigationMissionBtFile).not.toHaveBeenCalled();
-
-  fireEvent.click(screen.getByRole('button', { name: 'Undo' }));
-  await waitFor(() => expect(latestMapViewerProps().missionRouteOrder).toEqual([
-    { id: 'spot_a', order: 1 },
-    { id: 'spot_b', order: 2 },
-    { id: 'spot_d', order: 3 },
-    { id: 'spot_c', order: 4 },
-  ]));
-  fireEvent.click(screen.getByRole('button', { name: 'Redo' }));
-  await waitFor(() => expect(latestMapViewerProps().missionRouteOrder).toEqual([
-    { id: 'spot_a', order: 1 },
-    { id: 'spot_d', order: 2 },
-    { id: 'spot_c', order: 3 },
-  ]));
 });
 
-test('inserts into a persisted closed route without opening its loop', async () => {
+test('appends an unused waypoint to a closed route without opening its loop', async () => {
   const latestMapViewerProps = () => (
     mockMapViewer.mock.calls[mockMapViewer.mock.calls.length - 1][0]
   );
@@ -3204,23 +3203,29 @@ test('inserts into a persisted closed route without opening its loop', async () 
   expect(latestMapViewerProps().missionRouteClosed).toBe(true);
   expect(latestMapViewerProps().missionRouteMode).toBe(false);
   expect(screen.getByText('Return to Waypoint A')).toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Open loop' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Clear Route' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: /^Insert waypoint/ })).not.toBeInTheDocument();
 
-  // Arming a route-list slot also supports choosing the unused waypoint on
-  // the map. The closing C -> A edge must survive the B -> D -> C splice.
-  fireEvent.click(screen.getByRole('button', { name: 'Insert waypoint after Waypoint B' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Edit On Map' }));
   await waitFor(() => expect(latestMapViewerProps().missionRouteMode).toBe(true));
-  expect(await screen.findByRole('button', { name: 'Insert Waypoint D here' })).toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Add Waypoint D to route' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: /^Insert waypoint/ })).not.toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Open loop' })).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Clear Route' })).toBeInTheDocument();
+
+  // D is appended before the closing edge, preserving A -> B -> C -> D -> A.
   act(() => {
     latestMapViewerProps().onMissionRouteSpotClick('spot_d');
   });
   await waitFor(() => expect(latestMapViewerProps().missionRouteOrder).toEqual([
     { id: 'spot_a', order: 1 },
     { id: 'spot_b', order: 2 },
-    { id: 'spot_d', order: 3 },
-    { id: 'spot_c', order: 4 },
+    { id: 'spot_c', order: 3 },
+    { id: 'spot_d', order: 4 },
   ]));
   expect(latestMapViewerProps().missionRouteClosed).toBe(true);
-  expect(latestMapViewerProps().missionRouteMode).toBe(false);
+  expect(latestMapViewerProps().missionRouteMode).toBe(true);
   expect(screen.getByText('Return to Waypoint A')).toBeInTheDocument();
 
   fireEvent.click(screen.getByRole('button', { name: 'Undo' }));
@@ -3234,8 +3239,8 @@ test('inserts into a persisted closed route without opening its loop', async () 
   await waitFor(() => expect(latestMapViewerProps().missionRouteOrder).toEqual([
     { id: 'spot_a', order: 1 },
     { id: 'spot_b', order: 2 },
-    { id: 'spot_d', order: 3 },
-    { id: 'spot_c', order: 4 },
+    { id: 'spot_c', order: 3 },
+    { id: 'spot_d', order: 4 },
   ]));
   expect(latestMapViewerProps().missionRouteClosed).toBe(true);
 });
@@ -3309,9 +3314,10 @@ test('locks route edits while deleting a legacy waypoint and stitches the captur
   // The backend deletion is still pending. Every route mutation affordance is
   // locked, and even a stale map callback cannot append D to the captured route.
   expect(screen.getByRole('button', { name: 'Edit On Map' })).toBeDisabled();
-  expect(screen.getByRole('button', { name: 'Insert waypoint after Waypoint A' })).toBeDisabled();
+  expect(screen.queryByRole('button', { name: /^Insert waypoint/ })).not.toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Remove Waypoint A from route' })).toBeDisabled();
   expect(screen.getByRole('button', { name: 'Move Waypoint A down' })).toBeDisabled();
+  expect(screen.getByRole('button', { name: 'Clear Route' })).toBeDisabled();
   expect(screen.getByRole('button', { name: 'Delete Waypoint Waypoint C' })).toBeDisabled();
   expect(screen.getByRole('button', { name: 'Undo' })).toBeDisabled();
   act(() => {
@@ -3336,7 +3342,8 @@ test('locks route edits while deleting a legacy waypoint and stitches the captur
   ]);
   expect(latestMapViewerProps().missionRouteClosed).toBe(false);
   expect(screen.getByRole('button', { name: 'Edit On Map' })).toBeEnabled();
-  expect(screen.getByRole('button', { name: 'Insert waypoint after Waypoint A' })).toBeEnabled();
+  expect(screen.getByRole('button', { name: 'Remove Waypoint A from route' })).toBeEnabled();
+  expect(screen.getByRole('button', { name: 'Clear Route' })).toBeEnabled();
 });
 
 test('edits the mission route directly on the map', async () => {
