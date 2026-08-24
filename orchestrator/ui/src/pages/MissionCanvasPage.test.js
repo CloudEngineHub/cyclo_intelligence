@@ -3039,6 +3039,306 @@ test('creates a waypoint at the current robot pose from the design toolbar', asy
   await waitFor(() => expect(stopNavigation).toHaveBeenCalled());
 });
 
+function mockPersistedRouteMission({ closed = false } = {}) {
+  const waypoints = [
+    {
+      id: 'spot_a',
+      label: 'Waypoint A',
+      pose: { frame_id: 'map', x: 1, y: 2, yaw: 0 },
+      local_bt: 'locals/spot_a/main.xml',
+      metadata: {},
+    },
+    {
+      id: 'spot_b',
+      label: 'Waypoint B',
+      pose: { frame_id: 'map', x: 3, y: 4, yaw: 0.5 },
+      local_bt: 'locals/spot_b/main.xml',
+      metadata: {},
+    },
+    {
+      id: 'spot_c',
+      label: 'Waypoint C',
+      pose: { frame_id: 'map', x: 5, y: 6, yaw: 0.75 },
+      local_bt: 'locals/spot_c/main.xml',
+      metadata: {},
+    },
+    {
+      id: 'spot_d',
+      label: 'Waypoint D',
+      pose: { frame_id: 'map', x: 7, y: 8, yaw: 1 },
+      local_bt: 'locals/spot_d/main.xml',
+      metadata: {},
+    },
+  ];
+  const edges = [
+    { id: 'route_a_b', source: 'spot_a', target: 'spot_b' },
+    { id: 'route_b_c', source: 'spot_b', target: 'spot_c' },
+    ...(closed ? [{ id: 'route_c_a', source: 'spot_c', target: 'spot_a' }] : []),
+  ];
+  getPgmFiles.mockResolvedValue({
+    files: [{ path: 'map.pgm', name: 'map.pgm' }],
+  });
+  getNavigationMission.mockResolvedValue({
+    exists: true,
+    map_name: 'map',
+    mission_name: 'default',
+    global_bt: 'global.xml',
+    waypoints,
+    metadata: {
+      mission_flow: {
+        nodes: waypoints.map((waypoint, index) => ({
+          id: waypoint.id,
+          position: { x: 80 + index * 220, y: 72 },
+        })),
+        edges,
+      },
+    },
+  });
+  getNavigationMissionBtFile.mockImplementation((_mapName, path) => Promise.resolve({
+    path,
+    content: '<root BTCPP_format="4" main_tree_to_execute="MainTree"><BehaviorTree ID="MainTree"/></root>',
+    exists: true,
+  }));
+}
+
+async function loadPersistedRouteDesign() {
+  render(<MissionCanvasPage />);
+  fireEvent.click(screen.getByRole('tab', { name: 'Design' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Load Map' }));
+  const loadDialog = await screen.findByRole('dialog', { name: 'Load Map' });
+  await within(loadDialog).findByRole('combobox', { name: 'Design mission map file' });
+  fireEvent.click(within(loadDialog).getByRole('button', { name: 'Load' }));
+}
+
+test('inserts into and removes from a persisted open route with undo and redo', async () => {
+  const latestMapViewerProps = () => (
+    mockMapViewer.mock.calls[mockMapViewer.mock.calls.length - 1][0]
+  );
+  mockPersistedRouteMission();
+
+  await loadPersistedRouteDesign();
+  await waitFor(() => expect(latestMapViewerProps().missionRouteOrder).toEqual([
+    { id: 'spot_a', order: 1 },
+    { id: 'spot_b', order: 2 },
+    { id: 'spot_c', order: 3 },
+  ]));
+  expect(latestMapViewerProps().missionRouteClosed).toBe(false);
+  expect(latestMapViewerProps().missionRouteMode).toBe(false);
+  expect(latestMapViewerProps().spots).toHaveLength(4);
+  expect(screen.getByRole('button', { name: 'Undo' })).toBeDisabled();
+  expect(screen.getByRole('button', { name: 'Insert waypoint before Waypoint A' })).toBeInTheDocument();
+
+  // The explicit route-list slot inserts D between B and C without dropping
+  // the existing suffix. The popover offers only waypoints outside the route.
+  fireEvent.click(screen.getByRole('button', { name: 'Insert waypoint after Waypoint B' }));
+  await waitFor(() => expect(latestMapViewerProps().missionRouteMode).toBe(true));
+  expect(await screen.findByRole('button', { name: 'Insert Waypoint D here' })).toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Insert Waypoint A here' })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'Insert Waypoint D here' }));
+  await waitFor(() => expect(latestMapViewerProps().missionRouteOrder).toEqual([
+    { id: 'spot_a', order: 1 },
+    { id: 'spot_b', order: 2 },
+    { id: 'spot_d', order: 3 },
+    { id: 'spot_c', order: 4 },
+  ]));
+  expect(latestMapViewerProps().missionRouteClosed).toBe(false);
+  expect(latestMapViewerProps().missionRouteMode).toBe(false);
+  expect(screen.getByRole('button', { name: 'Undo' })).toBeEnabled();
+
+  fireEvent.click(screen.getByRole('button', { name: 'Undo' }));
+  await waitFor(() => expect(latestMapViewerProps().missionRouteOrder).toEqual([
+    { id: 'spot_a', order: 1 },
+    { id: 'spot_b', order: 2 },
+    { id: 'spot_c', order: 3 },
+  ]));
+  expect(screen.getByRole('button', { name: 'Redo' })).toBeEnabled();
+  fireEvent.click(screen.getByRole('button', { name: 'Redo' }));
+  await waitFor(() => expect(latestMapViewerProps().missionRouteOrder).toEqual([
+    { id: 'spot_a', order: 1 },
+    { id: 'spot_b', order: 2 },
+    { id: 'spot_d', order: 3 },
+    { id: 'spot_c', order: 4 },
+  ]));
+
+  // Removing a middle route member stitches A directly to D. The waypoint
+  // itself and its local BT remain part of the mission document.
+  fireEvent.click(screen.getByRole('button', { name: 'Remove Waypoint B from route' }));
+  await waitFor(() => expect(latestMapViewerProps().missionRouteOrder).toEqual([
+    { id: 'spot_a', order: 1 },
+    { id: 'spot_d', order: 2 },
+    { id: 'spot_c', order: 3 },
+  ]));
+  expect(latestMapViewerProps().spots.map((spot) => spot.id)).toEqual([
+    'spot_a', 'spot_b', 'spot_c', 'spot_d',
+  ]);
+  expect(deleteNavigationSpot).not.toHaveBeenCalled();
+  expect(deleteNavigationMissionBtFile).not.toHaveBeenCalled();
+
+  fireEvent.click(screen.getByRole('button', { name: 'Undo' }));
+  await waitFor(() => expect(latestMapViewerProps().missionRouteOrder).toEqual([
+    { id: 'spot_a', order: 1 },
+    { id: 'spot_b', order: 2 },
+    { id: 'spot_d', order: 3 },
+    { id: 'spot_c', order: 4 },
+  ]));
+  fireEvent.click(screen.getByRole('button', { name: 'Redo' }));
+  await waitFor(() => expect(latestMapViewerProps().missionRouteOrder).toEqual([
+    { id: 'spot_a', order: 1 },
+    { id: 'spot_d', order: 2 },
+    { id: 'spot_c', order: 3 },
+  ]));
+});
+
+test('inserts into a persisted closed route without opening its loop', async () => {
+  const latestMapViewerProps = () => (
+    mockMapViewer.mock.calls[mockMapViewer.mock.calls.length - 1][0]
+  );
+  mockPersistedRouteMission({ closed: true });
+
+  await loadPersistedRouteDesign();
+  await waitFor(() => expect(latestMapViewerProps().missionRouteOrder).toEqual([
+    { id: 'spot_a', order: 1 },
+    { id: 'spot_b', order: 2 },
+    { id: 'spot_c', order: 3 },
+  ]));
+  expect(latestMapViewerProps().missionRouteClosed).toBe(true);
+  expect(latestMapViewerProps().missionRouteMode).toBe(false);
+  expect(screen.getByText('Return to Waypoint A')).toBeInTheDocument();
+
+  // Arming a route-list slot also supports choosing the unused waypoint on
+  // the map. The closing C -> A edge must survive the B -> D -> C splice.
+  fireEvent.click(screen.getByRole('button', { name: 'Insert waypoint after Waypoint B' }));
+  await waitFor(() => expect(latestMapViewerProps().missionRouteMode).toBe(true));
+  expect(await screen.findByRole('button', { name: 'Insert Waypoint D here' })).toBeInTheDocument();
+  act(() => {
+    latestMapViewerProps().onMissionRouteSpotClick('spot_d');
+  });
+  await waitFor(() => expect(latestMapViewerProps().missionRouteOrder).toEqual([
+    { id: 'spot_a', order: 1 },
+    { id: 'spot_b', order: 2 },
+    { id: 'spot_d', order: 3 },
+    { id: 'spot_c', order: 4 },
+  ]));
+  expect(latestMapViewerProps().missionRouteClosed).toBe(true);
+  expect(latestMapViewerProps().missionRouteMode).toBe(false);
+  expect(screen.getByText('Return to Waypoint A')).toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole('button', { name: 'Undo' }));
+  await waitFor(() => expect(latestMapViewerProps().missionRouteOrder).toEqual([
+    { id: 'spot_a', order: 1 },
+    { id: 'spot_b', order: 2 },
+    { id: 'spot_c', order: 3 },
+  ]));
+  expect(latestMapViewerProps().missionRouteClosed).toBe(true);
+  fireEvent.click(screen.getByRole('button', { name: 'Redo' }));
+  await waitFor(() => expect(latestMapViewerProps().missionRouteOrder).toEqual([
+    { id: 'spot_a', order: 1 },
+    { id: 'spot_b', order: 2 },
+    { id: 'spot_d', order: 3 },
+    { id: 'spot_c', order: 4 },
+  ]));
+  expect(latestMapViewerProps().missionRouteClosed).toBe(true);
+});
+
+test('locks route edits while deleting a legacy waypoint and stitches the captured route', async () => {
+  const latestMapViewerProps = () => (
+    mockMapViewer.mock.calls[mockMapViewer.mock.calls.length - 1][0]
+  );
+  getPgmFiles.mockResolvedValue({
+    files: [{ path: 'map.pgm', name: 'map.pgm' }],
+  });
+  getNavigationSpots.mockResolvedValue({
+    map_name: 'map',
+    spots: [
+      {
+        id: 'spot_a',
+        map_name: 'map',
+        label: 'Waypoint A',
+        pose: { frame_id: 'map', x: 1, y: 2, yaw: 0 },
+        linked_bt_tree: 'waypoint_a.xml',
+        metadata: {},
+      },
+      {
+        id: 'spot_b',
+        map_name: 'map',
+        label: 'Waypoint B',
+        pose: { frame_id: 'map', x: 3, y: 4, yaw: 0.5 },
+        linked_bt_tree: 'waypoint_b.xml',
+        metadata: {},
+      },
+      {
+        id: 'spot_c',
+        map_name: 'map',
+        label: 'Waypoint C',
+        pose: { frame_id: 'map', x: 5, y: 6, yaw: 0.75 },
+        linked_bt_tree: 'waypoint_c.xml',
+        metadata: {},
+      },
+      {
+        id: 'spot_d',
+        map_name: 'map',
+        label: 'Waypoint D',
+        pose: { frame_id: 'map', x: 7, y: 8, yaw: 1 },
+        linked_bt_tree: 'waypoint_d.xml',
+        metadata: {},
+      },
+    ],
+  });
+  let resolveDelete;
+  const pendingDelete = new Promise((resolve) => {
+    resolveDelete = resolve;
+  });
+  deleteNavigationSpot.mockReturnValueOnce(pendingDelete);
+
+  await loadPersistedRouteDesign();
+  await waitFor(() => expect(latestMapViewerProps().spots).toHaveLength(4));
+  fireEvent.click(screen.getByRole('button', { name: 'Edit On Map' }));
+  await waitFor(() => expect(latestMapViewerProps().missionRouteMode).toBe(true));
+  act(() => { latestMapViewerProps().onMissionRouteSpotClick('spot_a'); });
+  act(() => { latestMapViewerProps().onMissionRouteSpotClick('spot_b'); });
+  act(() => { latestMapViewerProps().onMissionRouteSpotClick('spot_c'); });
+  await waitFor(() => expect(latestMapViewerProps().missionRouteOrder).toEqual([
+    { id: 'spot_a', order: 1 },
+    { id: 'spot_b', order: 2 },
+    { id: 'spot_c', order: 3 },
+  ]));
+
+  fireEvent.click(screen.getByRole('button', { name: 'Delete Waypoint Waypoint B' }));
+  await waitFor(() => expect(deleteNavigationSpot).toHaveBeenCalledWith('spot_b', 'map'));
+
+  // The backend deletion is still pending. Every route mutation affordance is
+  // locked, and even a stale map callback cannot append D to the captured route.
+  expect(screen.getByRole('button', { name: 'Edit On Map' })).toBeDisabled();
+  expect(screen.getByRole('button', { name: 'Insert waypoint after Waypoint A' })).toBeDisabled();
+  expect(screen.getByRole('button', { name: 'Remove Waypoint A from route' })).toBeDisabled();
+  expect(screen.getByRole('button', { name: 'Move Waypoint A down' })).toBeDisabled();
+  expect(screen.getByRole('button', { name: 'Delete Waypoint Waypoint C' })).toBeDisabled();
+  expect(screen.getByRole('button', { name: 'Undo' })).toBeDisabled();
+  act(() => {
+    latestMapViewerProps().onMissionRouteSpotClick('spot_d');
+  });
+  expect(latestMapViewerProps().missionRouteOrder).toEqual([
+    { id: 'spot_a', order: 1 },
+    { id: 'spot_b', order: 2 },
+    { id: 'spot_c', order: 3 },
+  ]);
+
+  await act(async () => {
+    resolveDelete({ ok: true });
+    await pendingDelete;
+  });
+  await waitFor(() => expect(latestMapViewerProps().spots.map((spot) => spot.id)).toEqual([
+    'spot_a', 'spot_c', 'spot_d',
+  ]));
+  expect(latestMapViewerProps().missionRouteOrder).toEqual([
+    { id: 'spot_a', order: 1 },
+    { id: 'spot_c', order: 2 },
+  ]);
+  expect(latestMapViewerProps().missionRouteClosed).toBe(false);
+  expect(screen.getByRole('button', { name: 'Edit On Map' })).toBeEnabled();
+  expect(screen.getByRole('button', { name: 'Insert waypoint after Waypoint A' })).toBeEnabled();
+});
+
 test('edits the mission route directly on the map', async () => {
   const latestMapViewerProps = () => (
     mockMapViewer.mock.calls[mockMapViewer.mock.calls.length - 1][0]

@@ -35,8 +35,14 @@ const WAYPOINT_HEADING_LENGTH = 4.4;
 const WAYPOINT_HEADING_SHAFT_WIDTH = 1.12;
 const WAYPOINT_HEADING_HEAD_LENGTH = 1.05;
 const WAYPOINT_HEADING_HEAD_WIDTH = 2.84;
-const WAYPOINT_LABEL_OFFSET_Y = 7.2;
 const WAYPOINT_LABEL_SCALE_Y = 6;
+// Keep the label just outside the heading arrow's full rotation radius. This
+// leaves the rotate handle unobstructed without visually detaching the name
+// from its waypoint marker.
+const WAYPOINT_LABEL_CLEARANCE = 1.5;
+const WAYPOINT_LABEL_OFFSET_Y = (
+    WAYPOINT_HEADING_LENGTH + WAYPOINT_LABEL_SCALE_Y / 2 + WAYPOINT_LABEL_CLEARANCE
+);
 const BT_FOCUS_VISIBLE_HEIGHT_MIN = 5;
 const BT_FOCUS_VISIBLE_HEIGHT_MAX = 11;
 const BT_FOCUS_WAYPOINT_NDC_X = -0.75;
