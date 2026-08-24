@@ -745,9 +745,16 @@ function changedLocalBtPaths(files, persistedFiles) {
 }
 
 function nextWaypointLabel(spots) {
-  const occupied = new Set(
-    (spots || []).map((spot) => String(spot.label || "").trim().toLowerCase()),
-  );
+  const occupied = new Set();
+  (spots || []).forEach((spot) => {
+    const label = String(spot?.label || "").trim().toLowerCase();
+    if (label) occupied.add(label);
+    // A display rename (for example Waypoint 1 -> Start) must not release the
+    // stable ordinal embedded in the waypoint ID. Reusing it would generate a
+    // second tokenized ID that collapses onto the same readable BT directory.
+    const idMatch = String(spot?.id || "").match(/^waypoint_(\d+)(?:_[0-9a-f]{8})?$/i);
+    if (idMatch) occupied.add(`waypoint ${Number(idMatch[1])}`);
+  });
   let index = 1;
   while (occupied.has(`waypoint ${index}`)) index += 1;
   return `Waypoint ${index}`;
@@ -792,6 +799,32 @@ function defaultLocalBtXml() {
     '</root>',
     '',
   ].join("\n");
+}
+
+function initializeCreatedWaypointLocalBt(existingSpots, createdSpot, reservedPaths = []) {
+  const existingDirectories = localBtDirectoriesForSpots(existingSpots || []);
+  const usedDirectories = new Set(
+    [...existingDirectories.values()].map((path) => path.toLowerCase()),
+  );
+  (reservedPaths || []).forEach((path) => {
+    const directory = String(path || "").match(/^(locals\/[^/]+)\/[^/]+\.xml$/i)?.[1];
+    if (directory) usedDirectories.add(directory.toLowerCase());
+  });
+
+  const base = localBtDirectoryBaseForSpot(createdSpot);
+  let directory = base;
+  let suffix = 1;
+  while (usedDirectories.has(directory.toLowerCase())) {
+    suffix += 1;
+    directory = `${base}_${suffix}`;
+  }
+  const defaultPath = canonicalLocalBtPathForSpot(createdSpot, directory);
+  const paths = canonicalLocalBtPathsForSpot(createdSpot, directory);
+  return {
+    spot: withLocalBtLibrary(createdSpot, defaultPath, paths),
+    defaultPath,
+    paths,
+  };
 }
 
 function missionFlowEdgeId(source, target) {
@@ -1095,23 +1128,31 @@ export function assembleMissionBtFilesForSave(spots, missionBtFiles, deletedPath
   const files = { [globalPath]: globalXml };
   const activePaths = new Map();
   const directories = localBtDirectoriesForSpots(spots);
-  spots.forEach((spot) => {
+  const mappings = spots.flatMap((spot) => (
     canonicalLocalBtPathMappingsForSpot(
       spot,
       directories.get(spot.id),
-    ).forEach(({ sourcePath, targetPath }) => {
-      const ownershipKey = targetPath.toLowerCase();
-      if (activePaths.has(ownershipKey)) {
-        throw new Error(`Multiple waypoints reference the same local BT path: ${targetPath}`);
-      }
-      activePaths.set(ownershipKey, spot.id);
-      const content = missionBtFiles[sourcePath] !== undefined
-        ? missionBtFiles[sourcePath]
-        : missionBtFiles[targetPath] !== undefined
-          ? missionBtFiles[targetPath]
-          : defaultLocalBtXml(spot);
-      files[targetPath] = content;
-    });
+    ).map((mapping) => ({ ...mapping, spot }))
+  ));
+  mappings.forEach(({ spot, targetPath }) => {
+    const ownershipKey = targetPath.toLowerCase();
+    if (activePaths.has(ownershipKey)) {
+      throw new Error(`Multiple waypoints reference the same local BT path: ${targetPath}`);
+    }
+    activePaths.set(ownershipKey, spot.id);
+  });
+  mappings.forEach(({ sourcePath, targetPath, spot }) => {
+    const sourceOwner = activePaths.get(sourcePath.toLowerCase());
+    const sourceOwnedByAnotherWaypoint = sourceOwner && sourceOwner !== spot.id;
+    // A token-free fallback may point at another waypoint's canonical target.
+    // Treat that as an uninitialized new tree instead of copying its XML.
+    const content = !sourceOwnedByAnotherWaypoint
+      && missionBtFiles[sourcePath] !== undefined
+      ? missionBtFiles[sourcePath]
+      : missionBtFiles[targetPath] !== undefined
+        ? missionBtFiles[targetPath]
+        : defaultLocalBtXml(spot);
+    files[targetPath] = content;
   });
   const stale = new Set();
   const considerStale = (path) => {
@@ -2610,6 +2651,7 @@ export default function MissionCanvasPage({ onBackHome = null }) {
   const persistedMissionRevisionRef = useRef(0);
   const dirtyLocalBtPathsRef = useRef(new Set());
   const localBtFileOperationRef = useRef(0);
+  const waypointCreatePendingRef = useRef(false);
   const saveDesignMissionRef = useRef(null);
   const [deletedMissionBtPaths, setDeletedMissionBtPaths] = useState([]);
   const [missionFlowNodes, setMissionFlowNodes] = useState([]);
@@ -5759,6 +5801,40 @@ export default function MissionCanvasPage({ onBackHome = null }) {
     );
   }, [clearLocalizationPoseCache, runCommand, waitForAutoLocalizedPose]);
 
+  const commitCreatedDesignWaypoint = useCallback((createdSpot) => {
+    // Establish ownership before the waypoint enters the UI. Falling back to
+    // a path derived from one spot in isolation can alias an existing renamed
+    // waypoint after the readable ID suffix is normalized away.
+    const reservedPaths = [
+      ...Object.keys(missionBtFilesRef.current),
+      ...persistedLocalBtPathsRef.current,
+      ...deletedMissionBtPaths,
+    ];
+    const initialized = initializeCreatedWaypointLocalBt(
+      spots,
+      createdSpot,
+      reservedPaths,
+    );
+    const emptyXml = defaultLocalBtXml(initialized.spot);
+    const nextBtFiles = { ...missionBtFilesRef.current };
+    initialized.paths.forEach((path) => {
+      nextBtFiles[path] = emptyXml;
+    });
+
+    markDesignDirty();
+    missionBtFilesRef.current = nextBtFiles;
+    designBtRevisionRef.current += 1;
+    dirtyLocalBtPathsRef.current = changedLocalBtPaths(
+      nextBtFiles,
+      persistedMissionBtFilesRef.current,
+    );
+    setMissionBtFiles(nextBtFiles);
+    setSpots((current) => [...current, initialized.spot]);
+    setSelectedSpotId(initialized.spot.id);
+    setSelectedBehaviorNodeId("");
+    return initialized.spot;
+  }, [deletedMissionBtPaths, markDesignDirty, spots]);
+
   const handleCreateSpotAtPose = useCallback(async (x, y, yaw) => {
     if (workspaceStage === STAGE_NAVIGATE) {
       if (interactionMode === "initial") {
@@ -5783,6 +5859,8 @@ export default function MissionCanvasPage({ onBackHome = null }) {
       return;
     }
     if (interactionMode === "initial") {
+      if (waypointCreatePendingRef.current) return;
+      waypointCreatePendingRef.current = true;
       setInteractionMode("view");
       setShowWaypointOptions(false);
       void runCommand(
@@ -5810,10 +5888,7 @@ export default function MissionCanvasPage({ onBackHome = null }) {
             pose: spotPoseFromMapPose(localizedX, localizedY, localizedYaw),
             metadata: { source: "mission_canvas", coordinate_space: "map" },
           });
-          markDesignDirty();
-          setSpots((current) => [...current, created]);
-          setSelectedSpotId(created.id);
-          setSelectedBehaviorNodeId("");
+          const initialized = commitCreatedDesignWaypoint(created);
           await stopNavigation();
           setNavigationRuntimeMode("idle");
           setDesignPoseInitialized(false);
@@ -5829,9 +5904,11 @@ export default function MissionCanvasPage({ onBackHome = null }) {
             runShutdownPending: false,
             runShutdownRequestedAt: null,
           });
-          return `Created ${created.label} at robot`;
+          return `Created ${initialized.label} at robot`;
         },
-      );
+      ).finally(() => {
+        waypointCreatePendingRef.current = false;
+      });
       return;
     }
     if (interactionMode === "behavior" && pendingBehaviorNodeTag) {
@@ -5857,32 +5934,49 @@ export default function MissionCanvasPage({ onBackHome = null }) {
       return;
     }
     if (interactionMode !== "spot") return;
+    if (waypointCreatePendingRef.current) return;
+    waypointCreatePendingRef.current = true;
+    setShowWaypointOptions(false);
+    setInteractionMode("view");
     const label = nextWaypointLabel(spots);
     try {
-      const created = await createNavigationSpot({
-        map_name: currentMapName,
-        label,
-        pose: spotPoseFromMapPose(x, y, yaw),
-        metadata: { source: "mission_canvas", coordinate_space: "map" },
+      const targetMapName = currentMapName;
+      const targetMissionName = designMissionNameRef.current;
+      const targetGeneration = designMissionLoadGenerationRef.current;
+      await runCommand("Create Waypoint", async () => {
+        const created = await createNavigationSpot({
+          map_name: targetMapName,
+          label,
+          pose: spotPoseFromMapPose(x, y, yaw),
+          metadata: { source: "mission_canvas", coordinate_space: "map" },
+        });
+        if (
+          designMapNameRef.current !== targetMapName
+          || designMissionNameRef.current !== targetMissionName
+          || designMissionLoadGenerationRef.current !== targetGeneration
+        ) {
+          try {
+            await deleteNavigationSpot(created.id, targetMapName);
+          } catch {
+            // The stale result must never enter the newly selected document;
+            // orphan cleanup can be retried through the legacy spot store.
+          }
+          throw new Error("Map or mission changed while the waypoint was being created");
+        }
+        const initialized = commitCreatedDesignWaypoint(created);
+        return `Created ${initialized.label}`;
       });
-      markDesignDirty();
-      setSpots((current) => [...current, created]);
-      setSelectedSpotId(created.id);
-      setSelectedBehaviorNodeId("");
-      setShowWaypointOptions(false);
-      setInteractionMode("view");
-      setMessage(`Created ${created.label}`);
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Failed to create waypoint");
+    } finally {
+      waypointCreatePendingRef.current = false;
     }
   }, [handleSendNavGoal, 
     currentMapName,
     clearLocalizationPoseCache,
+    commitCreatedDesignWaypoint,
     designMapPath,
     handleRunPoseEstimate,
     interactionMode,
     mappingRuntimeActive,
-    markDesignDirty,
     missionRunnerActive,
     pendingBehaviorNodeTag,
     runCommand,

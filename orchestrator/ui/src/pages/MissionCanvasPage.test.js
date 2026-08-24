@@ -1498,7 +1498,12 @@ test('shows waypoint actions in Waypoints after placing a waypoint', async () =>
   await waitFor(() => expect(updateNavigationSpot).toHaveBeenCalledWith('spot_a', {
     map_name: 'factory',
     pose: { frame_id: 'map', x: 4, y: 5, yaw: 0.25 },
-    metadata: { coordinate_space: 'map' },
+    metadata: {
+      coordinate_space: 'map',
+      linked_bt_tree: 'locals/spot_a/main.xml',
+      local_bt: 'locals/spot_a/main.xml',
+      local_bt_files: ['locals/spot_a/main.xml'],
+    },
   }));
   await waitFor(() => expect(latestMapViewerProps().spots[0].pose).toMatchObject({
     x: 4,
@@ -2608,6 +2613,164 @@ test('creates a waypoint at robot with automatic localization from the waypoint 
   expect(screen.getByRole('button', { name: 'Stop' })).toBeDisabled();
   expect(screen.getByRole('button', { name: 'Save Map' })).toBeDisabled();
 });
+
+test.each([
+  ['On Map', false],
+  ['At Robot', true],
+])('keeps a newly created %s waypoint BT independent from a stored Start BT', async (
+  creationMode,
+  createAtRobot,
+) => {
+  const latestMapViewerProps = () => (
+    mockMapViewer.mock.calls[mockMapViewer.mock.calls.length - 1][0]
+  );
+  const startBtPath = 'locals/waypoint_1/main.xml';
+  const startOnlyXml = [
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    '<root BTCPP_format="4" main_tree_to_execute="MainTree">',
+    '  <BehaviorTree ID="MainTree"><Wait name="StartOnly" duration="7.0"/></BehaviorTree>',
+    '</root>',
+    '',
+  ].join('\n');
+  const globalXml = [
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    '<root BTCPP_format="4" main_tree_to_execute="MainTree">',
+    '  <BehaviorTree ID="MainTree"/>',
+    '</root>',
+    '',
+  ].join('\n');
+
+  getPgmFiles.mockResolvedValue({
+    files: [{ path: 'factory.pgm', name: 'factory.pgm' }],
+  });
+  getPgmImage.mockResolvedValue({
+    path: 'factory.pgm',
+    width: 1,
+    height: 1,
+    maxval: 255,
+    pixels_base64: 'AA==',
+  });
+  getNavigationMissions.mockResolvedValue({
+    map_name: 'factory',
+    missions: ['default'],
+  });
+  getNavigationMission.mockResolvedValue({
+    exists: true,
+    revision: 0,
+    map_name: 'factory',
+    mission_name: 'default',
+    global_bt: 'global.xml',
+    waypoints: [{
+      id: 'Waypoint_1_ee992021',
+      label: 'Start',
+      pose: { frame_id: 'map', x: 0, y: 0, yaw: 0 },
+      local_bt: startBtPath,
+      local_bt_files: [startBtPath],
+      metadata: {
+        local_bt: startBtPath,
+        local_bt_files: [startBtPath],
+      },
+    }],
+    metadata: {},
+  });
+  getNavigationMissionBtFile.mockImplementation((_mapName, path) => Promise.resolve({
+    path,
+    content: path === startBtPath ? startOnlyXml : globalXml,
+    exists: path === startBtPath || path === 'global.xml',
+    revision: 0,
+  }));
+  createNavigationSpot.mockImplementation((payload) => Promise.resolve({
+    id: 'Waypoint_2_d58de4b1',
+    map_name: payload.map_name,
+    label: payload.label,
+    pose: payload.pose,
+    linked_bt_tree: payload.linked_bt_tree || '',
+    local_bt_files: payload.local_bt_files || [],
+    metadata: payload.metadata || {},
+  }));
+
+  if (createAtRobot) {
+    getServiceStatus
+      .mockResolvedValueOnce({ is_up: false })
+      .mockResolvedValue({ is_up: true, mode: 'localize' });
+    mockTopicDataByName['/amcl_pose'] = amclPoseMessage(9, 9, 0);
+    sendInitialPoseEstimate.mockImplementationOnce(async () => {
+      mockTopicDataByName['/amcl_pose'] = amclPoseMessage(2.5, -1.25, 0.4);
+      return { ok: true };
+    });
+    stopNavigation.mockImplementationOnce(async () => {
+      getServiceStatus.mockResolvedValue({ is_up: false });
+      return { ok: true };
+    });
+  }
+
+  render(<MissionCanvasPage />);
+  fireEvent.click(screen.getByRole('tab', { name: 'Design' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Load Map' }));
+  await screen.findByRole('combobox', { name: 'Design mission map file' });
+  fireEvent.click(screen.getByRole('button', { name: 'Load' }));
+  await waitFor(() => expect(latestMapViewerProps().spots).toHaveLength(1));
+  await waitFor(() => expect(getNavigationMissionBtFile)
+    .toHaveBeenCalledWith('factory', startBtPath, ''));
+
+  fireEvent.click(screen.getByRole('button', { name: 'Create Waypoint' }));
+  fireEvent.click(screen.getByRole('button', { name: creationMode }));
+  if (createAtRobot) {
+    await waitFor(() => expect(latestMapViewerProps().interactionMode).toBe('initial'));
+  }
+  await act(async () => {
+    await latestMapViewerProps().onMapPose(2.5, -1.25, 0.4);
+  });
+  await waitFor(() => expect(createNavigationSpot).toHaveBeenCalled(), { timeout: 6000 });
+  expect(createNavigationSpot).toHaveBeenCalledWith(expect.objectContaining({
+    label: 'Waypoint 2',
+  }));
+  await waitFor(() => expect(latestMapViewerProps().spots).toHaveLength(2));
+
+  const newSpot = latestMapViewerProps().spots.find(
+    ({ id }) => id === 'Waypoint_2_d58de4b1',
+  );
+  expect(newSpot).toBeDefined();
+  const newBtPath = newSpot.linked_bt_tree || newSpot.metadata?.local_bt;
+  expect(newBtPath).toBe('locals/waypoint_2/main.xml');
+  expect(newBtPath).not.toBe(startBtPath);
+  expect(newSpot.local_bt_files || newSpot.metadata?.local_bt_files)
+    .toEqual([newBtPath]);
+
+  fireEvent.click(screen.getByRole('button', { name: 'Edit BT for Waypoint 2' }));
+  await waitFor(() => expect(latestMapViewerProps().btLayer?.spot?.id)
+    .toBe('Waypoint_2_d58de4b1'));
+  await waitFor(() => expect(latestMapViewerProps().btLayer.editor.props.filePath)
+    .toBe(newBtPath));
+  const newWaypointXml = latestMapViewerProps().btLayer.editor.props.xml;
+  expect(newWaypointXml).toContain('<BehaviorTree ID="MainTree"/>');
+  expect(newWaypointXml).not.toContain('StartOnly');
+  act(() => latestMapViewerProps().onBtLayerClose());
+
+  const saveButton = screen.getByRole('button', { name: 'Save Mission' });
+  await waitFor(() => expect(saveButton).toBeEnabled());
+  fireEvent.click(saveButton);
+  await waitFor(() => expect(saveNavigationMission).toHaveBeenCalled());
+
+  const savedPayload = saveNavigationMission.mock.calls[
+    saveNavigationMission.mock.calls.length - 1
+  ][1];
+  const savedStart = savedPayload.waypoints.find(({ id }) => id === 'Waypoint_1_ee992021');
+  const savedNew = savedPayload.waypoints.find(({ id }) => id === 'Waypoint_2_d58de4b1');
+  expect(savedStart.local_bt).toBe(startBtPath);
+  expect(savedNew.local_bt).toBe(newBtPath);
+  expect(savedNew.local_bt).not.toBe(savedStart.local_bt);
+
+  const startUpload = saveNavigationMissionBtFile.mock.calls.find(
+    ([, path]) => path === startBtPath,
+  );
+  const newUpload = saveNavigationMissionBtFile.mock.calls.find(
+    ([, path]) => path === newBtPath,
+  );
+  expect(startUpload?.[2]).toBe(startOnlyXml);
+  expect(newUpload?.[2]).toContain('<BehaviorTree ID="MainTree"/>');
+  expect(newUpload?.[2]).not.toContain('StartOnly');
+}, 15000);
 
 test('clears stale robot pose before a second at-robot waypoint attempt', async () => {
   const latestMapViewerProps = () => (
@@ -5369,21 +5532,32 @@ describe('assembleMissionBtFilesForSave', () => {
   });
 
   test('uses readable numeric suffixes when token-free waypoint folders collide', () => {
+    const startOnly = EDITED.replace('2.0', '7.0').replace('<Wait', '<Wait name="StartOnly"');
     const spots = [
-      { id: 'Spot_A', label: 'A', metadata: { local_bt: 'locals/a.xml' } },
-      { id: 'spot_a', label: 'B', metadata: { local_bt: 'locals/b.xml' } },
+      {
+        id: 'Waypoint_1_ee992021',
+        label: 'Start',
+        linked_bt_tree: 'locals/waypoint_1/main.xml',
+        local_bt_files: ['locals/waypoint_1/main.xml'],
+        metadata: {
+          local_bt: 'locals/waypoint_1/main.xml',
+          local_bt_files: ['locals/waypoint_1/main.xml'],
+        },
+      },
+      { id: 'Waypoint_1_d58de4b1', label: 'Waypoint 1', metadata: {} },
     ];
 
     const { files } = assembleMissionBtFilesForSave(
       spots,
-      { 'locals/a.xml': EDITED, 'locals/b.xml': EDITED },
+      { 'locals/waypoint_1/main.xml': startOnly },
       [],
       'global.xml',
       '<global/>',
     );
 
-    expect(files['locals/spot_a/main.xml']).toBe(EDITED);
-    expect(files['locals/spot_a_2/main.xml']).toBe(EDITED);
+    expect(files['locals/waypoint_1/main.xml']).toBe(startOnly);
+    expect(files['locals/waypoint_1_2/main.xml']).toContain('<BehaviorTree ID="MainTree"/>');
+    expect(files['locals/waypoint_1_2/main.xml']).not.toContain('StartOnly');
   });
 });
 
