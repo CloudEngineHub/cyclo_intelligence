@@ -403,6 +403,11 @@ export function useMissionRunner({
         emit("Stop sent, but the robot may still be executing");
       }
     });
+    // Callers that also tear down the navigation runtime must be able to keep
+    // their Stop lock engaged until the cancel-all request has settled. If a
+    // new runtime starts before this cleanup finishes, the late cancellation
+    // can otherwise kill a goal from that new session.
+    return cleanup;
   }, [emit, stopEngagedBt]);
 
   // Abort on unmount, but only if a run is genuinely in flight (guards against

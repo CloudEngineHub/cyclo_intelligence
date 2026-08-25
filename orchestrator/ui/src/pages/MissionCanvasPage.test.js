@@ -5802,6 +5802,7 @@ test('run mission activates the BT node on demand and releases it on stop', asyn
   ].join('\n');
   // Supervisor mock with real node state: status reflects start/stop calls.
   let btUp = false;
+  let resolveBtStop;
   global.fetch.mockImplementation((url) => {
     const target = String(url);
     if (target.includes('/services/bt_node/start')) {
@@ -5810,7 +5811,9 @@ test('run mission activates the BT node on demand and releases it on stop', asyn
     }
     if (target.includes('/services/bt_node/stop')) {
       btUp = false;
-      return Promise.resolve(mockJsonResponse({ ok: true }));
+      return new Promise((resolve) => {
+        resolveBtStop = () => resolve(mockJsonResponse({ ok: true }));
+      });
     }
     return Promise.resolve(mockJsonResponse({ name: 'bt_node', state: btUp ? 'up' : 'down', raw: '' }));
   });
@@ -5952,16 +5955,26 @@ test('run mission activates the BT node on demand and releases it on stop', asyn
   // the same map is loaded again. A stale currentIndex used to recreate an
   // orange pulsing marker as soon as the map layer returned.
   getServiceStatus.mockResolvedValue({ is_up: false, mode: 'idle' });
-  fireEvent.click(screen.getByRole('button', { name: 'Stop' }));
+  const stopButton = screen.getByRole('button', { name: 'Stop' });
+  fireEvent.click(stopButton);
   await waitFor(() => expect(latestMapViewerProps().activeWaypointId).toBe(''));
   await waitFor(() => expect(global.fetch).toHaveBeenCalledWith(
     '/api/services/bt_node/stop',
     expect.objectContaining({ method: 'POST' }),
   ));
+  // Navigation shutdown can finish before the owned Task Engine release.
+  // The already-cancelled runner must not make Stop clickable again during
+  // that final cleanup window.
+  await waitFor(() => expect(stopButton).not.toHaveAttribute('aria-pressed', 'true'));
+  expect(stopButton).toBeDisabled();
   expect(global.fetch.mock.calls.filter(([url, options]) => (
     String(url) === '/api/services/bt_node/stop'
     && options?.method === 'POST'
   ))).toHaveLength(1);
+  await act(async () => {
+    resolveBtStop();
+    await Promise.resolve();
+  });
   const reloadMapButton = screen.getByRole('button', { name: 'Load Map' });
   await waitFor(() => expect(reloadMapButton).toBeEnabled());
   fireEvent.click(reloadMapButton);
@@ -6058,7 +6071,14 @@ test.each([
   fireEvent.click(screen.getByRole('button', { name: 'Load' }));
   await waitFor(() => expect(screen.getByRole('button', { name: 'Localize' })).toBeEnabled());
 
-  getServiceStatus.mockResolvedValue({ is_up: true, mode: 'nav' });
+  let navigationUp = true;
+  getServiceStatus.mockImplementation(() => Promise.resolve(
+    navigationUp ? { is_up: true, mode: 'nav' } : { is_up: false, mode: 'idle' },
+  ));
+  stopNavigation.mockImplementation(() => {
+    navigationUp = false;
+    return Promise.resolve({ ok: true, message: 'stopped' });
+  });
   fireEvent.click(screen.getByRole('button', { name: 'Localize' }));
   await waitFor(() => expect(startNavigation).toHaveBeenCalledWith('nav', 'factory'));
   await waitFor(() => expect(latestMapViewerProps().interactionMode).toBe('initial'));
@@ -6535,9 +6555,18 @@ test('drives to a clicked goal from the Navigation stage', async () => {
     mockMapViewer.mock.calls[mockMapViewer.mock.calls.length - 1][0]
   );
   getPgmFiles.mockResolvedValue({ files: [{ path: 'factory.pgm', name: 'factory.pgm' }] });
-  getServiceStatus
-    .mockResolvedValueOnce({ is_up: false })
-    .mockResolvedValue({ is_up: true, mode: 'nav' });
+  let navigationUp = false;
+  getServiceStatus.mockImplementation(() => Promise.resolve(
+    navigationUp ? { is_up: true, mode: 'nav' } : { is_up: false, mode: 'idle' },
+  ));
+  startNavigation.mockImplementation(() => {
+    navigationUp = true;
+    return Promise.resolve({ ok: true, message: 'started' });
+  });
+  stopNavigation.mockImplementation(() => {
+    navigationUp = false;
+    return Promise.resolve({ ok: true, message: 'stopped' });
+  });
   mockTopicDataByName['/amcl_pose'] = amclPoseMessage(0, 0, 0);
   sendInitialPoseEstimate.mockImplementationOnce(async () => {
     mockTopicDataByName['/amcl_pose'] = amclPoseMessage(1, 2, 0.5);
@@ -6546,6 +6575,10 @@ test('drives to a clicked goal from the Navigation stage', async () => {
   let resolveGoal;
   sendNavigateToPoseGoalAndWait.mockReturnValue(new Promise((resolve) => {
     resolveGoal = resolve;
+  }));
+  let resolveCancel;
+  cancelNavigateToPoseGoal.mockReturnValueOnce(new Promise((resolve) => {
+    resolveCancel = resolve;
   }));
 
   render(<MissionCanvasPage />);
@@ -6603,18 +6636,32 @@ test('drives to a clicked goal from the Navigation stage', async () => {
   expect(latestMapViewerProps().interactionMode).toBe('view');
   expect(latestMapViewerProps().missionFollowRobot).toBe(true);
 
-  // Stop while driving cancels the goal only — navigation stays up for the
-  // next goal.
+  // A single Stop cancels the active goal and shuts the navigation runtime
+  // down. A second click must not be necessary.
   fireEvent.click(screen.getByRole('button', { name: 'Stop' }));
   await waitFor(() => expect(cancelNavigateToPoseGoal).toHaveBeenCalled());
-  expect(stopNavigation).not.toHaveBeenCalled();
+  await waitFor(() => expect(stopNavigation).toHaveBeenCalledTimes(1));
+  expect(screen.getByRole('button', { name: 'Localize' })).toBeDisabled();
+  expect(screen.getByRole('button', { name: 'Set Goal' })).toBeDisabled();
+
+  await act(async () => {
+    resolveCancel({ ok: true });
+  });
   await waitFor(() => expect(screen.queryByText('Driving')).not.toBeInTheDocument());
   expect(latestMapViewerProps().missionFollowRobot).toBe(false);
-  expect(screen.getByRole('button', { name: 'Localize' })).toBeEnabled();
+  expect(latestMapViewerProps().goalPose).toBeNull();
+  expect(latestMapViewerProps().showGoalPose).toBe(false);
+  expect(navigationUp).toBe(false);
+  // Full shutdown unloads the live navigation map, so a fresh map load is
+  // required before Localize can start another session.
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Localize' })).toBeDisabled());
+  expect(screen.getByRole('button', { name: 'Stop' })).toBeDisabled();
 
   await act(async () => {
     resolveGoal({ ok: true, status: 'CANCELED' });
   });
+  expect(screen.queryByText('Driving')).not.toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Stop' })).toBeDisabled();
 });
 
 

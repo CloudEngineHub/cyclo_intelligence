@@ -290,6 +290,32 @@ test("stop while idle leaves an externally running BT alone", async () => {
   expect(h.stopBt).not.toHaveBeenCalled();
 });
 
+test("returns cleanup completion so runtime shutdown can wait for goal cancellation", async () => {
+  let resolveCancel;
+  const cancelGoal = jest.fn(() => new Promise((resolve) => {
+    resolveCancel = resolve;
+  }));
+  const h = makeHarness({ cancelGoal });
+
+  let cleanup;
+  act(() => {
+    cleanup = h.view.result.current.stop();
+  });
+  expect(cleanup).toEqual(expect.objectContaining({ then: expect.any(Function) }));
+
+  const settled = jest.fn();
+  cleanup.then(settled);
+  await act(async () => { await Promise.resolve(); });
+  expect(cancelGoal).toHaveBeenCalledTimes(1);
+  expect(settled).not.toHaveBeenCalled();
+
+  await act(async () => {
+    resolveCancel();
+    await cleanup;
+  });
+  expect(settled).toHaveBeenCalledTimes(1);
+});
+
 test("stop while awaiting navigation cancels without stopping an external BT", async () => {
   const sendGoal = jest.fn((x, y, yaw, signal) => new Promise((resolve, reject) => {
     signal.addEventListener("abort", () => {

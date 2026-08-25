@@ -3841,16 +3841,9 @@ function MissionCanvasWorkspace({
   // idle | driving | reached | failed
   const [navGoalStatus, setNavGoalStatus] = useState("idle");
   const navGoalSeqRef = useRef(0);
-  const [navGoalCancelling, setNavGoalCancelling] = useState(false);
   const navGoalDriving = navGoalStatus === "driving";
 
   const handleSendNavGoal = useCallback(async (x, y, yaw) => {
-    if (navGoalCancelling) {
-      // The backend cancel sweeps ALL NavigateToPose goals; a goal sent now
-      // would be killed by it.
-      setMessage("Cancelling the previous goal — try again in a moment");
-      return;
-    }
     const seq = navGoalSeqRef.current + 1;
     navGoalSeqRef.current = seq;
     setNavGoalPose({
@@ -3880,24 +3873,7 @@ function MissionCanvasWorkspace({
       setNavGoalStatus("failed");
       setMessage(error instanceof Error ? error.message : "Navigation goal failed");
     }
-  }, [navGoalCancelling, sendMissionGoal]);
-
-  const handleCancelNavGoal = useCallback(async () => {
-    // Bump the sequence first so the in-flight goal promise cannot override
-    // the cancelled state when it settles.
-    navGoalSeqRef.current += 1;
-    setNavGoalStatus("idle");
-    setNavGoalPose(null);
-    setNavGoalCancelling(true);
-    try {
-      await cancelNavigateToPoseGoal();
-      setMessage("Navigation goal cancelled");
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Failed to cancel the goal");
-    } finally {
-      setNavGoalCancelling(false);
-    }
-  }, []);
+  }, [sendMissionGoal]);
   const stopMissionBt = useCallback(async () => {
     const result = await callService(
       "/bt/set_running",
@@ -4030,6 +4006,9 @@ function MissionCanvasWorkspace({
     onMessage: setMessage,
   });
   const missionRunnerActive = missionRunner.isRunning;
+  const missionRunnerStopping = (
+    missionRunnerActive && missionRunner.status === RunnerStatus.CANCELLED
+  );
   const missionFollowRobot = (
     missionRunnerActive
     && (missionRunner.phase === "nav-sent" || missionRunner.phase === "awaiting-nav-result")
@@ -5757,7 +5736,10 @@ function MissionCanvasWorkspace({
   } = {}) => {
     // This cleanup is shared by Mapping, Design localization, Navigation, and
     // Run. Only a session leaving Run owns the loaded mission snapshot.
-    stopMissionRunner();
+    // Start cancelling the active goal before taking Nav2 down, and keep the
+    // outer Stop command busy until that cancellation settles. Local UI state
+    // is invalidated immediately so a late goal result cannot revive it.
+    const runnerCleanup = stopMissionRunner();
     navGoalSeqRef.current += 1;
     setNavGoalPose(null);
     setNavGoalStatus("idle");
@@ -5780,7 +5762,17 @@ function MissionCanvasWorkspace({
       setRunPoseInitialized(false);
       saveMissionSession({ runMissionName: "" });
     }
-    const result = await stopNavigation();
+    // Shut the supervisor runtime down immediately, but do not unlock this
+    // Stop command until the cancel-all request has also settled. That keeps
+    // a late cancellation away from any newly started navigation session.
+    const [, navigationStopResult] = await Promise.allSettled([
+      runnerCleanup,
+      stopNavigation(),
+    ]);
+    if (navigationStopResult.status === "rejected") {
+      throw navigationStopResult.reason;
+    }
+    const result = navigationStopResult.value;
     clearLocalizationPoseCache();
     resetMappingPoseSync();
     setStatus({ is_up: false, mode: "idle" });
@@ -7506,7 +7498,7 @@ function MissionCanvasWorkspace({
               <button
                 type="button"
                 onClick={handleStopNavigation}
-                disabled={!!busy || (!running && !missionRunnerActive && !runShutdownPending)}
+                disabled={!!busy || missionRunnerStopping || (!running && !missionRunnerActive && !runShutdownPending)}
                 aria-label="Stop"
                 aria-pressed={(busy === "Stop" || runShutdownPending) ? true : undefined}
                 title="Stop the mission and navigation"
@@ -7525,8 +7517,8 @@ function MissionCanvasWorkspace({
 
           {/* Navigate HUD — Localize / Set Goal / Stop. Set Goal arms the
               map: click (or drag for heading) sends a NavigateToPose goal and
-              nav2 plans the path. Stop cancels a driving goal first; pressed
-              again while idle it tears the navigation runtime down. */}
+              nav2 plans the path. Stop cancels the current goal and tears the
+              navigation runtime down in one operation. */}
           {workspaceStage === STAGE_NAVIGATE && (
             <div
               className="absolute top-5 left-5 z-10 flex items-center gap-2 p-2"
@@ -7568,11 +7560,11 @@ function MissionCanvasWorkspace({
               </button>
               <button
                 type="button"
-                onClick={navGoalDriving ? handleCancelNavGoal : handleStopNavigation}
-                disabled={!!busy || navGoalCancelling || (!running && !navGoalDriving && !runShutdownPending)}
+                onClick={handleStopNavigation}
+                disabled={!!busy || (!running && !navGoalDriving && !runShutdownPending)}
                 aria-label="Stop"
                 aria-pressed={(busy === "Stop" || runShutdownPending) ? true : undefined}
-                title={navGoalDriving ? "Stop the current goal (navigation stays up)" : "Stop navigation"}
+                title="Stop the current goal and navigation"
                 className="h-8 w-8 inline-flex items-center justify-center disabled:opacity-45"
                 style={{
                   borderRadius: 9,
