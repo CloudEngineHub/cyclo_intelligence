@@ -5752,55 +5752,58 @@ function MissionCanvasWorkspace({
   }, [runCommand, saveMapName]);
 
   const stopMissionRunner = missionRunner.stop;
+  const stopActiveNavigationSession = useCallback(async ({
+    clearRunSnapshot = workspaceStageRef.current === STAGE_RUN,
+  } = {}) => {
+    // This cleanup is shared by Mapping, Design localization, Navigation, and
+    // Run. Only a session leaving Run owns the loaded mission snapshot.
+    stopMissionRunner();
+    navGoalSeqRef.current += 1;
+    setNavGoalPose(null);
+    setNavGoalStatus("idle");
+    setInteractionMode("view");
+    if (clearRunSnapshot) {
+      // Clear the operator-facing session immediately. Supervisor shutdown
+      // may take a while (or its HTTP response may be lost after the backend
+      // already stopped), so the old mission must not linger behind a map
+      // that has already disappeared.
+      runMissionLoadGenerationRef.current += 1;
+      setMissionMapLoaded(false);
+      setRunMapName("");
+      setRunMissionName("");
+      setRunCatalog({ mapName: "", names: [] });
+      setRunSpots([]);
+      setRunMissionFlowNodes([]);
+      setRunMissionFlowEdges([]);
+      setRunMissionBtFiles({});
+      setRunMapSnapshotInvalid(true);
+      setRunPoseInitialized(false);
+      saveMissionSession({ runMissionName: "" });
+    }
+    const result = await stopNavigation();
+    clearLocalizationPoseCache();
+    resetMappingPoseSync();
+    setStatus({ is_up: false, mode: "idle" });
+    setNavigationRuntimeMode("idle");
+    setDesignPoseInitialized(false);
+    setRunPoseInitialized(false);
+    setRunRuntimeOwned(false);
+    setRunShutdownPending(false);
+    saveMissionSession({
+      navigationRuntimeMode: "idle",
+      designPoseInitialized: false,
+      runRuntimeOwned: false,
+      runShutdownPending: false,
+      runShutdownRequestedAt: null,
+      ...(clearRunSnapshot ? { runMissionName: "" } : {}),
+    });
+    return result;
+  }, [clearLocalizationPoseCache, resetMappingPoseSync, stopMissionRunner]);
+
   const handleStopNavigation = useCallback(() => runCommand(
     "Stop",
-    async () => {
-      // This handler is shared by Mapping, Design localization, Navigate, and
-      // Run. Only the Run Stop button owns the loaded mission snapshot.
-      const clearRunSnapshot = workspaceStageRef.current === STAGE_RUN;
-      stopMissionRunner();
-      navGoalSeqRef.current += 1;
-      setNavGoalPose(null);
-      setNavGoalStatus("idle");
-      setInteractionMode("view");
-      if (clearRunSnapshot) {
-        // Clear the operator-facing session immediately. Supervisor shutdown
-        // may take a while (or its HTTP response may be lost after the backend
-        // already stopped), so the old mission must not linger behind a map
-        // that has already disappeared.
-        runMissionLoadGenerationRef.current += 1;
-        setMissionMapLoaded(false);
-        setRunMapName("");
-        setRunMissionName("");
-        setRunCatalog({ mapName: "", names: [] });
-        setRunSpots([]);
-        setRunMissionFlowNodes([]);
-        setRunMissionFlowEdges([]);
-        setRunMissionBtFiles({});
-        setRunMapSnapshotInvalid(true);
-        setRunPoseInitialized(false);
-        saveMissionSession({ runMissionName: "" });
-      }
-      const result = await stopNavigation();
-      clearLocalizationPoseCache();
-      resetMappingPoseSync();
-      setStatus({ is_up: false, mode: "idle" });
-      setNavigationRuntimeMode("idle");
-      setDesignPoseInitialized(false);
-      setRunPoseInitialized(false);
-      setRunRuntimeOwned(false);
-      setRunShutdownPending(false);
-      saveMissionSession({
-        navigationRuntimeMode: "idle",
-        designPoseInitialized: false,
-        runRuntimeOwned: false,
-        runShutdownPending: false,
-        runShutdownRequestedAt: null,
-        ...(clearRunSnapshot ? { runMissionName: "" } : {}),
-      });
-      return result;
-    },
-  ), [clearLocalizationPoseCache, resetMappingPoseSync, runCommand, stopMissionRunner]);
+    () => stopActiveNavigationSession(),
+  ), [runCommand, stopActiveNavigationSession]);
 
   const cancelPendingDesignLocalization = useCallback(() => {
     if (
@@ -6636,10 +6639,12 @@ function MissionCanvasWorkspace({
 
   const handleSelectStageTab = (stageId) => {
     if (!missionWorkspaceActive) return;
-    if (stageId !== workspaceStage) {
+    if (stageId === workspaceStage) return;
+
+    const applyStageSelection = () => {
       // Run and Navigate share the nav runtime AND the loaded map snapshot:
-      // moving between them must not invalidate the session, or the sibling
-      // stage strands with every control disabled while nav is up.
+      // an idle switch between them may retain the loaded map. Active runtime
+      // switches are stopped before this cleanup runs.
       const runFamilySwitch = (
         (stageId === STAGE_RUN || stageId === STAGE_NAVIGATE)
         && (workspaceStage === STAGE_RUN || workspaceStage === STAGE_NAVIGATE)
@@ -6654,8 +6659,32 @@ function MissionCanvasWorkspace({
       setBtLayerSpotId("");
       setMapEditToolsOpen(false);
       setLabelToolsOpen(false);
+      setWorkspaceStage(stageId);
+    };
+
+    const leavingRunFamilyStage = (
+      workspaceStage === STAGE_RUN || workspaceStage === STAGE_NAVIGATE
+    );
+    const runFamilyRuntimeNeedsStop = (
+      navigationRuntimeMode === "run"
+      || runRuntimeActive
+      || runRuntimeOwned
+      || runShutdownPending
+      || missionRunnerActive
+      || navGoalDriving
+    );
+
+    if (leavingRunFamilyStage && runFamilyRuntimeNeedsStop) {
+      const clearRunSnapshot = workspaceStage === STAGE_RUN;
+      void runCommand("Stop", async () => {
+        const result = await stopActiveNavigationSession({ clearRunSnapshot });
+        applyStageSelection();
+        return result;
+      });
+      return;
     }
-    setWorkspaceStage(stageId);
+
+    applyStageSelection();
   };
 
   return (
@@ -6821,9 +6850,10 @@ function MissionCanvasWorkspace({
                 {group.stageIds.map((stageId) => {
                   const stage = WORKSPACE_STAGES.find((item) => item.id === stageId);
                   const selected = workspaceStage === stage.id;
-                  // Editing a saved PGM while SLAM (or a run) may rewrite the
-                  // same file and clobber one side silently — keep the guard.
-                  const editLocked = stage.id === STAGE_MAP_EDIT && !selected && (mappingRuntimeActive || runRuntimeActive);
+                  // SLAM may rewrite the saved PGM while it is being edited.
+                  // Run/Navigation sessions use the ordinary stage-exit stop,
+                  // so Map Edit must stay clickable to initiate that shutdown.
+                  const editLocked = stage.id === STAGE_MAP_EDIT && !selected && mappingRuntimeActive;
                   return (
                     <button
                       key={stage.id}

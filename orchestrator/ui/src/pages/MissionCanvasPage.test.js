@@ -5644,7 +5644,7 @@ test('hides run waypoints with the map after leaving and returning to Run', asyn
   expect(latestMapViewerProps().missionRouteOrder).toEqual([]);
 });
 
-test('clears a pending Run pose gesture when switching to Design', async () => {
+test('stops Run and clears its pending pose gesture before switching to Design', async () => {
   const latestMapViewerProps = () => (
     mockMapViewer.mock.calls[mockMapViewer.mock.calls.length - 1][0]
   );
@@ -5677,6 +5677,7 @@ test('clears a pending Run pose gesture when switching to Design', async () => {
 
   await waitFor(() => expect(latestMapViewerProps().interactionMode).toBe('view'));
   expect(screen.getByRole('tab', { name: 'Design' })).toHaveAttribute('aria-selected', 'true');
+  await waitFor(() => expect(stopNavigation).toHaveBeenCalledTimes(1));
   await act(async () => {
     latestMapViewerProps().onMapClick(1, 2);
     await latestMapViewerProps().onMapPose(1, 2, 0.25);
@@ -5684,8 +5685,14 @@ test('clears a pending Run pose gesture when switching to Design', async () => {
 
   expect(sendInitialPoseEstimate).not.toHaveBeenCalled();
   expect(createNavigationSpot).not.toHaveBeenCalled();
-  expect(stopNavigation).not.toHaveBeenCalled();
-  expect(navigationUp).toBe(true);
+  expect(navigationUp).toBe(false);
+  expect(JSON.parse(window.sessionStorage.getItem('mission_canvas_session')))
+    .toEqual(expect.objectContaining({
+      workspaceStage: 'authoring',
+      navigationRuntimeMode: 'idle',
+      runRuntimeOwned: false,
+      runShutdownPending: false,
+    }));
   expect(screen.queryByText('Stop the active navigation session before using At Robot'))
     .not.toBeInTheDocument();
 });
@@ -6569,13 +6576,6 @@ test('drives to a clicked goal from the Navigation stage', async () => {
     { timeout: 5000 },
   );
 
-  // Run requires its own mission load and must not borrow Navigate's map-only
-  // readiness. Returning to Navigate still preserves its map and localization.
-  fireEvent.click(screen.getByRole('tab', { name: 'Run' }));
-  expect(screen.getByRole('button', { name: 'Localize' })).toBeDisabled();
-  fireEvent.click(screen.getByRole('tab', { name: 'Navigation' }));
-  await waitFor(() => expect(screen.getByRole('button', { name: 'Set Goal' })).toBeEnabled());
-
   // An accidental Localize re-click must not invalidate the pose: with the
   // runtime already up the first click re-arms pose-set mode, the second
   // disarms it, and Set Goal stays usable throughout.
@@ -6615,6 +6615,114 @@ test('drives to a clicked goal from the Navigation stage', async () => {
   await act(async () => {
     resolveGoal({ ok: true, status: 'CANCELED' });
   });
+});
+
+
+test('stops Navigation and clears its localization before switching to Map Edit', async () => {
+  const latestMapViewerProps = () => (
+    mockMapViewer.mock.calls[mockMapViewer.mock.calls.length - 1][0]
+  );
+  let navigationUp = false;
+  getPgmFiles.mockResolvedValue({ files: [{ path: 'factory.pgm', name: 'factory.pgm' }] });
+  getServiceStatus.mockImplementation(() => Promise.resolve(
+    navigationUp ? { is_up: true, mode: 'nav' } : { is_up: false, mode: 'idle' },
+  ));
+  startNavigation.mockImplementation(() => {
+    navigationUp = true;
+    return Promise.resolve({ ok: true, message: 'started' });
+  });
+  stopNavigation.mockImplementation(() => {
+    navigationUp = false;
+    return Promise.resolve({ ok: true, message: 'stopped' });
+  });
+  mockTopicDataByName['/amcl_pose'] = amclPoseMessage(0, 0, 0);
+  sendInitialPoseEstimate.mockImplementation(async () => {
+    mockTopicDataByName['/amcl_pose'] = amclPoseMessage(1, 2, 0.5);
+    return { ok: true };
+  });
+
+  render(<MissionCanvasPage />);
+
+  fireEvent.click(screen.getByRole('tab', { name: 'Navigation' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Load Map' }));
+  const loadDialog = await screen.findByRole('dialog', { name: 'Load Map' });
+  fireEvent.click(within(loadDialog).getByRole('button', { name: 'Load' }));
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Localize' })).toBeEnabled());
+
+  fireEvent.click(screen.getByRole('button', { name: 'Localize' }));
+  await waitFor(() => expect(latestMapViewerProps().interactionMode).toBe('initial'));
+  await act(async () => {
+    latestMapViewerProps().onMapPose(1, 2, 0.5);
+  });
+  await waitFor(
+    () => expect(screen.getByRole('button', { name: 'Set Goal' })).toBeEnabled(),
+    { timeout: 5000 },
+  );
+  expect(navigationUp).toBe(true);
+
+  stopNavigation.mockClear();
+  expect(screen.getByRole('tab', { name: 'Map Edit' })).toBeEnabled();
+  fireEvent.click(screen.getByRole('tab', { name: 'Map Edit' }));
+
+  await waitFor(() => expect(stopNavigation).toHaveBeenCalledTimes(1));
+  await waitFor(() => expect(screen.getByRole('tab', { name: 'Map Edit' }))
+    .toHaveAttribute('aria-selected', 'true'));
+  expect(navigationUp).toBe(false);
+  expect(latestMapViewerProps().interactionMode).toBe('view');
+  expect(latestMapViewerProps().goalPose).toBeNull();
+  await waitFor(() => expect(
+    JSON.parse(window.sessionStorage.getItem('mission_canvas_session')),
+  ).toEqual(expect.objectContaining({
+    workspaceStage: 'map_edit',
+    navigationRuntimeMode: 'idle',
+    runRuntimeOwned: false,
+    runShutdownPending: false,
+  })));
+
+  await waitFor(() => expect(screen.getByRole('tab', { name: 'Navigation' })).toBeEnabled());
+  fireEvent.click(screen.getByRole('tab', { name: 'Navigation' }));
+  expect(screen.getByRole('button', { name: 'Set Goal' })).toBeDisabled();
+  expect(screen.getByRole('button', { name: 'Localize' })).toBeDisabled();
+  expect(stopNavigation).toHaveBeenCalledTimes(1);
+});
+
+
+test('keeps Run selected when automatic stage-exit shutdown fails', async () => {
+  let navigationUp = false;
+  getServiceStatus.mockImplementation(() => Promise.resolve(
+    navigationUp ? { is_up: true, mode: 'nav' } : { is_up: false, mode: 'idle' },
+  ));
+  startNavigation.mockImplementation(() => {
+    navigationUp = true;
+    return Promise.resolve({ ok: true, message: 'started' });
+  });
+  stopNavigation.mockRejectedValue(new Error('navigation stop failed'));
+
+  render(<MissionCanvasPage />);
+
+  fireEvent.click(screen.getByRole('tab', { name: 'Run' }));
+  await loadRunMapFromDialog('factory.pgm');
+  fireEvent.click(screen.getByRole('button', { name: 'Localize' }));
+  await waitFor(() => expect(startNavigation).toHaveBeenCalledWith('nav', 'factory'));
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Stop' })).toBeEnabled());
+  stopNavigation.mockClear();
+
+  fireEvent.click(screen.getByRole('tab', { name: 'Design' }));
+
+  await waitFor(() => expect(stopNavigation).toHaveBeenCalledTimes(1));
+  await waitFor(() => expect(screen.getByRole('tab', { name: 'Run' }))
+    .toHaveAttribute('aria-selected', 'true'));
+  expect(screen.getByRole('tab', { name: 'Design' }))
+    .toHaveAttribute('aria-selected', 'false');
+  expect(navigationUp).toBe(true);
+  await waitFor(() => expect(
+    JSON.parse(window.sessionStorage.getItem('mission_canvas_session')),
+  ).toEqual(expect.objectContaining({
+    workspaceStage: 'run',
+    navigationRuntimeMode: 'run',
+    runRuntimeOwned: true,
+    runShutdownPending: false,
+  })));
 });
 
 
