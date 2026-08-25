@@ -23,6 +23,7 @@ import PageType from '../../constants/pageType';
 export const CURRENT_PAGE_STORAGE_KEY = 'cyclo_intelligence.current_page';
 export const MISSION_CANVAS_SESSION_STORAGE_KEY = 'mission_canvas_session';
 export const LEGACY_BT_MANAGER_PAGE = 'bt_manager';
+export const LEGACY_NAVIGATION_PAGE = 'navigation';
 
 const validPages = new Set(Object.values(PageType));
 
@@ -73,6 +74,35 @@ export const resolveInitialPageState = (storage = getSessionStorage()) => {
       storage.setItem(MISSION_CANVAS_SESSION_STORAGE_KEY, JSON.stringify({
         ...missionSession,
         workspaceKind: 'standalone_bt',
+      }));
+      storage.setItem(CURRENT_PAGE_STORAGE_KEY, PageType.MISSION_CANVAS);
+    } catch (_error) {
+      // A blocked write does not prevent this in-memory compatibility redirect.
+    }
+    return {
+      currentPage: PageType.MISSION_CANVAS,
+      restoredPageFromSession: true,
+    };
+  }
+
+  if (storedPage === LEGACY_NAVIGATION_PAGE) {
+    // The standalone Nav page now lives in Mission Canvas. Preserve any
+    // existing Mission Canvas context and open its map-only Navigate stage.
+    let missionSession = {};
+    try {
+      const rawMissionSession = storage.getItem(MISSION_CANVAS_SESSION_STORAGE_KEY);
+      const parsedMissionSession = rawMissionSession ? JSON.parse(rawMissionSession) : {};
+      if (parsedMissionSession && typeof parsedMissionSession === 'object') {
+        missionSession = parsedMissionSession;
+      }
+    } catch (_error) {
+      missionSession = {};
+    }
+    try {
+      storage.setItem(MISSION_CANVAS_SESSION_STORAGE_KEY, JSON.stringify({
+        ...missionSession,
+        workspaceKind: 'mission',
+        workspaceStage: 'navigate',
       }));
       storage.setItem(CURRENT_PAGE_STORAGE_KEY, PageType.MISSION_CANVAS);
     } catch (_error) {

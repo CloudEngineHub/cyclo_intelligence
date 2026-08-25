@@ -16,7 +16,7 @@
 
 import React, { useEffect, useRef } from 'react';
 import clsx from 'clsx';
-import { MdHome, MdVideocam, MdMemory, MdWidgets, MdAccountTree, MdNavigation } from 'react-icons/md';
+import { MdHome, MdVideocam, MdMemory, MdWidgets, MdAccountTree } from 'react-icons/md';
 import { TbMapRoute } from 'react-icons/tb';
 import { GoGraph } from 'react-icons/go';
 import { Toaster } from 'react-hot-toast';
@@ -30,13 +30,11 @@ import TrainingPage from './pages/TrainingPage';
 import EditDatasetPage from './pages/EditDatasetPage';
 import { useRosTopicSubscription } from './hooks/useRosTopicSubscription';
 import rosConnectionManager from './utils/rosConnectionManager';
-import { stopNavigation } from './utils/navigationApi';
 import { useDispatch, useSelector } from 'react-redux';
 import { moveToPage, persistCurrentPage } from './features/ui/uiSlice';
 import { persistRobotType } from './features/tasks/taskSlice';
 import PageType from './constants/pageType';
 
-const NavigationPage = React.lazy(() => import('./pages/NavigationPage'));
 const MissionCanvasPage = React.lazy(() => import('./pages/MissionCanvasPage'));
 
 function MissionCanvasIcon({ size = 36 }) {
@@ -89,7 +87,6 @@ function App() {
   const taskStatusReceived = recordTopicReceived || inferenceTopicReceived;
 
   const isFirstLoad = useRef(true);
-  const previousPageRef = useRef(page);
 
   // Subscribe to task status from ROS topic (always active)
   const rosSubscriptionControls = useRosTopicSubscription();
@@ -132,19 +129,6 @@ function App() {
 
   useEffect(() => {
     persistCurrentPage(page);
-  }, [page]);
-
-  // Navigation belongs to the Nav page. Stop the external stack when the user
-  // leaves it; keeping this transition at App level avoids StrictMode's
-  // development-only effect cleanup from stopping a freshly mounted page.
-  useEffect(() => {
-    const previousPage = previousPageRef.current;
-    previousPageRef.current = page;
-    if (previousPage === PageType.NAVIGATION && page !== PageType.NAVIGATION) {
-      void stopNavigation().catch((error) => {
-        console.error('Failed to stop Navigation after leaving the Nav page:', error);
-      });
-    }
   }, [page]);
 
   useEffect(() => {
@@ -287,11 +271,6 @@ function App() {
   const handleEditDatasetPageNavigation = () => {
     isFirstLoad.current = false;
     dispatch(moveToPage(PageType.EDIT_DATASET));
-  };
-
-  const handleNavigationPageNavigation = () => {
-    isFirstLoad.current = false;
-    dispatch(moveToPage(PageType.NAVIGATION));
   };
 
   const handleMissionCanvasPageNavigation = () => {
@@ -456,18 +435,6 @@ function App() {
             className="w-24 h-1 border-t-2 rounded-full border-gray-200 dark:border-slate-800 mt-3"
           />
 
-          {/* Navigation page button */}
-          <button
-            className={clsx(classPageButton, {
-              'hover:bg-gray-200 active:bg-gray-400 dark:hover:bg-slate-800 dark:active:bg-slate-700': page !== PageType.NAVIGATION,
-              'bg-gray-300 dark:bg-slate-700': page === PageType.NAVIGATION,
-            })}
-            onClick={handleNavigationPageNavigation}
-          >
-            <MdNavigation size={30} className="mb-2" />
-            <span className="mt-1 text-sm whitespace-nowrap">Nav</span>
-          </button>
-
           {/* Mission Canvas page button */}
           <button
             className={clsx(classPageButton, {
@@ -499,10 +466,6 @@ function App() {
         ) : page === PageType.MISSION_CANVAS ? (
           <React.Suspense fallback={<div className="flex-1 flex items-center justify-center">Loading Mission Canvas...</div>}>
             <MissionCanvasPage onBackHome={handleHomePageNavigation} />
-          </React.Suspense>
-        ) : page === PageType.NAVIGATION ? (
-          <React.Suspense fallback={<div className="flex-1 flex items-center justify-center">Loading Navigation...</div>}>
-            <NavigationPage />
           </React.Suspense>
         ) : (
           <HomePage />

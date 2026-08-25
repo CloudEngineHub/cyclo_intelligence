@@ -25,6 +25,9 @@ Final UX target:
 `Mission Canvas` is the product-facing page name. `Spatial Behavior Workspace`
 is the internal architecture name used in this document.
 
+The former standalone `Nav` page has been removed. References to Nav UI in
+this document now describe the `Navigate` stage inside Mission Canvas.
+
 The main design goal is to stop growing `ai_worker` feature code and move the
 new application logic into `cyclo_intelligence`, while continuing to use
 `ai_worker` as the robot navigation stack provider.
@@ -738,7 +741,7 @@ This slice proves the core product idea without requiring a full plugin system.
 The smallest slice should still be designed with the unified workspace in mind:
 
 ```text
-- Do not bake Spot state into NavigationPage-only local state.
+- Do not bake Spot state into MissionCanvasPage-only local state.
 - Do not bake BT graph state into BTManagerPage-only assumptions.
 - Extract reusable components when the second call site appears:
   - MapViewer + overlays

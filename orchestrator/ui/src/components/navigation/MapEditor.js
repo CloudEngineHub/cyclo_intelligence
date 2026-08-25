@@ -17,6 +17,7 @@
 "use client";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { MdRedo, MdUndo } from "react-icons/md";
+import { mapPointToAreaGridCell } from "../../utils/mapAreaGeometry";
 import { getMapAnnotations, getPgmFiles, getPgmImage, saveMapAnnotations, savePgmImage } from "../../utils/navigationApi";
 import { yawFromPose } from "../../utils/navigationTf";
 const FREE_VALUE = 254;
@@ -440,24 +441,10 @@ function pgmPixelsToGrid(image, pixels) {
     };
 }
 function mapPointToPgmPixel(image, x, y) {
-    const resolution = Number(image.resolution ?? 1) || 1;
-    const origin = image.origin ?? {
-        position: { x: 0, y: 0, z: 0 },
-        orientation: { x: 0, y: 0, z: 0, w: 1 },
-    };
-    const originX = Number(origin.position?.x ?? 0);
-    const originY = Number(origin.position?.y ?? 0);
-    const originYaw = yawFromPose(origin);
-    const dx = x - originX;
-    const dy = y - originY;
-    const localX = Math.cos(originYaw) * dx + Math.sin(originYaw) * dy;
-    const localY = -Math.sin(originYaw) * dx + Math.cos(originYaw) * dy;
-    const pixelX = Math.floor(localX / resolution);
-    const pixelY = image.height - 1 - Math.floor(localY / resolution);
-    if (pixelX < 0 || pixelX >= image.width || pixelY < 0 || pixelY >= image.height) {
+    const cell = mapPointToAreaGridCell(image, x, y);
+    if (!cell)
         return null;
-    }
-    return { pixelX, pixelY };
+    return { pixelX: cell.x, pixelY: image.height - 1 - cell.y };
 }
 function pgmPixelToMapPoint(image, pixelX, pixelY) {
     const resolution = Number(image.resolution ?? 1) || 1;

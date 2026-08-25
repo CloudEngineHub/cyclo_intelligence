@@ -1825,88 +1825,108 @@ function MapAreaManager({ mapEditor, showNameInput = false }) {
           />
         </label>
       )}
-      <div role="group" aria-label="Map areas" className="grid max-h-44 gap-2 content-start overflow-y-auto">
-        {mapEditor.annotations.map((annotation) => {
-          const selected = annotation.id === mapEditor.selectedAnnotationId;
-          const confirming = confirmDeleteId === annotation.id;
-          return (
-            <div key={annotation.id} className="flex items-center gap-1.5 min-w-0">
-              {renamingId === annotation.id ? (
-                <input
-                  autoFocus
-                  aria-label={`Rename area ${annotation.label}`}
-                  value={renameDraft}
-                  disabled={busy}
-                  onChange={(event) => setRenameDraft(event.currentTarget.value)}
-                  onBlur={() => commitRename(annotation)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter") {
-                      event.preventDefault();
-                      commitRename(annotation);
-                    }
-                    if (event.key === "Escape") {
-                      event.preventDefault();
-                      setRenamingId("");
-                      setRenameDraft("");
-                    }
-                  }}
-                  className="h-8 flex-1 px-2 text-[13px] min-w-0"
-                  style={{ borderRadius: 8, border: "1px solid var(--mc-border-strong)", backgroundColor: "var(--mc-surface)", color: "var(--mc-text)" }}
-                />
-              ) : (
+      <div className="grid gap-1.5 min-w-0 border-t pt-2" style={{ borderColor: "var(--mc-border)" }}>
+        <div className="flex items-center justify-between px-0.5">
+          <span className="text-[10px] font-mono tracking-[0.12em]" style={{ color: "var(--mc-text-subtle)" }}>
+            LABELED AREAS
+          </span>
+          <span className="text-[10px] font-mono" style={{ color: "var(--mc-text-muted)" }}>
+            {mapEditor.annotations.length}
+          </span>
+        </div>
+        <div
+          role="group"
+          aria-label="Map areas"
+          className="grid max-h-28 gap-2 content-start overflow-y-auto overscroll-contain pr-1"
+          style={{ scrollbarGutter: "stable" }}
+        >
+          {mapEditor.annotations.map((annotation) => {
+            const selected = annotation.id === mapEditor.selectedAnnotationId;
+            const confirming = confirmDeleteId === annotation.id;
+            return (
+              <div key={annotation.id} className="flex h-8 items-center gap-1.5 min-w-0">
+                {renamingId === annotation.id ? (
+                  <input
+                    autoFocus
+                    aria-label={`Rename area ${annotation.label}`}
+                    value={renameDraft}
+                    disabled={busy}
+                    onChange={(event) => setRenameDraft(event.currentTarget.value)}
+                    onBlur={() => commitRename(annotation)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") {
+                        event.preventDefault();
+                        commitRename(annotation);
+                      }
+                      if (event.key === "Escape") {
+                        event.preventDefault();
+                        setRenamingId("");
+                        setRenameDraft("");
+                      }
+                    }}
+                    className="h-8 flex-1 px-2 text-[13px] min-w-0"
+                    style={{ borderRadius: 8, border: "1px solid var(--mc-border-strong)", backgroundColor: "var(--mc-surface)", color: "var(--mc-text)" }}
+                  />
+                ) : (
+                  <button
+                    type="button"
+                    aria-pressed={selected}
+                    disabled={busy}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      mapEditor.setSelectedAnnotationId(annotation.id);
+                    }}
+                    onDoubleClick={() => {
+                      setRenamingId(annotation.id);
+                      setRenameDraft(annotation.label);
+                    }}
+                    title={`${annotation.label} — double-click to rename`}
+                    className="h-8 flex-1 px-2.5 min-w-0 inline-flex items-center gap-2 text-left text-[12.5px] font-semibold disabled:opacity-50"
+                    style={{
+                      borderRadius: 8,
+                      border: `1px solid ${selected ? "var(--mc-accent)" : "var(--mc-border)"}`,
+                      backgroundColor: selected ? "var(--mc-accent-soft)" : "var(--mc-surface-2)",
+                      color: "var(--mc-text)",
+                    }}
+                  >
+                    <span aria-hidden="true" className="shrink-0" style={{ width: 8, height: 8, borderRadius: 999, backgroundColor: annotation.color }} />
+                    <span className="block truncate">{annotation.label}</span>
+                  </button>
+                )}
                 <button
                   type="button"
-                  aria-pressed={selected}
                   disabled={busy}
-                  onClick={() => mapEditor.setSelectedAnnotationId(annotation.id)}
-                  onDoubleClick={() => {
-                    setRenamingId(annotation.id);
-                    setRenameDraft(annotation.label);
+                  aria-label={confirming ? `Confirm delete area ${annotation.label}` : `Delete area ${annotation.label}`}
+                  title={confirming ? "Click again to delete" : `Delete ${annotation.label}`}
+                  onClick={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    if (confirming) {
+                      mapEditor.deleteAnnotationById(annotation.id);
+                      setConfirmDeleteId("");
+                      return;
+                    }
+                    armConfirm(annotation.id);
                   }}
-                  title={`${annotation.label} — double-click to rename`}
-                  className="h-8 flex-1 px-2.5 min-w-0 inline-flex items-center gap-2 text-left text-[12.5px] font-semibold disabled:opacity-50"
+                  className="h-8 w-8 shrink-0 inline-flex items-center justify-center active:translate-y-px disabled:opacity-50"
                   style={{
                     borderRadius: 8,
-                    border: `1px solid ${selected ? "var(--mc-accent)" : "var(--mc-border)"}`,
-                    backgroundColor: selected ? "var(--mc-accent-soft)" : "var(--mc-surface-2)",
-                    color: "var(--mc-text)",
+                    border: `1px solid ${confirming ? "var(--mc-danger)" : "var(--mc-border-strong)"}`,
+                    backgroundColor: confirming ? "var(--mc-danger)" : "var(--mc-surface)",
+                    color: confirming ? "var(--mc-accent-fg)" : "var(--mc-danger)",
                   }}
                 >
-                  <span aria-hidden="true" className="shrink-0" style={{ width: 8, height: 8, borderRadius: 999, backgroundColor: annotation.color }} />
-                  <span className="block truncate">{annotation.label}</span>
+                  <MdDelete size={15} />
                 </button>
-              )}
-              <button
-                type="button"
-                disabled={busy}
-                aria-label={confirming ? `Confirm delete area ${annotation.label}` : `Delete area ${annotation.label}`}
-                title={confirming ? "Click again to delete" : `Delete ${annotation.label}`}
-                onClick={() => {
-                  if (confirming) {
-                    mapEditor.deleteAnnotationById(annotation.id);
-                    setConfirmDeleteId("");
-                    return;
-                  }
-                  armConfirm(annotation.id);
-                }}
-                className="h-8 w-8 shrink-0 inline-flex items-center justify-center active:translate-y-px disabled:opacity-50"
-                style={{
-                  borderRadius: 8,
-                  border: `1px solid ${confirming ? "var(--mc-danger)" : "var(--mc-border-strong)"}`,
-                  backgroundColor: confirming ? "var(--mc-danger)" : "var(--mc-surface)",
-                  color: confirming ? "var(--mc-accent-fg)" : "var(--mc-danger)",
-                }}
-              >
-                <MdDelete size={15} />
-              </button>
+              </div>
+            );
+          })}
+          {mapEditor.annotations.length === 0 && (
+            <div className="text-[12px]" style={{ color: "var(--mc-text-muted)" }}>
+              {showNameInput ? "Drag on the map to mark a region." : "No labeled areas."}
             </div>
-          );
-        })}
-        {mapEditor.annotations.length === 0 && showNameInput && (
-          <div className="text-[12px]" style={{ color: "var(--mc-text-muted)" }}>
-            Drag on the map to mark a region.
-          </div>
-        )}
+          )}
+        </div>
       </div>
     </div>
   );
@@ -7203,7 +7223,7 @@ export default function MissionCanvasPage({ onBackHome = null }) {
               popovers below (the Design HUD's waypoint-options idiom). */}
           {workspaceStage === STAGE_MAP_EDIT && (
             <div
-              className="absolute top-5 left-5 z-10 flex items-center gap-2 p-2"
+              className="absolute top-5 left-5 z-20 flex items-center gap-2 p-2"
               style={{ borderRadius: 14, backgroundColor: "color-mix(in srgb, var(--mc-surface) 88%, transparent)", border: "1px solid var(--mc-border)", boxShadow: "var(--mc-shadow)", backdropFilter: "blur(8px)" }}
             >
               <MapEditToolButton
@@ -7267,9 +7287,11 @@ export default function MissionCanvasPage({ onBackHome = null }) {
                 </MapEditToolButton>
                 {labelToolsOpen && (
                   <div
-                    className="absolute left-0 top-[calc(100%+6px)] grid gap-2 p-2"
+                    className="absolute left-0 top-[calc(100%+6px)] z-30 isolate grid w-72 max-w-[calc(100vw-2rem)] gap-2 p-2 pointer-events-auto"
                     role="menu"
                     aria-label="Map labeling tools"
+                    onPointerDown={(event) => event.stopPropagation()}
+                    onClick={(event) => event.stopPropagation()}
                     style={{ borderRadius: 12, backgroundColor: "var(--mc-surface)", border: "1px solid var(--mc-border-strong)", boxShadow: "var(--mc-shadow)" }}
                   >
                     <div className="flex items-center gap-2">

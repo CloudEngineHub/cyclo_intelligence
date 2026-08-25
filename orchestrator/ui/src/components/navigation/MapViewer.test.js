@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import {
   MapViewer,
+  mapAreaPreviewCellIndices,
   mapRenderIntervalMs,
   updateGlobalCostmapTexture,
 } from './MapViewer';
@@ -96,6 +97,27 @@ test('uses adaptive map render intervals for active, idle and hidden states', ()
   expect(mapRenderIntervalMs({ active: true })).toBe(16);
   expect(mapRenderIntervalMs({ active: false })).toBe(100);
   expect(mapRenderIntervalMs({ hidden: true, active: true })).toBe(500);
+});
+
+test('previews only the free, unclaimed cells that an Area drag will save', () => {
+  const grid = {
+    info: {
+      width: 4,
+      height: 2,
+      resolution: 1,
+      origin: {
+        position: { x: 0, y: 0, z: 0 },
+        orientation: { x: 0, y: 0, z: 0, w: 1 },
+      },
+    },
+    data: [0, 100, -1, 0, 0, 0, 0, 0],
+  };
+
+  expect(mapAreaPreviewCellIndices(
+    grid,
+    { startX: 0.05, startY: 0.05, endX: 3.95, endY: 1.95 },
+    new Set([4]),
+  )).toEqual([0, 3, 5, 6, 7]);
 });
 
 test('keeps the left waypoint context passive when no close action is provided', () => {

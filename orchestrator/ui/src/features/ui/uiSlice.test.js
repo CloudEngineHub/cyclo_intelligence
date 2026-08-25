@@ -2,6 +2,7 @@ import PageType from '../../constants/pageType';
 import {
   CURRENT_PAGE_STORAGE_KEY,
   LEGACY_BT_MANAGER_PAGE,
+  LEGACY_NAVIGATION_PAGE,
   MISSION_CANVAS_SESSION_STORAGE_KEY,
   persistCurrentPage,
   resolveInitialPageState,
@@ -94,6 +95,31 @@ describe('uiSlice page session state', () => {
     expect(JSON.parse(storage.values[MISSION_CANVAS_SESSION_STORAGE_KEY]))
       .toEqual(expect.objectContaining({
         workspaceKind: 'standalone_bt',
+      }));
+  });
+
+  test('migrates the legacy navigation page into the Mission Canvas Navigate workspace', () => {
+    const storage = makeStorage({
+      [CURRENT_PAGE_STORAGE_KEY]: LEGACY_NAVIGATION_PAGE,
+      [MISSION_CANVAS_SESSION_STORAGE_KEY]: JSON.stringify({
+        workspaceKind: 'standalone_bt',
+        workspaceStage: 'authoring',
+        mapName: 'factory',
+      }),
+    });
+
+    expect(PageType).not.toHaveProperty('NAVIGATION');
+    expect(LEGACY_NAVIGATION_PAGE).toBe('navigation');
+    expect(resolveInitialPageState(storage)).toEqual({
+      currentPage: PageType.MISSION_CANVAS,
+      restoredPageFromSession: true,
+    });
+    expect(storage.values[CURRENT_PAGE_STORAGE_KEY]).toBe(PageType.MISSION_CANVAS);
+    expect(JSON.parse(storage.values[MISSION_CANVAS_SESSION_STORAGE_KEY]))
+      .toEqual(expect.objectContaining({
+        workspaceKind: 'mission',
+        workspaceStage: 'navigate',
+        mapName: 'factory',
       }));
   });
 });

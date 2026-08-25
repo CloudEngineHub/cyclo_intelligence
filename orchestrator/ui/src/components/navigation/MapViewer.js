@@ -19,6 +19,7 @@ import { useEffect, useRef, useState } from "react";
 import * as THREE from "three";
 // @ts-ignore
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
+import { mapAreaGridMeta, mapAreaSelectionBounds, mapPointToAreaGridCell } from "../../utils/mapAreaGeometry";
 import { buildTfFramePoses, normalizeFrameId, orientationFromYaw, poseForScanFrame, poseForScanFrameAtBasePose, poseForTfAxesFrame, yawFromPose, } from "../../utils/navigationTf";
 import { roomSegmentationParams, segmentFreeRooms } from "../../utils/roomSegmentation";
 const CAMERA_NEAR = 0.05;
@@ -795,6 +796,12 @@ function boundedFreeRegion(grid, regionSpec, excludedCells = null) {
         },
     };
 }
+export function mapAreaPreviewCellIndices(grid, selection, excludedCells = null) {
+    const bounds = mapAreaSelectionBounds(grid, selection);
+    if (!bounds)
+        return [];
+    return boundedFreeRegion(grid, { bounds }, excludedCells)?.cells ?? [];
+}
 function rgbaArrayFromHex(color, alpha = 150) {
     const value = hexColorString(color, "#6D1F2A");
     return [
@@ -833,37 +840,69 @@ function makeAnnotationRegionTexture(grid, region, colorString, alpha = 164) {
     texture.needsUpdate = true;
     return texture;
 }
-function makeEditorAreaPreview(selection, isDark = false) {
-    if (!selection)
+function makeEditorAreaPreview(selection, grid, excludedCells = null, isDark = false) {
+    const meta = mapAreaGridMeta(grid);
+    if (!meta)
         return null;
-    const minX = Math.min(selection.startX, selection.endX);
-    const maxX = Math.max(selection.startX, selection.endX);
-    const minY = Math.min(selection.startY, selection.endY);
-    const maxY = Math.max(selection.startY, selection.endY);
-    const width = maxX - minX;
-    const height = maxY - minY;
-    if (width <= 0 || height <= 0)
+    const cells = mapAreaPreviewCellIndices(grid, selection, excludedCells);
+    if (!cells.length)
         return null;
-    const group = new THREE.Group();
-    const fill = new THREE.Mesh(new THREE.PlaneGeometry(width, height), new THREE.MeshBasicMaterial({
+
+    // Merge adjacent cells into one quad per horizontal run. This shows the
+    // exact free, unclaimed cells that will be saved without rebuilding a
+    // full-map canvas texture on every pointer move.
+    const positions = [];
+    const indices = [];
+    const originCos = Math.cos(meta.originYaw);
+    const originSin = Math.sin(meta.originYaw);
+    const addVertex = (cellX, cellY) => {
+        const localX = cellX * meta.resolution;
+        const localY = cellY * meta.resolution;
+        positions.push(
+            meta.originX + originCos * localX - originSin * localY,
+            meta.originY + originSin * localX + originCos * localY,
+            0.82,
+        );
+    };
+    const addRun = (y, xStart, xEnd) => {
+        const vertex = positions.length / 3;
+        addVertex(xStart, y);
+        addVertex(xEnd + 1, y);
+        addVertex(xEnd + 1, y + 1);
+        addVertex(xStart, y + 1);
+        indices.push(vertex, vertex + 1, vertex + 2, vertex, vertex + 2, vertex + 3);
+    };
+    let runY = -1;
+    let runStart = -1;
+    let runEnd = -1;
+    const flushRun = () => {
+        if (runStart >= 0)
+            addRun(runY, runStart, runEnd);
+    };
+    cells.forEach((index) => {
+        const x = index % meta.width;
+        const y = Math.floor(index / meta.width);
+        if (y !== runY || x !== runEnd + 1) {
+            flushRun();
+            runY = y;
+            runStart = x;
+        }
+        runEnd = x;
+    });
+    flushRun();
+    if (!positions.length)
+        return null;
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+    geometry.setIndex(indices);
+    geometry.computeBoundingSphere();
+    return new THREE.Mesh(geometry, new THREE.MeshBasicMaterial({
         color: isDark ? 0xd5794f : 0x6d1f2a,
         transparent: true,
-        opacity: 0.18,
+        opacity: 0.3,
         depthWrite: false,
         side: THREE.DoubleSide,
     }));
-    fill.position.set((minX + maxX) / 2, (minY + maxY) / 2, 0.82);
-    group.add(fill);
-    const outline = makeLine([
-        new THREE.Vector3(minX, minY, 0.84),
-        new THREE.Vector3(maxX, minY, 0.84),
-        new THREE.Vector3(maxX, maxY, 0.84),
-        new THREE.Vector3(minX, maxY, 0.84),
-        new THREE.Vector3(minX, minY, 0.84),
-    ], isDark ? 0xf3f1ea : 0x1c1a17, 2);
-    if (outline)
-        group.add(outline);
-    return group;
 }
 function makeLine(points, color, lineWidth = 2) {
     if (points.length < 2)
@@ -2052,11 +2091,6 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, scanPose = n
                 layers.add(makePoseMarker(dragPreviewPose, interactionMode === "initial" ? (isDark ? 0x6f9a74 : 0x5b8266) : (isDark ? 0xd5794f : 0xc96442), 0.2, isDark));
             }
         }
-        if (editorAreaPreview) {
-            const preview = makeEditorAreaPreview(editorAreaPreview, isDark);
-            if (preview)
-                layers.add(preview);
-        }
         const spotById = new Map(spots.map((spot) => [spot.id, spot]));
         const coveredAnnotationCells = new Set();
         mapAnnotations.forEach((annotation) => {
@@ -2064,6 +2098,11 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, scanPose = n
             if (marker)
                 layers.add(marker);
         });
+        if (editorAreaPreview) {
+            const preview = makeEditorAreaPreview(editorAreaPreview, map, coveredAnnotationCells, isDark);
+            if (preview)
+                layers.add(preview);
+        }
         spots.forEach((spot) => {
             const preview = (nodeDragPreview === null || nodeDragPreview === void 0 ? void 0 : nodeDragPreview.type) === "spot" && nodeDragPreview.id === spot.id
                 ? nodeDragPreview
@@ -2335,15 +2374,12 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, scanPose = n
             const plane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0);
             if (!raycasterRef.current.ray.intersectPlane(plane, point))
                 return null;
-            const width = meta.width * meta.resolution;
-            const height = meta.height * meta.resolution;
-            if (point.x < meta.originX ||
-                point.x > meta.originX + width ||
-                point.y < meta.originY ||
-                point.y > meta.originY + height) {
-                return null;
-            }
             if (!Number.isFinite(point.x) || !Number.isFinite(point.y))
+                return null;
+            // Validate in the map's local grid frame. Axis-aligned world bounds
+            // reject valid points (and accept invalid ones) when origin yaw is
+            // non-zero.
+            if (!mapPointToAreaGridCell(map, point.x, point.y))
                 return null;
             return point;
         };

@@ -23,7 +23,6 @@ const PageType = {
   INFERENCE: 'inference',
   TRAINING: 'training',
   EDIT_DATASET: 'edit_dataset',
-  NAVIGATION: 'navigation',
   MISSION_CANVAS: 'mission_canvas',
 };
 

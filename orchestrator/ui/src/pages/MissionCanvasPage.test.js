@@ -4159,6 +4159,46 @@ test('auto-numbers and auto-selects areas created by rectangle drag', async () =
   expect(latestMapViewerProps().mapAnnotations).toHaveLength(2);
 });
 
+test('keeps the saved free-space Area footprint aligned with the full drag selection', async () => {
+  const latestMapViewerProps = () => (
+    mockMapViewer.mock.calls[mockMapViewer.mock.calls.length - 1][0]
+  );
+  getPgmFiles.mockResolvedValue({
+    files: [{ path: 'factory.pgm', name: 'factory.pgm' }],
+  });
+  getPgmImage.mockResolvedValue({
+    path: 'factory.pgm',
+    width: 3,
+    height: 2,
+    maxval: 255,
+    pixels_base64: '/v7+/v7+',
+  });
+  getMapAnnotations.mockResolvedValue({ path: 'factory.pgm', annotations: [] });
+
+  render(<MissionCanvasPage />);
+
+  await openMappingEditorAndSelect();
+  await waitFor(() => expect(getMapAnnotations).toHaveBeenCalledWith('factory.pgm'));
+  fireEvent.click(screen.getByRole('button', { name: 'Add Label' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Area' }));
+
+  await act(async () => {
+    latestMapViewerProps().onEditorMapArea(0.05, 0.05, 2.95, 1.95);
+  });
+
+  await waitFor(() => expect(latestMapViewerProps().mapAnnotations).toEqual([
+    expect.objectContaining({
+      pose: expect.objectContaining({ x: 1.5, y: 1 }),
+      region: expect.objectContaining({
+        bounds: { x_min: 0, y_min: 0, x_max: 2, y_max: 1 },
+        cell_count: 6,
+        width: 3,
+        height: 2,
+      }),
+    }),
+  ]));
+});
+
 test('removes an area from the chip list', async () => {
   const latestMapViewerProps = () => (
     mockMapViewer.mock.calls[mockMapViewer.mock.calls.length - 1][0]
@@ -4214,6 +4254,66 @@ test('removes an area from the chip list', async () => {
 
   await waitFor(() => expect(saveMapAnnotations).toHaveBeenCalledWith('factory.pgm', []));
   expect(savePgmImage).not.toHaveBeenCalled();
+});
+
+test('caps the Area list at three rows and isolates scrolled delete actions', async () => {
+  const latestMapViewerProps = () => (
+    mockMapViewer.mock.calls[mockMapViewer.mock.calls.length - 1][0]
+  );
+  getPgmFiles.mockResolvedValue({
+    files: [{ path: 'factory.pgm', name: 'factory.pgm' }],
+  });
+  getPgmImage.mockResolvedValue({
+    path: 'factory.pgm',
+    width: 4,
+    height: 1,
+    maxval: 255,
+    pixels_base64: '/v7+/g==',
+  });
+  getMapAnnotations.mockResolvedValue({
+    path: 'factory.pgm',
+    annotations: [0, 1, 2, 3].map((x) => ({
+      id: `area_${x + 1}`,
+      label: `Area ${x + 1}`,
+      color: '#3B241F',
+      pose: { frame_id: 'map', x: x + 0.5, y: 0.5, yaw: 0 },
+      region: {
+        seed_cell: { x, y: 0 },
+        bounds: { x_min: x, y_min: 0, x_max: x, y_max: 0 },
+        cells: [{ x, y: 0 }],
+        cell_count: 1,
+        width: 4,
+        height: 1,
+      },
+    })),
+  });
+
+  render(<MissionCanvasPage />);
+
+  await openMappingEditorAndSelect();
+  await waitFor(() => expect(latestMapViewerProps().mapAnnotations).toHaveLength(4));
+  fireEvent.click(screen.getByRole('button', { name: 'Add Label' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Area' }));
+
+  const areas = screen.getByRole('group', { name: 'Map areas' });
+  expect(areas).toHaveClass('max-h-28', 'overflow-y-auto', 'overscroll-contain', 'pr-1');
+  expect(areas.style.scrollbarGutter).toBe('stable');
+  expect(screen.getByRole('menu', { name: 'Map labeling tools' })).toHaveClass('z-30', 'isolate');
+
+  const documentClick = jest.fn();
+  document.addEventListener('click', documentClick);
+  fireEvent.click(screen.getByRole('button', { name: 'Delete area Area 4' }));
+  expect(documentClick).not.toHaveBeenCalled();
+  expect(screen.getByRole('button', { name: 'Area 4' })).toBeInTheDocument();
+  expect(screen.getByRole('menu', { name: 'Map labeling tools' })).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'Confirm delete area Area 4' }));
+  document.removeEventListener('click', documentClick);
+
+  await waitFor(() => expect(latestMapViewerProps().mapAnnotations.map(({ label }) => label)).toEqual([
+    'Area 1', 'Area 2', 'Area 3',
+  ]));
+  expect(screen.queryByRole('button', { name: 'Area 4' })).not.toBeInTheDocument();
+  expect(screen.getByRole('menu', { name: 'Map labeling tools' })).toBeInTheDocument();
 });
 
 test('renames a map area from the chip list', async () => {
