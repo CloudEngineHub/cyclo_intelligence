@@ -36,6 +36,12 @@ const node = {
   },
 };
 
+function fieldControl(name) {
+  return screen.getByText(name, { selector: 'label' }).parentElement.querySelector(
+    'input, select, textarea',
+  );
+}
+
 test('commits parameter drafts while typing instead of waiting for blur', () => {
   const onParamChange = jest.fn();
   render(
@@ -197,4 +203,93 @@ test('legacy JointControl nodes without joint_names still get the chips', () => 
   expect(onParamChange).toHaveBeenCalledWith(
     'bt_4', 'left_positions', '0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7',
   );
+});
+
+test('treats legacy SendCommand nodes without a target as inference commands', () => {
+  const legacyCommand = {
+    id: 'bt_5',
+    data: {
+      label: 'SendCommand_1',
+      nodeType: 'SendCommand',
+      params: {
+        command: 'STOP',
+        model: 'lerobot:act',
+        policy_path: '/workspace/model/lerobot/example',
+      },
+    },
+  };
+
+  render(
+    <BTParamPanel
+      nodes={[legacyCommand]}
+      selectedNodeId={legacyCommand.id}
+      onParamChange={jest.fn()}
+      onNameChange={jest.fn()}
+    />,
+  );
+
+  expect(fieldControl('target')).toHaveValue('INFERENCE');
+  expect(fieldControl('command')).toHaveValue('STOP');
+  expect(Array.from(fieldControl('command').options, (option) => option.value)).toEqual([
+    'LOAD', 'RESUME', 'STOP', 'CLEAR',
+  ]);
+  expect(fieldControl('model')).toBeDisabled();
+  expect(fieldControl('policy_path')).toBeDisabled();
+});
+
+test('switches SendCommand to Docker controls and enables only target, command, and model', () => {
+  const onParamChange = jest.fn();
+  const dockerCommand = {
+    id: 'bt_6',
+    data: {
+      label: 'SendCommand_2',
+      nodeType: 'SendCommand',
+      params: {
+        target: 'INFERENCE',
+        command: 'LOAD',
+        model: 'groot:n17',
+        policy_path: '/workspace/model/groot/example',
+        task_instruction: 'Pick up the object',
+        inference_mode: 'robot',
+        action_request_mode: 'sync',
+        inference_hz: '10',
+        control_hz: '100',
+        chunk_align_window_s: '0.3',
+        acceleration_mode: 'pytorch',
+        acceleration_engine_path: '',
+      },
+    },
+  };
+
+  render(
+    <BTParamPanel
+      nodes={[dockerCommand]}
+      selectedNodeId={dockerCommand.id}
+      onParamChange={onParamChange}
+      onNameChange={jest.fn()}
+    />,
+  );
+
+  fireEvent.change(fieldControl('target'), { target: { value: 'DOCKER' } });
+
+  expect(onParamChange).toHaveBeenCalledWith('bt_6', 'target', 'DOCKER');
+  expect(onParamChange).toHaveBeenCalledWith('bt_6', 'command', 'START');
+  expect(fieldControl('target')).toBeEnabled();
+  expect(fieldControl('command')).toBeEnabled();
+  expect(fieldControl('model')).toBeEnabled();
+  expect(fieldControl('command')).toHaveValue('START');
+  expect(Array.from(fieldControl('command').options, (option) => option.value)).toEqual([
+    'START', 'STOP', 'RESTART',
+  ]);
+  [
+    'policy_path',
+    'task_instruction',
+    'inference_mode',
+    'action_request_mode',
+    'inference_hz',
+    'control_hz',
+    'chunk_align_window_s',
+    'acceleration_mode',
+    'acceleration_engine_path',
+  ].forEach((key) => expect(fieldControl(key)).toBeDisabled());
 });

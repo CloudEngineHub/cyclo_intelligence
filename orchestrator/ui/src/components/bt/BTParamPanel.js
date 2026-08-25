@@ -124,10 +124,36 @@ const BOOL_PARAMS = new Set([
   'detect_right_gripper',
 ]);
 
+const SEND_COMMAND_TARGETS = ['INFERENCE', 'DOCKER'];
+
+const SEND_COMMAND_COMMANDS_BY_TARGET = {
+  INFERENCE: ['LOAD', 'RESUME', 'STOP', 'CLEAR'],
+  DOCKER: ['START', 'STOP', 'RESTART'],
+};
+
+function normalizeSendCommandTarget(target) {
+  return String(target || 'INFERENCE').trim().toUpperCase() === 'DOCKER'
+    ? 'DOCKER'
+    : 'INFERENCE';
+}
+
+function normalizeSendCommandParams(params, nodeType) {
+  const next = withJointSelectionDefaults(params, nodeType);
+  if (nodeType !== 'SendCommand') return next;
+
+  const target = normalizeSendCommandTarget(next.target);
+  const commands = SEND_COMMAND_COMMANDS_BY_TARGET[target];
+  const requestedCommand = String(next.command || commands[0]).trim().toUpperCase();
+  const command = commands.includes(requestedCommand) ? requestedCommand : commands[0];
+  const remaining = Object.fromEntries(
+    Object.entries(next).filter(([key]) => key !== 'target' && key !== 'command'),
+  );
+  return { target, command, ...remaining };
+}
+
 // Enum params surface as <select> dropdowns. Keep value lists in sync with
 // the Python action definitions (send_command.COMMAND_MAP).
 const ENUM_PARAMS = {
-  command: ['LOAD', 'RESUME', 'STOP', 'CLEAR'],
   model: [
     'lerobot:act',
     'lerobot:diffusion',
@@ -147,21 +173,35 @@ const ENUM_PARAMS = {
   acceleration_mode: ['pytorch', 'tensorrt_dit'],
 };
 
+function enumOptionsFor(nodeType, key, params) {
+  if (nodeType === 'SendCommand') {
+    if (key === 'target') return SEND_COMMAND_TARGETS;
+    if (key === 'command') {
+      return SEND_COMMAND_COMMANDS_BY_TARGET[
+        normalizeSendCommandTarget(params.target)
+      ];
+    }
+  }
+  return ENUM_PARAMS[key];
+}
+
 // SendCommand inputs that are meaningful per command. Anything outside
 // the set for the current command is rendered disabled — the value stays
 // in params so flipping back to LOAD restores the user's earlier entries.
 // 'command' itself is always editable.
 const SEND_COMMAND_ACTIVE_FIELDS = {
   LOAD: new Set([
-    'command', 'model', 'policy_path', 'task_instruction',
+    'target', 'command', 'model', 'policy_path', 'task_instruction',
     'inference_mode', 'action_request_mode', 'inference_hz', 'control_hz',
     'chunk_align_window_s', 'acceleration_mode', 'acceleration_engine_path',
   ]),
   // Resume can re-condition language mid-run; output mode is fixed by LOAD.
-  RESUME: new Set(['command', 'task_instruction']),
-  STOP: new Set(['command']),
-  CLEAR: new Set(['command']),
+  RESUME: new Set(['target', 'command', 'task_instruction']),
+  STOP: new Set(['target', 'command']),
+  CLEAR: new Set(['target', 'command']),
 };
+
+const SEND_COMMAND_DOCKER_ACTIVE_FIELDS = new Set(['target', 'command', 'model']);
 
 // JointControl: each group's positions input is gated on its enable_*
 // flag. enable_* toggles themselves + duration are always editable.
@@ -169,6 +209,9 @@ const truthy = (v) => v === true || v === 'true';
 
 function isSendCommandFieldDisabled(nodeType, key, params) {
   if (nodeType !== 'SendCommand') return false;
+  if (normalizeSendCommandTarget(params.target) === 'DOCKER') {
+    return !SEND_COMMAND_DOCKER_ACTIVE_FIELDS.has(key);
+  }
   const cmd = String(params.command || 'LOAD').toUpperCase();
   const active = SEND_COMMAND_ACTIVE_FIELDS[cmd];
   if (!active) return false;
@@ -238,7 +281,7 @@ export default function BTParamPanel({
   // Reset local state only when switching to a different node
   useEffect(() => {
     if (selectedNode) {
-      setLocalParams(withJointSelectionDefaults(
+      setLocalParams(normalizeSendCommandParams(
         selectedNode.data.params || {},
         selectedNode.data.nodeType,
       ));
@@ -271,6 +314,18 @@ export default function BTParamPanel({
   };
 
   const handleChange = (paramName, value) => {
+    if (nodeType === 'SendCommand' && paramName === 'target') {
+      const target = normalizeSendCommandTarget(value);
+      const commands = SEND_COMMAND_COMMANDS_BY_TARGET[target];
+      const currentCommand = String(localParams.command || '').trim().toUpperCase();
+      const command = commands.includes(currentCommand) ? currentCommand : commands[0];
+      setLocalParams((prev) => ({ ...prev, target, command }));
+      onParamChange(selectedNodeId, 'target', target);
+      if (command !== currentCommand) {
+        onParamChange(selectedNodeId, 'command', command);
+      }
+      return;
+    }
     setLocalParams((prev) => ({ ...prev, [paramName]: value }));
     // A Design Save click can happen before a blur-driven graph update reaches
     // the mission state. Keep the graph current while the field is focused so
@@ -380,7 +435,8 @@ export default function BTParamPanel({
       return renderTargetJointSelector(key, value, disabled);
     }
 
-    if (ENUM_PARAMS[key]) {
+    const enumOptions = enumOptionsFor(nodeType, key, localParams);
+    if (enumOptions) {
       return (
         <select
           value={value}
@@ -388,7 +444,7 @@ export default function BTParamPanel({
           onChange={(e) => handleChange(key, e.target.value)}
           className={`w-full px-2 py-1.5 border border-[var(--mc-border-strong)] rounded-lg text-sm bg-[var(--mc-surface)] text-[var(--mc-text)] focus:outline-none focus:ring-1 focus:ring-[var(--mc-accent)]${disabledCls}`}
         >
-          {ENUM_PARAMS[key].map((opt) => (
+          {enumOptions.map((opt) => (
             <option key={opt} value={opt}>{opt}</option>
           ))}
         </select>

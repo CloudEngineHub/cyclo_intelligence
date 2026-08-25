@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<root BTCPP_format="4" main_tree_to_execute="MainTree">
+  <BehaviorTree ID="MainTree">
+    <Sequence name="Sequence_1">
+      <SendCommand name="SendCommand_1"
+        command="LOAD"
+        model="groot:n17"
+        policy_path="/workspace/model/groot/RobotisSW/PickGreenCoffeeCan_WhiteShdlf_byGrootModel_80K"
+        task_instruction="test"
+        inference_hz="15"
+        control_hz="100"
+        chunk_align_window_s="0.3"
+        inference_mode="robot"
+        action_request_mode="sync"
+        acceleration_mode="pytorch"/>
+      <SendCommand name="SendCommand_2" command="RESUME" task_instruction="test"/>
+      <SendCommand name="SendCommand_3" command="STOP"/>
+    </Sequence>
+  </BehaviorTree>
+</root>

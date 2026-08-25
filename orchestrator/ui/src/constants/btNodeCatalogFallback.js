@@ -103,6 +103,7 @@ export const FALLBACK_CATALOG = [
     tag: 'SendCommand',
     category: 'action',
     ports: [
+      { name: 'target', type: 'string', default: 'INFERENCE' },
       { name: 'command', type: 'string', default: 'LOAD' },
       { name: 'model', type: 'string', default: 'lerobot:act' },
       { name: 'policy_path', type: 'string', default: '' },

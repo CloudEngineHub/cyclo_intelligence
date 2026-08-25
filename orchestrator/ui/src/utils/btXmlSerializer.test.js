@@ -174,6 +174,7 @@ describe('btXmlSerializer', () => {
 
     expect(xml).toContain('command="RESUME"');
     expect(xml).toContain('command="STOP"');
+    expect(xml.match(/target="INFERENCE"/g)).toHaveLength(2);
     expect(xml).not.toContain('bt_x=');
     expect(xml).not.toContain('bt_y=');
     expect(xml).not.toContain('model="groot:n17"');
@@ -185,5 +186,53 @@ describe('btXmlSerializer', () => {
     expect(xml).not.toContain('chunk_align_window_s=');
     expect(xml).not.toContain('acceleration_mode=');
     expect(xml).not.toContain('acceleration_engine_path=');
+  });
+
+  it('round-trips Docker SendCommand while dropping inference-only parameters', () => {
+    const nodes = [
+      {
+        id: 'bt_0',
+        type: 'btAction',
+        position: { x: 0, y: 0 },
+        data: {
+          label: 'RestartGroot',
+          nodeType: 'SendCommand',
+          params: {},
+        },
+      },
+    ];
+    const params = {
+      target: 'DOCKER',
+      command: 'RESTART',
+      model: 'groot:n17',
+      policy_path: '/workspace/model/groot/example',
+      task_instruction: 'ignored',
+      inference_mode: 'robot',
+      inference_hz: '10',
+    };
+    const nodeDataMap = new Map([
+      ['bt_0', { tag: 'SendCommand', name: 'RestartGroot', params }],
+    ]);
+
+    const xml = serializeFromGraph(nodes, [], nodeDataMap);
+    const parsed = parseBTXml(xml);
+    const parsedCommand = [...parsed.nodeDataMap.values()][0];
+
+    expect(xml).toContain('target="DOCKER"');
+    expect(xml).toContain('command="RESTART"');
+    expect(xml).toContain('model="groot:n17"');
+    expect(xml).not.toContain('policy_path=');
+    expect(xml).not.toContain('task_instruction=');
+    expect(xml).not.toContain('inference_mode=');
+    expect(xml).not.toContain('inference_hz=');
+    expect(parsedCommand).toEqual({
+      tag: 'SendCommand',
+      name: 'RestartGroot',
+      params: {
+        target: 'DOCKER',
+        command: 'RESTART',
+        model: 'groot:n17',
+      },
+    });
   });
 });

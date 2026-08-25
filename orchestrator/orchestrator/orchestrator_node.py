@@ -1332,9 +1332,10 @@ class OrchestratorNode(Node):
                 #
                 # The policy container may have been restarted outside
                 # orchestrator, though; in that case the cached client is
-                # stale and the container replies with "not running" or
-                # "LOAD first". Fall back to a fresh LOAD -> START instead
-                # of surfacing that confusing error.
+                # stale and the container either rejects RESUME because no
+                # policy is loaded or its cached ROS client can no longer
+                # discover/reach the service. Fall back to a fresh
+                # LOAD -> START instead of surfacing that confusing error.
                 # Snapshot the client so a concurrent _teardown_inference_client
                 # cannot null it between the prefix check and the call.
                 requested_policy_path = self._normalize_policy_path(
@@ -1404,13 +1405,34 @@ class OrchestratorNode(Node):
                             start_handled = True
                         else:
                             resume_message = resume_result.message or ''
-                            if resume_message in ('not running', 'LOAD first'):
-                                self.get_logger().warning(
-                                    'Cached inference client for '
-                                    f'{service_prefix} is stale '
-                                    f'({resume_message}); reloading policy'
-                                )
-                                self._teardown_inference_client()
+                            if self._is_stale_inference_client_failure(
+                                resume_message
+                            ):
+                                if self._discard_stale_inference_client(
+                                    existing_client
+                                ):
+                                    self.get_logger().warning(
+                                        'Cached inference client for '
+                                        f'{service_prefix} is stale '
+                                        f'({resume_message}); reloading policy'
+                                    )
+                                else:
+                                    # RESUME can wait up to 10 seconds. If a
+                                    # concurrent STOP/reload replaced the
+                                    # client in that window, the result
+                                    # belongs to the old session. Never tear
+                                    # down or overwrite the newer client.
+                                    self.get_logger().warning(
+                                        'Ignoring stale RESUME result for '
+                                        f'{service_prefix}; inference client '
+                                        'changed while the call was pending'
+                                    )
+                                    response.success = False
+                                    response.message = (
+                                        'Inference session changed while '
+                                        'RESUME was pending'
+                                    )
+                                    start_handled = True
                             else:
                                 response.success = False
                                 response.message = resume_message
@@ -2473,6 +2495,36 @@ class OrchestratorNode(Node):
         return 'already loaded' in value and 'unload' in value
 
     @staticmethod
+    def _is_stale_inference_client_failure(message: str) -> bool:
+        """Return whether cached-client RESUME should retry as a fresh LOAD.
+
+        A policy container can be restarted independently of orchestrator.
+        The cached client then still identifies the same backend/policy, but
+        RESUME cannot reach its old service endpoint. Only lifecycle replies
+        that mean "nothing is loaded" and transport/discovery messages
+        emitted by ``ContainerServiceClient`` are recoverable here.
+
+        Deliberately do not classify arbitrary backend failures (or a
+        cancelled call) as stale: a cancellation can be caused by a
+        concurrent user-requested teardown, and retrying it could resurrect
+        inference after STOP.
+        """
+        value = ' '.join(str(message or '').strip().lower().split())
+        if value in {'not running', 'load first'}:
+            return True
+
+        transport_failure_prefixes = (
+            'not connected to container services',
+            'service client not initialized:',
+            'service not available after ',
+            'service call returned none:',
+            'service call timed out:',
+            'service call failed:',
+            'no response from service (timeout or error)',
+        )
+        return value.startswith(transport_failure_prefixes)
+
+    @staticmethod
     def _normalize_acceleration_mode(value: str) -> str:
         mode = str(value or '').strip().lower()
         if mode in {'', 'none', 'off', 'false', 'pytorch', 'eager'}:
@@ -2553,6 +2605,47 @@ class OrchestratorNode(Node):
         # Default to groot for backward compatibility
         return '/groot'
 
+    def _detach_inference_client(self, expected_client=None):
+        """Atomically detach a client and clear its cached load signature."""
+        with self._state_lock:
+            client = self.container_service_client
+            if expected_client is not None and client is not expected_client:
+                return None
+            self.container_service_client = None
+            self._loaded_inference_policy_path = ''
+            self._loaded_inference_publish_to_robot = False
+            self._loaded_inference_acceleration_mode = 'pytorch'
+            self._loaded_inference_acceleration_engine_path = ''
+            self._loaded_inference_action_request_mode = 'async'
+        return client
+
+    def _discard_stale_inference_client(self, expected_client) -> bool:
+        """Detach a stale cached client without remote STOP/UNLOAD calls.
+
+        A discovery/transport failure means the cached ROS endpoint is no
+        longer authoritative. Issuing cleanup commands against it is both
+        unnecessary and unsafe: the old cleanup thread could acquire the
+        lifecycle lock after a replacement session starts and unload that
+        new session. The identity check also prevents a delayed RESUME
+        result from detaching a newer client.
+        """
+        if expected_client is None:
+            return False
+        client = self._detach_inference_client(
+            expected_client=expected_client
+        )
+        if client is None:
+            return False
+
+        try:
+            client._cancelled.set()
+            client.disconnect()
+        except Exception as e:
+            self.get_logger().warning(
+                f'Error discarding stale inference client: {e}'
+            )
+        return True
+
     def _teardown_inference_client(self, expected_client=None):
         """Tear down the container service client (STOP + UNLOAD + disconnect).
 
@@ -2565,16 +2658,9 @@ class OrchestratorNode(Node):
         # Atomic swap: detach the client under the lock so concurrent
         # callers (RESUME path, joystick handler, daemon thread) can't
         # both grab the same client and double-disconnect.
-        with self._state_lock:
-            client = self.container_service_client
-            if expected_client is not None and client is not expected_client:
-                return
-            self.container_service_client = None
-            self._loaded_inference_policy_path = ''
-            self._loaded_inference_publish_to_robot = False
-            self._loaded_inference_acceleration_mode = 'pytorch'
-            self._loaded_inference_acceleration_engine_path = ''
-            self._loaded_inference_action_request_mode = 'async'
+        client = self._detach_inference_client(
+            expected_client=expected_client
+        )
         if client is None:
             return
 

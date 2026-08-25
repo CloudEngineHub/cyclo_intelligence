@@ -164,6 +164,22 @@ and click **Refresh Steps**.
 If running from an installed package instead of a source-mounted workspace,
 rebuild/restart first so the new file exists in the install space.
 
+### SendCommand targets
+
+`SendCommand` owns both inference commands and the lifecycle of their policy
+backend without exposing arbitrary Docker names or images:
+
+- `target=INFERENCE` (the default): `LOAD`, `RESUME`, `STOP`, or `CLEAR`.
+  `LOAD` first ensures the selected `model` backend is installed, running, and
+  internally ready, then continues through the existing inference stages.
+- `target=DOCKER`: `START`, `STOP`, or `RESTART` for the allowlisted `groot` or
+  `lerobot` backend selected by `model`. `START` is idempotent.
+
+When `START` or `RESTART` finds no local image, the supervisor tries the exact
+release image from the registry and falls back to that backend's allowlisted
+Compose build. Trees saved before the `target` port existed continue to load as
+`target=INFERENCE`.
+
 ## Action Canvas XML saving
 
 The Action Canvas workspace saves XML task files through

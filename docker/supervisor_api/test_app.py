@@ -2,6 +2,7 @@ import asyncio
 import importlib.util
 import json
 import sys
+import threading
 import types
 from pathlib import Path
 from types import SimpleNamespace
@@ -3115,6 +3116,333 @@ def test_backend_status_model_exposes_stale_image_status():
     )
 
     assert status.image_status == "stale"
+
+
+def _backend_lifecycle_client(*, image_present=False, pull_error=""):
+    state = {
+        "image_present": image_present,
+        "pull_error": pull_error,
+        "pull_calls": [],
+    }
+    spec = _BACKENDS["groot"]
+
+    class FakeImages:
+        def get(self, image):
+            if image != spec["image"] or not state["image_present"]:
+                raise ImageNotFound(image)
+            return SimpleNamespace(id="sha256:current")
+
+    class FakeApi:
+        def pull(self, image, *, stream, decode):
+            state["pull_calls"].append((image, stream, decode))
+            if state["pull_error"]:
+                raise DockerException(state["pull_error"])
+            state["image_present"] = True
+            yield {"status": "Pull complete"}
+
+    class FakeContainers:
+        def get(self, _name):
+            raise NotFound(_name)
+
+    client = SimpleNamespace(
+        api=FakeApi(),
+        images=FakeImages(),
+        containers=FakeContainers(),
+    )
+    return client, state
+
+
+def _patch_backend_compose(monkeypatch, fake_run):
+    monkeypatch.setattr(
+        app,
+        "_compose_base_cmd",
+        lambda: ["docker", "compose", "-f", "allowlisted-compose.yml"],
+    )
+    monkeypatch.setattr(app, "_compose_env", lambda: {"ARCH": "test"})
+    monkeypatch.setattr(app, "_run", fake_run)
+
+
+def test_backend_start_uses_existing_local_image_without_provision(monkeypatch):
+    client, state = _backend_lifecycle_client(image_present=True)
+    commands = []
+
+    async def fake_run(*cmd, **kwargs):
+        commands.append((cmd, kwargs))
+        return SimpleNamespace(rc=0, stdout="container started", stderr="")
+
+    monkeypatch.setattr(app, "_docker_client", lambda: client)
+    _patch_backend_compose(monkeypatch, fake_run)
+
+    result = asyncio.run(app._ensure_backend_running(
+        "groot",
+        _BACKENDS["groot"],
+        auto_provision=True,
+    ))
+
+    assert result.ok is True
+    assert "using local image" in result.message
+    assert state["pull_calls"] == []
+    assert [command[0][-4:] for command in commands] == [
+        ("up", "-d", "--no-build", "groot"),
+    ]
+
+
+def test_backend_start_auto_provision_pulls_missing_image(monkeypatch):
+    client, state = _backend_lifecycle_client(image_present=False)
+    commands = []
+
+    async def fake_run(*cmd, **kwargs):
+        commands.append((cmd, kwargs))
+        return SimpleNamespace(rc=0, stdout="container started", stderr="")
+
+    monkeypatch.setattr(app, "_docker_client", lambda: client)
+    _patch_backend_compose(monkeypatch, fake_run)
+
+    result = asyncio.run(app._ensure_backend_running(
+        "groot",
+        _BACKENDS["groot"],
+        auto_provision=True,
+    ))
+
+    assert result.ok is True
+    assert "using registry pull" in result.message
+    assert state["pull_calls"] == [
+        (_BACKENDS["groot"]["image"], True, True),
+    ]
+    assert len(commands) == 1
+    assert commands[0][0][-4:] == ("up", "-d", "--no-build", "groot")
+
+
+def test_backend_start_builds_after_registry_pull_failure(monkeypatch):
+    client, state = _backend_lifecycle_client(
+        image_present=False,
+        pull_error="registry unavailable",
+    )
+    commands = []
+
+    async def fake_run(*cmd, **kwargs):
+        commands.append((cmd, kwargs))
+        if cmd[-2:] == ("build", "groot"):
+            state["image_present"] = True
+            return SimpleNamespace(rc=0, stdout="image built", stderr="")
+        return SimpleNamespace(rc=0, stdout="container started", stderr="")
+
+    monkeypatch.setattr(app, "_docker_client", lambda: client)
+    _patch_backend_compose(monkeypatch, fake_run)
+
+    result = asyncio.run(app._ensure_backend_running(
+        "groot",
+        _BACKENDS["groot"],
+        auto_provision=True,
+    ))
+
+    assert result.ok is True
+    assert "using local build after registry pull failed" in result.message
+    assert [command[0][-2:] for command in commands] == [
+        ("build", "groot"),
+        ("--no-build", "groot"),
+    ]
+    assert commands[0][1]["timeout"] == app._BACKEND_BUILD_TIMEOUT_SEC
+    assert commands[1][1]["timeout"] == 60.0
+
+
+def test_backend_start_reports_pull_and_build_failures(monkeypatch):
+    client, _state = _backend_lifecycle_client(
+        image_present=False,
+        pull_error="registry denied",
+    )
+    commands = []
+
+    async def fake_run(*cmd, **kwargs):
+        commands.append((cmd, kwargs))
+        return SimpleNamespace(rc=17, stdout="", stderr="Dockerfile missing")
+
+    monkeypatch.setattr(app, "_docker_client", lambda: client)
+    _patch_backend_compose(monkeypatch, fake_run)
+
+    with pytest.raises(app.HTTPException) as exc_info:
+        asyncio.run(app._ensure_backend_running(
+            "groot",
+            _BACKENDS["groot"],
+            auto_provision=True,
+        ))
+
+    assert exc_info.value.status_code == 502
+    assert "registry pull failed: registry denied" in exc_info.value.detail
+    assert "local build failed (rc=17): Dockerfile missing" in exc_info.value.detail
+    assert [command[0][-2:] for command in commands] == [("build", "groot")]
+
+
+def test_backend_start_is_idempotent_and_restart_resets_running_container(
+    monkeypatch,
+):
+    class FakeContainer:
+        def __init__(self):
+            self.attrs = {"State": {"Status": "running"}}
+            self.restart_calls = []
+            self.start_calls = 0
+
+        def reload(self):
+            return None
+
+        def restart(self, *, timeout):
+            self.restart_calls.append(timeout)
+
+        def start(self):
+            self.start_calls += 1
+
+    container = FakeContainer()
+    client = SimpleNamespace(
+        containers=SimpleNamespace(get=lambda _name: container),
+    )
+    monkeypatch.setattr(app, "_docker_client", lambda: client)
+    monkeypatch.setattr(app, "_host_workspace_dir", lambda: None)
+    monkeypatch.setattr(
+        app,
+        "_backend_container_stale_reason",
+        lambda *_args, **_kwargs: None,
+    )
+
+    started = asyncio.run(app._ensure_backend_running(
+        "groot",
+        _BACKENDS["groot"],
+        restart_existing=False,
+    ))
+    restarted = asyncio.run(app._ensure_backend_running(
+        "groot",
+        _BACKENDS["groot"],
+        restart_existing=True,
+    ))
+
+    assert started.ok is True
+    assert started.message == "groot_server already running"
+    assert restarted.ok is True
+    assert restarted.message == "groot_server restarted"
+    assert container.start_calls == 0
+    assert container.restart_calls == [10]
+
+
+def test_backend_start_and_restart_keep_auto_provision_opt_in(monkeypatch):
+    calls = []
+
+    async def fake_ensure(name, spec, **kwargs):
+        calls.append((name, spec, kwargs))
+        return app.ActionResult(ok=True, message="ok")
+
+    monkeypatch.setattr(app, "_ensure_backend_running", fake_ensure)
+
+    asyncio.run(app.backend_start("groot"))
+    asyncio.run(app.backend_restart("lerobot"))
+    asyncio.run(app.backend_start("groot", auto_provision=True))
+
+    assert [(name, kwargs) for name, _spec, kwargs in calls] == [
+        ("groot", {"restart_existing": False, "auto_provision": False}),
+        ("lerobot", {"restart_existing": True, "auto_provision": False}),
+        ("groot", {"restart_existing": False, "auto_provision": True}),
+    ]
+
+
+def test_backend_lifecycle_rejects_non_allowlisted_compose_target():
+    overridden = dict(_BACKENDS["groot"])
+    overridden["service"] = "arbitrary-service"
+
+    with pytest.raises(app.HTTPException) as exc_info:
+        asyncio.run(app._ensure_backend_running(
+            "groot",
+            overridden,
+            auto_provision=True,
+        ))
+
+    assert exc_info.value.status_code == 400
+    assert "overrides are not allowed" in exc_info.value.detail
+
+
+def test_backend_lifecycle_serializes_concurrent_auto_provision(monkeypatch):
+    spec = _BACKENDS["groot"]
+    pull_started = threading.Event()
+    release_pull = threading.Event()
+    state = {
+        "image_present": False,
+        "container_running": False,
+        "pull_calls": 0,
+        "up_calls": 0,
+    }
+
+    class FakeImages:
+        def get(self, image):
+            if image != spec["image"] or not state["image_present"]:
+                raise ImageNotFound(image)
+            return SimpleNamespace(id="sha256:current")
+
+    class FakeApi:
+        def pull(self, image, *, stream, decode):
+            assert (image, stream, decode) == (spec["image"], True, True)
+            state["pull_calls"] += 1
+            pull_started.set()
+            assert release_pull.wait(timeout=2.0)
+            state["image_present"] = True
+            yield {"status": "Pull complete"}
+
+    class FakeContainer:
+        attrs = {"State": {"Status": "running"}}
+
+        def reload(self):
+            return None
+
+    class FakeContainers:
+        def get(self, name):
+            if name != spec["container"] or not state["container_running"]:
+                raise NotFound(name)
+            return FakeContainer()
+
+    client = SimpleNamespace(
+        api=FakeApi(),
+        images=FakeImages(),
+        containers=FakeContainers(),
+    )
+
+    async def fake_run(*cmd, **_kwargs):
+        assert cmd[-4:] == ("up", "-d", "--no-build", "groot")
+        state["up_calls"] += 1
+        await asyncio.sleep(0.01)
+        state["container_running"] = True
+        return SimpleNamespace(rc=0, stdout="container started", stderr="")
+
+    monkeypatch.setattr(app, "_docker_client", lambda: client)
+    monkeypatch.setattr(app, "_host_workspace_dir", lambda: None)
+    monkeypatch.setattr(
+        app,
+        "_backend_container_stale_reason",
+        lambda *_args, **_kwargs: None,
+    )
+    _patch_backend_compose(monkeypatch, fake_run)
+
+    async def run_concurrently():
+        first = asyncio.create_task(app._ensure_backend_running(
+            "groot",
+            spec,
+            auto_provision=True,
+        ))
+        while not pull_started.is_set():
+            await asyncio.sleep(0.001)
+        second = asyncio.create_task(app._ensure_backend_running(
+            "groot",
+            spec,
+            auto_provision=True,
+        ))
+        await asyncio.sleep(0.02)
+        assert state["pull_calls"] == 1
+        release_pull.set()
+        return await asyncio.gather(first, second)
+
+    first_result, second_result = asyncio.run(run_concurrently())
+
+    assert first_result.ok is True
+    assert second_result.ok is True
+    assert state["pull_calls"] == 1
+    assert state["up_calls"] == 1
+    assert "created/started" in first_result.message
+    assert second_result.message == "groot_server already running"
 
 
 def test_host_project_dir_falls_back_to_compose_container_name(monkeypatch):

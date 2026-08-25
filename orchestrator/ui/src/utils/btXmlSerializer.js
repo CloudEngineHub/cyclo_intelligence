@@ -17,8 +17,9 @@
 const INDENT = '  ';
 const WRAP_THRESHOLD = 100;
 
-const SEND_COMMAND_PARAMS_BY_COMMAND = {
+const SEND_COMMAND_INFERENCE_PARAMS_BY_COMMAND = {
   LOAD: new Set([
+    'target',
     'command',
     'model',
     'policy_path',
@@ -31,10 +32,13 @@ const SEND_COMMAND_PARAMS_BY_COMMAND = {
     'acceleration_mode',
     'acceleration_engine_path',
   ]),
-  RESUME: new Set(['command', 'task_instruction']),
-  STOP: new Set(['command']),
-  CLEAR: new Set(['command']),
+  RESUME: new Set(['target', 'command', 'task_instruction']),
+  STOP: new Set(['target', 'command']),
+  CLEAR: new Set(['target', 'command']),
 };
+
+const SEND_COMMAND_DOCKER_COMMANDS = new Set(['START', 'STOP', 'RESTART']);
+const SEND_COMMAND_DOCKER_PARAMS = new Set(['target', 'command', 'model']);
 
 function escapeAttr(value) {
   return String(value)
@@ -88,12 +92,26 @@ function attrPairs(el) {
 function paramsForXml(tag, params = {}) {
   if (tag !== 'SendCommand') return params;
 
-  const command = String(params.command || 'LOAD').toUpperCase();
-  const allowed = SEND_COMMAND_PARAMS_BY_COMMAND[command] || new Set(['command']);
-  const out = { command };
+  const target = String(params.target || 'INFERENCE').trim().toUpperCase() === 'DOCKER'
+    ? 'DOCKER'
+    : 'INFERENCE';
+  const requestedCommand = String(
+    params.command || (target === 'DOCKER' ? 'START' : 'LOAD'),
+  ).trim().toUpperCase();
+  const command = target === 'DOCKER'
+    ? (SEND_COMMAND_DOCKER_COMMANDS.has(requestedCommand) ? requestedCommand : 'START')
+    : (
+      SEND_COMMAND_INFERENCE_PARAMS_BY_COMMAND[requestedCommand]
+        ? requestedCommand
+        : 'LOAD'
+    );
+  const allowed = target === 'DOCKER'
+    ? SEND_COMMAND_DOCKER_PARAMS
+    : SEND_COMMAND_INFERENCE_PARAMS_BY_COMMAND[command];
+  const out = { target, command };
 
   Object.entries(params).forEach(([key, value]) => {
-    if (key === 'command' || !allowed.has(key)) return;
+    if (key === 'target' || key === 'command' || !allowed.has(key)) return;
     if (value === undefined || value === null || value === '') return;
     out[key] = value;
   });

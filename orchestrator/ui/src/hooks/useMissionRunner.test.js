@@ -26,6 +26,13 @@ const emptyBt = [
   '  <BehaviorTree ID="MainTree"/>',
   "</root>",
 ].join("\n");
+const dockerStartBt = [
+  '<root BTCPP_format="4" main_tree_to_execute="MainTree">',
+  '  <BehaviorTree ID="MainTree">',
+  '    <SendCommand target="DOCKER" command="START" model="groot"/>',
+  '  </BehaviorTree>',
+  "</root>",
+].join("\n");
 
 const SPOTS = [
   { id: "a", label: "Dock", pose: { x: 0, y: 0, yaw: 0 } },
@@ -263,6 +270,33 @@ test("does not accept a stale latched completed as fresh BT completion", async (
   await waitFor(() => expect(h.callService).toHaveBeenCalledTimes(1));
   await waitFor(() => expect(h.view.result.current.status).toBe(RunnerStatus.FAILED));
   expect(h.view.result.current.reason).toBe("Waypoint Task did not start at Dock");
+});
+
+test("uses the extended watchdog for a backend-provisioning command", async () => {
+  const h = makeHarness({
+    orderedSpots: [SPOTS[0]],
+    resolveBtXml: () => dockerStartBt,
+    config: {
+      pollMs: 5,
+      btStartTimeoutMs: 100,
+      btTimeoutMs: 20,
+      backendTaskTimeoutMs: 500,
+    },
+  });
+  act(() => { h.view.result.current.start(); });
+
+  await waitFor(() => expect(h.callService).toHaveBeenCalledTimes(1));
+  await act(async () => {
+    h.btStatusRef.current = "running";
+    await new Promise((resolve) => setTimeout(resolve, 60));
+  });
+  expect(h.view.result.current.status).toBe(RunnerStatus.RUNNING_BT);
+
+  await act(async () => {
+    h.btStatusRef.current = "completed";
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  });
+  await waitFor(() => expect(h.view.result.current.status).toBe(RunnerStatus.DONE));
 });
 
 test("keeps backend execution errors in Waypoint Task terminology", async () => {

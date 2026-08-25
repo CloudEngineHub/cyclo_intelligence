@@ -331,6 +331,51 @@ _BACKENDS: Dict[str, Dict[str, str]] = {
     },
 }
 
+
+def _bounded_env_timeout(
+    name: str,
+    default: float,
+    minimum: float,
+    maximum: float,
+) -> float:
+    """Read a positive timeout while keeping operator overrides bounded."""
+    raw = os.environ.get(name, "").strip()
+    try:
+        value = float(raw) if raw else default
+    except ValueError:
+        logger.warning("invalid %s=%r; using %.0fs", name, raw, default)
+        value = default
+    return max(minimum, min(maximum, value))
+
+
+# Policy images can take substantially longer to build than a normal compose
+# lifecycle call. Keep the override long enough for CUDA-heavy builds, but do
+# not permit an accidentally unbounded HTTP-triggered subprocess.
+_BACKEND_BUILD_TIMEOUT_SEC = _bounded_env_timeout(
+    "CYCLO_BACKEND_BUILD_TIMEOUT_S",
+    default=7200.0,
+    minimum=300.0,
+    maximum=21600.0,
+)
+
+# FastAPI serves lifecycle requests from one asyncio loop. Lazily recreate the
+# lock set when direct-function tests use a fresh asyncio.run() loop, while
+# keeping independent backends free to provision in parallel in production.
+_BACKEND_LIFECYCLE_LOCK_LOOP: Optional[asyncio.AbstractEventLoop] = None
+_BACKEND_LIFECYCLE_LOCKS: Dict[str, asyncio.Lock] = {}
+
+
+def _backend_lifecycle_lock(name: str) -> asyncio.Lock:
+    """Return the current event loop's lock for an allowlisted backend."""
+    _require_known_backend(name)
+    loop = asyncio.get_running_loop()
+    global _BACKEND_LIFECYCLE_LOCK_LOOP
+    global _BACKEND_LIFECYCLE_LOCKS
+    if _BACKEND_LIFECYCLE_LOCK_LOOP is not loop:
+        _BACKEND_LIFECYCLE_LOCK_LOOP = loop
+        _BACKEND_LIFECYCLE_LOCKS = {}
+    return _BACKEND_LIFECYCLE_LOCKS.setdefault(name, asyncio.Lock())
+
 _REQUIRED_BACKEND_MOUNTS: Dict[str, tuple[str, ...]] = {
     "lerobot": (
         "/workspace",
@@ -382,6 +427,20 @@ def _require_known_backend(name: str) -> Dict[str, str]:
             404, f"Unknown backend '{name}'. Known: {known}"
         )
     return _BACKENDS[name]
+
+
+def _require_allowlisted_backend_spec(
+    name: str,
+    spec: Dict[str, str],
+) -> Dict[str, str]:
+    """Reject internal lifecycle calls that try to override Docker targets."""
+    allowlisted = _require_known_backend(name)
+    if spec != allowlisted:
+        raise HTTPException(
+            400,
+            "Backend image, container, and compose service overrides are not allowed",
+        )
+    return allowlisted
 
 
 _HOST_PROJECT_DIR_CACHE: Optional[str] = None
@@ -1197,14 +1256,16 @@ async def service_stop(name: str) -> ActionResult:
 # -- Backend container endpoints — PLAN §4.8 -----------------------------------
 # Hybrid wiring (matches PLAN §4.8 example):
 #   - pull   → docker-py client.api.pull(stream=True), SSE per layer
-#   - start  → restart an existing running container, start an existing
+#   - start  → leave an existing running container alone, start an existing
 #              stopped container, or 'docker compose up -d --no-build
-#              <service>' when the container does not exist. No build is
-#              attempted from the UI path; missing images are reported so the
-#              user can pull/install first.
+#              <service>' when the container does not exist.
 #   - stop   → docker-py container.stop(), keeping the container for reuse.
 #   - restart → hard reset an existing backend, or create/start it when absent.
 #   - status → docker-py images.get + containers.get
+#
+# Start/restart preserve the Inference UI's explicit Pull flow by default.
+# Callers such as task actions may opt into auto_provision=true, which tries
+# the allowlisted registry image first and the allowlisted compose build second.
 
 
 @app.get("/backends/groot/trt/status", response_model=TrtEngineStatus)
@@ -1287,15 +1348,31 @@ async def backend_pull(name: str) -> StreamingResponse:
 
 
 @app.post("/backends/{name}/start", response_model=ActionResult)
-async def backend_start(name: str) -> ActionResult:
+async def backend_start(
+    name: str,
+    auto_provision: bool = False,
+) -> ActionResult:
     spec = _require_known_backend(name)
-    return await _ensure_backend_running(name, spec)
+    return await _ensure_backend_running(
+        name,
+        spec,
+        restart_existing=False,
+        auto_provision=auto_provision,
+    )
 
 
 @app.post("/backends/{name}/restart", response_model=ActionResult)
-async def backend_restart(name: str) -> ActionResult:
+async def backend_restart(
+    name: str,
+    auto_provision: bool = False,
+) -> ActionResult:
     spec = _require_known_backend(name)
-    return await _ensure_backend_running(name, spec)
+    return await _ensure_backend_running(
+        name,
+        spec,
+        restart_existing=True,
+        auto_provision=auto_provision,
+    )
 
 
 @app.post("/backends/{name}/recreate", response_model=ActionResult)
@@ -1374,10 +1451,151 @@ async def backend_stop(name: str) -> ActionResult:
     return ActionResult(ok=ok, message=msg)
 
 
-async def _ensure_backend_running(name: str, spec: Dict[str, str]) -> ActionResult:
-    """Start policy backend without building; reset if it is already running."""
+def _pull_backend_image_for_provision(
+    client: docker.DockerClient,
+    spec: Dict[str, str],
+) -> str:
+    """Pull and verify the exact allowlisted image for an auto-provision call."""
+    image = spec["image"]
+    try:
+        for chunk in client.api.pull(image, stream=True, decode=True):
+            if not isinstance(chunk, dict):
+                continue
+            detail = chunk.get("errorDetail") or {}
+            detail_message = (
+                detail.get("message") if isinstance(detail, dict) else str(detail)
+            )
+            error = chunk.get("error") or detail_message
+            if error:
+                raise DockerException(str(error))
+    except DockerException:
+        raise
+    except Exception as e:
+        raise DockerException(str(e)) from e
 
+    local_image = _local_backend_image(client, spec)
+    if not local_image:
+        raise DockerException(
+            f"pull stream ended but expected image is still missing: {image}"
+        )
+    return local_image
+
+
+async def _auto_provision_backend_image(
+    name: str,
+    spec: Dict[str, str],
+) -> tuple[str, str]:
+    """Install an allowlisted backend image by pull, then compose build."""
+    spec = _require_allowlisted_backend_spec(name, spec)
+    pull_error = ""
+    try:
+        client = _docker_client()
+        local_image = await asyncio.to_thread(
+            _pull_backend_image_for_provision,
+            client,
+            spec,
+        )
+        return local_image, "registry pull"
+    except Exception as e:
+        pull_error = str(e) or type(e).__name__
+        logger.warning(
+            "backend %s registry pull failed; trying local build: %s",
+            name,
+            pull_error,
+        )
+
+    cmd = _compose_base_cmd() + ["build", spec["service"]]
+    try:
+        result = await _run(
+            *cmd,
+            timeout=_BACKEND_BUILD_TIMEOUT_SEC,
+            env=_compose_env(),
+        )
+    except Exception as e:
+        build_error = str(getattr(e, "detail", e)) or type(e).__name__
+        raise HTTPException(
+            502,
+            f"Auto-provision failed for {name}: registry pull failed: "
+            f"{pull_error}; local build failed: {build_error}",
+        ) from e
+
+    build_output = result.stderr or result.stdout or f"rc={result.rc}"
+    if result.rc != 0:
+        raise HTTPException(
+            502,
+            f"Auto-provision failed for {name}: registry pull failed: "
+            f"{pull_error}; local build failed (rc={result.rc}): "
+            f"{build_output}",
+        )
+
+    try:
+        local_image = await asyncio.to_thread(
+            lambda: _local_backend_image(_docker_client(), spec)
+        )
+    except DockerException as e:
+        raise HTTPException(
+            502,
+            f"Auto-provision failed for {name}: registry pull failed: "
+            f"{pull_error}; local build completed but image verification "
+            f"failed: {e}",
+        ) from e
+    if not local_image:
+        raise HTTPException(
+            502,
+            f"Auto-provision failed for {name}: registry pull failed: "
+            f"{pull_error}; local build completed but expected image is "
+            f"missing: {spec['image']}",
+        )
+    return local_image, f"local build after registry pull failed ({pull_error})"
+
+
+async def _ensure_backend_running(
+    name: str,
+    spec: Dict[str, str],
+    *,
+    restart_existing: bool = False,
+    auto_provision: bool = False,
+) -> ActionResult:
+    """Start an allowlisted backend, optionally provisioning its image."""
+
+    spec = _require_allowlisted_backend_spec(name, spec)
+    async with _backend_lifecycle_lock(name):
+        return await _ensure_backend_running_locked(
+            name,
+            spec,
+            restart_existing=restart_existing,
+            auto_provision=auto_provision,
+        )
+
+
+async def _ensure_backend_running_locked(
+    name: str,
+    spec: Dict[str, str],
+    *,
+    restart_existing: bool = False,
+    auto_provision: bool = False,
+) -> ActionResult:
+    """Run one serialized backend start/restart lifecycle operation."""
     container_name = spec["container"]
+
+    def _find_local_image() -> Optional[str]:
+        try:
+            return _local_backend_image(_docker_client(), spec)
+        except DockerException:
+            return None
+
+    # Opt-in callers asked for the current allowlisted image, even if an older
+    # or untagged container still exists. Provision before stale-container
+    # inspection so an image-ID mismatch triggers a clean compose recreation.
+    local_image = None
+    provision_source = "local image"
+    if auto_provision:
+        local_image = await asyncio.to_thread(_find_local_image)
+        if not local_image:
+            local_image, provision_source = await _auto_provision_backend_image(
+                name,
+                spec,
+            )
 
     def _start_or_restart_existing() -> tuple[Optional[bool], str]:
         try:
@@ -1408,8 +1626,10 @@ async def _ensure_backend_running(name: str, spec: Dict[str, str]) -> ActionResu
                 ctr.unpause()
                 state = "running"
             if state == "running":
-                ctr.restart(timeout=10)
-                return True, f"{container_name} restarted"
+                if restart_existing:
+                    ctr.restart(timeout=10)
+                    return True, f"{container_name} restarted"
+                return True, f"{container_name} already running"
             ctr.start()
             return True, f"{container_name} started from {state}"
         except DockerException as e:
@@ -1420,25 +1640,36 @@ async def _ensure_backend_running(name: str, spec: Dict[str, str]) -> ActionResu
         return ActionResult(ok=handled, message=msg)
     compose_reason = msg
 
-    # Container is absent. Pre-flight the image so compose up never starts an
-    # implicit pull/build path from a simple ON click.
-    def _find_local_image() -> Optional[str]:
-        try:
-            return _local_backend_image(_docker_client(), spec)
-        except DockerException:
-            return None
-
-    local_image = await asyncio.to_thread(_find_local_image)
+    # Container is absent or stale. Pre-flight the image so compose up never
+    # starts an implicit pull/build path from a normal Inference UI ON click.
     if not local_image:
-        images = ", ".join(_backend_image_candidates(spec))
-        raise HTTPException(
-            409,
-            f"No local image for {name}. Expected one of: {images}. "
-            f"Connect internet and call /backends/{name}/pull first.",
-        )
+        local_image = await asyncio.to_thread(_find_local_image)
+    if not local_image:
+        if auto_provision:
+            local_image, provision_source = await _auto_provision_backend_image(
+                name,
+                spec,
+            )
+        else:
+            images = ", ".join(_backend_image_candidates(spec))
+            raise HTTPException(
+                409,
+                f"No local image for {name}. Expected one of: {images}. "
+                f"Connect internet and call /backends/{name}/pull first, or "
+                "retry start/restart with auto_provision=true.",
+            )
 
     cmd = _compose_base_cmd() + ["up", "-d", "--no-build", spec["service"]]
-    result = await _run(*cmd, timeout=60.0, env=_compose_env())
+    try:
+        result = await _run(*cmd, timeout=60.0, env=_compose_env())
+    except Exception as e:
+        detail = str(getattr(e, "detail", e)) or type(e).__name__
+        status_code = getattr(e, "status_code", 502)
+        raise HTTPException(
+            status_code,
+            f"{spec['container']} create/start failed using "
+            f"{provision_source} {local_image}: {detail}",
+        ) from e
     ok = result.rc == 0
     msg = result.stderr or result.stdout or f"rc={result.rc}"
     if ok:
@@ -1447,7 +1678,12 @@ async def _ensure_backend_running(name: str, spec: Dict[str, str]) -> ActionResu
             reason = f" after recreating stale container ({compose_reason})"
         msg = (
             f"{spec['container']} created/started{reason} "
-            f"using local image {local_image}. {msg}"
+            f"using {provision_source} {local_image}. {msg}"
+        )
+    else:
+        msg = (
+            f"{spec['container']} create/start failed using "
+            f"{provision_source} {local_image} (rc={result.rc}): {msg}"
         )
     return ActionResult(ok=ok, message=msg)
 

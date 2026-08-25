@@ -31,6 +31,7 @@ import {
   isRunnerActive,
   missionRunnerReducer,
   navigationBatchFromIndex,
+  requiresBackendTaskTimeout,
 } from "./missionRunnerCore";
 import { formatTaskDisplayMessage } from "../utils/taskTerminology";
 
@@ -150,12 +151,12 @@ export function useMissionRunner({
   // Keep the newly-loaded tree ticking until it reports a FRESH terminal status.
   // The engine latches the previous run's `completed`, so we only accept a
   // terminal once we've seen `running` (or the status object identity changed).
-  const awaitBtTerminal = useCallback(async (signal) => {
+  const awaitBtTerminal = useCallback(async (signal, timeoutMs) => {
     const cfg = configRef.current;
     const statusAtLoad = btStatusRef.current;
     let sawRunning = false;
     const startDeadline = Date.now() + cfg.btStartTimeoutMs;
-    const runDeadline = Date.now() + cfg.btTimeoutMs;
+    const runDeadline = Date.now() + (timeoutMs ?? cfg.btTimeoutMs);
     for (;;) {
       const status = normStatus(btStatusRef.current);
       if (status === "running") sawRunning = true;
@@ -199,7 +200,11 @@ export function useMissionRunner({
     }
     dispatch({ type: "phase", phase: RunnerPhase.BT_RUNNING });
 
-    const outcome = await awaitBtTerminal(signal);
+    const cfg = configRef.current;
+    const timeoutMs = requiresBackendTaskTimeout(xml)
+      ? cfg.backendTaskTimeoutMs
+      : cfg.btTimeoutMs;
+    const outcome = await awaitBtTerminal(signal, timeoutMs);
     if (outcome === "completed") {
       btNeedsStopRef.current = false;
       dispatch({ type: "finish", index, skipped: false });
