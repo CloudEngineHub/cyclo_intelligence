@@ -14,7 +14,7 @@
 //
 // Author: Kiwoong Park, Seongwoo Kim
 
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import clsx from 'clsx';
 import { MdHome, MdVideocam, MdMemory, MdWidgets, MdAccountTree } from 'react-icons/md';
 import { TbMapRoute } from 'react-icons/tb';
@@ -87,6 +87,10 @@ function App() {
   const taskStatusReceived = recordTopicReceived || inferenceTopicReceived;
 
   const isFirstLoad = useRef(true);
+  // A user entering from the app rail gets the Mission Canvas workspace chooser.
+  // A restored/deep-linked Mission Canvas session skips it and resumes exactly
+  // where it was, preserving the existing open-source session behavior.
+  const [showMissionWorkspaceChooser, setShowMissionWorkspaceChooser] = useState(false);
 
   // Subscribe to task status from ROS topic (always active)
   const rosSubscriptionControls = useRosTopicSubscription();
@@ -169,6 +173,7 @@ function App() {
 
   const handleHomePageNavigation = () => {
     isFirstLoad.current = false;
+    setShowMissionWorkspaceChooser(false);
     dispatch(moveToPage(PageType.HOME));
   };
 
@@ -275,6 +280,7 @@ function App() {
 
   const handleMissionCanvasPageNavigation = () => {
     isFirstLoad.current = false;
+    setShowMissionWorkspaceChooser(true);
     dispatch(moveToPage(PageType.MISSION_CANVAS));
   };
 
@@ -435,7 +441,7 @@ function App() {
             className="w-24 h-1 border-t-2 rounded-full border-gray-200 dark:border-slate-800 mt-3"
           />
 
-          {/* Mission Canvas page button */}
+          {/* Mission Canvas workspace entry */}
           <button
             className={clsx(classPageButton, {
               'hover:bg-gray-200 active:bg-gray-400 dark:hover:bg-slate-800 dark:active:bg-slate-700': page !== PageType.MISSION_CANVAS,
@@ -465,7 +471,10 @@ function App() {
           <EditDatasetPage isActive={page === PageType.EDIT_DATASET} />
         ) : page === PageType.MISSION_CANVAS ? (
           <React.Suspense fallback={<div className="flex-1 flex items-center justify-center">Loading Mission Canvas...</div>}>
-            <MissionCanvasPage onBackHome={handleHomePageNavigation} />
+            <MissionCanvasPage
+              onBackHome={handleHomePageNavigation}
+              showWorkspaceChooser={showMissionWorkspaceChooser}
+            />
           </React.Suspense>
         ) : (
           <HomePage />

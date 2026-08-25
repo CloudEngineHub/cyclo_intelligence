@@ -17,7 +17,7 @@
 export const BT_SUPPORTED_ROBOT_TYPE = 'ffw_sg2_rev1';
 
 export const BT_UNSUPPORTED_ROBOT_MESSAGE =
-  `Behavior Trees currently supports only ${BT_SUPPORTED_ROBOT_TYPE}. ` +
+  `Task Builder currently supports only ${BT_SUPPORTED_ROBOT_TYPE}. ` +
   'Support for other robot types is coming soon.';
 
 export function isBtRobotSupported(robotType) {

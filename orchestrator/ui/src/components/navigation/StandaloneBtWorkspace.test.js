@@ -11,6 +11,7 @@ jest.mock('../../features/btmanager/components/BTEditorSurface', () => {
   return function MockBTEditorSurface({
     isActive,
     title,
+    subtitle,
     className,
     variant,
     onExitStateChange,
@@ -24,7 +25,8 @@ jest.mock('../../features/btmanager/components/BTEditorSurface', () => {
         'data-has-exit-state-callback': String(typeof onExitStateChange === 'function'),
         className,
       },
-      title,
+      React.createElement('span', null, title),
+      React.createElement('span', null, subtitle),
     );
   };
 });
@@ -59,20 +61,27 @@ test('renders the existing editor surface with workspace configuration', () => {
 test('forwards the Mission Canvas visual variant to the shared editor surface', () => {
   renderWithRobot('ffw_sg2_rev1', {
     variant: 'mission-canvas',
+    subtitle: 'Behavior Tree workspace · No map required',
     onExitStateChange: jest.fn(),
   });
 
   const editor = screen.getByTestId('bt-editor-surface');
   expect(editor).toHaveAttribute('data-variant', 'mission-canvas');
   expect(editor).toHaveAttribute('data-has-exit-state-callback', 'true');
+  expect(editor).toHaveTextContent('Task Builder');
+  expect(editor).toHaveTextContent('Behavior Tree workspace · No map required');
 });
 
 test('keeps the unsupported robot guard inside the reusable workspace', () => {
-  renderWithRobot('ffw_sh5_rev1');
+  renderWithRobot('ffw_sh5_rev1', {
+    subtitle: 'Behavior Tree workspace · No map required',
+  });
 
   expect(
-    screen.getByRole('heading', { name: 'Behavior Trees' }),
+    screen.getByRole('heading', { name: 'Task Builder' }),
   ).toBeInTheDocument();
+  expect(screen.getByText('Behavior Tree workspace · No map required'))
+    .toBeInTheDocument();
   expect(screen.getByText(BT_UNSUPPORTED_ROBOT_MESSAGE)).toBeInTheDocument();
   expect(screen.getByText('Current robot type: ffw_sh5_rev1')).toBeInTheDocument();
   expect(screen.queryByTestId('bt-editor-surface')).not.toBeInTheDocument();

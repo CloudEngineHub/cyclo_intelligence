@@ -389,21 +389,114 @@ test('renders Mission Canvas foundation', async () => {
   expect(getNavigationSpots).not.toHaveBeenCalled();
 });
 
-test('places the Back icon, robot brand, and Mission Canvas title in the top header', async () => {
+test('shows a lightweight Mission Canvas workspace chooser on a fresh entry', () => {
+  const onBackHome = jest.fn();
+
+  render(
+    <MissionCanvasPage
+      onBackHome={onBackHome}
+      showWorkspaceChooser
+    />,
+  );
+
+  expect(screen.getByRole('heading', { name: 'Mission Canvas', level: 1 }))
+    .toBeInTheDocument();
+  expect(screen.getByText('Choose a workspace')).toBeInTheDocument();
+  expect(screen.queryByText('Does your robot need to move on a map?'))
+    .not.toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Open Task Builder' }))
+    .toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Open Mission Canvas' }))
+    .toBeInTheDocument();
+  expect(screen.queryByText('NO MAP REQUIRED')).not.toBeInTheDocument();
+  expect(screen.queryByText('MAP REQUIRED')).not.toBeInTheDocument();
+  expect(screen.getByText('VLA LONG-HORIZON TASK · SIMPLE RULE-BASED CONTROL'))
+    .toBeInTheDocument();
+  expect(screen.getByText('NAVIGATION + VLA · HYBRID ROBOT CONTROL'))
+    .toBeInTheDocument();
+
+  // The chooser is intentionally lightweight. ROS/map work starts only after
+  // the user selects the map-bound Mission Canvas workspace.
+  expect(mockMapViewer).not.toHaveBeenCalled();
+  expect(mockStandaloneBtWorkspace).not.toHaveBeenCalled();
+  expect(getServiceStatus).not.toHaveBeenCalled();
+  expect(getPgmFiles).not.toHaveBeenCalled();
+  expect(getPgmImage).not.toHaveBeenCalled();
+  expect(getNavigationSpots).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: 'Back to Home' }));
+  expect(onBackHome).toHaveBeenCalledTimes(1);
+});
+
+test('opens the mapless Task Builder from the Mission Canvas chooser', async () => {
+  render(<MissionCanvasPage showWorkspaceChooser />);
+
+  fireEvent.click(screen.getByRole('button', { name: 'Open Task Builder' }));
+
+  expect(screen.getByTestId('standalone-bt-workspace')).toBeInTheDocument();
+  expect(screen.queryByText('Choose a workspace')).not.toBeInTheDocument();
+  expect(mockStandaloneBtWorkspace).toHaveBeenLastCalledWith(expect.objectContaining({
+    isActive: true,
+    title: 'Task Builder',
+    subtitle: 'Behavior Tree workspace · No map required',
+    variant: 'mission-canvas',
+  }));
+  expect(screen.queryByRole('tablist')).not.toBeInTheDocument();
+  expect(screen.queryByRole('tab', { name: 'Mapping' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('tab', { name: 'Task Builder' })).not.toBeInTheDocument();
+  expect(screen.queryByText('NAVIGATION')).not.toBeInTheDocument();
+  expect(screen.queryByText('MISSION')).not.toBeInTheDocument();
+  expect(mockMapViewer).not.toHaveBeenCalled();
+  expect(getServiceStatus).not.toHaveBeenCalled();
+  expect(getPgmFiles).not.toHaveBeenCalled();
+  expect(getPgmImage).not.toHaveBeenCalled();
+  expect(getNavigationSpots).not.toHaveBeenCalled();
+  expect(screen.getByRole('button', { name: 'Back to workspace chooser' }))
+    .toBeInTheDocument();
+  await waitFor(() => expect(
+    JSON.parse(window.sessionStorage.getItem('mission_canvas_session')).workspaceKind,
+  ).toBe('standalone_bt'));
+});
+
+test('opens the Mapping stage from the Mission Canvas chooser card', async () => {
+  render(<MissionCanvasPage showWorkspaceChooser />);
+
+  fireEvent.click(screen.getByRole('button', { name: 'Open Mission Canvas' }));
+
+  expect(screen.queryByText('Choose a workspace')).not.toBeInTheDocument();
+  expect(screen.getByRole('tab', { name: 'Mapping' }))
+    .toHaveAttribute('aria-selected', 'true');
+  const stageNavigation = screen.getByRole('tablist', { name: 'Mission Canvas stages' });
+  expect(within(stageNavigation).getByText('NAVIGATION')).toBeInTheDocument();
+  expect(within(stageNavigation).getByText('MISSION')).toBeInTheDocument();
+  expect(within(stageNavigation).queryByText('AUTOMATION')).not.toBeInTheDocument();
+  expect(within(stageNavigation).queryByRole('tab', { name: 'Task Builder' }))
+    .not.toBeInTheDocument();
+  expect(screen.getByText('Mission Canvas Map')).toBeInTheDocument();
+  expect(screen.queryByTestId('standalone-bt-workspace')).not.toBeInTheDocument();
+  await waitFor(() => {
+    expect(getServiceStatus).toHaveBeenCalled();
+    expect(getPgmFiles).toHaveBeenCalled();
+    expect(
+      JSON.parse(window.sessionStorage.getItem('mission_canvas_session')).workspaceKind,
+    ).toBe('mission');
+  });
+});
+
+test('places the Back icon, robot brand, and Mission Canvas title in the workspace header', async () => {
   render(<MissionCanvasPage onBackHome={jest.fn()} />);
   await waitFor(() => {
     expect(getServiceStatus).toHaveBeenCalled();
     expect(getPgmFiles).toHaveBeenCalled();
   });
 
-  const backHomeButton = screen.getByRole('button', { name: 'Back to Home' });
-  const topHeader = backHomeButton.closest('header');
+  const backToChooserButton = screen.getByRole('button', { name: 'Back to workspace chooser' });
+  const topHeader = backToChooserButton.closest('header');
 
   expect(topHeader).not.toBeNull();
-  expect(backHomeButton.closest('aside')).toBeNull();
-  expect(backHomeButton).toHaveAccessibleName('Back to Home');
-  expect(backHomeButton.querySelector('svg')).toHaveAttribute('aria-hidden', 'true');
-  expect(within(backHomeButton).queryByText('Back to Home')).not.toBeInTheDocument();
+  expect(backToChooserButton.closest('aside')).toBeNull();
+  expect(backToChooserButton).toHaveAccessibleName('Back to workspace chooser');
+  expect(backToChooserButton.querySelector('svg')).toHaveAttribute('aria-hidden', 'true');
+  expect(within(backToChooserButton).queryByText('Back to workspace chooser')).not.toBeInTheDocument();
 
   const robotBrandIcon = within(topHeader).getByTestId('mission-canvas-brand-icon');
   const missionCanvasTitle = within(topHeader).getByRole('heading', {
@@ -414,7 +507,7 @@ test('places the Back icon, robot brand, and Mission Canvas title in the top hea
   expect(robotBrandIcon.closest('header')).toBe(topHeader);
   expect(
     Boolean(
-      backHomeButton.compareDocumentPosition(robotBrandIcon)
+      backToChooserButton.compareDocumentPosition(robotBrandIcon)
       & Node.DOCUMENT_POSITION_FOLLOWING
     )
   ).toBe(true);
@@ -426,7 +519,7 @@ test('places the Back icon, robot brand, and Mission Canvas title in the top hea
   ).toBe(true);
 });
 
-test('returns Home immediately when Mission Canvas is clean and idle', async () => {
+test('returns a clean direct workspace to the chooser before returning Home', async () => {
   const onBackHome = jest.fn();
 
   render(<MissionCanvasPage onBackHome={onBackHome} />);
@@ -435,12 +528,16 @@ test('returns Home immediately when Mission Canvas is clean and idle', async () 
     expect(getPgmFiles).toHaveBeenCalled();
   });
 
-  fireEvent.click(screen.getByRole('button', { name: 'Back to Home' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Back to workspace chooser' }));
 
+  expect(screen.getByText('Choose a workspace')).toBeInTheDocument();
+  expect(onBackHome).not.toHaveBeenCalled();
+
+  fireEvent.click(screen.getByRole('button', { name: 'Back to Home' }));
   expect(onBackHome).toHaveBeenCalledTimes(1);
 });
 
-test('guards returning Home with the existing unsaved Design dialog', async () => {
+test('guards returning to the chooser with the existing unsaved Design dialog', async () => {
   const latestMapViewerProps = () => (
     mockMapViewer.mock.calls[mockMapViewer.mock.calls.length - 1][0]
   );
@@ -464,19 +561,20 @@ test('guards returning Home with the existing unsaved Design dialog', async () =
   });
   await waitFor(() => expect(latestMapViewerProps().spots).toHaveLength(1));
 
-  fireEvent.click(screen.getByRole('button', { name: 'Back to Home' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Back to workspace chooser' }));
   expect(screen.getByText('Unsaved changes')).toBeInTheDocument();
   expect(onBackHome).not.toHaveBeenCalled();
 
   fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
   expect(onBackHome).not.toHaveBeenCalled();
 
-  fireEvent.click(screen.getByRole('button', { name: 'Back to Home' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Back to workspace chooser' }));
   fireEvent.click(screen.getByRole('button', { name: 'Discard' }));
-  expect(onBackHome).toHaveBeenCalledTimes(1);
+  expect(screen.getByText('Choose a workspace')).toBeInTheDocument();
+  expect(onBackHome).not.toHaveBeenCalled();
 });
 
-test('keeps unsaved Map Edit changes in place when returning Home is requested', async () => {
+test('keeps unsaved Map Edit changes in place when the chooser is requested', async () => {
   const latestMapViewerProps = () => (
     mockMapViewer.mock.calls[mockMapViewer.mock.calls.length - 1][0]
   );
@@ -501,21 +599,21 @@ test('keeps unsaved Map Edit changes in place when returning Home is requested',
   });
   await waitFor(() => expect(screen.getByText('· unsaved')).toBeInTheDocument());
 
-  const backHomeButton = screen.getByRole('button', { name: 'Back to Home' });
-  fireEvent.click(backHomeButton);
+  const backToChooserButton = screen.getByRole('button', { name: 'Back to workspace chooser' });
+  fireEvent.click(backToChooserButton);
 
   expect(onBackHome).not.toHaveBeenCalled();
   const exitStatus = screen.getByRole('status');
-  expect(exitStatus).toHaveTextContent('Save the current map edits before returning Home');
+  expect(exitStatus).toHaveTextContent('Save the current map edits');
   expect(exitStatus).toHaveAttribute('aria-live', 'polite');
   expect(exitStatus).toHaveAttribute('id', expect.stringMatching(/\S+/));
-  expect(backHomeButton).toHaveAttribute('aria-describedby', exitStatus.id);
+  expect(backToChooserButton).toHaveAttribute('aria-describedby', exitStatus.id);
 });
 
 test.each([
   ['Mapping', 'mapping', 'map', false],
   ['Run', 'run', 'nav', true],
-])('blocks returning Home while the %s runtime is active', async (
+])('blocks returning to the chooser while the %s runtime is active', async (
   _label,
   workspaceStage,
   statusMode,
@@ -539,11 +637,11 @@ test.each([
     await waitFor(() => expect(screen.getByRole('button', { name: 'Load Map' })).toBeDisabled());
   }
 
-  fireEvent.click(screen.getByRole('button', { name: 'Back to Home' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Back to workspace chooser' }));
 
   expect(onBackHome).not.toHaveBeenCalled();
-  expect(screen.getByText('Stop the active runtime before returning Home'))
-    .toBeInTheDocument();
+  expect(screen.getByRole('status')).toHaveTextContent('Stop the active runtime');
+  expect(screen.queryByText('Choose a workspace')).not.toBeInTheDocument();
 });
 
 test('keeps a restored runtime mode guarded while status confirmation is pending', async () => {
@@ -564,21 +662,18 @@ test('keeps a restored runtime mode guarded while status confirmation is pending
   // the session-owned mode authoritative during that gap even though the HUD
   // does not yet have an `is_up` confirmation.
   expect(screen.getByText('Status: idle')).toBeInTheDocument();
-  const behaviorTreesTab = screen.getByRole('tab', { name: 'BT Manager' });
-  expect(behaviorTreesTab).toBeDisabled();
-  expect(behaviorTreesTab).toHaveAttribute(
-    'title',
-    'Stop the active operation before switching workspaces',
-  );
+  expect(screen.queryByRole('tab', { name: 'Task Builder' })).not.toBeInTheDocument();
+  const backToChooserButton = screen.getByRole('button', { name: 'Back to workspace chooser' });
+  expect(backToChooserButton).toHaveAttribute('title', expect.stringContaining('Stop'));
 
-  fireEvent.click(screen.getByRole('button', { name: 'Back to Home' }));
+  fireEvent.click(backToChooserButton);
 
   expect(onBackHome).not.toHaveBeenCalled();
-  expect(screen.getByText('Stop the active runtime before returning Home'))
-    .toBeInTheDocument();
+  expect(screen.getByRole('status')).toHaveTextContent('Stop the active runtime');
+  expect(screen.queryByText('Choose a workspace')).not.toBeInTheDocument();
 });
 
-test('waits for an in-flight Mission operation before returning Home', async () => {
+test('waits for an in-flight Mission operation before returning to the chooser', async () => {
   const onBackHome = jest.fn();
   let finishStartMapping;
   startNavigation.mockReturnValue(new Promise((resolve) => {
@@ -589,15 +684,15 @@ test('waits for an in-flight Mission operation before returning Home', async () 
   await waitFor(() => expect(screen.getByRole('button', { name: 'Start Mapping' })).toBeEnabled());
 
   fireEvent.click(screen.getByRole('button', { name: 'Start Mapping' }));
-  await waitFor(() => expect(screen.getByRole('button', { name: 'Back to Home' })).toHaveAttribute(
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Back to workspace chooser' })).toHaveAttribute(
     'title',
-    'Wait for the current operation to finish before returning Home',
+    expect.stringContaining('Wait for the current operation'),
   ));
-  fireEvent.click(screen.getByRole('button', { name: 'Back to Home' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Back to workspace chooser' }));
 
   expect(onBackHome).not.toHaveBeenCalled();
-  expect(screen.getByText('Wait for the current operation to finish before returning Home'))
-    .toBeInTheDocument();
+  expect(screen.getByRole('status')).toHaveTextContent('Wait for the current operation');
+  expect(screen.queryByText('Choose a workspace')).not.toBeInTheDocument();
 
   await act(async () => {
     finishStartMapping({ ok: true, message: 'started' });
@@ -606,70 +701,48 @@ test('waits for an in-flight Mission operation before returning Home', async () 
   await waitFor(() => expect(screen.getByRole('button', { name: 'Start Mapping' })).toBeEnabled());
 });
 
-test('uses standalone BT exit state to guard returning Home', async () => {
+test('uses Task Builder exit state to guard returning to the chooser', async () => {
   const onBackHome = jest.fn();
 
-  render(<MissionCanvasPage onBackHome={onBackHome} />);
-  await waitFor(() => {
-    expect(getServiceStatus).toHaveBeenCalled();
-    expect(getPgmFiles).toHaveBeenCalled();
-  });
-  fireEvent.click(screen.getByRole('tab', { name: 'BT Manager' }));
+  render(<MissionCanvasPage onBackHome={onBackHome} showWorkspaceChooser />);
+  fireEvent.click(screen.getByRole('button', { name: 'Open Task Builder' }));
   const exitStateChange = mockStandaloneBtWorkspace.mock.calls.at(-1)[0].onExitStateChange;
 
   act(() => exitStateChange({ active: true, busy: false }));
-  fireEvent.click(screen.getByRole('button', { name: 'Back to Home' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Back to workspace chooser' }));
   expect(onBackHome).not.toHaveBeenCalled();
-  expect(screen.getByText('Stop the active runtime before returning Home'))
-    .toBeInTheDocument();
+  expect(screen.getByRole('status')).toHaveTextContent('Stop the active runtime');
+  expect(screen.queryByText('Choose a workspace')).not.toBeInTheDocument();
 
   act(() => exitStateChange({ active: false, busy: true }));
-  fireEvent.click(screen.getByRole('button', { name: 'Back to Home' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Back to workspace chooser' }));
   expect(onBackHome).not.toHaveBeenCalled();
-  expect(screen.getByText('Wait for the current operation to finish before returning Home'))
-    .toBeInTheDocument();
+  expect(screen.getByRole('status')).toHaveTextContent('Wait for the current operation');
+  expect(screen.queryByText('Choose a workspace')).not.toBeInTheDocument();
+
+  act(() => exitStateChange({ active: false, busy: false }));
+  fireEvent.click(screen.getByRole('button', { name: 'Back to workspace chooser' }));
+  expect(screen.getByText('Choose a workspace')).toBeInTheDocument();
+  expect(onBackHome).not.toHaveBeenCalled();
 });
 
-test('switches between the mapless BT Manager workspace and the previous Mission stage', async () => {
+test('shows only grouped navigation and mission stages inside Mission Canvas', () => {
   render(<MissionCanvasPage />);
 
-  // One rail, three asset groups: stages split by what they manage and the
-  // BT library stands beside them as a peer.
-  const tablist = screen.getByRole('tablist', { name: 'Mission Canvas workspaces' });
+  const tablist = screen.getByRole('tablist', { name: 'Mission Canvas stages' });
   expect(within(tablist).getByText('NAVIGATION')).toBeInTheDocument();
   expect(within(tablist).getByText('MISSION')).toBeInTheDocument();
-  expect(within(tablist).getByText('BEHAVIOR TREES')).toBeInTheDocument();
-  expect(screen.getByRole('tab', { name: 'BT Manager' })).toHaveAttribute('aria-selected', 'false');
-  expect(screen.getByRole('tab', { name: 'Mapping' })).toHaveAttribute('aria-selected', 'true');
+  expect(within(tablist).getByRole('tab', { name: 'Mapping' })).toHaveAttribute('aria-selected', 'true');
+  expect(within(tablist).getByRole('tab', { name: 'Map Edit' })).toBeInTheDocument();
+  expect(within(tablist).getByRole('tab', { name: 'Navigation' })).toBeInTheDocument();
+  expect(within(tablist).getByRole('tab', { name: 'Design' })).toBeInTheDocument();
+  expect(within(tablist).getByRole('tab', { name: 'Run' })).toBeInTheDocument();
   expect(screen.getByText('Mission Canvas Map')).toBeInTheDocument();
-
-  fireEvent.click(screen.getByRole('tab', { name: 'Design' }));
-  expect(screen.getByRole('tab', { name: 'Design' })).toHaveAttribute('aria-selected', 'true');
-
-  fireEvent.click(screen.getByRole('tab', { name: 'BT Manager' }));
-
-  expect(screen.getByRole('tab', { name: 'BT Manager' })).toHaveAttribute('aria-selected', 'true');
-  expect(screen.getByTestId('standalone-bt-workspace')).toBeInTheDocument();
-  expect(mockStandaloneBtWorkspace).toHaveBeenLastCalledWith(expect.objectContaining({
-    isActive: true,
-    title: 'BT Manager',
-    variant: 'mission-canvas',
-  }));
-  // The stage tabs stay visible (unselected) so any stage is one click away.
-  expect(screen.getByRole('tab', { name: 'Mapping' })).toHaveAttribute('aria-selected', 'false');
-  expect(screen.getByRole('tab', { name: 'Design' })).toHaveAttribute('aria-selected', 'false');
-  expect(screen.queryByText('Mission Canvas Map')).not.toBeInTheDocument();
-  await waitFor(() => expect(
-    JSON.parse(window.sessionStorage.getItem('mission_canvas_session')).workspaceKind,
-  ).toBe('standalone_bt'));
-
-  // Clicking a stage returns straight to the Mission workspace.
-  fireEvent.click(screen.getByRole('tab', { name: 'Design' }));
-
-  expect(screen.getByRole('tab', { name: 'Design' })).toHaveAttribute('aria-selected', 'true');
-  expect(screen.getByRole('tab', { name: 'BT Manager' })).toHaveAttribute('aria-selected', 'false');
-  expect(screen.getByText('Mission Canvas Map')).toBeInTheDocument();
-  expect(screen.queryByTestId('standalone-bt-workspace')).not.toBeInTheDocument();
+  expect(within(tablist).queryByRole('tab', { name: 'Task Builder' })).not.toBeInTheDocument();
+  expect(within(tablist).queryByRole('button', { name: 'Mission Canvas' })).not.toBeInTheDocument();
+  expect(within(tablist).queryByText('AUTOMATION')).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Open Task Builder' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Open Mission Canvas' })).not.toBeInTheDocument();
 });
 
 test('restores the standalone workspace from the Mission Canvas session', () => {
@@ -680,13 +753,16 @@ test('restores the standalone workspace from the Mission Canvas session', () => 
 
   render(<MissionCanvasPage />);
 
-  expect(screen.getByRole('tab', { name: 'BT Manager' })).toHaveAttribute('aria-selected', 'true');
   expect(screen.getByTestId('standalone-bt-workspace')).toBeInTheDocument();
-  expect(screen.getByRole('tab', { name: 'Design' })).toHaveAttribute('aria-selected', 'false');
+  expect(screen.queryByRole('tablist')).not.toBeInTheDocument();
+  expect(screen.queryByRole('tab', { name: 'Design' })).not.toBeInTheDocument();
   expect(screen.queryByText('Mission Canvas Map')).not.toBeInTheDocument();
   expect(getPgmFiles).not.toHaveBeenCalled();
   expect(getPgmImage).not.toHaveBeenCalled();
   expect(getNavigationSpots).not.toHaveBeenCalled();
+
+  fireEvent.click(screen.getByRole('button', { name: 'Back to workspace chooser' }));
+  expect(screen.getByText('Choose a workspace')).toBeInTheDocument();
 });
 
 test('defaults legacy Mission Canvas sessions without workspaceKind to Mission', () => {
@@ -697,8 +773,8 @@ test('defaults legacy Mission Canvas sessions without workspaceKind to Mission',
 
   render(<MissionCanvasPage />);
 
-  expect(screen.getByRole('tab', { name: 'BT Manager' })).toHaveAttribute('aria-selected', 'false');
   expect(screen.getByRole('tab', { name: 'Design' })).toHaveAttribute('aria-selected', 'true');
+  expect(screen.queryByRole('tab', { name: 'Task Builder' })).not.toBeInTheDocument();
   expect(screen.getByText('Mission Canvas Map')).toBeInTheDocument();
   expect(screen.queryByTestId('standalone-bt-workspace')).not.toBeInTheDocument();
 });
@@ -3922,7 +3998,7 @@ test('edits and saves loaded map pixels from the fix editor', async () => {
   expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
 });
 
-test('keeps unsaved Map Edit pixels in place by locking workspace switches', async () => {
+test('keeps unsaved Map Edit pixels in place by blocking return to the chooser', async () => {
   const latestMapViewerProps = () => (
     mockMapViewer.mock.calls[mockMapViewer.mock.calls.length - 1][0]
   );
@@ -3945,13 +4021,12 @@ test('keeps unsaved Map Edit pixels in place by locking workspace switches', asy
     latestMapViewerProps().onEditorMapPoint(0, 0);
   });
 
-  const behaviorTreesTab = screen.getByRole('tab', { name: 'BT Manager' });
-  expect(behaviorTreesTab).toBeDisabled();
-  expect(behaviorTreesTab).toHaveAttribute(
-    'title',
-    'Save the current map edits before switching workspaces',
-  );
+  expect(screen.queryByRole('tab', { name: 'Task Builder' })).not.toBeInTheDocument();
+  const backToChooserButton = screen.getByRole('button', { name: 'Back to workspace chooser' });
+  expect(backToChooserButton).toHaveAttribute('title', expect.stringContaining('Save the current map edits'));
+  fireEvent.click(backToChooserButton);
   expect(screen.getByText('· unsaved')).toBeInTheDocument();
+  expect(screen.queryByText('Choose a workspace')).not.toBeInTheDocument();
   expect(screen.queryByTestId('standalone-bt-workspace')).not.toBeInTheDocument();
 });
 
@@ -6351,7 +6426,7 @@ test('invalidates a Run mission snapshot when Navigate loads a different map', a
   const missionLoadCalls = getNavigationMission.mock.calls.length;
   const missionBtCalls = getNavigationMissionBtFile.mock.calls.length;
 
-  fireEvent.click(screen.getByRole('tab', { name: 'Navigate' }));
+  fireEvent.click(screen.getByRole('tab', { name: 'Navigation' }));
   fireEvent.click(screen.getByRole('button', { name: 'Load Map' }));
   const navigateLoadDialog = await screen.findByRole('dialog', { name: 'Load Map' });
   const navigateMapSelect = within(navigateLoadDialog).getByRole('combobox', {
@@ -6403,7 +6478,7 @@ test('loads a Navigate map without mission state while Run keeps its mission sel
   });
 
   render(<MissionCanvasPage />);
-  fireEvent.click(screen.getByRole('tab', { name: 'Navigate' }));
+  fireEvent.click(screen.getByRole('tab', { name: 'Navigation' }));
   fireEvent.click(screen.getByRole('button', { name: 'Load Map' }));
 
   const navigateLoadDialog = await screen.findByRole('dialog', { name: 'Load Map' });
@@ -6439,7 +6514,7 @@ test('loads a Navigate map without mission state while Run keeps its mission sel
 });
 
 
-test('drives to a clicked goal from the Navigate stage', async () => {
+test('drives to a clicked goal from the Navigation stage', async () => {
   const latestMapViewerProps = () => (
     mockMapViewer.mock.calls[mockMapViewer.mock.calls.length - 1][0]
   );
@@ -6459,7 +6534,7 @@ test('drives to a clicked goal from the Navigate stage', async () => {
 
   render(<MissionCanvasPage />);
 
-  fireEvent.click(screen.getByRole('tab', { name: 'Navigate' }));
+  fireEvent.click(screen.getByRole('tab', { name: 'Navigation' }));
   expect(screen.getByRole('button', { name: 'Set Goal' })).toBeDisabled();
   expect(screen.getByRole('button', { name: 'Localize' })).toBeDisabled();
 
@@ -6469,7 +6544,7 @@ test('drives to a clicked goal from the Navigate stage', async () => {
   expect(within(navigateLoadDialog).getAllByRole('combobox')).toHaveLength(1);
   fireEvent.click(within(navigateLoadDialog).getByRole('button', { name: 'Load' }));
   await waitFor(() => expect(screen.getByRole('button', { name: 'Localize' })).toBeEnabled());
-  expect(screen.getByRole('tab', { name: 'Navigate' })).toHaveAttribute('aria-selected', 'true');
+  expect(screen.getByRole('tab', { name: 'Navigation' })).toHaveAttribute('aria-selected', 'true');
   expect(screen.getByRole('tab', { name: 'Run' })).toHaveAttribute('aria-selected', 'false');
 
   // Localize brings nav up and enters pose-set mode; clicking the map
@@ -6489,7 +6564,7 @@ test('drives to a clicked goal from the Navigate stage', async () => {
   // readiness. Returning to Navigate still preserves its map and localization.
   fireEvent.click(screen.getByRole('tab', { name: 'Run' }));
   expect(screen.getByRole('button', { name: 'Localize' })).toBeDisabled();
-  fireEvent.click(screen.getByRole('tab', { name: 'Navigate' }));
+  fireEvent.click(screen.getByRole('tab', { name: 'Navigation' }));
   await waitFor(() => expect(screen.getByRole('button', { name: 'Set Goal' })).toBeEnabled());
 
   // An accidental Localize re-click must not invalidate the pose: with the
@@ -6554,7 +6629,7 @@ test('reports a non-succeeded navigate goal as failed', async () => {
 
   render(<MissionCanvasPage />);
 
-  fireEvent.click(screen.getByRole('tab', { name: 'Navigate' }));
+  fireEvent.click(screen.getByRole('tab', { name: 'Navigation' }));
   fireEvent.click(screen.getByRole('button', { name: 'Load Map' }));
   const navigateLoadDialog = await screen.findByRole('dialog', { name: 'Load Map' });
   expect(within(navigateLoadDialog).getAllByRole('combobox')).toHaveLength(1);

@@ -161,15 +161,13 @@ const RUN_SHUTDOWN_RETRY_MAX_AGE_MS = 60_000;
 const WORKSPACE_STAGES = [
   { id: STAGE_MAPPING, label: "Mapping" },
   { id: STAGE_MAP_EDIT, label: "Map Edit" },
-  { id: STAGE_NAVIGATE, label: "Navigate" },
+  { id: STAGE_NAVIGATE, label: "Navigation" },
   { id: STAGE_AUTHORING, label: "Design" },
   { id: STAGE_RUN, label: "Run" },
 ];
 
-// The rail groups stages by the asset they manage (maps vs missions), which
-// mirrors the backend split: maps (pgm/yaml/annotations) live and die in
-// NAVIGATION, missions in MISSION, standalone trees under BEHAVIOR TREES.
-// Within each group the left-to-right order still reads as a mini pipeline.
+// The Mission Canvas rail groups map-bound stages by the asset they manage.
+// Task Builder is selected from the chooser and intentionally has no rail.
 const WORKSPACE_NAV_GROUPS = [
   { caption: "NAVIGATION", stageIds: [STAGE_MAPPING, STAGE_MAP_EDIT, STAGE_NAVIGATE] },
   { caption: "MISSION", stageIds: [STAGE_AUTHORING, STAGE_RUN] },
@@ -2562,6 +2560,145 @@ function MapEditToolButton({ label, active = false, disabled = false, onClick, c
   );
 }
 
+function MissionCanvasAppBar({
+  onBack,
+  backLabel = "Back to Home",
+  backTitle = "Back to Cyclo Intelligence Home",
+  blockReason = "",
+}) {
+  return (
+    <header
+      className="shrink-0 h-14 flex items-center gap-3 px-4 border-b"
+      style={{ borderColor: MISSION_BORDER, backgroundColor: MISSION_SURFACE }}
+    >
+      <button
+        type="button"
+        onClick={onBack}
+        aria-label={backLabel}
+        aria-describedby={blockReason ? "mission-canvas-back-status" : undefined}
+        title={blockReason || backTitle}
+        className="h-10 w-10 shrink-0 inline-flex items-center justify-center rounded-[10px] transition-colors hover:bg-[var(--mc-surface-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--mc-accent)]"
+        style={{ color: MISSION_TEXT_MUTED }}
+      >
+        <MdArrowBack size={19} aria-hidden="true" />
+      </button>
+      <div className="flex min-w-0 items-center gap-2.5">
+        <div
+          aria-hidden="true"
+          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[9px]"
+          style={{ backgroundColor: MISSION_TEXT }}
+        >
+          <svg data-testid="mission-canvas-brand-icon" aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--mc-bg)" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+            <rect x="4" y="8" width="16" height="12" rx="3" />
+            <path d="M12 8V4" />
+            <circle cx="12" cy="3" r="1.4" fill="var(--mc-accent)" stroke="none" />
+            <path d="M9 13h.01M15 13h.01" />
+          </svg>
+        </div>
+        <h1
+          className="min-w-0 truncate text-[15px] font-bold tracking-tight"
+          aria-label="Mission Canvas"
+          style={{ color: MISSION_TEXT }}
+        >
+          Mission Canvas
+        </h1>
+      </div>
+      {blockReason && (
+        <div
+          id="mission-canvas-back-status"
+          role="status"
+          aria-live="polite"
+          title={blockReason}
+          className="ml-auto min-w-0 max-w-[50vw] truncate text-right text-[11px] font-medium"
+          style={{ color: "var(--mc-text-subtle)" }}
+        >
+          {blockReason}
+        </div>
+      )}
+    </header>
+  );
+}
+
+function WorkspaceChoiceCard({
+  ariaLabel,
+  description,
+  examples,
+  icon,
+  onClick,
+  title,
+}) {
+  return (
+    <button
+      type="button"
+      aria-label={ariaLabel}
+      onClick={onClick}
+      className="group flex min-h-[230px] w-full flex-col border bg-[var(--mc-surface)] p-6 text-left transition-colors hover:bg-[var(--mc-surface-2)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--mc-accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--mc-bg)]"
+      style={{
+        borderColor: MISSION_BORDER,
+        borderRadius: MISSION_CARD_RADIUS,
+        boxShadow: "var(--mc-shadow)",
+      }}
+    >
+      <div className="flex items-start">
+        <span
+          className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-[var(--mc-surface-hover)] transition-colors group-hover:bg-[var(--mc-accent-soft)]"
+          style={{ color: "var(--mc-accent)" }}
+        >
+          {icon}
+        </span>
+      </div>
+      <h3 className="mt-7 text-[20px] font-bold tracking-tight" style={{ color: MISSION_TEXT }}>
+        {title}
+      </h3>
+      <p className="mt-2 max-w-sm text-[13px] leading-6" style={{ color: MISSION_TEXT_MUTED }}>
+        {description}
+      </p>
+      <p className="mt-auto pt-5 text-[10px] font-mono font-semibold tracking-[0.08em]" style={{ color: "var(--mc-text-subtle)" }}>
+        {examples}
+      </p>
+    </button>
+  );
+}
+
+function MissionCanvasWorkspaceChooser({ onBackHome, onChooseMissionCanvas, onChooseTaskBuilder }) {
+  return (
+    <div
+      className="mission-canvas-page h-full min-h-[560px] flex flex-col overflow-hidden"
+      style={{ backgroundColor: MISSION_STAGE_FILL, color: MISSION_TEXT }}
+    >
+      <MissionCanvasAppBar onBack={onBackHome} />
+      <main className="flex flex-1 items-center justify-center overflow-auto px-8 py-10">
+        <section className="w-full max-w-[900px]">
+          <div className="text-[10px] font-mono font-bold tracking-[0.18em]" style={{ color: "var(--mc-accent)" }}>
+            MISSION CANVAS
+          </div>
+          <h2 className="mt-3 text-[28px] font-bold tracking-[-0.025em]" style={{ color: MISSION_TEXT }}>
+            Choose a workspace
+          </h2>
+          <div className="mt-8 grid grid-cols-1 gap-5 md:grid-cols-2">
+            <WorkspaceChoiceCard
+              ariaLabel="Open Task Builder"
+              title="Task Builder"
+              description="Build and run robot tasks without a map."
+              examples="VLA LONG-HORIZON TASK · SIMPLE RULE-BASED CONTROL"
+              icon={<MdAccountTree size={23} aria-hidden="true" />}
+              onClick={onChooseTaskBuilder}
+            />
+            <WorkspaceChoiceCard
+              ariaLabel="Open Mission Canvas"
+              title="Mission Canvas"
+              description="Plan navigation and run waypoint tasks on a map."
+              examples="NAVIGATION + VLA · HYBRID ROBOT CONTROL"
+              icon={<MdRoute size={23} aria-hidden="true" />}
+              onClick={onChooseMissionCanvas}
+            />
+          </div>
+        </section>
+      </main>
+    </div>
+  );
+}
+
 // Track the app's dark theme by observing the `dark` class on <html>. We avoid
 // useTheme() here because the page test renders without a ThemeProvider (which
 // makes useTheme throw); reading the DOM class works with or without a provider.
@@ -2582,7 +2719,45 @@ function useIsDarkTheme() {
   return isDark;
 }
 
-export default function MissionCanvasPage({ onBackHome = null }) {
+export default function MissionCanvasPage({
+  onBackHome = null,
+  showWorkspaceChooser = false,
+}) {
+  const [chooserOpen, setChooserOpen] = useState(showWorkspaceChooser);
+  const [chosenWorkspace, setChosenWorkspace] = useState("");
+
+  useEffect(() => {
+    if (showWorkspaceChooser) setChooserOpen(true);
+  }, [showWorkspaceChooser]);
+
+  const chooseWorkspace = (workspaceKind) => {
+    setChosenWorkspace(workspaceKind);
+    setChooserOpen(false);
+  };
+
+  if (chooserOpen) {
+    return (
+      <MissionCanvasWorkspaceChooser
+        onBackHome={onBackHome}
+        onChooseTaskBuilder={() => chooseWorkspace(WORKSPACE_STANDALONE_BT)}
+        onChooseMissionCanvas={() => chooseWorkspace(WORKSPACE_MISSION)}
+      />
+    );
+  }
+
+  return (
+    <MissionCanvasWorkspace
+      key={chosenWorkspace || "restored-workspace"}
+      onBackToWorkspaceChooser={() => setChooserOpen(true)}
+      initialWorkspaceKindOverride={chosenWorkspace || null}
+    />
+  );
+}
+
+function MissionCanvasWorkspace({
+  onBackToWorkspaceChooser = null,
+  initialWorkspaceKindOverride = null,
+}) {
   const isDark = useIsDarkTheme();
   const initialSessionRef = useRef(null);
   if (initialSessionRef.current === null) {
@@ -2699,7 +2874,12 @@ export default function MissionCanvasPage({ onBackHome = null }) {
     initialRunShutdownPending(initialSession)
   ));
   const [tfBufferRevision, setTfBufferRevision] = useState(0);
-  const [workspaceKind, setWorkspaceKind] = useState(() => initialWorkspaceKind(initialSession));
+  const [workspaceKind] = useState(() => (
+    initialWorkspaceKindOverride === WORKSPACE_MISSION
+      || initialWorkspaceKindOverride === WORKSPACE_STANDALONE_BT
+      ? initialWorkspaceKindOverride
+      : initialWorkspaceKind(initialSession)
+  ));
   const missionWorkspaceActive = workspaceKind === WORKSPACE_MISSION;
   const [workspaceStage, setWorkspaceStage] = useState(() => initialWorkspaceStage(initialSession));
   // Run-family handlers (map load / localize) historically forced the Run
@@ -6409,24 +6589,6 @@ export default function MissionCanvasPage({ onBackHome = null }) {
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [mapEditor.busy, mapEditor.redo, mapEditor.undo, missionWorkspaceActive, showEditMapDialog, workspaceStage]);
 
-  const workspaceSwitchLocked = (
-    !!busy
-    || !!btNodeBusy
-    || mapEditor.dirty
-    || designMapEditor.dirty
-    || mappingRuntimeActive
-    || runRuntimeActive
-    || designLocalizationActive
-    || navigationRuntimeMode !== "idle"
-    || missionRunnerActive
-    || runShutdownPending
-    || standaloneBtExitState.active
-    || standaloneBtExitState.busy
-  );
-  const workspaceSwitchLockTitle = mapEditor.dirty || designMapEditor.dirty
-    ? "Save the current map edits before switching workspaces"
-    : "Stop the active operation before switching workspaces";
-
   const handleStandaloneBtExitStateChange = useCallback((nextState) => {
     const normalized = {
       active: nextState?.active === true,
@@ -6439,7 +6601,7 @@ export default function MissionCanvasPage({ onBackHome = null }) {
     ));
   }, []);
 
-  const homeExitBlockReason = (
+  const workspaceExitBlockReason = (
     busy
     || btNodeBusy
     || designMapBusy
@@ -6447,9 +6609,9 @@ export default function MissionCanvasPage({ onBackHome = null }) {
     || mapEditor.busy
     || standaloneBtExitState.busy
   )
-    ? "Wait for the current operation to finish before returning Home"
+    ? "Wait for the current operation to finish before going back"
     : (mapEditor.dirty || designMapEditor.dirty)
-      ? "Save the current map edits before returning Home"
+      ? "Save the current map edits before going back"
       : (
         mappingRuntimeActive
         || runRuntimeActive
@@ -6459,43 +6621,20 @@ export default function MissionCanvasPage({ onBackHome = null }) {
         || runShutdownPending
         || standaloneBtExitState.active
       )
-        ? "Stop the active runtime before returning Home"
+        ? "Stop the active runtime before going back"
         : "";
 
-  const handleBackHome = () => {
-    if (typeof onBackHome !== "function") return;
-    if (homeExitBlockReason) {
-      setMessage(homeExitBlockReason);
+  const handleBackToWorkspaceChooser = () => {
+    if (typeof onBackToWorkspaceChooser !== "function") return;
+    if (workspaceExitBlockReason) {
+      setMessage(workspaceExitBlockReason);
       return;
     }
-    runGuardedDesignAction(onBackHome);
+    runGuardedDesignAction(onBackToWorkspaceChooser);
   };
 
-  const selectWorkspaceKind = (nextKind) => {
-    if (
-      nextKind === workspaceKind
-      || workspaceSwitchLocked
-    ) return;
-    setShowSaveMapDialog(false);
-    setShowSaveMissionDialog(false);
-    setShowRenameMissionDialog(false);
-    setShowDuplicateMissionDialog(false);
-    setShowDeleteMissionDialog(false);
-    setShowDesignMapDialog(false);
-    setShowRunMapDialog(false);
-    setShowEditMapDialog(false);
-    setShowWaypointOptions(false);
-    setBtLayerSpotId("");
-    setWorkspaceKind(nextKind);
-  };
-
-  // Rail stage tabs: selecting a stage from the BT Manager workspace first
-  // returns to the Mission workspace (subject to the same switch lock).
   const handleSelectStageTab = (stageId) => {
-    if (workspaceKind !== WORKSPACE_MISSION) {
-      if (workspaceSwitchLocked) return;
-      selectWorkspaceKind(WORKSPACE_MISSION);
-    }
+    if (!missionWorkspaceActive) return;
     if (stageId !== workspaceStage) {
       // Run and Navigate share the nav runtime AND the loaded map snapshot:
       // moving between them must not invalidate the session, or the sibling
@@ -6657,147 +6796,69 @@ export default function MissionCanvasPage({ onBackHome = null }) {
         onCancel={() => setShowEditMapDialog(false)}
         onSubmit={handleConfirmEditMap}
       />
-      {/* ── APP BAR — leave the full-screen workspace + page identity ── */}
-      <header
-        className="shrink-0 h-14 flex items-center gap-3 px-4 border-b"
-        style={{ borderColor: MISSION_BORDER, backgroundColor: MISSION_SURFACE }}
-      >
-        <button
-          type="button"
-          onClick={handleBackHome}
-          aria-label="Back to Home"
-          aria-describedby={homeExitBlockReason ? "mission-home-exit-status" : undefined}
-          title={homeExitBlockReason || "Back to Cyclo Intelligence Home"}
-          className="h-10 w-10 shrink-0 inline-flex items-center justify-center rounded-[10px] transition-colors hover:bg-[var(--mc-surface-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--mc-accent)]"
-          style={{ color: MISSION_TEXT_MUTED }}
-        >
-          <MdArrowBack size={19} aria-hidden="true" />
-        </button>
-        <div className="flex min-w-0 items-center gap-2.5">
-          <div
-            aria-hidden="true"
-            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[9px]"
-            style={{ backgroundColor: MISSION_TEXT }}
-          >
-            <svg data-testid="mission-canvas-brand-icon" aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--mc-bg)" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
-              <rect x="4" y="8" width="16" height="12" rx="3" />
-              <path d="M12 8V4" />
-              <circle cx="12" cy="3" r="1.4" fill="var(--mc-accent)" stroke="none" />
-              <path d="M9 13h.01M15 13h.01" />
-            </svg>
-          </div>
-          <h1
-            className="min-w-0 truncate text-[15px] font-bold tracking-tight"
-            aria-label="Mission Canvas"
-            style={{ color: MISSION_TEXT }}
-          >
-            Mission Canvas
-          </h1>
-        </div>
-        {homeExitBlockReason && (
-          <div
-            id="mission-home-exit-status"
-            role="status"
-            aria-live="polite"
-            title={homeExitBlockReason}
-            className="ml-auto min-w-0 max-w-[50vw] truncate text-right text-[11px] font-medium"
-            style={{ color: "var(--mc-text-subtle)" }}
-          >
-            {homeExitBlockReason}
-          </div>
-        )}
-      </header>
+      {/* ── APP BAR — leave the full-screen workspace + product identity ── */}
+      <MissionCanvasAppBar
+        onBack={handleBackToWorkspaceChooser}
+        backLabel="Back to workspace chooser"
+        backTitle="Back to workspace selection"
+        blockReason={workspaceExitBlockReason}
+      />
 
       <div className="flex flex-1 min-h-0 overflow-hidden">
-      {/* ── LEFT RAIL — workspace + stage navigation ── */}
-      <aside
-        className="shrink-0 flex flex-col p-4 border-r"
-        style={{ width: 210, backgroundColor: MISSION_RAIL_BG, borderColor: MISSION_BORDER }}
-      >
-        <nav className="grid gap-1" role="tablist" aria-label="Mission Canvas workspaces">
-          {/* The standalone BT library leads: skills exist without any map or
-              mission, so it sits above the navigation/mission workflow with a
-              divider marking where the map-bound pipeline begins. */}
-          <div className="grid gap-1 pb-4 mb-1" style={{ borderBottom: "1px solid var(--mc-border)" }}>
-            <div className="text-[11px] font-mono font-semibold tracking-[0.14em] px-1 pb-1.5" style={{ color: "var(--mc-text-muted)" }}>
-              BEHAVIOR TREES
-            </div>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={workspaceKind === WORKSPACE_STANDALONE_BT}
-              disabled={workspaceSwitchLocked && workspaceKind !== WORKSPACE_STANDALONE_BT}
-              title={
-                workspaceSwitchLocked && workspaceKind !== WORKSPACE_STANDALONE_BT
-                  ? workspaceSwitchLockTitle
-                  : undefined
-              }
-              onClick={() => selectWorkspaceKind(WORKSPACE_STANDALONE_BT)}
-              className="flex items-center gap-3 px-3 py-2.5 text-[13px] font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50"
-              style={{
-                borderRadius: 10,
-                color: workspaceKind === WORKSPACE_STANDALONE_BT ? MISSION_TEXT : MISSION_TEXT_MUTED,
-                backgroundColor: workspaceKind === WORKSPACE_STANDALONE_BT ? MISSION_STAGE_EMPTY : "transparent",
-                border: `1px solid ${workspaceKind === WORKSPACE_STANDALONE_BT ? MISSION_BORDER : "transparent"}`,
-                boxShadow: workspaceKind === WORKSPACE_STANDALONE_BT ? "var(--mc-shadow)" : "none",
-              }}
-            >
-              <MdAccountTree size={17} aria-hidden="true" className="shrink-0" />
-              BT Manager
-            </button>
-          </div>
-          {WORKSPACE_NAV_GROUPS.map((group, groupIndex) => (
-            <div key={group.caption} className={`grid gap-1 ${groupIndex === 0 ? "" : "mt-4"}`}>
-              <div className="text-[11px] font-mono font-semibold tracking-[0.14em] px-1 pb-1.5" style={{ color: "var(--mc-text-muted)" }}>
-                {group.caption}
+      {/* ── LEFT RAIL — map stages only; Task Builder stays full-width ── */}
+      {missionWorkspaceActive && (
+        <aside
+          className="shrink-0 flex flex-col p-4 border-r"
+          style={{ width: 210, backgroundColor: MISSION_RAIL_BG, borderColor: MISSION_BORDER }}
+        >
+          <nav className="grid gap-1" role="tablist" aria-label="Mission Canvas stages">
+            {WORKSPACE_NAV_GROUPS.map((group, groupIndex) => (
+              <div key={group.caption} className={`grid gap-1 ${groupIndex === 0 ? "" : "mt-4"}`}>
+                <div className="px-1 pb-1.5 text-[11px] font-mono font-semibold tracking-[0.14em]" style={{ color: MISSION_TEXT_MUTED }}>
+                  {group.caption}
+                </div>
+                {group.stageIds.map((stageId) => {
+                  const stage = WORKSPACE_STAGES.find((item) => item.id === stageId);
+                  const selected = workspaceStage === stage.id;
+                  // Editing a saved PGM while SLAM (or a run) may rewrite the
+                  // same file and clobber one side silently — keep the guard.
+                  const editLocked = stage.id === STAGE_MAP_EDIT && !selected && (mappingRuntimeActive || runRuntimeActive);
+                  return (
+                    <button
+                      key={stage.id}
+                      type="button"
+                      role="tab"
+                      aria-selected={selected}
+                      disabled={!!busy || editLocked}
+                      title={editLocked ? "Stop mapping before editing saved maps" : undefined}
+                      onClick={() => handleSelectStageTab(stage.id)}
+                      className="flex items-center gap-3 px-3 py-2.5 text-[13px] font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50"
+                      style={{
+                        borderRadius: 10,
+                        color: selected ? MISSION_TEXT : MISSION_TEXT_MUTED,
+                        backgroundColor: selected ? MISSION_STAGE_EMPTY : "transparent",
+                        border: `1px solid ${selected ? MISSION_BORDER : "transparent"}`,
+                        boxShadow: selected ? "var(--mc-shadow)" : "none",
+                      }}
+                    >
+                      <StageIcon id={stage.id} active={selected} />
+                      {stage.label}
+                    </button>
+                  );
+                })}
               </div>
-              {group.stageIds.map((stageId) => {
-                const stage = WORKSPACE_STAGES.find((item) => item.id === stageId);
-                const selected = missionWorkspaceActive && workspaceStage === stage.id;
-                // Editing a saved PGM while SLAM (or a run) may rewrite the
-                // same file would clobber one side silently — keep the guard.
-                const editLocked = stage.id === STAGE_MAP_EDIT && !selected && (mappingRuntimeActive || runRuntimeActive);
-                const kindLocked = !missionWorkspaceActive && workspaceSwitchLocked;
-                return (
-                  <button
-                    key={stage.id}
-                    type="button"
-                    role="tab"
-                    aria-selected={selected}
-                    disabled={!!busy || editLocked || kindLocked}
-                    title={
-                      kindLocked
-                        ? workspaceSwitchLockTitle
-                        : editLocked
-                          ? "Stop mapping before editing saved maps"
-                          : undefined
-                    }
-                    onClick={() => handleSelectStageTab(stage.id)}
-                    className="flex items-center gap-3 px-3 py-2.5 text-[13px] font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50"
-                    style={{
-                      borderRadius: 10,
-                      color: selected ? MISSION_TEXT : MISSION_TEXT_MUTED,
-                      backgroundColor: selected ? MISSION_STAGE_EMPTY : "transparent",
-                      border: `1px solid ${selected ? MISSION_BORDER : "transparent"}`,
-                      boxShadow: selected ? "var(--mc-shadow)" : "none",
-                    }}
-                  >
-                    <StageIcon id={stage.id} active={selected} />
-                    {stage.label}
-                  </button>
-                );
-              })}
-            </div>
-          ))}
-        </nav>
-      </aside>
+            ))}
+          </nav>
+        </aside>
+      )}
 
       {/* WORKSPACE */}
       {workspaceKind === WORKSPACE_STANDALONE_BT ? (
-        <main className="flex-1 min-w-0 min-h-0" aria-label="BT Manager workspace">
+        <main className="flex-1 min-w-0 min-h-0" aria-label="Task Builder workspace">
           <StandaloneBtWorkspace
             isActive
-            title="BT Manager"
+            title="Task Builder"
+            subtitle="Behavior Tree workspace · No map required"
             variant="mission-canvas"
             onExitStateChange={handleStandaloneBtExitStateChange}
           />

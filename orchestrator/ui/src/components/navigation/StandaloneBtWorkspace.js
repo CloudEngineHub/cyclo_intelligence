@@ -27,7 +27,8 @@ import {
 
 export default function StandaloneBtWorkspace({
   isActive = true,
-  title = 'Behavior Trees',
+  title = 'Task Builder',
+  subtitle = '',
   className = 'w-full h-full',
   variant = 'legacy',
   onExitStateChange,
@@ -52,12 +53,22 @@ export default function StandaloneBtWorkspace({
             ? 'border-[var(--mc-border)] bg-[var(--mc-surface)]'
             : 'border-black bg-white',
         )}>
-          <h1 className={clsx(
-            'font-bold',
-            missionCanvasVariant ? 'text-[15px] text-[var(--mc-text)]' : 'text-xl text-gray-800',
-          )}>
-            {title}
-          </h1>
+          <div className="min-w-0">
+            <h1 className={clsx(
+              'font-bold',
+              missionCanvasVariant ? 'text-[15px] text-[var(--mc-text)]' : 'text-xl text-gray-800',
+            )}>
+              {title}
+            </h1>
+            {subtitle && (
+              <p className={clsx(
+                'mt-0.5 truncate text-[10px] font-mono',
+                missionCanvasVariant ? 'text-[var(--mc-text-muted)]' : 'text-gray-500',
+              )}>
+                {subtitle}
+              </p>
+            )}
+          </div>
         </div>
 
         <div className={clsx(
@@ -99,6 +110,7 @@ export default function StandaloneBtWorkspace({
     <BTEditorSurface
       isActive={isActive}
       title={title}
+      subtitle={subtitle}
       className={className}
       variant={variant}
       onExitStateChange={onExitStateChange}

@@ -103,6 +103,8 @@ test('renders the Cyclo Intelligence shell navigation for regular pages', () => 
     .toBeInTheDocument();
   expect(screen.getByRole('button', { name: /Inference/i }))
     .toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Mission Canvas' }))
+    .toBeInTheDocument();
   expect(screen.queryByRole('button', { name: 'BT Manager' }))
     .not.toBeInTheDocument();
   expect(screen.queryByRole('button', { name: 'Nav' }))
@@ -145,7 +147,7 @@ test('orders the Cyclo Intelligence navigation into workflow sections', () => {
     .not.toBeInTheDocument();
 });
 
-test('uses Mission Canvas as the canonical navigation entry point', async () => {
+test('opens the Mission Canvas workspace chooser from the canonical navigation entry point', async () => {
   window.sessionStorage.clear();
   act(() => {
     store.dispatch(moveToPage(PageType.HOME));
@@ -168,7 +170,10 @@ test('uses Mission Canvas as the canonical navigation entry point', async () => 
   expect(screen.queryByLabelText('Cyclo Intelligence navigation'))
     .not.toBeInTheDocument();
   expect(mockMissionCanvasPage).toHaveBeenLastCalledWith(
-    expect.objectContaining({ onBackHome: expect.any(Function) })
+    expect.objectContaining({
+      onBackHome: expect.any(Function),
+      showWorkspaceChooser: true,
+    })
   );
   await waitFor(() => {
     expect(window.sessionStorage.getItem(CURRENT_PAGE_STORAGE_KEY))

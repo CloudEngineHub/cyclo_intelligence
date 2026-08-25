@@ -163,7 +163,8 @@ function getSimulationInferenceNodeNames(nodeDataMap) {
 
 export default function BTEditorSurface({
   isActive = true,
-  title = 'Behavior Trees',
+  title = 'Task Builder',
+  subtitle = '',
   className = 'w-full h-full',
   variant = 'legacy',
   onExitStateChange,
@@ -1077,6 +1078,16 @@ export default function BTEditorSurface({
           )}>
             {title}
           </h1>
+          {subtitle && (
+            <p className={clsx(
+              'mt-0.5 truncate text-[10px] font-mono',
+              missionCanvasVariant
+                ? 'text-[var(--mc-text-muted)]'
+                : 'text-gray-500',
+            )}>
+              {subtitle}
+            </p>
+          )}
         </div>
         <div className="flex items-center gap-3">
           <span className={clsx(
