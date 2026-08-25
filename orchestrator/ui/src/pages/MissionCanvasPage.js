@@ -69,6 +69,7 @@ import {
   saveNavigationMissionBtFile,
   setNavigationMissionDefaultBtFile,
 } from "../utils/navigationMissionsApi";
+import { formatTaskDisplayMessage } from "../utils/taskTerminology";
 import { useNavigationRosPublisher, useNavigationRosTopic } from "../hooks/useNavigationRosTopic";
 import { useMappingPoseSync } from "../hooks/useMappingPoseSync";
 import {
@@ -369,6 +370,10 @@ async function readJsonResponse(response) {
   }
 }
 
+function taskDisplayMessage(value) {
+  return formatTaskDisplayMessage(value, "Waypoint Task");
+}
+
 async function requestSupervisorApi(path, init) {
   if (typeof fetch !== "function") {
     throw new Error("Supervisor API is not available");
@@ -574,7 +579,7 @@ function localBtDirectoriesForSpots(spots) {
     if (!stored) return;
     const key = stored.toLowerCase();
     if (used.has(key)) {
-      throw new Error(`Multiple waypoints reference the same local BT directory: ${stored}`);
+      throw new Error(`Multiple waypoints reference the same Waypoint Task directory: ${stored}`);
     }
     used.add(key);
     directories.set(spot.id, stored);
@@ -1097,7 +1102,7 @@ export function assembleMissionBtFilesForSave(spots, missionBtFiles, deletedPath
   mappings.forEach(({ spot, targetPath }) => {
     const ownershipKey = targetPath.toLowerCase();
     if (activePaths.has(ownershipKey)) {
-      throw new Error(`Multiple waypoints reference the same local BT path: ${targetPath}`);
+      throw new Error(`Multiple waypoints reference the same Waypoint Task path: ${targetPath}`);
     }
     activePaths.set(ownershipKey, spot.id);
   });
@@ -1934,15 +1939,15 @@ const RUNNER_PHASE_LABEL = {
   "nav-sent": "Navigating",
   "awaiting-nav-result": "Navigating",
   arrived: "Arrived",
-  "bt-loading": "Starting behavior",
-  "bt-running": "Running behavior",
+  "bt-loading": "Starting task",
+  "bt-running": "Running task",
   "bt-done": "Waypoint done",
 };
 
 const WAYPOINT_STATE_META = {
   pending: { mark: "○", color: "var(--mc-text-subtle)", note: "" },
   navigating: { mark: "◐", color: "var(--mc-success)", note: "Navigating" },
-  "running-bt": { mark: "◑", color: "var(--mc-accent)", note: "Behavior" },
+  "running-bt": { mark: "◑", color: "var(--mc-accent)", note: "Task" },
   done: { mark: "●", color: "var(--mc-success)", note: "" },
   skipped: { mark: "●", color: "var(--mc-text-subtle)", note: "Nav only" },
   failed: { mark: "✕", color: "var(--mc-danger)", note: "Failed" },
@@ -3422,7 +3427,7 @@ function MissionCanvasWorkspace({
     if (!persistedLocalBtPathsRef.current.has(path)) {
       const content = missionBtFilesRef.current[path];
       if (typeof content !== "string") {
-        throw new Error("No local BT XML is available at this path");
+        throw new Error("No Waypoint Task is available at this path");
       }
       return {
         path,
@@ -3437,7 +3442,7 @@ function MissionCanvasWorkspace({
     const contentAtLoadStart = missionBtFilesRef.current[path];
     const operation = localBtFileOperationRef.current + 1;
     localBtFileOperationRef.current = operation;
-    const busyLabel = "Load local BT";
+    const busyLabel = "Load Waypoint Task";
     setBusy(busyLabel);
     try {
       const response = await getNavigationMissionBtFile(
@@ -3450,7 +3455,7 @@ function MissionCanvasWorkspace({
         || designMapNameRef.current !== targetMapName
         || designMissionNameRef.current !== targetMissionName
       ) {
-        throw new Error("Mission changed while the local BT was loading");
+        throw new Error("Mission changed while the Waypoint Task was loading");
       }
       if (
         Number.isInteger(response?.revision)
@@ -3465,7 +3470,7 @@ function MissionCanvasWorkspace({
       parseBTXml(response.content);
       const current = missionBtFilesRef.current;
       if (current[path] !== contentAtLoadStart) {
-        throw new Error("Local BT changed while its saved XML was loading");
+        throw new Error("Waypoint Task changed while its saved file was loading");
       }
       if (current[path] !== response.content) {
         captureDesignHistory();
@@ -3513,7 +3518,7 @@ function MissionCanvasWorkspace({
     }
     if (busy) throw new Error(`${busy} is already in progress`);
     if (designMissionLoadError) {
-      throw new Error("Reload the mission before saving its local BT");
+      throw new Error("Reload the mission before saving its Waypoint Task");
     }
     const current = missionBtFilesRef.current;
     if (current[path] !== content) {
@@ -3541,7 +3546,7 @@ function MissionCanvasWorkspace({
         ? path
         : canonicalPath;
       if (!persistedLocalBtPathsRef.current.has(savedPath)) {
-        throw new Error("Failed to register this waypoint BT. Reload the mission and retry.");
+        throw new Error("Failed to register this Waypoint Task. Reload the mission and retry.");
       }
       return {
         path: savedPath,
@@ -3555,7 +3560,7 @@ function MissionCanvasWorkspace({
     const generation = designMissionLoadGenerationRef.current;
     const operation = localBtFileOperationRef.current + 1;
     localBtFileOperationRef.current = operation;
-    const busyLabel = "Save local BT";
+    const busyLabel = "Save Waypoint Task";
     setBusy(busyLabel);
     try {
       const response = await saveNavigationMissionBtFile(
@@ -3618,7 +3623,7 @@ function MissionCanvasWorkspace({
   const saveMissionLocalBtXmlAs = useCallback(async (_sourcePath, fileName, content) => {
     if (busy) throw new Error(`${busy} is already in progress`);
     if (designMissionLoadError) {
-      throw new Error("Reload the mission before saving its local BT");
+      throw new Error("Reload the mission before saving its Waypoint Task");
     }
     if (!selectedBtLayerSpot) throw new Error("Select a waypoint first");
     if (
@@ -3635,7 +3640,7 @@ function MissionCanvasWorkspace({
         selectedBtLayerDirectory,
       );
       if (!persistedLocalBtPathsRef.current.has(canonicalPath)) {
-        throw new Error("Failed to register this waypoint BT. Reload the mission and retry.");
+        throw new Error("Failed to register this Waypoint Task. Reload the mission and retry.");
       }
     }
 
@@ -3650,7 +3655,7 @@ function MissionCanvasWorkspace({
       ...persistedLocalBtPathsRef.current,
     ].map((path) => String(path).toLowerCase()));
     if (occupiedPaths.has(targetPath.toLowerCase())) {
-      throw new Error(`A local BT named ${targetPath.split("/").pop()} already exists`);
+      throw new Error(`A Waypoint Task named ${targetPath.split("/").pop()} already exists`);
     }
 
     const targetMapName = String(mapName || "").trim() || DEFAULT_MAP_NAME;
@@ -3659,7 +3664,7 @@ function MissionCanvasWorkspace({
     const generation = designMissionLoadGenerationRef.current;
     const operation = localBtFileOperationRef.current + 1;
     localBtFileOperationRef.current = operation;
-    const busyLabel = "Save local BT as";
+    const busyLabel = "Save Waypoint Task as";
     setBusy(busyLabel);
     try {
       const response = await saveNavigationMissionBtFile(
@@ -3677,7 +3682,7 @@ function MissionCanvasWorkspace({
         || designMapNameRef.current !== targetMapName
         || designMissionNameRef.current !== targetMissionName
       ) {
-        throw new Error("Mission changed while the local BT was being saved");
+        throw new Error("Mission changed while the Waypoint Task was being saved");
       }
 
       captureDesignHistory();
@@ -3744,10 +3749,10 @@ function MissionCanvasWorkspace({
     if (path === selectedBtLayerDefaultPath) return;
     if (busy) throw new Error(`${busy} is already in progress`);
     if (designMissionLoadError) {
-      throw new Error("Reload the mission before changing its default BT");
+      throw new Error("Reload the mission before changing its default Waypoint Task");
     }
     if (!designMissionIsStored || !persistedLocalBtPathsRef.current.has(path)) {
-      throw new Error("Save Mission before changing its default BT");
+      throw new Error("Save Mission before changing its default Waypoint Task");
     }
 
     const targetMapName = String(mapName || "").trim() || DEFAULT_MAP_NAME;
@@ -3756,7 +3761,7 @@ function MissionCanvasWorkspace({
     const generation = designMissionLoadGenerationRef.current;
     const operation = localBtFileOperationRef.current + 1;
     localBtFileOperationRef.current = operation;
-    const busyLabel = "Set default local BT";
+    const busyLabel = "Set default Waypoint Task";
     setBusy(busyLabel);
     try {
       const response = await setNavigationMissionDefaultBtFile(
@@ -3771,7 +3776,7 @@ function MissionCanvasWorkspace({
         || designMapNameRef.current !== targetMapName
         || designMissionNameRef.current !== targetMissionName
       ) {
-        throw new Error("Mission changed while its default BT was being updated");
+        throw new Error("Mission changed while its default Waypoint Task was being updated");
       }
       setSpots((current) => current.map((spot) => (
         spot.id === targetSpotId
@@ -3791,7 +3796,7 @@ function MissionCanvasWorkspace({
       );
       designDirtyRef.current = nextDirty;
       setDesignDirty(nextDirty);
-      setMessage(`${path.split("/").pop()} set as the default BT`);
+      setMessage(`${path.split("/").pop()} set as the default Waypoint Task`);
       return response;
     } finally {
       if (localBtFileOperationRef.current === operation) {
@@ -3906,7 +3911,7 @@ function MissionCanvasWorkspace({
       { data: false },
     );
     if (result?.success === false) {
-      throw new Error(result.message || "BT stop rejected");
+      throw new Error(taskDisplayMessage(result.message) || "Task Engine stop rejected");
     }
     return result;
   }, [callService]);
@@ -3954,18 +3959,18 @@ function MissionCanvasWorkspace({
       if (initialState === "up") {
         const executionStatus = String(btStatusRef.current || "").trim().toLowerCase();
         if (executionStatus === "running" || executionStatus === "stopping") {
-          setMessage("BT runtime is already running another tree. Stop it before running this mission.");
+          setMessage("Task Engine is already running another task. Stop it before running this mission.");
           return false;
         }
         if (!["stopped", "completed", "failed"].includes(executionStatus)) {
           // Failing closed is intentional: /bt/load_and_run replaces the
           // current tree, so an unknown status must not be treated as idle.
-          setMessage("Unable to verify that the BT runtime is idle. Wait for BT status and try again.");
+          setMessage("Unable to verify that the Task Engine is idle. Wait for its status and try again.");
           return false;
         }
       }
       if (initialState !== "up" && initialState !== "down") {
-        setMessage("Unable to verify the BT node state. Try again after its status is available.");
+        setMessage("Unable to verify the Task Engine state. Try again after its status is available.");
         return false;
       }
       if (initialState === "down") {
@@ -4038,7 +4043,7 @@ function MissionCanvasWorkspace({
 
   const waypointBtEditor = selectedBtLayerSpot ? (
     <MissionBtEditor
-      title={`${selectedBtLayerSpot.label || selectedBtLayerSpot.id} Local BT`}
+      title={`${selectedBtLayerSpot.label || selectedBtLayerSpot.id} Waypoint Task`}
       filePath={selectedBtLayerPath}
       fileOptions={selectedBtLayerPaths}
       defaultFilePath={selectedBtLayerDefaultPath}
@@ -4246,7 +4251,9 @@ function MissionCanvasWorkspace({
       };
       setBtNodeStatus(nextStatus);
       if (!quiet) {
-        setMessage(error instanceof Error ? error.message : "BT node status failed");
+        setMessage(error instanceof Error
+          ? `Task Engine status check failed: ${taskDisplayMessage(error.message)}`
+          : "Task Engine status check failed");
       }
       return nextStatus;
     }
@@ -4412,7 +4419,7 @@ function MissionCanvasWorkspace({
       .catch((error) => {
         if (cancelled) return;
         setMessage(error instanceof Error
-          ? `Failed to load ${selectedBtLayerPath}: ${error.message}`
+          ? `Failed to load ${selectedBtLayerPath}: ${taskDisplayMessage(error.message)}`
           : `Failed to load ${selectedBtLayerPath}`);
       })
       .finally(() => {
@@ -4534,12 +4541,12 @@ function MissionCanvasWorkspace({
     try {
       const result = await action();
       if (typeof result === "string") {
-        setMessage(result);
+        setMessage(taskDisplayMessage(result));
       } else {
-        setMessage(result?.message || `${label} complete`);
+        setMessage(taskDisplayMessage(result?.message) || `${label} complete`);
       }
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : `${label} failed`);
+      setMessage(error instanceof Error ? taskDisplayMessage(error.message) : `${label} failed`);
     } finally {
       setBusy("");
       void loadStatus();
@@ -4917,7 +4924,7 @@ function MissionCanvasWorkspace({
     "Save mission",
     async () => {
       if (designMissionLoadError) {
-        throw new Error("Mission BT files did not finish loading. Reload the mission before saving.");
+        throw new Error("Waypoint Task files did not finish loading. Reload the mission before saving.");
       }
       let savedManifestRevision = persistedMissionRevisionRef.current;
       const targetIsKnown = designCatalog.mapName === currentMapName
@@ -5837,7 +5844,7 @@ function MissionCanvasWorkspace({
     setMissionRouteSourceId("");
     setInteractionMode("view");
     setBtLayerSpotId(spotId);
-    setMessage(`Editing ${spot.label || spot.id} local BT`);
+    setMessage(`Editing ${spot.label || spot.id} Waypoint Task`);
   }, [cancelPendingDesignLocalization, visibleSpots]);
 
   const handleSetMissionRouteOrder = useCallback((orderedIds) => {
@@ -6716,7 +6723,7 @@ function MissionCanvasWorkspace({
       <ConfirmDialog
         open={showDeleteMissionDialog}
         title="Delete Mission"
-        body={`Delete mission "${missionName}"? This permanently removes its waypoints, route, and behavior trees.`}
+        body={`Delete mission "${missionName}"? This permanently removes its waypoints, route, and Waypoint Tasks.`}
         confirmLabel="Delete"
         busy={!!busy}
         onConfirm={handleConfirmDeleteMission}
@@ -6858,7 +6865,6 @@ function MissionCanvasWorkspace({
           <StandaloneBtWorkspace
             isActive
             title="Task Builder"
-            subtitle="Behavior Tree workspace · No map required"
             variant="mission-canvas"
             onExitStateChange={handleStandaloneBtExitStateChange}
           />
@@ -6876,7 +6882,7 @@ function MissionCanvasWorkspace({
                 <span className="font-bold tracking-tight">Design</span>
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--mc-text-subtle)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m9 18 6-6-6-6" /></svg>
                 <span className="font-semibold truncate" style={{ color: MISSION_TEXT_MUTED }}>{waypointBtLayer.spot.label || waypointBtLayer.spot.id}</span>
-                <span className="text-[11px] font-mono shrink-0" style={{ color: "var(--mc-text-subtle)" }}>· Local BT</span>
+                <span className="text-[11px] font-mono shrink-0" style={{ color: "var(--mc-text-subtle)" }}>· Waypoint Task</span>
               </div>
               <ActionButton
                 onClick={() => setBtLayerSpotId("")}
@@ -6897,7 +6903,7 @@ function MissionCanvasWorkspace({
               <div className="flex items-center gap-2.5">
                 <div className="flex items-center gap-2 px-3 py-1.5" style={{ borderRadius: 999, backgroundColor: "color-mix(in srgb, var(--mc-success) 14%, transparent)", border: "1px solid color-mix(in srgb, var(--mc-success) 35%, transparent)" }}>
                   <span className="w-2 h-2 rounded-full" style={{ backgroundColor: "var(--mc-success)" }} />
-                  <span className="text-[12px] font-semibold" style={{ color: "var(--mc-success)" }}>Behavior running</span>
+                  <span className="text-[12px] font-semibold" style={{ color: "var(--mc-success)" }}>Task running</span>
                 </div>
               </div>
             </>
@@ -7598,13 +7604,13 @@ function MissionCanvasWorkspace({
                         )}
                         <button
                           type="button"
-                          aria-label={`Edit BT for ${spot.label || spot.id}`}
-                          title={`Edit ${spot.label || spot.id} local BT`}
+                          aria-label={`Edit Task for ${spot.label || spot.id}`}
+                          title={`Edit ${spot.label || spot.id} Waypoint Task`}
                           onClick={() => handleOpenWaypointBt(spot.id)}
                           className="h-8 shrink-0 px-2.5 text-[11.5px] font-semibold active:translate-y-px"
                           style={{ borderRadius: 8, border: "1px solid var(--mc-border-strong)", backgroundColor: "var(--mc-surface)", color: "var(--mc-text-muted)" }}
                         >
-                          Edit BT
+                          Edit Task
                         </button>
                         <button type="button" aria-label={`Delete Waypoint ${spot.label || spot.id}`} title={`Delete ${spot.label || spot.id}`} disabled={!!busy} onClick={() => { void handleDeleteSpot(spot); }}
                           className="h-8 w-8 shrink-0 inline-flex items-center justify-center active:translate-y-px disabled:opacity-45"

@@ -126,8 +126,24 @@ test('keeps the left waypoint context passive when no close action is provided',
   expect(screen.queryByRole('button', {
     name: 'Back to Map from waypoint context',
   })).not.toBeInTheDocument();
-  expect(screen.getByRole('region', { name: 'Waypoint BT focus canvas' }))
+  expect(screen.getByRole('region', { name: 'Waypoint Task focus canvas' }))
     .toHaveTextContent('Waypoint BT editor');
+});
+
+test('uses task terminology for an empty waypoint focus canvas', () => {
+  render(
+    <MapViewer
+      btLayer={{
+        spot: { ...waypointBtLayer.spot, linked_bt_tree: '' },
+        editor: null,
+      }}
+      showMap={false}
+    />,
+  );
+
+  const focusCanvas = screen.getByRole('region', { name: 'Waypoint Task focus canvas' });
+  expect(focusCanvas).toHaveTextContent('New Task');
+  expect(focusCanvas).not.toHaveTextContent('New BT');
 });
 
 test('reprojects an offset laser frame when its synchronized scan pose improves', async () => {

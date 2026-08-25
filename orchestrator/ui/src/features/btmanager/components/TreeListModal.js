@@ -20,6 +20,7 @@ import toast from 'react-hot-toast';
 import { MdClose, MdDescription, MdRefresh } from 'react-icons/md';
 
 import { useRosServiceCaller } from '../../../hooks/useRosServiceCaller';
+import { formatTaskDisplayMessage } from '../../../utils/taskTerminology';
 
 export default function TreeListModal({
   isOpen,
@@ -39,10 +40,10 @@ export default function TreeListModal({
     try {
       const result = await getTreeList();
       if (!result || !result.success) {
-        const msg = (result && result.message) || 'Unknown error';
+        const msg = formatTaskDisplayMessage(result && result.message) || 'Unknown error';
         setItems([]);
         setErrorMsg(msg);
-        toast.error(`Failed to list trees: ${msg}`);
+        toast.error(`Failed to load tasks: ${msg}`);
         return;
       }
       const names = result.tree_names || [];
@@ -54,9 +55,9 @@ export default function TreeListModal({
       setItems(next);
     } catch (err) {
       setItems([]);
-      const msg = err.message || String(err);
+      const msg = formatTaskDisplayMessage(err.message || err);
       setErrorMsg(msg);
-      toast.error(`Failed to list trees: ${msg}`);
+      toast.error(`Failed to load tasks: ${msg}`);
     } finally {
       setLoading(false);
     }
@@ -89,7 +90,7 @@ export default function TreeListModal({
               'font-semibold',
               missionCanvasVariant ? 'text-[15px] text-[var(--mc-text)]' : 'text-xl text-gray-900',
             )}>
-              Select BT XML
+              Open Task
             </h2>
             <div className="flex items-center gap-1">
               <button
@@ -129,7 +130,7 @@ export default function TreeListModal({
                 'flex items-center justify-center h-full py-12 text-sm',
                 missionCanvasVariant ? 'text-[var(--mc-text-muted)]' : 'text-gray-500',
               )}>
-                Loading trees…
+                Loading tasks…
               </div>
             ) : errorMsg ? (
               <div className="flex flex-col items-center justify-center h-full py-12 text-center">
@@ -137,7 +138,7 @@ export default function TreeListModal({
                   'text-sm font-medium',
                   missionCanvasVariant ? 'text-[var(--mc-danger)]' : 'text-red-500',
                 )}>
-                  Failed to load trees
+                  Failed to load tasks
                 </p>
                 <p className={clsx(
                   'text-xs mt-1 break-all px-4',
@@ -151,7 +152,7 @@ export default function TreeListModal({
                 'flex items-center justify-center h-full py-12 text-sm',
                 missionCanvasVariant ? 'text-[var(--mc-text-muted)]' : 'text-gray-500',
               )}>
-                No tree XMLs found in bt/trees/
+                No saved tasks found
               </div>
             ) : (
               <ul className={clsx(

@@ -29,6 +29,7 @@ import "@xyflow/react/dist/style.css";
 import BTActionNode from "../bt/BTActionNode";
 import BTControlNode from "../bt/BTControlNode";
 import { parseBTXml } from "../../utils/btTreeParser";
+import { formatTaskDisplayMessage } from "../../utils/taskTerminology";
 
 const nodeTypes = {
   btControl: BTControlNode,
@@ -142,7 +143,9 @@ function MissionBtRunView({ xml, activeNodeNames = [], loading = false }) {
     } catch (error) {
       return {
         graph: { nodes: [], edges: [] },
-        parseError: error instanceof Error ? error.message : "Failed to parse BT XML",
+        parseError: error instanceof Error
+          ? formatTaskDisplayMessage(error.message, "Waypoint Task")
+          : "Could not read this waypoint task file",
       };
     }
   }, [xml]);
@@ -184,7 +187,7 @@ function MissionBtRunView({ xml, activeNodeNames = [], loading = false }) {
     <div className="h-full min-h-0 relative bg-[var(--mc-bg)] text-[var(--mc-text)]">
       {loading ? (
         <div className="h-full flex items-center justify-center text-sm text-[var(--mc-text-muted)]">
-          Loading behavior tree...
+          Loading waypoint task...
         </div>
       ) : parseError ? (
         <div className="h-full flex items-center justify-center text-center text-[var(--mc-danger)]">
@@ -197,7 +200,7 @@ function MissionBtRunView({ xml, activeNodeNames = [], loading = false }) {
         <div className="h-full flex items-center justify-center text-center text-[var(--mc-text-subtle)]">
           <div>
             <div className="text-sm font-semibold">Navigate only</div>
-            <div className="mt-1 text-xs">This waypoint has no behavior tree.</div>
+            <div className="mt-1 text-xs">This waypoint has no waypoint task.</div>
           </div>
         </div>
       ) : (

@@ -1540,7 +1540,7 @@ function WaypointBtFocusLayer({ layer, onClose }) {
     const spot = layer === null || layer === void 0 ? void 0 : layer.spot;
     if (!spot)
         return null;
-    return (<section className="absolute inset-0 z-20 pointer-events-none" role="region" aria-label="Waypoint BT focus canvas">
+    return (<section className="absolute inset-0 z-20 pointer-events-none" role="region" aria-label="Waypoint Task focus canvas">
       {onClose ? (<button type="button" className="absolute inset-y-0 left-0 w-[25%] pointer-events-auto cursor-pointer border-0 p-0 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px]" style={{
             background: "linear-gradient(90deg, rgba(28,26,23,0.08), rgba(28,26,23,0))",
             outlineColor: "var(--mc-accent)",
@@ -1571,7 +1571,7 @@ function WaypointBtFocusLayer({ layer, onClose }) {
               <line x1="56%" y1="60%" x2="76%" y2="72%" stroke="var(--mc-accent)" strokeWidth="2.5" strokeLinecap="round"/>
             </svg>
             <BtCanvasNode className="left-[8%] top-[43%]" tone={spot.linked_bt_tree ? "active" : "muted"}>
-              {spot.linked_bt_tree ? "Tree" : "New BT"}
+              {spot.linked_bt_tree ? "Task" : "New Task"}
             </BtCanvasNode>
             <BtCanvasNode className="left-[38%] top-[43%]">
               Sequence

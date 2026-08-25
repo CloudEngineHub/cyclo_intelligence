@@ -56,6 +56,7 @@ import { useRosServiceCaller } from '../../../hooks/useRosServiceCaller';
 import { useBTHistory } from '../../../hooks/useBTHistory';
 import { useBTNodeCatalog } from '../../../hooks/useBTNodeCatalog';
 import { BT_SUPPORTED_ROBOT_TYPE } from '../../../constants/btSupport';
+import { formatTaskDisplayMessage } from '../../../utils/taskTerminology';
 import { CYCLO_VIDEO_SERVER_PORT } from '../../../config/runtimeConfig';
 
 const nodeTypes = {
@@ -256,7 +257,7 @@ export default function BTEditorSurface({
       dispatch(setSelectedNodeId(null));
       dispatch(setTreeFileName(restoredFileName));
     } catch (err) {
-      setParseError(err.message);
+      setParseError(formatTaskDisplayMessage(err.message));
     }
   }, [setNodes, setEdges, dispatch]);
 
@@ -332,7 +333,7 @@ export default function BTEditorSurface({
       setParseError(null);
     } catch (err) {
       graphHydratedRef.current = false;
-      setParseError(err.message);
+      setParseError(formatTaskDisplayMessage(err.message));
       setNodes([]);
       setEdges([]);
       setNodeDataMap(new Map());
@@ -405,9 +406,9 @@ export default function BTEditorSurface({
       dispatch(setSelectedNodeId(null));
       dispatch(setTreeXml(xmlContent));
       dispatch(setTreeFileName(fileName));
-      toast.success(`Loaded: ${fileName}`);
+      toast.success(`Opened: ${fileName}`);
     } catch (err) {
-      toast.error(`Failed to load file: ${err.message}`);
+      toast.error(`Failed to load file: ${formatTaskDisplayMessage(err.message)}`);
     }
   }, [disarmClearTree, rosbridgeUrl, dispatch, setNodes, setEdges, resetHistory]);
 
@@ -547,7 +548,7 @@ export default function BTEditorSurface({
     dispatch(setTreeXml(''));
     dispatch(setTreeFileName(''));
     disarmClearTree();
-    toast.success('BT canvas cleared');
+    toast.success('Task cleared');
   }, [
     armClearTree,
     btExecutionPending,
@@ -728,31 +729,31 @@ export default function BTEditorSurface({
       });
       const data = await res.json();
       if (data.success) {
-        toast.success(data.message);
+        toast.success(formatTaskDisplayMessage(data.message));
         setShowSaveDialog(false);
         setSaveFileName('');
         setSaveConflict(null);
       } else {
         if (res.status === 409 || data.code === 'file_exists') {
           setSaveConflict(data);
-          toast.error(data.message || 'File already exists');
+          toast.error(formatTaskDisplayMessage(data.message) || 'File already exists');
           return;
         }
-        toast.error(data.message || 'Save failed');
+        toast.error(formatTaskDisplayMessage(data.message) || 'Save failed');
       }
     } catch (err) {
-      toast.error(`Save failed: ${err.message}`);
+      toast.error(`Save failed: ${formatTaskDisplayMessage(err.message)}`);
     }
   }, [saveFileName, getSerializedXml, getHttpBaseUrl]);
 
   // ── BT Start ──────────────────────────────────────────────────────────────
   const handleStart = useCallback(async () => {
     if (nodes.length === 0) {
-      toast.error('No tree loaded');
+      toast.error('No task to run');
       return;
     }
     if (btNodeStatus.state !== 'up') {
-      toast.error('BT node is not running');
+      toast.error('Task Engine is off');
       return;
     }
     if (btExecutionPending) return;
@@ -766,7 +767,7 @@ export default function BTEditorSurface({
           { data: false },
         );
         if (!cleanupResult?.success) {
-          throw new Error(cleanupResult?.message || 'Failed to clean up the completed BT');
+          throw new Error(formatTaskDisplayMessage(cleanupResult?.message) || 'Failed to reset the completed task');
         }
       }
 
@@ -788,12 +789,12 @@ export default function BTEditorSurface({
       if (result.success) {
         dispatch(setBtStatus('running'));
         dispatch(setSelectedNodeId(null));
-        toast.success('BT started');
+        toast.success('Task started');
       } else {
-        toast.error(`Failed: ${result.message}`);
+        toast.error(`Failed: ${formatTaskDisplayMessage(result.message)}`);
       }
     } catch (err) {
-      toast.error(`Failed to start BT: ${err.message}`);
+      toast.error(`Failed to start task: ${formatTaskDisplayMessage(err.message)}`);
     } finally {
       setBtExecutionPending(null);
     }
@@ -806,14 +807,14 @@ export default function BTEditorSurface({
     try {
       const result = await callService('/bt/set_running', 'std_srvs/srv/SetBool', { data: false });
       if (!result.success) {
-        toast.error(`Failed: ${result.message}`);
+        toast.error(`Failed: ${formatTaskDisplayMessage(result.message)}`);
         return;
       }
       dispatch(setBtStatus('stopped'));
       dispatch(setActiveNodeNames([]));
-      toast.success('BT stopped');
+      toast.success('Task stopped');
     } catch (err) {
-      toast.error(`Failed to stop BT: ${err.message}`);
+      toast.error(`Failed to stop task: ${formatTaskDisplayMessage(err.message)}`);
     } finally {
       setBtExecutionPending(null);
     }
@@ -839,7 +840,7 @@ export default function BTEditorSurface({
         raw: err.message,
       };
       setBtNodeStatus(next);
-      if (!quiet) toast.error(`BT node status failed: ${err.message}`);
+      if (!quiet) toast.error(`Task Engine status unavailable: ${formatTaskDisplayMessage(err.message)}`);
       return next;
     }
   }, [dispatch]);
@@ -875,13 +876,13 @@ export default function BTEditorSurface({
 
   const handleBtNodeOn = useCallback(async () => {
     if (robotType && robotType !== BT_SUPPORTED_ROBOT_TYPE) {
-      toast.error(`BT currently supports only ${BT_SUPPORTED_ROBOT_TYPE}`);
+      toast.error(`Task Builder currently supports only ${BT_SUPPORTED_ROBOT_TYPE}`);
       return;
     }
 
     try {
       await callBtNodeService('start');
-      toast.success('BT node started');
+      toast.success('Task Engine started');
       await refreshBtNodeStatus({ quiet: true });
       try {
         await refreshCatalog({ force: true });
@@ -889,7 +890,7 @@ export default function BTEditorSurface({
         console.debug('BT catalog refresh after node start failed:', err.message);
       }
     } catch (err) {
-      toast.error(`Failed to start BT node: ${err.message}`);
+      toast.error(`Failed to start Task Engine: ${formatTaskDisplayMessage(err.message)}`);
       await refreshBtNodeStatus({ quiet: true });
     }
   }, [callBtNodeService, refreshBtNodeStatus, refreshCatalog, robotType]);
@@ -904,16 +905,16 @@ export default function BTEditorSurface({
           { data: false },
         );
         if (!result?.success) {
-          throw new Error(result?.message || 'Failed to clean up the completed BT');
+          throw new Error(formatTaskDisplayMessage(result?.message) || 'Failed to reset the completed task');
         }
       }
       await callBtNodeService('stop');
       dispatch(setBtStatus('stopped'));
       dispatch(setActiveNodeNames([]));
-      toast.success('BT node stopped');
+      toast.success('Task Engine stopped');
       await refreshBtNodeStatus({ quiet: true });
     } catch (err) {
-      toast.error(`Failed to stop BT node: ${err.message}`);
+      toast.error(`Failed to stop Task Engine: ${formatTaskDisplayMessage(err.message)}`);
       await refreshBtNodeStatus({ quiet: true });
     }
   }, [btStatus, callBtNodeService, callService, dispatch, refreshBtNodeStatus]);
@@ -1049,8 +1050,8 @@ export default function BTEditorSurface({
       btNodeStatus.state === 'down' ? 'bg-gray-400' :
       'bg-yellow-400';
   const btNodeStatusLabel =
-    isBtNodeUp ? 'Running' :
-    btNodeStatus.state === 'down' ? 'Stopped' :
+    isBtNodeUp ? 'On' :
+    btNodeStatus.state === 'down' ? 'Off' :
     'Unknown';
 
   return (
@@ -1153,8 +1154,8 @@ export default function BTEditorSurface({
             type="button"
             onClick={handleClearTree}
             disabled={!canClearTree}
-            aria-label={clearTreeArmed ? 'Confirm clear current BT' : 'Clear current BT'}
-            title={clearTreeArmed ? 'Click again to clear the current BT' : 'Clear current BT'}
+            aria-label={clearTreeArmed ? 'Confirm clear current task' : 'Clear current task'}
+            title={clearTreeArmed ? 'Click again to clear the current task' : 'Clear current task'}
             className={clsx(
               'flex items-center justify-center w-9 h-9 rounded-lg transition-colors duration-150',
               missionCanvasVariant
@@ -1192,7 +1193,7 @@ export default function BTEditorSurface({
             )}
           >
             <MdSave size={18} />
-            Save As
+            Save Task As
           </button>
           <button
             onClick={() => setShowTreeList(true)}
@@ -1205,7 +1206,7 @@ export default function BTEditorSurface({
             )}
           >
             <MdUploadFile size={18} />
-            Load XML
+            Open Task
           </button>
         </div>
       </div>
@@ -1230,7 +1231,7 @@ export default function BTEditorSurface({
                 'text-center',
                 missionCanvasVariant ? 'text-[var(--mc-danger)]' : 'text-red-500',
               )}>
-                <p className="font-semibold">Parse Error</p>
+                <p className="font-semibold">Task File Error</p>
                 <p className="text-sm mt-1">{parseError}</p>
               </div>
             </div>
@@ -1240,8 +1241,8 @@ export default function BTEditorSurface({
               missionCanvasVariant ? 'text-[var(--mc-text-subtle)]' : 'text-gray-400',
             )}>
               <div className="text-center">
-                <p className="text-lg">No behavior tree loaded</p>
-                <p className="text-sm mt-1">Click "Load XML" or drag nodes from the palette</p>
+                <p className="text-lg">No task yet</p>
+                <p className="text-sm mt-1">Open a saved task or drag steps from the left</p>
               </div>
             </div>
           ) : (
@@ -1305,12 +1306,12 @@ export default function BTEditorSurface({
               'text-sm',
               missionCanvasVariant ? 'text-[var(--mc-text-muted)]' : 'text-gray-600',
             )}>
-              BT Node {btNodeStatusLabel}
+              Task Engine {btNodeStatusLabel}
             </span>
             <button
               onClick={handleBtNodeOn}
               disabled={!canStartBtNode}
-              title="Start BT node"
+              title="Turn on Task Engine"
               className={clsx(
                 'flex items-center gap-1 px-3 py-2 rounded-lg text-sm font-medium transition-colors',
                 missionCanvasVariant
@@ -1323,12 +1324,12 @@ export default function BTEditorSurface({
               )}
             >
               <MdPowerSettingsNew size={18} />
-              ON
+              Turn On
             </button>
             <button
               onClick={handleBtNodeOff}
               disabled={!canStopBtNode}
-              title="Stop BT node"
+              title="Turn off Task Engine"
               className={clsx(
                 'flex items-center gap-1 px-3 py-2 rounded-lg text-sm font-medium transition-colors',
                 missionCanvasVariant
@@ -1341,7 +1342,7 @@ export default function BTEditorSurface({
               )}
             >
               <MdStop size={18} />
-              OFF
+              Turn Off
             </button>
           </div>
           <button
@@ -1359,7 +1360,7 @@ export default function BTEditorSurface({
             )}
           >
             <MdPlayArrow size={20} />
-            Start
+            Run Task
           </button>
           <button
             onClick={handleStop}
@@ -1376,7 +1377,7 @@ export default function BTEditorSurface({
             )}
           >
             <MdStop size={20} />
-            Stop
+            Stop Task
           </button>
         </div>
 
@@ -1412,7 +1413,7 @@ export default function BTEditorSurface({
               'text-base font-semibold mb-4',
               missionCanvasVariant ? 'text-[var(--mc-text)]' : 'text-gray-800',
             )}>
-              Save Tree As
+              Save Task As
             </h2>
             <div className={clsx(
               'flex items-center gap-1 border rounded-lg px-3 py-2 focus-within:ring-2',

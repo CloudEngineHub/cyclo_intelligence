@@ -262,7 +262,21 @@ test("does not accept a stale latched completed as fresh BT completion", async (
 
   await waitFor(() => expect(h.callService).toHaveBeenCalledTimes(1));
   await waitFor(() => expect(h.view.result.current.status).toBe(RunnerStatus.FAILED));
-  expect(h.view.result.current.reason).toMatch(/did not start/);
+  expect(h.view.result.current.reason).toBe("Waypoint Task did not start at Dock");
+});
+
+test("keeps backend execution errors in Waypoint Task terminology", async () => {
+  const h = makeHarness({ orderedSpots: [SPOTS[0]] });
+  h.callService.mockResolvedValueOnce({
+    success: false,
+    message: "BT node rejected the BehaviorTree",
+  });
+
+  act(() => { h.view.result.current.start(); });
+
+  await waitFor(() => expect(h.view.result.current.status).toBe(RunnerStatus.FAILED));
+  expect(h.view.result.current.reason)
+    .toBe("Waypoint Task was rejected at Dock: Task Engine rejected the Waypoint Task");
 });
 
 test("stop while idle leaves an externally running BT alone", async () => {
@@ -392,7 +406,7 @@ test("start fails fast when a BT is present but the BT node is down", () => {
   const h = makeHarness({ getFlags: () => ({ navRunning: true, btNodeIsUp: false }) });
   act(() => { h.view.result.current.start(); });
   expect(h.sendGoal).not.toHaveBeenCalled();
-  expect(h.onMessage).toHaveBeenCalledWith(expect.stringMatching(/Activate the BT node/));
+  expect(h.onMessage).toHaveBeenCalledWith(expect.stringMatching(/Activate the Task Engine/));
 });
 
 test("activates the BT node on demand and releases it when the run ends", async () => {
@@ -439,7 +453,7 @@ test("fails the run when BT activation fails", async () => {
   act(() => { h.view.result.current.start(); });
 
   await waitFor(() => expect(h.view.result.current.status).toBe(RunnerStatus.FAILED));
-  expect(h.view.result.current.reason).toMatch(/activate/i);
+  expect(h.view.result.current.reason).toBe("Task Engine failed to activate");
   expect(h.sendGoal).not.toHaveBeenCalled();
 });
 

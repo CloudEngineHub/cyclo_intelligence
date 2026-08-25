@@ -24,7 +24,7 @@ export default function BTNodePalette({ canUpdateCatalog = true }) {
   const { catalog, source, refreshCatalog } = useBTNodeCatalog();
   const isUpdating = source === 'loading';
   const isUpdateDisabled = !canUpdateCatalog || isUpdating;
-  const updateTitle = 'Update node list from /bt/nodes/catalog';
+  const updateTitle = 'Refresh available task steps';
 
   const grouped = useMemo(() => ({
     control: catalog.filter((n) => n.category === 'control'),
@@ -50,15 +50,15 @@ export default function BTNodePalette({ canUpdateCatalog = true }) {
               : 'bg-[var(--mc-surface)] text-[var(--mc-text)] border border-[var(--mc-border-strong)] hover:bg-[var(--mc-surface-hover)]'
           }`}
           title={updateTitle}
-          aria-label="Update node list"
+          aria-label="Refresh task steps"
         >
           <MdRefresh size={17} />
           {isUpdating ? (
-            <span>Updating...</span>
+            <span>Refreshing...</span>
           ) : (
             <span className="leading-tight text-center">
-              <span className="block">Update</span>
-              <span className="block">Node List</span>
+              <span className="block">Refresh</span>
+              <span className="block">Steps</span>
             </span>
           )}
         </button>
@@ -66,7 +66,7 @@ export default function BTNodePalette({ canUpdateCatalog = true }) {
 
       <div className="flex-1 overflow-y-auto py-2">
         <Section
-          title="Controls"
+          title="Flow Controls"
           chipClass="border-[#1c1a17] text-[#1c1a17] dark:border-[#ece7dd] dark:text-[#ece7dd]"
           items={grouped.control}
           onDragStart={handleDragStart}

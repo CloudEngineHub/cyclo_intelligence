@@ -48,12 +48,12 @@ function renderWithRobot(robotType, componentProps = {}) {
 test('renders the existing editor surface with workspace configuration', () => {
   renderWithRobot('ffw_sg2_rev1', {
     isActive: false,
-    title: 'Standalone Trees',
+    title: 'Standalone Tasks',
     className: 'embedded-workspace',
   });
 
   const editor = screen.getByTestId('bt-editor-surface');
-  expect(editor).toHaveTextContent('Standalone Trees');
+  expect(editor).toHaveTextContent('Standalone Tasks');
   expect(editor).toHaveAttribute('data-active', 'false');
   expect(editor).toHaveClass('embedded-workspace');
 });
@@ -61,7 +61,7 @@ test('renders the existing editor surface with workspace configuration', () => {
 test('forwards the Mission Canvas visual variant to the shared editor surface', () => {
   renderWithRobot('ffw_sg2_rev1', {
     variant: 'mission-canvas',
-    subtitle: 'Behavior Tree workspace · No map required',
+    subtitle: 'Robot task workspace · No map required',
     onExitStateChange: jest.fn(),
   });
 
@@ -69,18 +69,18 @@ test('forwards the Mission Canvas visual variant to the shared editor surface', 
   expect(editor).toHaveAttribute('data-variant', 'mission-canvas');
   expect(editor).toHaveAttribute('data-has-exit-state-callback', 'true');
   expect(editor).toHaveTextContent('Task Builder');
-  expect(editor).toHaveTextContent('Behavior Tree workspace · No map required');
+  expect(editor).toHaveTextContent('Robot task workspace · No map required');
 });
 
 test('keeps the unsupported robot guard inside the reusable workspace', () => {
   renderWithRobot('ffw_sh5_rev1', {
-    subtitle: 'Behavior Tree workspace · No map required',
+    subtitle: 'Robot task workspace · No map required',
   });
 
   expect(
     screen.getByRole('heading', { name: 'Task Builder' }),
   ).toBeInTheDocument();
-  expect(screen.getByText('Behavior Tree workspace · No map required'))
+  expect(screen.getByText('Robot task workspace · No map required'))
     .toBeInTheDocument();
   expect(screen.getByText(BT_UNSUPPORTED_ROBOT_MESSAGE)).toBeInTheDocument();
   expect(screen.getByText('Current robot type: ffw_sh5_rev1')).toBeInTheDocument();

@@ -32,8 +32,10 @@ import {
   missionRunnerReducer,
   navigationBatchFromIndex,
 } from "./missionRunnerCore";
+import { formatTaskDisplayMessage } from "../utils/taskTerminology";
 
 const normStatus = (value) => String(value || "").trim().toLowerCase();
+const taskDisplayMessage = (value) => formatTaskDisplayMessage(value, "Waypoint Task");
 
 // Sleep that rejects as soon as the abort signal fires, so a Stop mid-wait
 // unwinds the driver loop immediately instead of after the next tick.
@@ -185,14 +187,14 @@ export function useMissionRunner({
       throwIfAborted(signal);
     } catch (error) {
       if (signal.aborted || isAbort(error)) throw error;
-      dispatch({ type: "fail", reason: `BT load failed at ${label}: ${error.message || error}`, index });
+      dispatch({ type: "fail", reason: `Waypoint Task failed to load at ${label}: ${taskDisplayMessage(error.message || error)}`, index });
       return false;
     } finally {
       if (btLoadPromiseRef.current === loadPromise) btLoadPromiseRef.current = null;
     }
     if (loadResult && loadResult.success === false) {
       btNeedsStopRef.current = false;
-      dispatch({ type: "fail", reason: `BT rejected at ${label}: ${loadResult.message || ""}`, index });
+      dispatch({ type: "fail", reason: `Waypoint Task was rejected at ${label}: ${taskDisplayMessage(loadResult.message)}`, index });
       return false;
     }
     dispatch({ type: "phase", phase: RunnerPhase.BT_RUNNING });
@@ -204,16 +206,16 @@ export function useMissionRunner({
       return true;
     }
     const reasonByOutcome = {
-      failed: `Behavior tree failed at ${label}`,
-      timeout: `Behavior tree timed out at ${label}`,
-      nostart: `Behavior tree did not start at ${label}`,
+      failed: `Waypoint Task failed at ${label}`,
+      timeout: `Waypoint Task timed out at ${label}`,
+      nostart: `Waypoint Task did not start at ${label}`,
     };
     if (outcome === "failed") {
       btNeedsStopRef.current = false;
     } else if (outcome === "timeout" || outcome === "nostart") {
       try { await stopEngagedBt(); } catch (error) { /* best-effort */ }
     }
-    dispatch({ type: "fail", reason: reasonByOutcome[outcome] || `Behavior tree error at ${label}`, index });
+    dispatch({ type: "fail", reason: reasonByOutcome[outcome] || `Waypoint Task error at ${label}`, index });
     return false;
   }, [awaitBtTerminal, stopEngagedBt]);
 
@@ -319,7 +321,7 @@ export function useMissionRunner({
     // Without an activation callback the caller owns the BT lifecycle
     // (legacy behavior): refuse to start while the node is down.
     if (needsBt && !flags.btNodeIsUp && !ensureBtActiveRef.current) {
-      emit("Activate the BT node before running the mission");
+      emit("Activate the Task Engine before running the mission");
       return;
     }
 
@@ -338,7 +340,7 @@ export function useMissionRunner({
         // the owner verify ROS service readiness when a mission uses BTs;
         // ensureBtActive remains responsible for avoiding a redundant start.
         if (needsBt && ensureBtActiveRef.current) {
-          emit(flags.btNodeIsUp ? "Checking BT node" : "Activating BT node");
+          emit(flags.btNodeIsUp ? "Checking Task Engine" : "Activating Task Engine");
           let activated = false;
           try {
             activated = !!(await ensureBtActiveRef.current());
@@ -347,7 +349,7 @@ export function useMissionRunner({
           }
           if (controller.signal.aborted) return;
           if (!activated) {
-            dispatch({ type: "fail", reason: "BT node failed to activate", index: -1 });
+            dispatch({ type: "fail", reason: "Task Engine failed to activate", index: -1 });
             return;
           }
         }
@@ -363,7 +365,7 @@ export function useMissionRunner({
         emit("Mission complete");
       } catch (error) {
         if (!controller.signal.aborted && !isAbort(error)) {
-          dispatch({ type: "fail", reason: error.message || "Mission error", index: -1 });
+          dispatch({ type: "fail", reason: taskDisplayMessage(error.message) || "Mission error", index: -1 });
         }
       } finally {
         // A Stop may still be cancelling Nav2 or stopping the current tree.

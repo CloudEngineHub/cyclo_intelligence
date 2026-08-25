@@ -437,9 +437,9 @@ test('opens the mapless Task Builder from the Mission Canvas chooser', async () 
   expect(mockStandaloneBtWorkspace).toHaveBeenLastCalledWith(expect.objectContaining({
     isActive: true,
     title: 'Task Builder',
-    subtitle: 'Behavior Tree workspace · No map required',
     variant: 'mission-canvas',
   }));
+  expect(mockStandaloneBtWorkspace.mock.calls.at(-1)[0]).not.toHaveProperty('subtitle');
   expect(screen.queryByRole('tablist')).not.toBeInTheDocument();
   expect(screen.queryByRole('tab', { name: 'Mapping' })).not.toBeInTheDocument();
   expect(screen.queryByRole('tab', { name: 'Task Builder' })).not.toBeInTheDocument();
@@ -861,7 +861,7 @@ test('shows waypoint authoring panels without Design BT runtime controls', async
   expect(screen.queryByRole('button', { name: /Delete Waypoint/ })).not.toBeInTheDocument();
   expect(screen.queryByRole('button', { name: /Delete Node/ })).not.toBeInTheDocument();
   expect(screen.queryByRole('button', { name: 'Create BT' })).not.toBeInTheDocument();
-  expect(screen.queryByRole('button', { name: 'Edit BT' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Edit Task' })).not.toBeInTheDocument();
   expect(screen.queryByRole('button', { name: 'Start Mapping' })).not.toBeInTheDocument();
   expect(screen.queryByText('/map')).not.toBeInTheDocument();
   expect(screen.queryByText('/bt/status')).not.toBeInTheDocument();
@@ -1633,7 +1633,7 @@ test('shows waypoint actions in Waypoints after placing a waypoint', async () =>
   expect(screen.getByRole('button', { name: 'Create Waypoint' })).not.toHaveAttribute('aria-pressed', 'true');
   expect(latestMapViewerProps().interactionMode).toBe('view');
   expect(screen.queryByRole('button', { name: 'Create BT' })).not.toBeInTheDocument();
-  expect(screen.getByRole('button', { name: 'Edit BT for Waypoint A' })).toBeEnabled();
+  expect(screen.getByRole('button', { name: 'Edit Task for Waypoint A' })).toBeEnabled();
   expect(screen.getByRole('button', { name: /Delete Waypoint Waypoint A/ })).toBeEnabled();
   expect(screen.queryByRole('button', { name: 'Select Waypoints' })).not.toBeInTheDocument();
   expect(screen.queryByRole('button', { name: 'Move Waypoints' })).not.toBeInTheDocument();
@@ -1717,7 +1717,7 @@ test('shows waypoint actions in Waypoints after placing a waypoint', async () =>
   await waitFor(() => expect(latestMapViewerProps().selectedSpotId).toBe(''));
   expect(latestMapViewerProps().btLayer).toBeNull();
   expect(screen.queryByRole('button', { name: 'Create BT' })).not.toBeInTheDocument();
-  expect(screen.getByRole('button', { name: 'Edit BT for Waypoint A' })).toBeEnabled();
+  expect(screen.getByRole('button', { name: 'Edit Task for Waypoint A' })).toBeEnabled();
 
   fireEvent.click(screen.getByRole('button', { name: 'Create Waypoint' }));
   fireEvent.click(screen.getByRole('button', { name: 'On Map' }));
@@ -1854,7 +1854,7 @@ test('opens waypoint BT from the rail while map selection stays runtime-independ
   await waitFor(() => expect(latestMapViewerProps().spots).toHaveLength(1));
   expect(latestMapViewerProps().onSpotPoseChange).toEqual(expect.any(Function));
   expect(screen.getByRole('button', { name: 'Create Waypoint' })).toBeEnabled();
-  expect(screen.getByRole('button', { name: 'Edit BT for Waypoint Factory' })).toBeEnabled();
+  expect(screen.getByRole('button', { name: 'Edit Task for Waypoint Factory' })).toBeEnabled();
 
   act(() => {
     latestMapViewerProps().onSpotClick('spot_factory');
@@ -1870,7 +1870,7 @@ test('opens waypoint BT from the rail while map selection stays runtime-independ
 
   const mapBeforeBt = latestMapViewerProps().map;
   const viewKeyBeforeBt = latestMapViewerProps().viewKey;
-  fireEvent.click(screen.getByRole('button', { name: 'Edit BT for Waypoint Factory' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Edit Task for Waypoint Factory' }));
 
   await waitFor(() => expect(latestMapViewerProps().btLayer).toMatchObject({
     spot: {
@@ -1882,6 +1882,9 @@ test('opens waypoint BT from the rail while map selection stays runtime-independ
   expect(latestMapViewerProps().btLayer).not.toHaveProperty('fullCanvas');
   expect(latestMapViewerProps().btLayer).not.toHaveProperty('focusMap');
   expect(latestMapViewerProps().btLayer.editor.props.fileActionsDisabled).toBe(false);
+  expect(latestMapViewerProps().btLayer.editor.props.title)
+    .toBe('Waypoint Factory Waypoint Task');
+  expect(screen.getByText('· Waypoint Task')).toBeInTheDocument();
   expect(latestMapViewerProps().onSpotClick).toBeUndefined();
   expect(latestMapViewerProps().onSpotPoseChange).toBeUndefined();
   expect(latestMapViewerProps().onMapClick).toBeUndefined();
@@ -1920,7 +1923,7 @@ test('opens waypoint BT from the rail while map selection stays runtime-independ
   expect(screen.getAllByText('Waypoint Factory').length).toBeGreaterThan(0);
   expect(screen.queryByText('factory_waypoint.xml')).not.toBeInTheDocument();
   expect(screen.queryByRole('button', { name: 'Create BT' })).not.toBeInTheDocument();
-  expect(screen.queryByRole('button', { name: 'Edit BT' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Edit Task' })).not.toBeInTheDocument();
 
   fireEvent.click(screen.getByRole('button', { name: /Back to Map/ }));
 
@@ -1928,7 +1931,7 @@ test('opens waypoint BT from the rail while map selection stays runtime-independ
   expect(latestMapViewerProps().selectedSpotId).toBe('spot_factory');
   expect(latestMapViewerProps().map).toBe(mapBeforeBt);
   expect(latestMapViewerProps().viewKey).toBe(viewKeyBeforeBt);
-  expect(screen.getByRole('button', { name: 'Edit BT for Waypoint Factory' })).toBeEnabled();
+  expect(screen.getByRole('button', { name: 'Edit Task for Waypoint Factory' })).toBeEnabled();
 });
 
 test('loads and saves each waypoint XML through its mission-local storage path', async () => {
@@ -1986,7 +1989,7 @@ test('loads and saves each waypoint XML through its mission-local storage path',
   fireEvent.click(screen.getByRole('button', { name: 'Load' }));
   await waitFor(() => expect(latestMapViewerProps().spots).toHaveLength(2));
 
-  fireEvent.click(screen.getByRole('button', { name: 'Edit BT for A' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Edit Task for A' }));
   await waitFor(() => expect(latestMapViewerProps().btLayer?.editor).toBeTruthy());
   expect(latestMapViewerProps().btLayer.editor.props.fileActionsDisabled).toBe(false);
   getNavigationMissionBtFile.mockClear();
@@ -2019,7 +2022,7 @@ test('loads and saves each waypoint XML through its mission-local storage path',
     'locals/a.xml',
     'inspection',
   );
-  fireEvent.click(screen.getByRole('button', { name: 'Edit BT for A' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Edit Task for A' }));
   await waitFor(() => expect(latestMapViewerProps().btLayer.editor.props.xml)
     .toContain('ReloadedA'));
 
@@ -2045,7 +2048,7 @@ test('loads and saves each waypoint XML through its mission-local storage path',
       exists: true,
     });
     await expect(staleReloadPromise).rejects.toThrow(
-      'Local BT changed while its saved XML was loading',
+      'Waypoint Task changed while its saved file was loading',
     );
   });
   await waitFor(() => expect(latestMapViewerProps().btLayer.editor.props.xml)
@@ -2064,7 +2067,7 @@ test('loads and saves each waypoint XML through its mission-local storage path',
   );
 
   fireEvent.click(screen.getByRole('button', { name: /Back to Map/ }));
-  fireEvent.click(screen.getByRole('button', { name: 'Edit BT for B' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Edit Task for B' }));
   await waitFor(() => expect(latestMapViewerProps().btLayer.editor.props.filePath)
     .toBe('locals/b.xml'));
   const editedB = xmlFor('EditedB');
@@ -2170,7 +2173,7 @@ test('keeps a waypoint XML library separate from its changeable runtime default'
     .toHaveValue('inspection'));
   fireEvent.click(screen.getByRole('button', { name: 'Load' }));
   await waitFor(() => expect(latestMapViewerProps().spots).toHaveLength(1));
-  fireEvent.click(screen.getByRole('button', { name: 'Edit BT for A' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Edit Task for A' }));
   await waitFor(() => expect(latestMapViewerProps().btLayer?.editor).toBeTruthy());
 
   expect(latestMapViewerProps().btLayer.editor.props).toMatchObject({
@@ -2321,7 +2324,7 @@ test('saves the latest local BT snapshot after closing the editor', async () => 
   await screen.findByRole('combobox', { name: 'Design mission map file' });
   fireEvent.click(screen.getByRole('button', { name: 'Load' }));
   await waitFor(() => expect(latestMapViewerProps().spots).toHaveLength(1));
-  fireEvent.click(screen.getByRole('button', { name: 'Edit BT for Pickup' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Edit Task for Pickup' }));
   await waitFor(() => expect(latestMapViewerProps().btLayer?.editor).toBeTruthy());
 
   const editor = latestMapViewerProps().btLayer.editor;
@@ -2378,7 +2381,7 @@ test('saves the local BT restored by Design undo', async () => {
   await screen.findByRole('combobox', { name: 'Design mission map file' });
   fireEvent.click(screen.getByRole('button', { name: 'Load' }));
   await waitFor(() => expect(latestMapViewerProps().spots).toHaveLength(1));
-  fireEvent.click(screen.getByRole('button', { name: 'Edit BT for Pickup' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Edit Task for Pickup' }));
   await waitFor(() => expect(latestMapViewerProps().btLayer?.editor).toBeTruthy());
   act(() => {
     latestMapViewerProps().btLayer.editor.props.onXmlChange('locals/wp1.xml', editedXml);
@@ -2488,7 +2491,7 @@ test('keeps edits made while a mission save is in flight', async () => {
   await screen.findByRole('combobox', { name: 'Design mission map file' });
   fireEvent.click(screen.getByRole('button', { name: 'Load' }));
   await waitFor(() => expect(latestMapViewerProps().spots).toHaveLength(1));
-  fireEvent.click(screen.getByRole('button', { name: 'Edit BT for Pickup' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Edit Task for Pickup' }));
   await waitFor(() => expect(latestMapViewerProps().btLayer?.editor).toBeTruthy());
 
   act(() => {
@@ -2505,7 +2508,7 @@ test('keeps edits made while a mission save is in flight', async () => {
     '',
     { expectedRevision: 0 },
   );
-  fireEvent.click(screen.getByRole('button', { name: 'Edit BT for Pickup' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Edit Task for Pickup' }));
   await waitFor(() => expect(latestMapViewerProps().btLayer?.editor).toBeTruthy());
   act(() => latestMapViewerProps().btLayer.editor.props.onXmlChange(
     'legacy.xml',
@@ -2590,7 +2593,7 @@ test('retries a partially completed mission save from the latest server revision
   await screen.findByRole('combobox', { name: 'Design mission map file' });
   fireEvent.click(screen.getByRole('button', { name: 'Load' }));
   await waitFor(() => expect(latestMapViewerProps().spots).toHaveLength(1));
-  fireEvent.click(screen.getByRole('button', { name: 'Edit BT for Pickup' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Edit Task for Pickup' }));
   await waitFor(() => expect(latestMapViewerProps().btLayer?.editor).toBeTruthy());
   act(() => {
     latestMapViewerProps().btLayer.editor.props.onXmlChange('locals/wp1.xml', editedXml);
@@ -2885,7 +2888,7 @@ test.each([
   expect(newSpot.local_bt_files || newSpot.metadata?.local_bt_files)
     .toEqual([newBtPath]);
 
-  fireEvent.click(screen.getByRole('button', { name: 'Edit BT for Waypoint 2' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Edit Task for Waypoint 2' }));
   await waitFor(() => expect(latestMapViewerProps().btLayer?.spot?.id)
     .toBe('Waypoint_2_d58de4b1'));
   await waitFor(() => expect(latestMapViewerProps().btLayer.editor.props.filePath)
@@ -3562,7 +3565,7 @@ test('edits the mission route directly on the map', async () => {
     expect(globalXml).toMatch(/waypoint_id="spot_b"[\s\S]*waypoint_id="spot_a"[\s\S]*waypoint_id="spot_b"/);
   });
   expect(screen.queryByRole('button', { name: 'Create BT' })).not.toBeInTheDocument();
-  expect(screen.queryByRole('button', { name: 'Edit BT' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Edit Task' })).not.toBeInTheDocument();
 
   // The route row only removes from the route; actual spot deletion lives in
   // the Waypoints panel alone.
@@ -5900,7 +5903,7 @@ test('run mission activates the BT node on demand and releases it on stop', asyn
     await Promise.resolve();
   });
   await waitFor(() => expect(latestMapViewerProps().btLayer).not.toBeNull());
-  expect(screen.getByText('Behavior running')).toBeInTheDocument();
+  expect(screen.getByText('Task running')).toBeInTheDocument();
   expect(screen.getAllByRole('button', { name: 'Stop' })).toHaveLength(1);
   await waitFor(() => expect(latestMapViewerProps()).toMatchObject({
     showMap: true,

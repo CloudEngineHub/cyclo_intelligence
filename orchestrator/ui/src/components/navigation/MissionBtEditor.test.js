@@ -18,6 +18,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import MissionBtEditor, {
   isValidBtConnection,
@@ -106,11 +107,11 @@ test("keeps file actions clear of the node parameter panel without a file banner
   );
 
   const step = await screen.findByText("StepA");
-  const actions = screen.getByLabelText("Local BT file actions");
+  const actions = screen.getByLabelText("Waypoint Task file actions");
   expect(actions).toHaveStyle({ right: "12px" });
   expect(screen.queryByText("init Local BT")).not.toBeInTheDocument();
   expect(screen.queryByText("init.xml")).not.toBeInTheDocument();
-  expect(screen.queryByText("Run BT")).not.toBeInTheDocument();
+  expect(screen.queryByText("Run Task")).not.toBeInTheDocument();
 
   fireEvent.click(step);
   expect(actions).toHaveStyle({ right: "332px" });
@@ -126,12 +127,12 @@ test("disables clear for an empty waypoint BT", async () => {
     />,
   );
 
-  await screen.findByText("No behavior tree");
-  expect(screen.getByRole("button", { name: "Clear current waypoint BT" })).toBeDisabled();
+  await screen.findByText("No waypoint task");
+  expect(screen.getByRole("button", { name: "Clear current waypoint task" })).toBeDisabled();
 });
 
 test.each([
-  ["loading", { loading: true }, "Loading BT XML..."],
+  ["loading", { loading: true }, "Loading waypoint task..."],
   ["parent file actions are busy", { fileActionsDisabled: true }, "StepA"],
 ])("disables clear while %s", async (_label, busyProps, expectedText) => {
   render(
@@ -145,7 +146,7 @@ test.each([
   );
 
   await screen.findByText(expectedText);
-  expect(screen.getByRole("button", { name: "Clear current waypoint BT" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "Clear current waypoint task" })).toBeDisabled();
 });
 
 test("disarms and disables clear while a file action is pending", async () => {
@@ -165,14 +166,14 @@ test("disarms and disables clear while a file action is pending", async () => {
   );
   await screen.findByText("StepA");
 
-  fireEvent.click(screen.getByRole("button", { name: "Clear current waypoint BT" }));
-  expect(screen.getByRole("button", { name: "Confirm clear current waypoint BT" }))
+  fireEvent.click(screen.getByRole("button", { name: "Clear current waypoint task" }));
+  expect(screen.getByRole("button", { name: "Confirm clear current waypoint task" }))
     .toBeEnabled();
 
-  fireEvent.click(screen.getByRole("button", { name: "Save XML" }));
+  fireEvent.click(screen.getByRole("button", { name: "Save Task" }));
 
   await waitFor(() => {
-    expect(screen.getByRole("button", { name: "Clear current waypoint BT" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Clear current waypoint task" })).toBeDisabled();
   });
   expect(onSaveXml).toHaveBeenCalledTimes(1);
 
@@ -181,7 +182,7 @@ test("disarms and disables clear while a file action is pending", async () => {
     await saveRequest;
   });
   await waitFor(() => {
-    expect(screen.getByRole("button", { name: "Clear current waypoint BT" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Clear current waypoint task" })).toBeEnabled();
   });
 });
 
@@ -202,29 +203,29 @@ test("clears waypoint BT contents after confirmation without changing its file i
     />,
   );
   fireEvent.click(await screen.findByText("StepA"));
-  const actions = screen.getByLabelText("Local BT file actions");
+  const actions = screen.getByLabelText("Waypoint Task file actions");
   expect(actions).toHaveStyle({ right: "332px" });
   onXmlChange.mockClear();
 
-  fireEvent.click(screen.getByRole("button", { name: "Clear current waypoint BT" }));
+  fireEvent.click(screen.getByRole("button", { name: "Clear current waypoint task" }));
 
-  expect(screen.getByRole("button", { name: "Confirm clear current waypoint BT" }))
-    .toHaveAttribute("title", "Click again to clear the current waypoint BT");
+  expect(screen.getByRole("button", { name: "Confirm clear current waypoint task" }))
+    .toHaveAttribute("title", "Click again to clear the current waypoint task");
   expect(screen.getByText("StepA")).toBeInTheDocument();
   expect(onXmlChange).not.toHaveBeenCalled();
 
-  fireEvent.click(screen.getByRole("button", { name: "Confirm clear current waypoint BT" }));
+  fireEvent.click(screen.getByRole("button", { name: "Confirm clear current waypoint task" }));
 
-  await screen.findByText("No behavior tree");
+  await screen.findByText("No waypoint task");
   expect(actions).toHaveStyle({ right: "12px" });
   await waitFor(() => {
     expect(onXmlChange).toHaveBeenCalledTimes(1);
   });
   expect(onXmlChange).toHaveBeenCalledWith("locals/a.xml", emptyTreeXml);
-  expect(screen.getByRole("button", { name: "Save XML" }))
-    .toHaveAttribute("title", "Save locals/a.xml");
-  expect(screen.getByRole("button", { name: "Set as Run BT" }))
-    .toHaveAttribute("title", "This XML is already used when running the mission");
+  expect(screen.getByRole("button", { name: "Save Task" }))
+    .toHaveAttribute("title", "Save Task to locals/a.xml");
+  expect(screen.getByRole("button", { name: "Use for Run" }))
+    .toHaveAttribute("title", "This task is already used when running the mission");
   expect(onFilePathChange).not.toHaveBeenCalled();
   expect(onSetDefaultXml).not.toHaveBeenCalled();
 });
@@ -242,9 +243,9 @@ test("restores and reapplies a cleared waypoint BT through undo and redo", async
   await screen.findByText("StepA");
   onXmlChange.mockClear();
 
-  fireEvent.click(screen.getByRole("button", { name: "Clear current waypoint BT" }));
-  fireEvent.click(screen.getByRole("button", { name: "Confirm clear current waypoint BT" }));
-  await screen.findByText("No behavior tree");
+  fireEvent.click(screen.getByRole("button", { name: "Clear current waypoint task" }));
+  fireEvent.click(screen.getByRole("button", { name: "Confirm clear current waypoint task" }));
+  await screen.findByText("No waypoint task");
   await waitFor(() => expect(onXmlChange).toHaveBeenCalledTimes(1));
   expect(onXmlChange).toHaveBeenLastCalledWith("locals/a.xml", emptyTreeXml);
 
@@ -261,11 +262,11 @@ test("restores and reapplies a cleared waypoint BT through undo and redo", async
   expect(redo).toBeEnabled();
   fireEvent.click(redo);
 
-  await screen.findByText("No behavior tree");
+  await screen.findByText("No waypoint task");
   await waitFor(() => expect(onXmlChange).toHaveBeenCalledTimes(3));
   expect(onXmlChange).toHaveBeenLastCalledWith("locals/a.xml", emptyTreeXml);
-  expect(screen.getByRole("button", { name: "Save XML" }))
-    .toHaveAttribute("title", "Save locals/a.xml");
+  expect(screen.getByRole("button", { name: "Save Task" }))
+    .toHaveAttribute("title", "Save Task to locals/a.xml");
 });
 
 test("expires clear confirmation without changing the waypoint BT", async () => {
@@ -282,20 +283,20 @@ test("expires clear confirmation without changing the waypoint BT", async () => 
   onXmlChange.mockClear();
   jest.useFakeTimers();
 
-  fireEvent.click(screen.getByRole("button", { name: "Clear current waypoint BT" }));
-  expect(screen.getByRole("button", { name: "Confirm clear current waypoint BT" }))
+  fireEvent.click(screen.getByRole("button", { name: "Clear current waypoint task" }));
+  expect(screen.getByRole("button", { name: "Confirm clear current waypoint task" }))
     .toBeEnabled();
 
   act(() => {
     jest.advanceTimersByTime(4000);
   });
 
-  expect(screen.getByRole("button", { name: "Clear current waypoint BT" })).toBeEnabled();
+  expect(screen.getByRole("button", { name: "Clear current waypoint task" })).toBeEnabled();
   expect(screen.getByText("StepA")).toBeInTheDocument();
   expect(onXmlChange).not.toHaveBeenCalled();
 
-  fireEvent.click(screen.getByRole("button", { name: "Clear current waypoint BT" }));
-  expect(screen.getByRole("button", { name: "Confirm clear current waypoint BT" }))
+  fireEvent.click(screen.getByRole("button", { name: "Clear current waypoint task" }));
+  expect(screen.getByRole("button", { name: "Confirm clear current waypoint task" }))
     .toBeEnabled();
   expect(screen.getByText("StepA")).toBeInTheDocument();
   expect(onXmlChange).not.toHaveBeenCalled();
@@ -371,10 +372,10 @@ test("loads a selected XML without changing the waypoint default", async () => {
   );
   await screen.findByText("OriginalStep");
 
-  fireEvent.click(screen.getByRole("button", { name: "Load XML" }));
-  expect(screen.getByRole("dialog", { name: "Local BT XML files" })).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Open Task" }));
+  expect(screen.getByRole("dialog", { name: "Waypoint Task files" })).toBeInTheDocument();
   fireEvent.click(screen.getByRole("radio", { name: /b\.xml/ }));
-  fireEvent.click(screen.getByRole("button", { name: "Load Selected" }));
+  fireEvent.click(screen.getByRole("button", { name: "Open Selected" }));
   await waitFor(() => expect(onLoadXml).toHaveBeenCalledWith("locals/b.xml"));
   expect(onFilePathChange).toHaveBeenCalledWith("locals/b.xml");
   expect(onSetDefaultXml).not.toHaveBeenCalled();
@@ -396,7 +397,7 @@ test("saves the latest graph to the current mission-local path", async () => {
   );
   fireEvent.click(await screen.findByText("StepA"));
   fireEvent.change(screen.getByDisplayValue("1.0"), { target: { value: "3.5" } });
-  fireEvent.click(screen.getByRole("button", { name: "Save XML" }));
+  fireEvent.click(screen.getByRole("button", { name: "Save Task" }));
 
   await waitFor(() => expect(onSaveXml).toHaveBeenCalledWith(
     "locals/a.xml",
@@ -424,11 +425,13 @@ test("saves the latest graph as another XML in the same waypoint", async () => {
   );
   fireEvent.click(await screen.findByText("StepA"));
   fireEvent.change(screen.getByDisplayValue("1.0"), { target: { value: "4.0" } });
-  fireEvent.click(screen.getByRole("button", { name: "Save XML as" }));
-  fireEvent.change(screen.getByRole("textbox", { name: "New BT XML name" }), {
+  fireEvent.click(screen.getByRole("button", { name: "Save Task As" }));
+  fireEvent.change(screen.getByRole("textbox", { name: "New task file name" }), {
     target: { value: "alternate" },
   });
-  fireEvent.click(screen.getByRole("button", { name: "Save As" }));
+  fireEvent.click(within(
+    screen.getByRole("dialog", { name: "Save Waypoint Task As" }),
+  ).getByRole("button", { name: "Save Task As" }));
 
   await waitFor(() => expect(onSaveXmlAs).toHaveBeenCalledWith(
     "locals/a.xml",
@@ -438,7 +441,7 @@ test("saves the latest graph as another XML in the same waypoint", async () => {
   expect(onFilePathChange).toHaveBeenCalledWith("locals/spot_a/alternate.xml");
 });
 
-test("changes the runtime default only through Set as Run BT", async () => {
+test("changes the runtime default only through Use for Run", async () => {
   const onSetDefaultXml = jest.fn().mockResolvedValue(undefined);
   render(
     <MissionBtEditor
@@ -452,6 +455,6 @@ test("changes the runtime default only through Set as Run BT", async () => {
     />,
   );
   await screen.findByText("StepB");
-  fireEvent.click(screen.getByRole("button", { name: "Set as Run BT" }));
+  fireEvent.click(screen.getByRole("button", { name: "Use for Run" }));
   await waitFor(() => expect(onSetDefaultXml).toHaveBeenCalledWith("locals/b.xml"));
 });

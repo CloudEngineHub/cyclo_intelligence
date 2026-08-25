@@ -80,15 +80,15 @@ function FirstCommitProbe({ children, onCommit }) {
 
 // The ReactFlow-backed graph needs a real layout engine, so these assertions
 // cover the plain-DOM states the viewer falls back to.
-test("shows a navigate-only message when the waypoint has no behavior tree", () => {
+test("shows a navigate-only message when the waypoint has no waypoint task", () => {
   render(<MissionBtRunView xml={EMPTY_TREE} activeNodeNames={[]} />);
   expect(screen.getByText("Navigate only")).toBeInTheDocument();
-  expect(screen.getByText("This waypoint has no behavior tree.")).toBeInTheDocument();
+  expect(screen.getByText("This waypoint has no waypoint task.")).toBeInTheDocument();
 });
 
 test("shows a loading state while the tree is being fetched", () => {
   render(<MissionBtRunView xml="" activeNodeNames={[]} loading />);
-  expect(screen.getByText("Loading behavior tree...")).toBeInTheDocument();
+  expect(screen.getByText("Loading waypoint task...")).toBeInTheDocument();
 });
 
 test("renders waypoint nodes in the first committed frame", () => {

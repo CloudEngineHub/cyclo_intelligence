@@ -109,7 +109,7 @@ function renderEditor(variant, { isActive = false, onExitStateChange } = {}) {
   return render(
     <BTEditorSurface
       isActive={isActive}
-      title="Behavior Trees"
+      title="Task Builder"
       variant={variant}
       onExitStateChange={onExitStateChange}
     />,
@@ -129,7 +129,7 @@ function mockBtNodeStatus(state) {
 }
 
 function getBottomControlBar() {
-  return screen.getByText(/^BT Node /).closest('.justify-between');
+  return screen.getByText(/^Task Engine /).closest('.justify-between');
 }
 
 function getReactFlowCanvasSurface() {
@@ -141,9 +141,9 @@ function getHeaderButtons() {
     screen.getByTitle('Undo (Ctrl+Z)'),
     screen.getByTitle('Redo (Ctrl+Shift+Z)'),
     screen.getByTitle('Auto Layout'),
-    screen.getByRole('button', { name: 'Clear current BT' }),
-    screen.getByRole('button', { name: 'Save As' }),
-    screen.getByRole('button', { name: 'Load XML' }),
+    screen.getByRole('button', { name: 'Clear current task' }),
+    screen.getByRole('button', { name: 'Save Task As' }),
+    screen.getByRole('button', { name: 'Open Task' }),
   ];
 }
 
@@ -199,7 +199,7 @@ test('reports whether a standalone BT is active before the workspace can exit', 
   view.rerender(
     <BTEditorSurface
       isActive={false}
-      title="Behavior Trees"
+      title="Task Builder"
       variant="mission-canvas"
       onExitStateChange={onExitStateChange}
     />,
@@ -215,14 +215,14 @@ test('uses elevated Mission Canvas surfaces for every header action', async () =
   renderEditor('mission-canvas');
 
   await waitFor(() => {
-    expect(screen.getByRole('button', { name: 'Save As' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Save Task As' })).toBeEnabled();
   });
 
   getHeaderButtons().forEach((button) => {
     expect(button).toHaveClass('bg-[var(--mc-surface)]');
   });
 
-  expect(screen.getByRole('button', { name: 'Save As' })).toHaveClass(
+  expect(screen.getByRole('button', { name: 'Save Task As' })).toHaveClass(
     'border-[var(--mc-accent)]',
     'text-[var(--mc-accent-hover)]',
   );
@@ -232,15 +232,15 @@ test('keeps legacy header action colors unchanged', async () => {
   renderEditor('legacy');
 
   await waitFor(() => {
-    expect(screen.getByRole('button', { name: 'Save As' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Save Task As' })).toBeEnabled();
   });
 
   getHeaderButtons().forEach((button) => {
     expect(button).not.toHaveClass('bg-[var(--mc-surface)]');
   });
   expect(screen.getByTitle('Undo (Ctrl+Z)')).toHaveClass('bg-gray-100');
-  expect(screen.getByRole('button', { name: 'Save As' })).toHaveClass('bg-blue-50');
-  expect(screen.getByRole('button', { name: 'Load XML' })).toHaveClass('bg-gray-100');
+  expect(screen.getByRole('button', { name: 'Save Task As' })).toHaveClass('bg-blue-50');
+  expect(screen.getByRole('button', { name: 'Open Task' })).toHaveClass('bg-gray-100');
 });
 
 test('disables the clear-current-BT control when the canvas is empty', () => {
@@ -249,8 +249,8 @@ test('disables the clear-current-BT control when the canvas is empty', () => {
 
   renderEditor('mission-canvas');
 
-  expect(screen.getByRole('button', { name: 'Clear current BT' })).toBeDisabled();
-  expect(screen.getByText('No behavior tree loaded')).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Clear current task' })).toBeDisabled();
+  expect(screen.getByText('No task yet')).toBeInTheDocument();
 });
 
 test.each(['running', 'stopping'])(
@@ -261,7 +261,7 @@ test.each(['running', 'stopping'])(
     renderEditor('mission-canvas');
 
     expect(screen.getByTestId('react-flow-canvas')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Clear current BT' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Clear current task' })).toBeDisabled();
   },
 );
 
@@ -279,18 +279,18 @@ test('disarms and disables clear while a Start request is pending', async () => 
 
   renderEditor('mission-canvas', { isActive: true });
 
-  const startButton = screen.getByRole('button', { name: 'Start' });
+  const startButton = screen.getByRole('button', { name: 'Run Task' });
   await waitFor(() => expect(startButton).toBeEnabled());
 
-  fireEvent.click(screen.getByRole('button', { name: 'Clear current BT' }));
-  expect(screen.getByRole('button', { name: 'Confirm clear current BT' })).toBeEnabled();
+  fireEvent.click(screen.getByRole('button', { name: 'Clear current task' }));
+  expect(screen.getByRole('button', { name: 'Confirm clear current task' })).toBeEnabled();
 
   fireEvent.click(startButton);
 
   await waitFor(() => {
-    expect(screen.getByRole('button', { name: 'Clear current BT' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Clear current task' })).toBeDisabled();
   });
-  expect(screen.queryByRole('button', { name: 'Confirm clear current BT' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Confirm clear current task' })).not.toBeInTheDocument();
 
   await act(async () => {
     resolveRun({ success: false, message: 'start rejected' });
@@ -298,7 +298,7 @@ test('disarms and disables clear while a Start request is pending', async () => 
   });
 
   await waitFor(() => {
-    expect(screen.getByRole('button', { name: 'Clear current BT' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Clear current task' })).toBeEnabled();
   });
 });
 
@@ -306,11 +306,11 @@ test('requires a second click to clear and disarms confirmation after four secon
   jest.useFakeTimers();
   renderEditor('mission-canvas');
 
-  fireEvent.click(screen.getByRole('button', { name: 'Clear current BT' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Clear current task' }));
 
-  expect(screen.getByRole('button', { name: 'Confirm clear current BT' })).toHaveAttribute(
+  expect(screen.getByRole('button', { name: 'Confirm clear current task' })).toHaveAttribute(
     'title',
-    'Click again to clear the current BT',
+    'Click again to clear the current task',
   );
   expect(screen.getByTestId('react-flow-canvas')).toBeInTheDocument();
   expect(mockDispatch).not.toHaveBeenCalledWith({
@@ -326,7 +326,7 @@ test('requires a second click to clear and disarms confirmation after four secon
     jest.advanceTimersByTime(4000);
   });
 
-  expect(screen.getByRole('button', { name: 'Clear current BT' })).toBeEnabled();
+  expect(screen.getByRole('button', { name: 'Clear current task' })).toBeEnabled();
   expect(screen.getByTestId('react-flow-canvas')).toBeInTheDocument();
 });
 
@@ -334,12 +334,12 @@ test('clears the graph and persisted identity, then restores both through undo a
   mockState.btmanager.selectedNodeId = 'root';
   renderEditor('mission-canvas');
 
-  fireEvent.click(screen.getByRole('button', { name: 'Clear current BT' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Clear current task' }));
   expect(screen.getByTestId('react-flow-canvas')).toBeInTheDocument();
 
-  fireEvent.click(screen.getByRole('button', { name: 'Confirm clear current BT' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Confirm clear current task' }));
 
-  expect(screen.getByText('No behavior tree loaded')).toBeInTheDocument();
+  expect(screen.getByText('No task yet')).toBeInTheDocument();
   expect(screen.getByText('No file loaded')).toBeInTheDocument();
   expect(mockDispatch).toHaveBeenCalledWith({
     type: 'btmanager/setSelectedNodeId',
@@ -353,7 +353,7 @@ test('clears the graph and persisted identity, then restores both through undo a
     type: 'btmanager/setTreeFileName',
     payload: '',
   });
-  expect(toast.success).toHaveBeenCalledWith('BT canvas cleared');
+  expect(toast.success).toHaveBeenCalledWith('Task cleared');
 
   const undoButton = screen.getByTitle('Undo (Ctrl+Z)');
   expect(undoButton).toBeEnabled();
@@ -367,7 +367,7 @@ test('clears the graph and persisted identity, then restores both through undo a
   expect(redoButton).toBeEnabled();
   fireEvent.click(redoButton);
 
-  expect(screen.getByText('No behavior tree loaded')).toBeInTheDocument();
+  expect(screen.getByText('No task yet')).toBeInTheDocument();
   expect(screen.getByText('No file loaded')).toBeInTheDocument();
   await waitFor(() => expect(mockState.btmanager.treeXml).toBe(''));
 });
@@ -400,7 +400,7 @@ test('uses the Mission workspace surface for the bottom control bar', () => {
 
 test('uses sand green for enabled Mission ON and Start controls', async () => {
   const downView = renderEditor('mission-canvas');
-  const onButton = screen.getByRole('button', { name: 'ON' });
+  const onButton = screen.getByRole('button', { name: 'Turn On' });
   expect(onButton).toBeEnabled();
   expect(onButton).toHaveClass(
     'border-[var(--mc-success)]',
@@ -412,9 +412,9 @@ test('uses sand green for enabled Mission ON and Start controls', async () => {
   mockBtNodeStatus('up');
   renderEditor('mission-canvas', { isActive: true });
 
-  const startButton = screen.getByRole('button', { name: 'Start' });
+  const startButton = screen.getByRole('button', { name: 'Run Task' });
   await waitFor(() => {
-    expect(screen.getByText('BT Node Running')).toBeInTheDocument();
+    expect(screen.getByText('Task Engine On')).toBeInTheDocument();
     expect(startButton).toBeEnabled();
   });
   expect(startButton).toHaveClass(
@@ -428,9 +428,9 @@ test('uses coral for enabled Mission OFF and Stop controls', async () => {
   mockBtNodeStatus('up');
   const stoppedView = renderEditor('mission-canvas', { isActive: true });
 
-  const offButton = screen.getByRole('button', { name: 'OFF' });
+  const offButton = screen.getByRole('button', { name: 'Turn Off' });
   await waitFor(() => {
-    expect(screen.getByText('BT Node Running')).toBeInTheDocument();
+    expect(screen.getByText('Task Engine On')).toBeInTheDocument();
     expect(offButton).toBeEnabled();
   });
   expect(offButton).toHaveClass(
@@ -441,7 +441,7 @@ test('uses coral for enabled Mission OFF and Stop controls', async () => {
 
   mockState.btmanager.btStatus = 'running';
   renderEditor('mission-canvas', { isActive: true });
-  const stopButton = screen.getByRole('button', { name: 'Stop' });
+  const stopButton = screen.getByRole('button', { name: 'Stop Task' });
   await waitFor(() => expect(stopButton).toBeEnabled());
   expect(stopButton).toHaveClass(
     'border-[var(--mc-danger)]',
@@ -465,11 +465,11 @@ test.each([
 
     renderEditor('mission-canvas', { isActive: true });
 
-    const startButton = screen.getByRole('button', { name: 'Start' });
-    const stopButton = screen.getByRole('button', { name: 'Stop' });
+    const startButton = screen.getByRole('button', { name: 'Run Task' });
+    const stopButton = screen.getByRole('button', { name: 'Stop Task' });
 
     await waitFor(() => {
-      expect(screen.getByText('BT Node Running')).toBeInTheDocument();
+      expect(screen.getByText('Task Engine On')).toBeInTheDocument();
       if (startEnabled) {
         expect(startButton).toBeEnabled();
       } else {
@@ -498,10 +498,10 @@ test.each([
 
     renderEditor('mission-canvas', { isActive: true });
 
-    const offButton = screen.getByRole('button', { name: 'OFF' });
+    const offButton = screen.getByRole('button', { name: 'Turn Off' });
 
     await waitFor(() => {
-      expect(screen.getByText('BT Node Running')).toBeInTheDocument();
+      expect(screen.getByText('Task Engine On')).toBeInTheDocument();
       if (offEnabled) {
         expect(offButton).toBeEnabled();
       } else {
@@ -519,7 +519,7 @@ test('stops BT execution before stopping the BT Node after completion', async ()
 
   renderEditor('mission-canvas', { isActive: true });
 
-  const offButton = screen.getByRole('button', { name: 'OFF' });
+  const offButton = screen.getByRole('button', { name: 'Turn Off' });
   await waitFor(() => expect(offButton).toBeEnabled());
 
   fireEvent.click(offButton);
@@ -552,7 +552,7 @@ test('does not stop the BT Node when terminal BT cleanup fails', async () => {
 
   renderEditor('mission-canvas', { isActive: true });
 
-  const offButton = screen.getByRole('button', { name: 'OFF' });
+  const offButton = screen.getByRole('button', { name: 'Turn Off' });
   await waitFor(() => expect(offButton).toBeEnabled());
 
   fireEvent.click(offButton);
@@ -574,7 +574,7 @@ test.each(['completed', 'failed'])(
 
     renderEditor('mission-canvas', { isActive: true });
 
-    const startButton = screen.getByRole('button', { name: 'Start' });
+    const startButton = screen.getByRole('button', { name: 'Run Task' });
     await waitFor(() => expect(startButton).toBeEnabled());
 
     fireEvent.click(startButton);
@@ -600,7 +600,7 @@ test('keeps the legacy bottom control bar and action palette unchanged', async (
   const downView = renderEditor('legacy');
 
   expect(getBottomControlBar()).toHaveClass('py-3', 'border-black', 'bg-white');
-  const onButton = screen.getByRole('button', { name: 'ON' });
+  const onButton = screen.getByRole('button', { name: 'Turn On' });
   expect(onButton).toBeEnabled();
   expect(onButton).toHaveClass('bg-blue-600', 'hover:bg-blue-700', 'text-white');
   downView.unmount();
@@ -609,8 +609,8 @@ test('keeps the legacy bottom control bar and action palette unchanged', async (
   mockBtNodeStatus('up');
   const stoppedView = renderEditor('legacy', { isActive: true });
 
-  const offButton = screen.getByRole('button', { name: 'OFF' });
-  const startButton = screen.getByRole('button', { name: 'Start' });
+  const offButton = screen.getByRole('button', { name: 'Turn Off' });
+  const startButton = screen.getByRole('button', { name: 'Run Task' });
   await waitFor(() => {
     expect(offButton).toBeEnabled();
     expect(startButton).toBeEnabled();
@@ -622,7 +622,7 @@ test('keeps the legacy bottom control bar and action palette unchanged', async (
 
   mockState.btmanager.btStatus = 'running';
   renderEditor('legacy', { isActive: true });
-  const stopButton = screen.getByRole('button', { name: 'Stop' });
+  const stopButton = screen.getByRole('button', { name: 'Stop Task' });
   await waitFor(() => expect(stopButton).toBeEnabled());
   expect(stopButton).toHaveClass('bg-red-600', 'hover:bg-red-700', 'text-white');
 });

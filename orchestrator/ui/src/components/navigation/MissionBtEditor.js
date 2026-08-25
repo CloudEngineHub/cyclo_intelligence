@@ -56,6 +56,7 @@ import {
   findDeletionLayoutAnchor,
 } from "../../utils/btTreeParser";
 import { isValidBtConnection } from "../../utils/btConnection";
+import { formatTaskDisplayMessage } from "../../utils/taskTerminology";
 import { serializeFromGraph } from "../../utils/btXmlSerializer";
 
 const nodeTypes = {
@@ -219,7 +220,9 @@ export default function MissionBtEditor({
       setParseError(null);
       coalescedEditRef.current = { key: "", lastChangeAt: 0 };
     } catch (error) {
-      setParseError(error instanceof Error ? error.message : "Failed to restore history");
+      setParseError(error instanceof Error
+        ? formatTaskDisplayMessage(error.message, "Waypoint Task")
+        : "Failed to restore history");
     }
   }, [setEdges, setNodes]);
 
@@ -323,7 +326,9 @@ export default function MissionBtEditor({
       setEdges([]);
       setNodeDataMap(new Map());
       setSelectedNodeId(null);
-      setParseError(error instanceof Error ? error.message : "Failed to parse BT XML");
+      setParseError(error instanceof Error
+        ? formatTaskDisplayMessage(error.message, "Waypoint Task")
+        : "Could not read this waypoint task file");
       setHydratedPath(filePath);
       coalescedEditRef.current = { key: "", lastChangeAt: 0 };
     }
@@ -409,7 +414,7 @@ export default function MissionBtEditor({
 
   const handleConnect = useCallback((connection) => {
     if (!isValidBtConnection(connection, nodesRef.current, edgesRef.current)) {
-      toast.error("BT connections must form a single-parent acyclic tree");
+      toast.error("Each step can have only one parent, and connections cannot form a loop");
       return;
     }
     captureHistory();
@@ -459,7 +464,7 @@ export default function MissionBtEditor({
     setParseError(null);
     coalescedEditRef.current = { key: "", lastChangeAt: 0 };
     disarmClearTree();
-    toast.success("Waypoint BT canvas cleared");
+    toast.success("Waypoint task cleared");
   }, [
     armClearTree,
     captureHistory,
@@ -494,11 +499,11 @@ export default function MissionBtEditor({
       await onLoadXml(targetPath);
       if (fileActionRequestRef.current !== requestId) return;
       setShowLoadDialog(false);
-      toast.success(`Loaded: ${targetPath}`);
+      toast.success(`Opened: ${targetPath}`);
       if (typeof onFilePathChange === "function") onFilePathChange(targetPath);
     } catch (error) {
       if (fileActionRequestRef.current !== requestId) return;
-      toast.error(`Failed to load ${targetPath}: ${error instanceof Error ? error.message : String(error)}`);
+      toast.error(`Failed to load ${targetPath}: ${formatTaskDisplayMessage(error instanceof Error ? error.message : error, "Waypoint Task")}`);
     } finally {
       if (fileActionRequestRef.current === requestId) setFileAction("");
     }
@@ -510,7 +515,7 @@ export default function MissionBtEditor({
     try {
       serialized = serializeCurrentXml();
     } catch (error) {
-      toast.error(`Failed to serialize ${filePath}: ${error instanceof Error ? error.message : String(error)}`);
+      toast.error(`Failed to serialize ${filePath}: ${formatTaskDisplayMessage(error instanceof Error ? error.message : error, "Waypoint Task")}`);
       return;
     }
     const requestId = fileActionRequestRef.current + 1;
@@ -522,7 +527,7 @@ export default function MissionBtEditor({
       toast.success(`Saved: ${filePath}`);
     } catch (error) {
       if (fileActionRequestRef.current !== requestId) return;
-      toast.error(`Failed to save ${filePath}: ${error instanceof Error ? error.message : String(error)}`);
+      toast.error(`Failed to save ${filePath}: ${formatTaskDisplayMessage(error instanceof Error ? error.message : error, "Waypoint Task")}`);
     } finally {
       if (fileActionRequestRef.current === requestId) setFileAction("");
     }
@@ -536,7 +541,7 @@ export default function MissionBtEditor({
     try {
       serialized = serializeCurrentXml();
     } catch (error) {
-      toast.error(`Failed to serialize ${filePath}: ${error instanceof Error ? error.message : String(error)}`);
+      toast.error(`Failed to serialize ${filePath}: ${formatTaskDisplayMessage(error instanceof Error ? error.message : error, "Waypoint Task")}`);
       return;
     }
     const requestId = fileActionRequestRef.current + 1;
@@ -554,7 +559,7 @@ export default function MissionBtEditor({
       }
     } catch (error) {
       if (fileActionRequestRef.current !== requestId) return;
-      toast.error(`Failed to save as ${targetName}: ${error instanceof Error ? error.message : String(error)}`);
+      toast.error(`Failed to save as ${targetName}: ${formatTaskDisplayMessage(error instanceof Error ? error.message : error, "Waypoint Task")}`);
     } finally {
       if (fileActionRequestRef.current === requestId) setFileAction("");
     }
@@ -568,10 +573,10 @@ export default function MissionBtEditor({
     try {
       await onSetDefaultXml(filePath);
       if (fileActionRequestRef.current !== requestId) return;
-      toast.success(`Run BT: ${filePath}`);
+      toast.success(`Used for Run: ${filePath}`);
     } catch (error) {
       if (fileActionRequestRef.current !== requestId) return;
-      toast.error(`Failed to set Run BT ${filePath}: ${error instanceof Error ? error.message : String(error)}`);
+      toast.error(`Failed to use ${filePath} for Run: ${formatTaskDisplayMessage(error instanceof Error ? error.message : error, "Waypoint Task")}`);
     } finally {
       if (fileActionRequestRef.current === requestId) setFileAction("");
     }
@@ -728,7 +733,7 @@ export default function MissionBtEditor({
   return (
     <div className="h-full min-h-0 relative flex bg-[var(--mc-bg)] text-[var(--mc-text)]">
       <div
-        aria-label="Local BT file actions"
+        aria-label="Waypoint Task file actions"
         className="absolute top-3 z-20 flex items-center gap-1 rounded-[10px] border border-[var(--mc-border)] bg-[var(--mc-surface)]/95 p-1 shadow-sm transition-[right]"
         style={{ right: selectedNodeId ? 332 : 12 }}
       >
@@ -779,11 +784,11 @@ export default function MissionBtEditor({
             onClick={handleClearTree}
             disabled={!canClearTree}
             aria-label={clearTreeArmed
-              ? "Confirm clear current waypoint BT"
-              : "Clear current waypoint BT"}
+              ? "Confirm clear current waypoint task"
+              : "Clear current waypoint task"}
             title={clearTreeArmed
-              ? "Click again to clear the current waypoint BT"
-              : "Clear current waypoint BT"}
+              ? "Click again to clear the current waypoint task"
+              : "Clear current waypoint task"}
             className={clsx(
               "h-8 w-8 rounded-lg flex items-center justify-center border transition-colors",
               !canClearTree
@@ -802,15 +807,15 @@ export default function MissionBtEditor({
               setShowLoadDialog(true);
             }}
             disabled={loading || fileActionsDisabled || Boolean(fileAction) || !onLoadXml}
-            title={filePath ? `Load ${filePath}` : "Load XML"}
-            aria-label="Load XML"
+            title={filePath ? `Open ${filePath}` : "Open Task"}
+            aria-label="Open Task"
             className={clsx(
               "h-8 flex items-center gap-1.5 rounded-lg bg-[var(--mc-surface-2)] px-2.5 text-xs font-medium text-[var(--mc-text-muted)] transition-colors hover:bg-[var(--mc-surface-hover)]",
               (loading || fileActionsDisabled || fileAction || !onLoadXml) && "cursor-not-allowed opacity-60",
             )}
           >
             <MdUploadFile size={18} />
-            {fileAction === "load" ? "Loading..." : "Load XML"}
+            {fileAction === "load" ? "Opening..." : "Open Task"}
           </button>
           <button
             type="button"
@@ -823,8 +828,8 @@ export default function MissionBtEditor({
               hydratedPath !== filePath ||
               !onSaveXml
             )}
-            title={filePath ? `Save ${filePath}` : "Save XML"}
-            aria-label="Save XML"
+            title={filePath ? `Save Task to ${filePath}` : "Save Task"}
+            aria-label="Save Task"
             className={clsx(
               "h-8 flex items-center gap-1.5 rounded-lg bg-[var(--mc-surface-2)] px-2.5 text-xs font-medium text-[var(--mc-text-muted)] transition-colors hover:bg-[var(--mc-surface-hover)]",
               (
@@ -851,8 +856,8 @@ export default function MissionBtEditor({
               || hydratedPath !== filePath
               || !onSaveXmlAs
             )}
-            title="Save the current tree as another waypoint XML"
-            aria-label="Save XML as"
+            title="Save the current waypoint task as another file"
+            aria-label="Save Task As"
             className={clsx(
               "h-8 flex items-center gap-1.5 rounded-lg bg-[var(--mc-surface-2)] px-2.5 text-xs font-medium text-[var(--mc-text-muted)] transition-colors hover:bg-[var(--mc-surface-hover)]",
               (
@@ -866,7 +871,7 @@ export default function MissionBtEditor({
             )}
           >
             <MdDriveFileRenameOutline size={18} />
-            {fileAction === "save-as" ? "Saving..." : "Save As"}
+            {fileAction === "save-as" ? "Saving..." : "Save Task As"}
           </button>
           <button
             type="button"
@@ -880,9 +885,9 @@ export default function MissionBtEditor({
               || !onSetDefaultXml
             )}
             title={filePath === defaultFilePath
-              ? "This XML is already used when running the mission"
-              : "Use this XML when the mission runs"}
-            aria-label="Set as Run BT"
+              ? "This task is already used when running the mission"
+              : "Use this task when the mission runs"}
+            aria-label="Use for Run"
             className={clsx(
               "h-8 flex items-center gap-1.5 rounded-lg bg-[var(--mc-surface-2)] px-2.5 text-xs font-medium text-[var(--mc-text-muted)] transition-colors hover:bg-[var(--mc-surface-hover)]",
               (
@@ -896,7 +901,7 @@ export default function MissionBtEditor({
             )}
           >
             <MdStar size={18} />
-            {fileAction === "set-default" ? "Setting Run BT..." : "Set as Run BT"}
+            {fileAction === "set-default" ? "Updating..." : "Use for Run"}
           </button>
       </div>
 
@@ -908,7 +913,7 @@ export default function MissionBtEditor({
         >
           {loading ? (
             <div className="h-full flex items-center justify-center text-sm text-[var(--mc-text-muted)]">
-              Loading BT XML...
+              Loading waypoint task...
             </div>
           ) : parseError ? (
             <div className="h-full flex items-center justify-center text-center text-[var(--mc-danger)]">
@@ -920,8 +925,8 @@ export default function MissionBtEditor({
           ) : nodes.length === 0 ? (
             <div className="h-full flex items-center justify-center text-center text-[var(--mc-text-subtle)]">
               <div>
-                <div className="text-sm font-semibold">No behavior tree</div>
-                <div className="mt-1 text-xs">Drag nodes from the palette.</div>
+                <div className="text-sm font-semibold">No waypoint task</div>
+                <div className="mt-1 text-xs">Drag steps from the palette.</div>
               </div>
             </div>
           ) : (
@@ -973,7 +978,7 @@ export default function MissionBtEditor({
             className="absolute inset-0 z-50 flex items-center justify-center bg-black/45 p-6"
             role="dialog"
             aria-modal="true"
-            aria-label="Local BT XML files"
+            aria-label="Waypoint Task files"
           >
             <form
               className="w-full max-w-md rounded-xl border border-[var(--mc-border)] bg-[var(--mc-surface)] p-4 shadow-xl"
@@ -982,9 +987,9 @@ export default function MissionBtEditor({
                 void handleLoadXml(pendingLoadPath);
               }}
             >
-              <div className="text-sm font-semibold">Load waypoint XML</div>
+              <div className="text-sm font-semibold">Open Waypoint Task</div>
               <div className="mt-1 text-xs text-[var(--mc-text-subtle)]">
-                Loading another XML changes the editor only. Use Set as Run BT to change Run behavior.
+                Opening another task changes the editor only. Choose Use for Run to change mission behavior.
               </div>
               <div className="mt-3 max-h-64 space-y-2 overflow-auto">
                 {availableFileOptions.map((path) => (
@@ -1010,7 +1015,7 @@ export default function MissionBtEditor({
                         <span className="truncate">{path.split("/").pop()}</span>
                         {path === defaultFilePath && (
                           <span className="rounded bg-[var(--mc-accent-soft)] px-1 py-0.5 text-[9px] text-[var(--mc-accent-hover)]">
-                            Run BT
+                            Run Task
                           </span>
                         )}
                       </span>
@@ -1034,7 +1039,7 @@ export default function MissionBtEditor({
                   disabled={!pendingLoadPath || Boolean(fileAction)}
                   className="rounded-lg bg-[var(--mc-accent-hover)] px-3 py-2 text-xs font-semibold text-[var(--mc-accent-fg)] hover:brightness-90 disabled:opacity-50"
                 >
-                  {fileAction === "load" ? "Loading..." : "Load Selected"}
+                  {fileAction === "load" ? "Opening..." : "Open Selected"}
                 </button>
               </div>
             </form>
@@ -1045,22 +1050,22 @@ export default function MissionBtEditor({
             className="absolute inset-0 z-50 flex items-center justify-center bg-black/45 p-6"
             role="dialog"
             aria-modal="true"
-            aria-label="Save local BT XML as"
+            aria-label="Save Waypoint Task As"
           >
             <form
               className="w-full max-w-sm rounded-xl border border-[var(--mc-border)] bg-[var(--mc-surface)] p-4 shadow-xl"
               onSubmit={handleSaveXmlAs}
             >
-              <div className="text-sm font-semibold">Save local BT as</div>
+              <div className="text-sm font-semibold">Save Waypoint Task As</div>
               <div className="mt-1 text-xs text-[var(--mc-text-subtle)]">
-                A new XML is added to this waypoint. The current default does not change.
+                A new task file is added to this waypoint. The task used for Run does not change.
               </div>
               <label className="mt-4 block text-xs font-medium" htmlFor="local-bt-save-as-name">
-                New BT XML name
+                New task file name
               </label>
               <input
                 id="local-bt-save-as-name"
-                aria-label="New BT XML name"
+                aria-label="New task file name"
                 value={saveAsName}
                 onChange={(event) => setSaveAsName(event.target.value)}
                 placeholder="alternate.xml"
@@ -1083,7 +1088,7 @@ export default function MissionBtEditor({
                   disabled={!saveAsName.trim() || Boolean(fileAction)}
                   className="rounded-lg bg-[var(--mc-accent-hover)] px-3 py-2 text-xs font-semibold text-[var(--mc-accent-fg)] hover:brightness-90 disabled:opacity-50"
                 >
-                  {fileAction === "save-as" ? "Saving..." : "Save As"}
+                  {fileAction === "save-as" ? "Saving..." : "Save Task As"}
                 </button>
               </div>
             </form>
