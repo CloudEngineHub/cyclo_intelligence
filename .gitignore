@@ -52,9 +52,8 @@ docker/workspace
 docker/huggingface
 docker/zenoh_cache
 
-# Runtime-authored BehaviorTree and navigation mission XML.
+# Runtime-authored navigation mission XML.
 # Keep these files local to each robot/workspace; never include them in commits.
-/orchestrator/orchestrator/bt/trees/
 /docker/workspace/navigation/
 
 # Per-backend runtime workspaces — model checkpoints / HF cache
