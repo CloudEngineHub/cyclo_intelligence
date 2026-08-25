@@ -164,7 +164,7 @@ function getSimulationInferenceNodeNames(nodeDataMap) {
 
 export default function BTEditorSurface({
   isActive = true,
-  title = 'Task Builder',
+  title = 'Action Canvas',
   subtitle = '',
   className = 'w-full h-full',
   variant = 'legacy',
@@ -876,7 +876,7 @@ export default function BTEditorSurface({
 
   const handleBtNodeOn = useCallback(async () => {
     if (robotType && robotType !== BT_SUPPORTED_ROBOT_TYPE) {
-      toast.error(`Task Builder currently supports only ${BT_SUPPORTED_ROBOT_TYPE}`);
+      toast.error(`Action Canvas currently supports only ${BT_SUPPORTED_ROBOT_TYPE}`);
       return;
     }
 

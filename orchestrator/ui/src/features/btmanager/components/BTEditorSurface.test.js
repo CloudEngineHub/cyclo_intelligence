@@ -109,7 +109,7 @@ function renderEditor(variant, { isActive = false, onExitStateChange } = {}) {
   return render(
     <BTEditorSurface
       isActive={isActive}
-      title="Task Builder"
+      title="Action Canvas"
       variant={variant}
       onExitStateChange={onExitStateChange}
     />,
@@ -186,7 +186,7 @@ afterEach(() => {
   jest.useRealTimers();
 });
 
-test('reports whether a standalone BT is active before the workspace can exit', async () => {
+test('reports whether an Action Canvas task is active before the workspace can exit', async () => {
   const onExitStateChange = jest.fn();
   const view = renderEditor('mission-canvas', { onExitStateChange });
 
@@ -199,7 +199,7 @@ test('reports whether a standalone BT is active before the workspace can exit', 
   view.rerender(
     <BTEditorSurface
       isActive={false}
-      title="Task Builder"
+      title="Action Canvas"
       variant="mission-canvas"
       onExitStateChange={onExitStateChange}
     />,

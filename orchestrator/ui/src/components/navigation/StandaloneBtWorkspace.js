@@ -27,7 +27,7 @@ import {
 
 export default function StandaloneBtWorkspace({
   isActive = true,
-  title = 'Task Builder',
+  title = 'Action Canvas',
   subtitle = '',
   className = 'w-full h-full',
   variant = 'legacy',

@@ -1,6 +1,6 @@
 import { formatTaskDisplayMessage } from "./taskTerminology";
 
-test("uses Task Builder terminology for backend messages", () => {
+test("uses Action Canvas terminology for backend messages", () => {
   expect(formatTaskDisplayMessage("BT node rejected the BehaviorTree"))
     .toBe("Task Engine rejected the Task");
   expect(formatTaskDisplayMessage("Behavior trees failed in the BT runtime"))

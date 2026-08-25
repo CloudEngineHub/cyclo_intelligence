@@ -168,7 +168,7 @@ const WORKSPACE_STAGES = [
 ];
 
 // The Mission Canvas rail groups map-bound stages by the asset they manage.
-// Task Builder is selected from the chooser and intentionally has no rail.
+// Action Canvas is selected from the chooser and intentionally has no rail.
 const WORKSPACE_NAV_GROUPS = [
   { caption: "NAVIGATION", stageIds: [STAGE_MAPPING, STAGE_MAP_EDIT, STAGE_NAVIGATE] },
   { caption: "MISSION", stageIds: [STAGE_AUTHORING, STAGE_RUN] },
@@ -2602,10 +2602,10 @@ function MissionCanvasAppBar({
         </div>
         <h1
           className="min-w-0 truncate text-[15px] font-bold tracking-tight"
-          aria-label="Mission Canvas"
+          aria-label="Autonomy Studio"
           style={{ color: MISSION_TEXT }}
         >
-          Mission Canvas
+          Autonomy Studio
         </h1>
       </div>
       {blockReason && (
@@ -2626,7 +2626,6 @@ function MissionCanvasAppBar({
 
 function WorkspaceChoiceCard({
   ariaLabel,
-  description,
   examples,
   icon,
   onClick,
@@ -2655,10 +2654,7 @@ function WorkspaceChoiceCard({
       <h3 className="mt-7 text-[20px] font-bold tracking-tight" style={{ color: MISSION_TEXT }}>
         {title}
       </h3>
-      <p className="mt-2 max-w-sm text-[13px] leading-6" style={{ color: MISSION_TEXT_MUTED }}>
-        {description}
-      </p>
-      <p className="mt-auto pt-5 text-[10px] font-mono font-semibold tracking-[0.08em]" style={{ color: "var(--mc-text-subtle)" }}>
+      <p className="mt-auto pt-5 text-[12px] font-mono font-semibold tracking-[0.08em]" style={{ color: "var(--mc-text-subtle)" }}>
         {examples}
       </p>
     </button>
@@ -2675,25 +2671,23 @@ function MissionCanvasWorkspaceChooser({ onBackHome, onChooseMissionCanvas, onCh
       <main className="flex flex-1 items-center justify-center overflow-auto px-8 py-10">
         <section className="w-full max-w-[900px]">
           <div className="text-[10px] font-mono font-bold tracking-[0.18em]" style={{ color: "var(--mc-accent)" }}>
-            MISSION CANVAS
+            AUTONOMY STUDIO
           </div>
           <h2 className="mt-3 text-[28px] font-bold tracking-[-0.025em]" style={{ color: MISSION_TEXT }}>
             Choose a workspace
           </h2>
           <div className="mt-8 grid grid-cols-1 gap-5 md:grid-cols-2">
             <WorkspaceChoiceCard
-              ariaLabel="Open Task Builder"
-              title="Task Builder"
-              description="Build and run robot tasks without a map."
-              examples="VLA LONG-HORIZON TASK · SIMPLE RULE-BASED CONTROL"
+              ariaLabel="Open Action Canvas"
+              title="Action Canvas"
+              examples="STATIONARY TASKS"
               icon={<MdAccountTree size={23} aria-hidden="true" />}
               onClick={onChooseTaskBuilder}
             />
             <WorkspaceChoiceCard
               ariaLabel="Open Mission Canvas"
               title="Mission Canvas"
-              description="Plan navigation and run waypoint tasks on a map."
-              examples="NAVIGATION + VLA · HYBRID ROBOT CONTROL"
+              examples="MOBILE MISSIONS"
               icon={<MdRoute size={23} aria-hidden="true" />}
               onClick={onChooseMissionCanvas}
             />
@@ -6812,7 +6806,7 @@ function MissionCanvasWorkspace({
       />
 
       <div className="flex flex-1 min-h-0 overflow-hidden">
-      {/* ── LEFT RAIL — map stages only; Task Builder stays full-width ── */}
+      {/* ── LEFT RAIL — map stages only; Action Canvas stays full-width ── */}
       {missionWorkspaceActive && (
         <aside
           className="shrink-0 flex flex-col p-4 border-r"
@@ -6861,10 +6855,10 @@ function MissionCanvasWorkspace({
 
       {/* WORKSPACE */}
       {workspaceKind === WORKSPACE_STANDALONE_BT ? (
-        <main className="flex-1 min-w-0 min-h-0" aria-label="Task Builder workspace">
+        <main className="flex-1 min-w-0 min-h-0" aria-label="Action Canvas workspace">
           <StandaloneBtWorkspace
             isActive
-            title="Task Builder"
+            title="Action Canvas"
             variant="mission-canvas"
             onExitStateChange={handleStandaloneBtExitStateChange}
           />

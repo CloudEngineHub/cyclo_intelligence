@@ -16,7 +16,7 @@ jest.mock('../../hooks/useBTNodeCatalog', () => ({
   }),
 }));
 
-test('labels the palette with Task Builder terminology', () => {
+test('labels the palette with Action Canvas terminology', () => {
   render(<BTNodePalette />);
 
   expect(screen.getByRole('button', { name: 'Refresh task steps' })).toHaveAttribute(

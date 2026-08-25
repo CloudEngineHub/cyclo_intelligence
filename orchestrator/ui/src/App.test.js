@@ -103,7 +103,7 @@ test('renders the Cyclo Intelligence shell navigation for regular pages', () => 
     .toBeInTheDocument();
   expect(screen.getByRole('button', { name: /Inference/i }))
     .toBeInTheDocument();
-  expect(screen.getByRole('button', { name: 'Mission Canvas' }))
+  expect(screen.getByRole('button', { name: 'Autonomy Studio' }))
     .toBeInTheDocument();
   expect(screen.queryByRole('button', { name: 'BT Manager' }))
     .not.toBeInTheDocument();
@@ -128,7 +128,7 @@ test('orders the Cyclo Intelligence navigation into workflow sections', () => {
     'Data Tools',
     'Training Guide',
     'Inference',
-    'Mission Canvas',
+    'Autonomy Studio',
   ].map((name) => navigation.getByRole('button', { name }));
 
   pageButtons.slice(1).forEach((button, index) => {
@@ -140,14 +140,14 @@ test('orders the Cyclo Intelligence navigation into workflow sections', () => {
   expect(navigation.getByRole('button', { name: 'Inference' }).nextElementSibling)
     .toBe(separator);
   expect(separator.nextElementSibling)
-    .toBe(navigation.getByRole('button', { name: 'Mission Canvas' }));
+    .toBe(navigation.getByRole('button', { name: 'Autonomy Studio' }));
   expect(navigation.queryByRole('button', { name: 'Nav' }))
     .not.toBeInTheDocument();
   expect(navigation.queryByRole('button', { name: 'BT Manager' }))
     .not.toBeInTheDocument();
 });
 
-test('opens the Mission Canvas workspace chooser from the canonical navigation entry point', async () => {
+test('opens the Autonomy Studio workspace chooser from the canonical navigation entry point', async () => {
   window.sessionStorage.clear();
   act(() => {
     store.dispatch(moveToPage(PageType.HOME));
@@ -162,7 +162,7 @@ test('opens the Mission Canvas workspace chooser from the canonical navigation e
   );
 
   act(() => {
-    screen.getByRole('button', { name: 'Mission Canvas' }).click();
+    screen.getByRole('button', { name: 'Autonomy Studio' }).click();
   });
 
   expect(await screen.findByTestId('mission-canvas-page'))

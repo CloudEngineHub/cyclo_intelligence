@@ -103,11 +103,11 @@ The normal bringup launch no longer starts it automatically:
 ros2 launch orchestrator orchestrator_bringup.launch.py
 ```
 
-Mission Canvas → **Behavior Trees** owns the normal process lifecycle through
+Autonomy Studio → **Action Canvas** owns the normal process lifecycle through
 the supervisor API:
 
-- **BT Node ON** starts the `bt_node` s6 service and refreshes the catalog.
-- **BT Node OFF** stops the `bt_node` s6 service, but only after BT execution
+- **Task Engine Turn On** starts the `bt_node` s6 service and refreshes the catalog.
+- **Task Engine Turn Off** stops the `bt_node` s6 service, but only after task execution
   has been explicitly stopped.
 
 For isolated debugging, launch only the BT node with:
@@ -117,19 +117,19 @@ ros2 launch orchestrator bt_node.launch.py robot_type:=ffw_sg2_rev1
 
 `bt_node.launch.py` receives `robot_type`, derives joint/topic parameters
 from `shared/robot_configs/<robot_type>_config.yaml`, and starts with no
-preloaded tree. The Behavior Trees workspace supplies tree XML through
+preloaded tree. The Action Canvas workspace supplies task XML through
 `/bt/load_and_run`.
 
-Behavior Trees **Start/Stop** controls tree execution, not the `bt_node`
+Action Canvas **Run Task/Stop Task** controls task execution, not the `bt_node`
 process:
 
-- **Start** cleans up a previous terminal execution when needed, serializes the
+- **Run Task** cleans up a previous terminal execution when needed, serializes the
   current graph, and calls `/bt/load_and_run`.
-- **Stop** calls `/bt/set_running` with `false`.
-- **Start** is disabled while the `bt_node` process is down.
-- While a tree is running, **Stop** is enabled and **Start** is disabled.
-- When a tree completes or fails, **Stop** is disabled and **Start** becomes
-  available again. **BT Node OFF** performs the required runtime cleanup before
+- **Stop Task** calls `/bt/set_running` with `false`.
+- **Run Task** is disabled while the `bt_node` process is down.
+- While a task is running, **Stop Task** is enabled and **Run Task** is disabled.
+- When a task completes or fails, **Stop Task** is disabled and **Run Task** becomes
+  available again. **Task Engine Turn Off** performs the required runtime cleanup before
   stopping the process from one of these terminal states.
 
 ## Custom BT nodes
@@ -159,14 +159,14 @@ dependencies from the loader, such as the ROS node, topic config, joint names,
 or helper methods. Built-in examples include `Rotate`, `JointControl`, and
 `SendCommand`.
 
-After adding or deleting a node file, open Mission Canvas → **Behavior Trees**
-and click **Refresh Nodes**.
+After adding or deleting a node file, open Autonomy Studio → **Action Canvas**
+and click **Refresh Steps**.
 If running from an installed package instead of a source-mounted workspace,
 rebuild/restart first so the new file exists in the install space.
 
-## Behavior Trees XML saving
+## Action Canvas XML saving
 
-The Mission Canvas Behavior Trees workspace saves XML files through
+The Action Canvas workspace saves XML task files through
 `cyclo_data`'s HTTP file server
 (`/bt/save_tree`) into `orchestrator/orchestrator/bt/trees/`. A duplicate file
 name is rejected by default to prevent accidental overwrite; the UI shows an

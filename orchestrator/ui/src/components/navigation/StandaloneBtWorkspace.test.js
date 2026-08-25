@@ -68,7 +68,7 @@ test('forwards the Mission Canvas visual variant to the shared editor surface', 
   const editor = screen.getByTestId('bt-editor-surface');
   expect(editor).toHaveAttribute('data-variant', 'mission-canvas');
   expect(editor).toHaveAttribute('data-has-exit-state-callback', 'true');
-  expect(editor).toHaveTextContent('Task Builder');
+  expect(editor).toHaveTextContent('Action Canvas');
   expect(editor).toHaveTextContent('Robot task workspace · No map required');
 });
 
@@ -78,7 +78,7 @@ test('keeps the unsupported robot guard inside the reusable workspace', () => {
   });
 
   expect(
-    screen.getByRole('heading', { name: 'Task Builder' }),
+    screen.getByRole('heading', { name: 'Action Canvas' }),
   ).toBeInTheDocument();
   expect(screen.getByText('Robot task workspace · No map required'))
     .toBeInTheDocument();

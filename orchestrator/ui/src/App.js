@@ -87,8 +87,8 @@ function App() {
   const taskStatusReceived = recordTopicReceived || inferenceTopicReceived;
 
   const isFirstLoad = useRef(true);
-  // A user entering from the app rail gets the Mission Canvas workspace chooser.
-  // A restored/deep-linked Mission Canvas session skips it and resumes exactly
+  // A user entering from the app rail gets the Autonomy Studio workspace chooser.
+  // A restored/deep-linked Autonomy Studio session skips it and resumes exactly
   // where it was, preserving the existing open-source session behavior.
   const [showMissionWorkspaceChooser, setShowMissionWorkspaceChooser] = useState(false);
 
@@ -441,7 +441,7 @@ function App() {
             className="w-24 h-1 border-t-2 rounded-full border-gray-200 dark:border-slate-800 mt-3"
           />
 
-          {/* Mission Canvas workspace entry */}
+          {/* Autonomy Studio workspace entry */}
           <button
             className={clsx(classPageButton, {
               'hover:bg-gray-200 active:bg-gray-400 dark:hover:bg-slate-800 dark:active:bg-slate-700': page !== PageType.MISSION_CANVAS,
@@ -451,7 +451,7 @@ function App() {
           >
             <MissionCanvasIcon />
             <span className="mt-1 text-center text-sm leading-tight">
-              Mission<br />Canvas
+              Autonomy<br />Studio
             </span>
           </button>
 
@@ -470,7 +470,7 @@ function App() {
         ) : page === PageType.EDIT_DATASET ? (
           <EditDatasetPage isActive={page === PageType.EDIT_DATASET} />
         ) : page === PageType.MISSION_CANVAS ? (
-          <React.Suspense fallback={<div className="flex-1 flex items-center justify-center">Loading Mission Canvas...</div>}>
+          <React.Suspense fallback={<div className="flex-1 flex items-center justify-center">Loading Autonomy Studio...</div>}>
             <MissionCanvasPage
               onBackHome={handleHomePageNavigation}
               showWorkspaceChooser={showMissionWorkspaceChooser}
