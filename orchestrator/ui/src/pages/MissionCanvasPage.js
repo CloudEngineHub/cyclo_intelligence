@@ -7348,7 +7348,7 @@ function MissionCanvasWorkspace({
                 </MapEditToolButton>
                 {labelToolsOpen && (
                   <div
-                    className="absolute left-0 top-[calc(100%+6px)] z-30 isolate grid w-72 max-w-[calc(100vw-2rem)] gap-2 p-2 pointer-events-auto"
+                    className="absolute left-0 top-[calc(100%+6px)] z-30 isolate grid w-80 max-w-[calc(100vw-2rem)] gap-2 p-2 pointer-events-auto"
                     role="menu"
                     aria-label="Map labeling tools"
                     onPointerDown={(event) => event.stopPropagation()}

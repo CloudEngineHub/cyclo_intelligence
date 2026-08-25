@@ -34,8 +34,26 @@ import { useDispatch, useSelector } from 'react-redux';
 import { moveToPage, persistCurrentPage } from './features/ui/uiSlice';
 import { persistRobotType } from './features/tasks/taskSlice';
 import PageType from './constants/pageType';
+import {
+  BT_SUPPORTED_ROBOT_TYPE,
+  isBtRobotSupported,
+} from './constants/btSupport';
 
 const MissionCanvasPage = React.lazy(() => import('./pages/MissionCanvasPage'));
+
+function getAutonomyStudioBlockMessage(robotType) {
+  const normalizedRobotType = String(robotType || '').trim();
+
+  if (!normalizedRobotType) {
+    return 'Please select a robot type first in the Home page';
+  }
+
+  if (!isBtRobotSupported(normalizedRobotType)) {
+    return `Autonomy Studio currently supports only ${BT_SUPPORTED_ROBOT_TYPE}. Current robot type: ${normalizedRobotType}`;
+  }
+
+  return '';
+}
 
 function MissionCanvasIcon({ size = 36 }) {
   const treeSize = Math.round(size * 0.48);
@@ -138,6 +156,19 @@ function App() {
   useEffect(() => {
     persistRobotType(robotType);
   }, [robotType]);
+
+  // The map and task workspaces currently share the SG2-specific runtime.
+  // Keep restored/deep-linked sessions behind the same guard as rail entry.
+  useEffect(() => {
+    if (page !== PageType.MISSION_CANVAS) return;
+
+    const blockMessage = getAutonomyStudioBlockMessage(robotType);
+    if (!blockMessage) return;
+
+    setShowMissionWorkspaceChooser(false);
+    dispatch(moveToPage(PageType.HOME));
+    toast.error(blockMessage, { duration: 5000 });
+  }, [dispatch, page, robotType]);
 
   useEffect(() => {
     if (isFirstLoad.current && restoredPageFromSession) {
@@ -279,6 +310,12 @@ function App() {
   };
 
   const handleMissionCanvasPageNavigation = () => {
+    const blockMessage = getAutonomyStudioBlockMessage(robotType);
+    if (blockMessage) {
+      toast.error(blockMessage, { duration: 5000 });
+      return;
+    }
+
     isFirstLoad.current = false;
     setShowMissionWorkspaceChooser(true);
     dispatch(moveToPage(PageType.MISSION_CANVAS));

@@ -4378,7 +4378,11 @@ test('caps the Area list at three rows and isolates scrolled delete actions', as
   const areas = screen.getByRole('group', { name: 'Map areas' });
   expect(areas).toHaveClass('max-h-28', 'overflow-y-auto', 'overscroll-contain', 'pr-1');
   expect(areas.style.scrollbarGutter).toBe('stable');
-  expect(screen.getByRole('menu', { name: 'Map labeling tools' })).toHaveClass('z-30', 'isolate');
+  expect(screen.getByRole('menu', { name: 'Map labeling tools' })).toHaveClass(
+    'z-30',
+    'isolate',
+    'w-80',
+  );
 
   const documentClick = jest.fn();
   document.addEventListener('click', documentClick);

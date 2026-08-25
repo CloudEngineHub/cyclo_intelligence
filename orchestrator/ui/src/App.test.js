@@ -1,12 +1,26 @@
 import { act, render, screen, waitFor, within } from '@testing-library/react';
 import { Provider } from 'react-redux';
+import toast from 'react-hot-toast';
 import App from './App';
 import { ThemeProvider } from './contexts/ThemeContext';
 import store from './store/store';
 import PageType from './constants/pageType';
 import { CURRENT_PAGE_STORAGE_KEY, moveToPage } from './features/ui/uiSlice';
+import { selectRobotType } from './features/tasks/taskSlice';
 
 const mockMissionCanvasPage = jest.fn();
+
+jest.mock('react-hot-toast', () => {
+  const React = require('react');
+  return {
+    __esModule: true,
+    default: {
+      dismiss: jest.fn(),
+      error: jest.fn(),
+    },
+    Toaster: () => React.createElement('div', { 'data-testid': 'toaster' }),
+  };
+});
 
 jest.mock('./components/ThemeToggle', () => {
   const React = require('react');
@@ -147,10 +161,63 @@ test('orders the Cyclo Intelligence navigation into workflow sections', () => {
     .not.toBeInTheDocument();
 });
 
-test('opens the Autonomy Studio workspace chooser from the canonical navigation entry point', async () => {
+test.each([
+  [
+    'no robot type is selected',
+    '',
+    'Please select a robot type first in the Home page',
+  ],
+  [
+    'an unsupported robot type is selected',
+    'ffw_sh5_rev1',
+    'Autonomy Studio currently supports only ffw_sg2_rev1. Current robot type: ffw_sh5_rev1',
+  ],
+])('blocks Autonomy Studio when %s', async (_scenario, robotType, message) => {
   window.sessionStorage.clear();
+  mockMissionCanvasPage.mockClear();
+  toast.error.mockClear();
   act(() => {
     store.dispatch(moveToPage(PageType.HOME));
+    store.dispatch(selectRobotType(robotType));
+  });
+
+  const view = render(
+    <Provider store={store}>
+      <ThemeProvider>
+        <App />
+      </ThemeProvider>
+    </Provider>
+  );
+
+  act(() => {
+    screen.getByRole('button', { name: 'Autonomy Studio' }).click();
+  });
+
+  await waitFor(() => {
+    expect(toast.error).toHaveBeenCalled();
+  });
+  expect(toast.error.mock.calls.at(-1)[0]).toBe(message);
+  expect(store.getState().ui.currentPage).toBe(PageType.HOME);
+  expect(screen.getByText('Home Page')).toBeInTheDocument();
+  expect(screen.getByLabelText('Cyclo Intelligence navigation'))
+    .toBeInTheDocument();
+  expect(screen.queryByTestId('mission-canvas-page')).not.toBeInTheDocument();
+  expect(mockMissionCanvasPage).not.toHaveBeenCalled();
+
+  view.unmount();
+  act(() => {
+    store.dispatch(selectRobotType(''));
+  });
+  window.sessionStorage.clear();
+});
+
+test('opens the Autonomy Studio workspace chooser from the canonical navigation entry point', async () => {
+  window.sessionStorage.clear();
+  mockMissionCanvasPage.mockClear();
+  toast.error.mockClear();
+  act(() => {
+    store.dispatch(moveToPage(PageType.HOME));
+    store.dispatch(selectRobotType('ffw_sg2_rev1'));
   });
 
   const view = render(
@@ -175,6 +242,7 @@ test('opens the Autonomy Studio workspace chooser from the canonical navigation 
       showWorkspaceChooser: true,
     })
   );
+  expect(toast.error).not.toHaveBeenCalled();
   await waitFor(() => {
     expect(window.sessionStorage.getItem(CURRENT_PAGE_STORAGE_KEY))
       .toBe(PageType.MISSION_CANVAS);
@@ -196,6 +264,7 @@ test('opens the Autonomy Studio workspace chooser from the canonical navigation 
   view.unmount();
   act(() => {
     store.dispatch(moveToPage(PageType.HOME));
+    store.dispatch(selectRobotType(''));
   });
   window.sessionStorage.clear();
 });
