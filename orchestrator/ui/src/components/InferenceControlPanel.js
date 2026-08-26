@@ -40,6 +40,7 @@ import { requiresInstruction } from '../constants/policyCapabilities';
 import usePolicyBackendStatus, {
   getPolicyBackendReadiness,
 } from '../hooks/usePolicyBackendStatus';
+import { getInferenceTimingWarnings } from '../utils/inferenceTiming';
 
 const phaseGuideMessages = {
   [InferencePhase.READY]: 'Ready to start',
@@ -50,7 +51,11 @@ const phaseGuideMessages = {
 };
 
 const buildRequiredFields = (serviceType, policyType) => {
-  const fields = [{ key: 'policyPath', label: 'Policy Path' }];
+  const fields = [
+    { key: 'policyPath', label: 'Policy Path' },
+    { key: 'inferenceHz', label: 'Dataset FPS' },
+    { key: 'controlHz', label: 'Control Hz' },
+  ];
   if (requiresInstruction(serviceType, policyType)) {
     fields.unshift({ key: 'taskInstruction', label: 'Task Instruction' });
   }
@@ -159,6 +164,18 @@ export default function InferenceControlPanel() {
         missingFields.push(field.label);
       }
     }
+    for (const field of [
+      { key: 'inferenceHz', label: 'Dataset FPS' },
+      { key: 'controlHz', label: 'Control Hz' },
+    ]) {
+      const value = Number(taskInfo[field.key]);
+      if (
+        (!Number.isFinite(value) || value <= 0) &&
+        !missingFields.includes(field.label)
+      ) {
+        missingFields.push(field.label);
+      }
+    }
     return { isValid: missingFields.length === 0, missingFields };
   }, [taskInfo]);
 
@@ -205,6 +222,10 @@ export default function InferenceControlPanel() {
         String(message).toLowerCase().includes('timeout') &&
         inferencePhaseRef.current === InferencePhase.LOADING
       );
+      const shouldPreserveSyncAfterFailure = () => (
+        inferencePhaseRef.current === InferencePhase.SYNCING &&
+        ['stop_inference', 'finish'].includes(commandString)
+      );
 
       try {
         const result = await sendRecordCommand(commandString, options);
@@ -217,12 +238,16 @@ export default function InferenceControlPanel() {
           // Backend may have left phase in LOADING/INFERENCING after a failed
           // setup; force the local phase back to READY so the panel becomes
           // editable and the user can retry.
-          dispatch(setInferenceStatus({ inferencePhase: InferencePhase.READY }));
+          if (!shouldPreserveSyncAfterFailure()) {
+            dispatch(setInferenceStatus({ inferencePhase: InferencePhase.READY }));
+          }
         } else if (result && result.success === true) {
           toast.success(`${commandName} executed successfully`);
         } else {
           toast.error(`${commandName} completed with uncertain status`);
-          dispatch(setInferenceStatus({ inferencePhase: InferencePhase.READY }));
+          if (!shouldPreserveSyncAfterFailure()) {
+            dispatch(setInferenceStatus({ inferencePhase: InferencePhase.READY }));
+          }
         }
         return result;
       } catch (error) {
@@ -244,7 +269,9 @@ export default function InferenceControlPanel() {
           toast.error(`Command failed [${commandName}]: ${errorMessage}`);
         }
         // Same reasoning as the success===false branch above.
-        dispatch(setInferenceStatus({ inferencePhase: InferencePhase.READY }));
+        if (!shouldPreserveSyncAfterFailure()) {
+          dispatch(setInferenceStatus({ inferencePhase: InferencePhase.READY }));
+        }
         return null;
       }
     },
@@ -321,6 +348,10 @@ export default function InferenceControlPanel() {
         setPendingRobotDeployIntent({
           ...startIntent,
           willRunInitialPoseSync,
+          timingWarnings: getInferenceTimingWarnings({
+            inferenceHz: taskInfo.inferenceHz,
+            controlHz: taskInfo.controlHz,
+          }),
         });
       } else {
         await executeStartIntent(startIntent, 'robot');
@@ -337,6 +368,8 @@ export default function InferenceControlPanel() {
     taskInfo.inferenceMode,
     taskInfo.initialPoseSync,
     taskInfo.initialPoseSyncDurationS,
+    taskInfo.inferenceHz,
+    taskInfo.controlHz,
     lastPolicyPath,
     executeStartIntent,
     ensureTensorRtReady,
@@ -366,8 +399,10 @@ export default function InferenceControlPanel() {
   }, [executeCommand]);
 
   const handleClear = useCallback(async () => {
-    await executeCommand('Clear', 'finish');
-    setLastPolicyPath('');
+    const result = await executeCommand('Clear', 'finish');
+    if (result && result.success === true) {
+      setLastPolicyPath('');
+    }
   }, [executeCommand]);
 
   const startEnabled = shouldCheckBackend && backendReadiness.ready;
@@ -605,6 +640,13 @@ export default function InferenceControlPanel() {
                 <p className="font-semibold text-orange-800">
                   Initial Pose Sync: {Number(taskInfo.initialPoseSyncDurationS || 5).toFixed(1)} s
                 </p>
+              )}
+              {pendingRobotDeployIntent.timingWarnings?.length > 0 && (
+                <div className="rounded-md border border-amber-200 bg-amber-50 p-2 text-amber-800">
+                  {pendingRobotDeployIntent.timingWarnings.map((warning) => (
+                    <p key={warning} className="font-semibold">{warning}</p>
+                  ))}
+                </div>
               )}
             </div>
             <div className="flex flex-col sm:flex-row gap-2 px-4 py-3 bg-gray-50 border-t border-gray-200">

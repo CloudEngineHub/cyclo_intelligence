@@ -14,8 +14,11 @@ if str(RUNTIME_ROOT) not in sys.path:
 
 from main_runtime.service_handler import (  # noqa: E402
     CMD_LOAD,
+    CMD_PAUSE,
     CMD_RESUME,
     CMD_START,
+    CMD_STOP,
+    CMD_UNLOAD,
     ServiceHandler,
 )
 from main_runtime.session_state import SessionState  # noqa: E402
@@ -40,6 +43,10 @@ class FakeControlLoop:
         self.task_instructions = []
         self.start_result = False
         self.start_error = None
+        self.pause_result = True
+        self.stop_result = True
+        self.hold_pending = False
+        self.deconfigure_count = 0
 
     def configure(self, **kwargs) -> None:
         self.configures.append(kwargs)
@@ -54,13 +61,16 @@ class FakeControlLoop:
         self.task_instructions.append(task_instruction)
 
     def pause(self) -> bool:
-        return True
+        return self.pause_result
 
     def stop(self) -> bool:
-        return True
+        return self.stop_result
 
     def deconfigure(self) -> None:
-        pass
+        self.deconfigure_count += 1
+
+    def initial_pose_sync_hold_required(self) -> bool:
+        return self.hold_pending
 
 
 def make_response(success, message="", action_keys=None):
@@ -248,6 +258,63 @@ class ServiceHandlerPublishModeTests(unittest.TestCase):
         self.assertTrue(response.success)
         self.assertEqual(loop.starts[-1], True)
         self.assertEqual(loop.task_instructions[-1], "place")
+
+    def test_pause_marks_session_only_after_hold_succeeds(self) -> None:
+        handler, session, loop = self._handler()
+        handler.handle(SimpleNamespace(
+            command=CMD_LOAD,
+            model_path="/models/policy",
+            robot_type="ffw",
+            task_instruction="pick",
+        ))
+        handler.handle(SimpleNamespace(command=CMD_START, publish_to_robot=True))
+        loop.pause_result = False
+
+        failed = handler.handle(SimpleNamespace(command=CMD_PAUSE))
+        self.assertFalse(failed.success)
+        self.assertTrue(session.running)
+        self.assertFalse(session.paused)
+
+        loop.pause_result = True
+        succeeded = handler.handle(SimpleNamespace(command=CMD_PAUSE))
+        self.assertTrue(succeeded.success)
+        self.assertTrue(session.paused)
+
+    def test_stop_keeps_session_running_when_hold_fails(self) -> None:
+        handler, session, loop = self._handler()
+        handler.handle(SimpleNamespace(
+            command=CMD_LOAD,
+            model_path="/models/policy",
+            robot_type="ffw",
+            task_instruction="pick",
+        ))
+        handler.handle(SimpleNamespace(command=CMD_START, publish_to_robot=True))
+        loop.stop_result = False
+
+        failed = handler.handle(SimpleNamespace(command=CMD_STOP))
+        self.assertFalse(failed.success)
+        self.assertTrue(session.running)
+
+        loop.stop_result = True
+        succeeded = handler.handle(SimpleNamespace(command=CMD_STOP))
+        self.assertTrue(succeeded.success)
+        self.assertFalse(session.running)
+
+    def test_unload_is_blocked_while_current_pose_hold_is_pending(self) -> None:
+        handler, session, loop = self._handler()
+        handler.handle(SimpleNamespace(
+            command=CMD_LOAD,
+            model_path="/models/policy",
+            robot_type="ffw",
+            task_instruction="pick",
+        ))
+        loop.hold_pending = True
+
+        response = handler.handle(SimpleNamespace(command=CMD_UNLOAD))
+
+        self.assertFalse(response.success)
+        self.assertTrue(session.loaded)
+        self.assertEqual(loop.deconfigure_count, 0)
 
 
 if __name__ == "__main__":

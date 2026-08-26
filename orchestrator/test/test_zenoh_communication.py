@@ -89,7 +89,7 @@ class TestContainerServiceClient(unittest.TestCase):
 
         client = ContainerServiceClient(node=None, service_prefix="/groot")
         self.assertIsNotNone(client)
-        self.assertEqual(client.timeout_sec, 30.0)
+        self.assertEqual(client.timeout_sec, 180.0)
         self.assertFalse(client._connected)
         print("PASS: ContainerServiceClient created with default parameters")
 
@@ -243,6 +243,26 @@ class TestContainerServiceClient(unittest.TestCase):
             captured["request"].initial_pose_sync_duration_s,
             7.5,
         )
+
+    def test_13_start_and_resume_keep_ten_second_service_timeout(self):
+        """Initial Pose Sync does not extend the external START timeout."""
+        from orchestrator.internal.communication.container_service_client import (
+            ContainerServiceClient,
+            ServiceResponse,
+        )
+
+        client = ContainerServiceClient(node=None, service_prefix="/lerobot")
+        captured_timeouts = []
+
+        def capture_call(_client, _request, _service_name, **kwargs):
+            captured_timeouts.append(kwargs["timeout_sec"])
+            return ServiceResponse(True, "ok", {}, "")
+
+        client._call_service = capture_call
+        client.inference_command(ContainerServiceClient.CMD_START)
+        client.inference_command(ContainerServiceClient.CMD_RESUME)
+
+        self.assertEqual(captured_timeouts, [10.0, 10.0])
 
 
 class TestServiceResponse(unittest.TestCase):

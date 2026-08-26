@@ -65,7 +65,7 @@ def inference_runtime_signature(
         inference_hz,
         chunk_align_window_s,
         initial_pose_sync,
-        initial_pose_sync_duration_s,
+        initial_pose_sync_duration_s if initial_pose_sync else 0.0,
     )
 
 

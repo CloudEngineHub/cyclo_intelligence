@@ -1,5 +1,5 @@
 import { configureStore } from '@reduxjs/toolkit';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import { Provider } from 'react-redux';
 import InferencePanel from './InferencePanel';
 import taskReducer from '../features/tasks/taskSlice';
@@ -28,10 +28,11 @@ const renderPanel = ({
   inferenceMode,
   inferencePhase = InferencePhase.READY,
   initialPoseSync = true,
+  inferenceHz = 15,
+  controlHz = 100,
 } = {}) => {
-  useRosServiceCaller.mockReturnValue({
-    sendRecordCommand: jest.fn().mockResolvedValue({ success: true }),
-  });
+  const sendRecordCommand = jest.fn().mockResolvedValue({ success: true });
+  useRosServiceCaller.mockReturnValue({ sendRecordCommand });
   const initialTasks = taskReducer(undefined, { type: '@@INIT' });
   const store = configureStore({
     reducer: { tasks: taskReducer },
@@ -43,12 +44,16 @@ const renderPanel = ({
           inferenceMode,
           initialPoseSync,
           initialPoseSyncDurationS: 5.0,
+          inferenceHz,
+          controlHz,
         },
         taskInfo: {
           ...initialTasks.taskInfo,
           inferenceMode,
           initialPoseSync,
           initialPoseSyncDurationS: 5.0,
+          inferenceHz,
+          controlHz,
         },
         inferenceStatus: {
           ...initialTasks.inferenceStatus,
@@ -63,6 +68,7 @@ const renderPanel = ({
       <InferencePanel />
     </Provider>
   );
+  return { store, sendRecordCommand };
 };
 
 describe('InferencePanel initial pose sync settings', () => {
@@ -112,5 +118,28 @@ describe('InferencePanel initial pose sync settings', () => {
       .toBeDisabled();
     expect(screen.getByRole('spinbutton', { name: 'Initial Pose Sync duration' }))
       .toBeDisabled();
+  });
+
+  test('keeps Dataset FPS blank while the user replaces its value', () => {
+    jest.useFakeTimers();
+    const { sendRecordCommand } = renderPanel({ inferenceMode: 'robot' });
+    const datasetFpsInput = screen.getByRole('spinbutton', { name: 'Dataset FPS' });
+
+    fireEvent.change(datasetFpsInput, { target: { value: '' } });
+    expect(datasetFpsInput).toHaveValue(null);
+
+    act(() => {
+      jest.advanceTimersByTime(1000);
+    });
+    expect(datasetFpsInput).toHaveValue(null);
+    expect(sendRecordCommand).not.toHaveBeenCalled();
+    jest.useRealTimers();
+  });
+
+  test('shows a non-blocking warning for unusual Dataset FPS', () => {
+    renderPanel({ inferenceMode: 'robot', inferenceHz: 1515, controlHz: 200 });
+
+    expect(screen.getByRole('status', { name: 'Timing warnings' }))
+      .toHaveTextContent('Dataset FPS is unusually high (1515)');
   });
 });

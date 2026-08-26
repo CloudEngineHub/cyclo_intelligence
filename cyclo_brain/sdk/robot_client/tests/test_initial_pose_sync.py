@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import importlib.util
+import os
 import re
 import sys
 import threading
+import time
 import types
 import unittest
+from unittest import mock
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -58,6 +61,7 @@ class InitialPoseSyncCommandTest(unittest.TestCase):
         client._command_publishers = {}
         client._command_joint_names = {}
         client._joint_positions_by_name = {}
+        client._joint_position_timestamps_by_name = {}
         client._joint_positions = {}
         client._joint_velocities = {}
         client._joint_efforts = {}
@@ -66,6 +70,7 @@ class InitialPoseSyncCommandTest(unittest.TestCase):
         client._lock = threading.Lock()
         client._cmd_vel_linear_deadband = 0.0
         client._cmd_vel_angular_deadband = 0.0
+        client._initial_pose_sync_state_max_age_s = 1.0
         client._closed = True
         for key, cfg in action_groups.items():
             publisher_key = f"leader_{key}"
@@ -74,6 +79,23 @@ class InitialPoseSyncCommandTest(unittest.TestCase):
                 cfg.get("joint_names", [])
             )
         return client
+
+    def test_joint_state_max_age_environment_override_and_fallback(self) -> None:
+        with mock.patch.object(RobotClient, "_init_subscriptions"):
+            with mock.patch.dict(
+                os.environ,
+                {"INITIAL_POSE_SYNC_STATE_MAX_AGE_S": "2.5"},
+            ):
+                client = RobotClient("omy_f3m")
+                self.assertEqual(client._initial_pose_sync_state_max_age_s, 2.5)
+
+            for invalid in ("0", "-1", "nan", "invalid"):
+                with self.subTest(invalid=invalid), mock.patch.dict(
+                    os.environ,
+                    {"INITIAL_POSE_SYNC_STATE_MAX_AGE_S": invalid},
+                ):
+                    client = RobotClient("omy_f3m")
+                    self.assertEqual(client._initial_pose_sync_state_max_age_s, 1.0)
 
     @staticmethod
     def _action_dimension(client: RobotClient, action_keys: list[str]) -> int:
@@ -90,11 +112,13 @@ class InitialPoseSyncCommandTest(unittest.TestCase):
     @staticmethod
     def _seed_joint_state(client: RobotClient) -> None:
         value = 0.0
+        received_at = time.monotonic()
         for cfg in client._action_groups.values():
             if cfg["msg_type"] == "geometry_msgs/msg/Twist":
                 continue
             for name in reversed(cfg["joint_names"]):
                 client._joint_positions_by_name[name] = value
+                client._joint_position_timestamps_by_name[name] = received_at
                 value += 0.1
 
     def test_supported_robot_layouts_publish_all_position_groups_and_zero_mobile(self):
@@ -158,6 +182,37 @@ class InitialPoseSyncCommandTest(unittest.TestCase):
 
         with self.assertRaisesRegex(RuntimeError, "current joint state unavailable"):
             client.publish_initial_pose_sync(action, action_keys, duration_s=5.0)
+
+        self.assertTrue(
+            all(not publisher.messages for publisher in client._command_publishers.values())
+        )
+
+    def test_stale_current_joint_state_prevents_any_sync_command(self):
+        client = self._make_client("omy_f3m")
+        action_keys = list(client._action_keys)
+        self._seed_joint_state(client)
+        stale_at = time.monotonic() - 1.1
+        client._joint_position_timestamps_by_name = {
+            name: stale_at for name in client._joint_positions_by_name
+        }
+        action = np.zeros(self._action_dimension(client, action_keys))
+
+        with self.assertRaisesRegex(RuntimeError, "current joint state stale"):
+            client.publish_initial_pose_sync(action, action_keys, duration_s=5.0)
+
+        self.assertTrue(
+            all(not publisher.messages for publisher in client._command_publishers.values())
+        )
+
+    def test_one_stale_joint_prevents_hold_and_twist_commands(self):
+        client = self._make_client("ffw_sg2_rev1")
+        action_keys = list(client._action_keys)
+        self._seed_joint_state(client)
+        stale_name = next(iter(client._joint_positions_by_name))
+        client._joint_position_timestamps_by_name[stale_name] = time.monotonic() - 1.1
+
+        with self.assertRaisesRegex(RuntimeError, stale_name):
+            client.publish_current_pose_hold(action_keys, duration_s=0.1)
 
         self.assertTrue(
             all(not publisher.messages for publisher in client._command_publishers.values())

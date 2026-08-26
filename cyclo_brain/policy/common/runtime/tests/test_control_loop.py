@@ -61,6 +61,7 @@ class FakeRobot:
         self.idles = []
         self.sync_targets = []
         self.holds = []
+        self.hold_failures_remaining = 0
         self.action_keys = ["arm"]
 
     def publish_action(self, action, action_keys) -> None:
@@ -78,6 +79,9 @@ class FakeRobot:
         )
 
     def publish_current_pose_hold(self, action_keys, duration_s) -> None:
+        if self.hold_failures_remaining > 0:
+            self.hold_failures_remaining -= 1
+            raise RuntimeError("hold publish failed")
         self.holds.append((list(action_keys), float(duration_s)))
 
     def close(self) -> None:
@@ -457,6 +461,49 @@ class ControlLoopSafetyTests(unittest.TestCase):
         self.assertTrue(loop.start())
         self.assertEqual(len(requester.calls), 2)
         self.assertEqual(len(robot.sync_targets), 2)
+
+    def test_failed_sync_hold_remains_retryable(self) -> None:
+        response = SimpleNamespace(
+            success=True,
+            message="ok",
+            chunk_size=1,
+            action_dim=2,
+            action_list=[0.1, 0.2],
+        )
+        robot = FakeRobot()
+        robot.hold_failures_remaining = 1
+        loop = ControlLoop(requester=FakeRequester(response))
+        loop._robot = robot
+        loop._processor = FakeProcessor()
+        loop._action_keys = ["arm"]
+        loop._publish_to_robot = True
+        loop._initial_pose_sync_enabled = True
+
+        self.assertTrue(loop.start())
+        self.assertFalse(loop.pause())
+        self.assertTrue(loop._initial_pose_sync_hold_pending)
+        self.assertTrue(loop._initial_pose_sync_in_progress)
+        self.assertFalse(loop._running)
+        with self.assertRaisesRegex(RuntimeError, "hold is still pending"):
+            loop.start()
+
+        self.assertTrue(loop.pause())
+        self.assertFalse(loop._initial_pose_sync_hold_pending)
+        self.assertFalse(loop._initial_pose_sync_in_progress)
+        self.assertEqual(robot.holds, [(["arm"], 0.1)])
+
+    def test_repeated_sync_hold_failures_remain_retryable(self) -> None:
+        robot = FakeRobot()
+        robot.hold_failures_remaining = 2
+        loop = self._make_loop(FakeProcessor(), robot)
+        loop._publish_to_robot = True
+        loop._initial_pose_sync_in_progress = True
+
+        self.assertFalse(loop.pause())
+        self.assertFalse(loop.pause())
+        self.assertTrue(loop._initial_pose_sync_hold_pending)
+        self.assertTrue(loop.pause())
+        self.assertFalse(loop._initial_pose_sync_hold_pending)
 
     def test_resume_after_completed_sync_does_not_sync_again(self) -> None:
         response = SimpleNamespace(

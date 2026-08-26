@@ -123,6 +123,7 @@ class ControlLoop:
         self._initial_pose_sync_in_progress = False
         self._initial_pose_sync_completed = False
         self._initial_pose_sync_deadline: Optional[float] = None
+        self._initial_pose_sync_hold_pending = False
         self._generation = 0
         self._shutdown = threading.Event()
         self._request_thread: Optional[threading.Thread] = None
@@ -183,22 +184,27 @@ class ControlLoop:
             self._initial_pose_sync_in_progress = False
             self._initial_pose_sync_completed = False
             self._initial_pose_sync_deadline = None
+            self._initial_pose_sync_hold_pending = False
             self._reset_request_latency_locked()
             self._generation += 1
-            logger.info(
+            config_message = (
                 "configured RobotClient command path for %s "
                 "(publish_to_robot=%s action_request_mode=%s "
                 "control_hz=%g inference_hz=%g chunk_align_window_s=%g "
-                "initial_pose_sync=%s initial_pose_sync_duration_s=%g)",
-                robot_type,
-                self._publish_to_robot,
-                self._action_request_mode,
-                self._control_hz,
-                self._inference_hz,
-                self._chunk_align_window_s,
-                self._initial_pose_sync_enabled,
-                self._initial_pose_sync_duration_s,
+                "initial_pose_sync=%s initial_pose_sync_duration_s=%g)"
+                % (
+                    robot_type,
+                    self._publish_to_robot,
+                    self._action_request_mode,
+                    self._control_hz,
+                    self._inference_hz,
+                    self._chunk_align_window_s,
+                    self._initial_pose_sync_enabled,
+                    self._initial_pose_sync_duration_s,
+                )
             )
+            logger.info(config_message)
+            print(f"[main-runtime] {config_message}", flush=True)
 
     def deconfigure(self) -> None:
         with self._lock:
@@ -215,6 +221,7 @@ class ControlLoop:
             self._initial_pose_sync_in_progress = False
             self._initial_pose_sync_completed = False
             self._initial_pose_sync_deadline = None
+            self._initial_pose_sync_hold_pending = False
             self._processor = None
             self._generation += 1
             if self._robot is not None:
@@ -224,6 +231,10 @@ class ControlLoop:
 
     def start(self, publish_to_robot: Optional[bool] = None) -> bool:
         with self._lock:
+            if self._initial_pose_sync_hold_pending:
+                raise RuntimeError(
+                    "initial pose sync hold is still pending - STOP again first"
+                )
             if publish_to_robot is not None:
                 self._set_publish_to_robot_locked(bool(publish_to_robot))
             should_sync = (
@@ -287,7 +298,10 @@ class ControlLoop:
         action_keys: list[str] = []
         with self._lock:
             should_hold = (
-                self._initial_pose_sync_in_progress
+                (
+                    self._initial_pose_sync_in_progress
+                    or self._initial_pose_sync_hold_pending
+                )
                 and self._publish_to_robot
                 and self._robot is not None
             )
@@ -297,20 +311,40 @@ class ControlLoop:
             self._running = False
             if self._processor is not None:
                 self._processor.clear()
-            self._initial_pose_sync_in_progress = False
             self._initial_pose_sync_deadline = None
             self._generation += 1
+            if should_hold:
+                self._initial_pose_sync_hold_pending = True
+            else:
+                self._initial_pose_sync_in_progress = False
+                self._initial_pose_sync_hold_pending = False
         if robot is not None:
             try:
                 robot.publish_current_pose_hold(action_keys, duration_s=0.1)
                 logger.info("initial pose sync interrupted; current pose hold published")
             except Exception as e:
+                with self._lock:
+                    if robot is self._robot:
+                        self._initial_pose_sync_in_progress = True
+                        self._initial_pose_sync_hold_pending = True
                 logger.error("failed to hold current pose during sync pause: %s", e)
                 return False
+            with self._lock:
+                if robot is not self._robot:
+                    return False
+                self._initial_pose_sync_in_progress = False
+                self._initial_pose_sync_hold_pending = False
         return True
 
     def stop(self) -> bool:
         return self.pause()
+
+    def initial_pose_sync_hold_required(self) -> bool:
+        with self._lock:
+            return (
+                self._initial_pose_sync_in_progress
+                or self._initial_pose_sync_hold_pending
+            )
 
     def set_publish_to_robot(self, publish_to_robot: bool) -> None:
         with self._lock:

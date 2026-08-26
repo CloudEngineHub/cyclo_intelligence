@@ -111,11 +111,22 @@ class InferenceModeTests(unittest.TestCase):
                 True, 5.0,
             ),
         )
-        self.assertNotEqual(
+        self.assertEqual(
             base,
             inference_runtime_signature(
                 "/models/policy", "pytorch", "", "async", 100, 15, 0.3,
                 False, 7.5,
+            ),
+        )
+        enabled = inference_runtime_signature(
+            "/models/policy", "pytorch", "", "async", 100, 15, 0.3,
+            True, 5.0,
+        )
+        self.assertNotEqual(
+            enabled,
+            inference_runtime_signature(
+                "/models/policy", "pytorch", "", "async", 100, 15, 0.3,
+                True, 7.5,
             ),
         )
 

@@ -206,6 +206,7 @@ class RobotClient:
         self._joint_efforts: dict[str, np.ndarray] = {}
         self._joint_timestamps: dict[str, float] = {}
         self._joint_positions_by_name: dict[str, float] = {}
+        self._joint_position_timestamps_by_name: dict[str, float] = {}
         self._sensors: dict[str, dict] = {}
         self._sensor_timestamps: dict[str, float] = {}
         self._task_instruction: str = ""
@@ -224,6 +225,19 @@ class RobotClient:
             0.0,
             _float_env("CMD_VEL_ANGULAR_DEADBAND", 0.0),
         )
+        self._initial_pose_sync_state_max_age_s = _float_env(
+            "INITIAL_POSE_SYNC_STATE_MAX_AGE_S",
+            1.0,
+        )
+        if (
+            not math.isfinite(self._initial_pose_sync_state_max_age_s)
+            or self._initial_pose_sync_state_max_age_s <= 0.0
+        ):
+            logger.warning(
+                "INITIAL_POSE_SYNC_STATE_MAX_AGE_S must be positive and finite; "
+                "using 1.0"
+            )
+            self._initial_pose_sync_state_max_age_s = 1.0
         self._closed = False
 
         self._init_subscriptions()
@@ -379,6 +393,7 @@ class RobotClient:
             velocity = list(msg.velocity) if hasattr(msg.velocity, '__iter__') else []
             effort = list(msg.effort) if hasattr(msg.effort, '__iter__') else []
             now = time.time()
+            received_monotonic = time.monotonic()
             with self._lock:
                 if position:
                     self._joint_positions[group_name] = np.array(position, dtype=np.float32)
@@ -387,6 +402,12 @@ class RobotClient:
                             {
                                 name: float(value)
                                 for name, value in zip(msg_names, position)
+                            }
+                        )
+                        self._joint_position_timestamps_by_name.update(
+                            {
+                                name: received_monotonic
+                                for name, _value in zip(msg_names, position)
                             }
                         )
                 if velocity:
@@ -757,8 +778,12 @@ class RobotClient:
         keys = list(action_keys) if action_keys else self._action_keys
         planned = []
         missing = []
+        stale = []
+        now = time.monotonic()
         with self._lock:
             positions_by_name = dict(self._joint_positions_by_name)
+            timestamps_by_name = dict(self._joint_position_timestamps_by_name)
+            max_age_s = self._initial_pose_sync_state_max_age_s
         for action_key in keys:
             publish_key = self._resolve_action_key(action_key)
             cfg = self._action_groups.get(publish_key)
@@ -772,10 +797,20 @@ class RobotClient:
                 raise RuntimeError(f"publisher unavailable for action key: {action_key}")
             joint_names = list(self._command_joint_names.get(publisher_key, []))
             group_missing = [
-                name for name in joint_names if name not in positions_by_name
+                name
+                for name in joint_names
+                if name not in positions_by_name or name not in timestamps_by_name
             ]
             missing.extend(group_missing)
             if group_missing:
+                continue
+            group_stale = [
+                (name, max(0.0, now - timestamps_by_name[name]))
+                for name in joint_names
+                if max(0.0, now - timestamps_by_name[name]) > max_age_s
+            ]
+            stale.extend(group_stale)
+            if group_stale:
                 continue
             planned.append(
                 (
@@ -790,6 +825,16 @@ class RobotClient:
         if missing:
             missing_names = ", ".join(sorted(set(missing)))
             raise RuntimeError(f"current joint state unavailable: {missing_names}")
+        if stale:
+            stale_by_name = {name: age for name, age in stale}
+            stale_details = ", ".join(
+                f"{name}={age:.3f}s"
+                for name, age in sorted(stale_by_name.items())
+            )
+            raise RuntimeError(
+                "current joint state stale: "
+                f"{stale_details} (max {max_age_s:.3f}s)"
+            )
         return planned
 
     def _publish_position_segments(

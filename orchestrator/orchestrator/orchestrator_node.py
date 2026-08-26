@@ -211,6 +211,7 @@ class OrchestratorNode(Node):
         self._loaded_inference_initial_pose_sync_duration_s: float = 5.0
         self._initial_pose_sync_status_timer: Optional[threading.Timer] = None
         self._initial_pose_sync_status_generation: int = 0
+        self._initial_pose_sync_hold_pending: bool = False
 
         # HF endpoint registry — orchestrator-owned because the
         # set/get/list/select_hf_endpoint services also read and mutate
@@ -918,6 +919,7 @@ class OrchestratorNode(Node):
         with self._state_lock:
             if self.container_service_client is not client:
                 return
+            self._initial_pose_sync_hold_pending = False
             self._initial_pose_sync_status_generation += 1
             generation = self._initial_pose_sync_status_generation
 
@@ -929,6 +931,7 @@ class OrchestratorNode(Node):
                     ):
                         return
                     self._initial_pose_sync_status_timer = None
+                    self._initial_pose_sync_hold_pending = False
                 self._publish_inference_phase(InferenceStatus.INFERENCING)
 
             timer = threading.Timer(float(duration_s), _complete_sync_status)
@@ -946,6 +949,92 @@ class OrchestratorNode(Node):
             timer.cancel()
             return True
         return False
+
+    def _initial_pose_sync_is_active(
+        self,
+        client: ContainerServiceClient,
+    ) -> bool:
+        with self._state_lock:
+            return (
+                self.container_service_client is client
+                and (
+                    self._initial_pose_sync_status_timer is not None
+                    or self._initial_pose_sync_hold_pending
+                )
+            )
+
+    def _mark_initial_pose_sync_hold_failed(
+        self,
+        client: ContainerServiceClient,
+        message: str,
+    ) -> None:
+        with self._state_lock:
+            if self.container_service_client is not client:
+                return
+            self._initial_pose_sync_hold_pending = True
+        self._publish_inference_phase(InferenceStatus.SYNCING, error=message)
+
+    def _clear_initial_pose_sync_hold_pending(
+        self,
+        client: ContainerServiceClient,
+    ) -> None:
+        with self._state_lock:
+            if self.container_service_client is client:
+                self._initial_pose_sync_hold_pending = False
+
+    def _pause_inference_client(
+        self,
+        client: ContainerServiceClient,
+    ):
+        sync_was_active = self._initial_pose_sync_is_active(client)
+        if sync_was_active:
+            self._cancel_initial_pose_sync_status()
+        try:
+            result = client.inference_command(ContainerServiceClient.CMD_PAUSE)
+        except Exception as exc:
+            if sync_was_active:
+                self._mark_initial_pose_sync_hold_failed(client, str(exc))
+            raise
+        if result.success:
+            self._clear_initial_pose_sync_hold_pending(client)
+        elif sync_was_active:
+            self._mark_initial_pose_sync_hold_failed(
+                client,
+                result.message or 'Current-pose hold failed',
+            )
+        return result
+
+    def _stop_initial_pose_sync_for_teardown(
+        self,
+        client: ContainerServiceClient,
+        force: bool = False,
+    ) -> bool:
+        sync_is_active = self._initial_pose_sync_is_active(client)
+        if not sync_is_active and not force:
+            return False
+        if sync_is_active:
+            self._cancel_initial_pose_sync_status()
+        try:
+            stop_result = client.inference_command(ContainerServiceClient.CMD_STOP)
+        except Exception as exc:
+            message = f'Current-pose hold failed: {exc}'
+            self._mark_initial_pose_sync_hold_failed(client, message)
+            raise RuntimeError(message) from exc
+        if not stop_result.success:
+            message = stop_result.message or 'Current-pose hold failed; retry'
+            self._mark_initial_pose_sync_hold_failed(client, message)
+            raise RuntimeError(message)
+        self._clear_initial_pose_sync_hold_pending(client)
+        return True
+
+    def _prepare_active_initial_pose_sync_teardown(
+        self,
+    ) -> Optional[ContainerServiceClient]:
+        with self._state_lock:
+            client = self.container_service_client
+        if client is not None and self._stop_initial_pose_sync_for_teardown(client):
+            return client
+        return None
 
     def user_training_interaction_callback(self, request, response):
         """
@@ -1936,6 +2025,9 @@ class OrchestratorNode(Node):
                         # flag — that field was removed); orchestrator
                         # still owns inference teardown + timer_manager.
                         self.get_logger().info('Cancelling current recording (forwarder)')
+                        sync_stop_verified_client = (
+                            self._prepare_active_initial_pose_sync_teardown()
+                        )
                         cd_result = self._forward_recording(
                             RecordingCommand.Request.RERECORD,
                             task_info=request.task_info,
@@ -1944,7 +2036,9 @@ class OrchestratorNode(Node):
                                 and cd_result.response is not None
                                 and cd_result.response.success):
                             # Inference teardown stays orchestrator-side.
-                            self._teardown_inference_client()
+                            self._teardown_inference_client(
+                                stop_verified_client=sync_stop_verified_client,
+                            )
                             self._set_session_active(
                                 on_recording=False, on_inference=False,
                             )
@@ -1961,19 +2055,10 @@ class OrchestratorNode(Node):
                         with self._state_lock:
                             client = self.container_service_client
                         if client is not None:
-                            result = client.inference_command(
-                                ContainerServiceClient.CMD_PAUSE,
-                            )
+                            result = self._pause_inference_client(client)
                             if result.success:
-                                self._cancel_initial_pose_sync_status()
-                                hold_error = (
-                                    result.message
-                                    if 'hold failed' in (result.message or '').lower()
-                                    else ''
-                                )
                                 self._publish_inference_phase(
                                     InferenceStatus.PAUSED,
-                                    error=hold_error,
                                 )
                             response.success = result.success
                             response.message = result.message or 'Inference paused'
@@ -2143,12 +2228,19 @@ class OrchestratorNode(Node):
                             f'{"inference session" if is_inference_clear else "recording"} '
                             '(forwarder)'
                         )
+                        sync_stop_verified_client = None
+                        if is_inference_clear:
+                            sync_stop_verified_client = (
+                                self._prepare_active_initial_pose_sync_teardown()
+                            )
                         cd_result = self._forward_recording(
                             RecordingCommand.Request.FINISH,
                             task_info=request.task_info,
                         )
                         if is_inference_clear:
-                            self._teardown_inference_client()
+                            self._teardown_inference_client(
+                                stop_verified_client=sync_stop_verified_client,
+                            )
                             self._set_session_active(
                                 on_recording=False, on_inference=False,
                             )
@@ -2180,11 +2272,16 @@ class OrchestratorNode(Node):
                         # Simplified-mode semantics: skip == stop-and-save
                         # plus tear down inference state.
                         self.get_logger().info('Skipping current recording (forwarder)')
+                        sync_stop_verified_client = (
+                            self._prepare_active_initial_pose_sync_teardown()
+                        )
                         cd_result = self._forward_recording(
                             RecordingCommand.Request.RERECORD,
                             task_info=request.task_info,
                         )
-                        self._teardown_inference_client()
+                        self._teardown_inference_client(
+                            stop_verified_client=sync_stop_verified_client,
+                        )
                         self._set_session_active(
                             on_recording=False, on_inference=False,
                         )
@@ -2209,12 +2306,19 @@ class OrchestratorNode(Node):
                             'Discarding current recording '
                             f'({"inference session" if is_inference_cancel else "record-only"})'
                         )
+                        sync_stop_verified_client = None
+                        if is_inference_cancel:
+                            sync_stop_verified_client = (
+                                self._prepare_active_initial_pose_sync_teardown()
+                            )
                         cd_result = self._forward_recording(
                             RecordingCommand.Request.CANCEL,
                             task_info=request.task_info,
                         )
                         if is_inference_cancel:
-                            self._teardown_inference_client()
+                            self._teardown_inference_client(
+                                stop_verified_client=sync_stop_verified_client,
+                            )
                             self._set_session_active(
                                 on_recording=False, on_inference=False,
                             )
@@ -2713,7 +2817,11 @@ class OrchestratorNode(Node):
         # Default to groot for backward compatibility
         return '/groot'
 
-    def _teardown_inference_client(self, expected_client=None):
+    def _teardown_inference_client(
+        self,
+        expected_client=None,
+        stop_verified_client=None,
+    ):
         """Tear down the container service client (STOP + UNLOAD + disconnect).
 
         Called on inference session end (FINISH), on LOAD/START failure so
@@ -2722,11 +2830,39 @@ class OrchestratorNode(Node):
         UNLOAD call happens on a background thread so UI keeps responding
         while CUDA memory releases.
         """
+        with self._state_lock:
+            client = self.container_service_client
+            if expected_client is not None and client is not expected_client:
+                return
+            sync_was_active = (
+                client is not None
+                and (
+                    self._initial_pose_sync_status_timer is not None
+                    or self._initial_pose_sync_hold_pending
+                )
+            )
+            sync_stop_required = (
+                sync_was_active
+                or (
+                    client is not None
+                    and self._loaded_inference_publish_to_robot
+                    and self._loaded_inference_initial_pose_sync
+                )
+            )
+
+        stop_verified = stop_verified_client is client
+        if sync_stop_required and not stop_verified:
+            stop_verified = self._stop_initial_pose_sync_for_teardown(
+                client,
+                force=True,
+            )
+
         # Atomic swap: detach the client under the lock so concurrent
         # callers (RESUME path, joystick handler, daemon thread) can't
         # both grab the same client and double-disconnect.
         with self._state_lock:
-            client = self.container_service_client
+            if self.container_service_client is not client:
+                return
             if expected_client is not None and client is not expected_client:
                 return
             sync_timer = self._initial_pose_sync_status_timer
@@ -2743,6 +2879,7 @@ class OrchestratorNode(Node):
             self._loaded_inference_chunk_align_window_s = 0.3
             self._loaded_inference_initial_pose_sync = False
             self._loaded_inference_initial_pose_sync_duration_s = 5.0
+            self._initial_pose_sync_hold_pending = False
         if sync_timer is not None:
             sync_timer.cancel()
         if client is None:
@@ -2751,7 +2888,8 @@ class OrchestratorNode(Node):
         def _cleanup():
             try:
                 with self._inference_lifecycle_lock:
-                    client.inference_command(ContainerServiceClient.CMD_STOP)
+                    if not stop_verified:
+                        client.inference_command(ContainerServiceClient.CMD_STOP)
                     client.inference_command(ContainerServiceClient.CMD_UNLOAD)
             except Exception as e:
                 self.get_logger().error(f'Error tearing down inference: {e}')

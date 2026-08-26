@@ -76,7 +76,7 @@ describe('taskInfoSync echo routing', () => {
     })).toBe(false);
   });
 
-  test('normalizes blank inference numeric fields to backend defaults', () => {
+  test('keeps blank inference numeric fields distinct while editing', () => {
     expect(getInferenceTaskInfoKey({
       taskType: 'inference',
       taskInstruction: ['pick'],
@@ -85,7 +85,7 @@ describe('taskInfoSync echo routing', () => {
       controlHz: '',
       inferenceHz: '',
       chunkAlignWindowS: '',
-    })).toBe(getInferenceTaskInfoKey({
+    })).not.toBe(getInferenceTaskInfoKey({
       taskType: 'inference',
       taskInstruction: ['pick'],
       policyPath: '/policy',

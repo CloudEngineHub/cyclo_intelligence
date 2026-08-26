@@ -87,10 +87,13 @@ class ServiceHandler:
         return self._make_response(True, "syncing" if syncing else "running")
 
     def _pause(self):
-        self._session.mark_paused()
+        if not self._session.running:
+            raise RuntimeError("not running")
         hold_ok = self._control_loop.pause()
-        message = "paused" if hold_ok else "paused; current-pose hold failed"
-        return self._make_response(True, message)
+        if not hold_ok:
+            return self._make_response(False, "current-pose hold failed; retry STOP")
+        self._session.mark_paused()
+        return self._make_response(True, "paused")
 
     def _resume(self, request):
         if not self._session.running:
@@ -104,12 +107,18 @@ class ServiceHandler:
         return self._make_response(True, "syncing" if syncing else "resumed")
 
     def _stop(self):
-        self._session.mark_stopped()
         hold_ok = self._control_loop.stop()
-        message = "stopped" if hold_ok else "stopped; current-pose hold failed"
-        return self._make_response(True, message)
+        if not hold_ok:
+            return self._make_response(False, "current-pose hold failed; retry STOP")
+        self._session.mark_stopped()
+        return self._make_response(True, "stopped")
 
     def _unload(self):
+        if self._control_loop.initial_pose_sync_hold_required():
+            return self._make_response(
+                False,
+                "current-pose hold is pending; retry STOP before UNLOAD",
+            )
         self._control_loop.deconfigure()
         response = self._requester.unload_policy()
         self._session.mark_unloaded()
