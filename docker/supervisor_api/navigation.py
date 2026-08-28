@@ -14,7 +14,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
-# Author: Howon Kim
+# Author: Howon Kim, Seongwoo Kim
 
 """Self-contained Navigation control plane for cyclo_intelligence.
 

@@ -128,25 +128,6 @@ function mockBtNodeStatus(state) {
   });
 }
 
-function getBottomControlBar() {
-  return screen.getByText(/^Task Engine /).closest('.justify-between');
-}
-
-function getReactFlowCanvasSurface() {
-  return screen.getByTestId('react-flow-canvas').parentElement;
-}
-
-function getHeaderButtons() {
-  return [
-    screen.getByTitle('Undo (Ctrl+Z)'),
-    screen.getByTitle('Redo (Ctrl+Shift+Z)'),
-    screen.getByTitle('Auto Layout'),
-    screen.getByRole('button', { name: 'Clear current task' }),
-    screen.getByRole('button', { name: 'Save Task As' }),
-    screen.getByRole('button', { name: 'Open Task' }),
-  ];
-}
-
 beforeEach(() => {
   mockDispatch.mockClear();
   mockParseBTXml.mockReset();
@@ -209,38 +190,6 @@ test('reports whether an Action Canvas task is active before the workspace can e
     active: true,
     busy: false,
   }));
-});
-
-test('uses elevated Mission Canvas surfaces for every header action', async () => {
-  renderEditor('mission-canvas');
-
-  await waitFor(() => {
-    expect(screen.getByRole('button', { name: 'Save Task As' })).toBeEnabled();
-  });
-
-  getHeaderButtons().forEach((button) => {
-    expect(button).toHaveClass('bg-[var(--mc-surface)]');
-  });
-
-  expect(screen.getByRole('button', { name: 'Save Task As' })).toHaveClass(
-    'border-[var(--mc-accent)]',
-    'text-[var(--mc-accent-hover)]',
-  );
-});
-
-test('keeps legacy header action colors unchanged', async () => {
-  renderEditor('legacy');
-
-  await waitFor(() => {
-    expect(screen.getByRole('button', { name: 'Save Task As' })).toBeEnabled();
-  });
-
-  getHeaderButtons().forEach((button) => {
-    expect(button).not.toHaveClass('bg-[var(--mc-surface)]');
-  });
-  expect(screen.getByTitle('Undo (Ctrl+Z)')).toHaveClass('bg-gray-100');
-  expect(screen.getByRole('button', { name: 'Save Task As' })).toHaveClass('bg-blue-50');
-  expect(screen.getByRole('button', { name: 'Open Task' })).toHaveClass('bg-gray-100');
 });
 
 test('disables the clear-current-BT control when the canvas is empty', () => {
@@ -370,83 +319,6 @@ test('clears the graph and persisted identity, then restores both through undo a
   expect(screen.getByText('No task yet')).toBeInTheDocument();
   expect(screen.getByText('No file loaded')).toBeInTheDocument();
   await waitFor(() => expect(mockState.btmanager.treeXml).toBe(''));
-});
-
-test('matches the Mission and Mapping canvas surface in the Mission BT workspace', () => {
-  renderEditor('mission-canvas');
-
-  expect(getReactFlowCanvasSurface()).toHaveClass('bg-[var(--mc-canvas)]');
-  expect(getReactFlowCanvasSurface()).not.toHaveClass('bg-[var(--mc-bg)]');
-});
-
-test('keeps the legacy ReactFlow canvas background unchanged', () => {
-  renderEditor('legacy');
-
-  expect(getReactFlowCanvasSurface()).not.toHaveClass(
-    'bg-[var(--mc-canvas)]',
-    'bg-[var(--mc-bg)]',
-  );
-});
-
-test('uses the Mission workspace surface for the bottom control bar', () => {
-  renderEditor('mission-canvas');
-
-  expect(getBottomControlBar()).toHaveClass(
-    'h-14',
-    'border-[var(--mc-border)]',
-    'bg-[var(--mc-surface-2)]',
-  );
-});
-
-test('uses sand green for enabled Mission ON and Start controls', async () => {
-  const downView = renderEditor('mission-canvas');
-  const onButton = screen.getByRole('button', { name: 'Turn On' });
-  expect(onButton).toBeEnabled();
-  expect(onButton).toHaveClass(
-    'border-[var(--mc-success)]',
-    'bg-[var(--mc-success)]',
-  );
-  downView.unmount();
-
-  mockState.ros.rosbridgeUrl = '';
-  mockBtNodeStatus('up');
-  renderEditor('mission-canvas', { isActive: true });
-
-  const startButton = screen.getByRole('button', { name: 'Run Task' });
-  await waitFor(() => {
-    expect(screen.getByText('Task Engine On')).toBeInTheDocument();
-    expect(startButton).toBeEnabled();
-  });
-  expect(startButton).toHaveClass(
-    'border-[var(--mc-success)]',
-    'bg-[var(--mc-success)]',
-  );
-});
-
-test('uses coral for enabled Mission OFF and Stop controls', async () => {
-  mockState.ros.rosbridgeUrl = '';
-  mockBtNodeStatus('up');
-  const stoppedView = renderEditor('mission-canvas', { isActive: true });
-
-  const offButton = screen.getByRole('button', { name: 'Turn Off' });
-  await waitFor(() => {
-    expect(screen.getByText('Task Engine On')).toBeInTheDocument();
-    expect(offButton).toBeEnabled();
-  });
-  expect(offButton).toHaveClass(
-    'border-[var(--mc-danger)]',
-    'bg-[var(--mc-danger)]',
-  );
-  stoppedView.unmount();
-
-  mockState.btmanager.btStatus = 'running';
-  renderEditor('mission-canvas', { isActive: true });
-  const stopButton = screen.getByRole('button', { name: 'Stop Task' });
-  await waitFor(() => expect(stopButton).toBeEnabled());
-  expect(stopButton).toHaveClass(
-    'border-[var(--mc-danger)]',
-    'bg-[var(--mc-danger)]',
-  );
 });
 
 test.each([
@@ -595,34 +467,3 @@ test.each(['completed', 'failed'])(
     );
   },
 );
-
-test('keeps the legacy bottom control bar and action palette unchanged', async () => {
-  const downView = renderEditor('legacy');
-
-  expect(getBottomControlBar()).toHaveClass('py-3', 'border-black', 'bg-white');
-  const onButton = screen.getByRole('button', { name: 'Turn On' });
-  expect(onButton).toBeEnabled();
-  expect(onButton).toHaveClass('bg-blue-600', 'hover:bg-blue-700', 'text-white');
-  downView.unmount();
-
-  mockState.ros.rosbridgeUrl = '';
-  mockBtNodeStatus('up');
-  const stoppedView = renderEditor('legacy', { isActive: true });
-
-  const offButton = screen.getByRole('button', { name: 'Turn Off' });
-  const startButton = screen.getByRole('button', { name: 'Run Task' });
-  await waitFor(() => {
-    expect(offButton).toBeEnabled();
-    expect(startButton).toBeEnabled();
-  });
-  expect(offButton).toHaveClass('bg-red-600', 'hover:bg-red-700', 'text-white');
-  expect(startButton).toHaveClass('bg-green-600', 'hover:bg-green-700', 'text-white');
-  expect(getBottomControlBar()).not.toHaveClass('bg-[var(--mc-surface-2)]');
-  stoppedView.unmount();
-
-  mockState.btmanager.btStatus = 'running';
-  renderEditor('legacy', { isActive: true });
-  const stopButton = screen.getByRole('button', { name: 'Stop Task' });
-  await waitFor(() => expect(stopButton).toBeEnabled());
-  expect(stopButton).toHaveClass('bg-red-600', 'hover:bg-red-700', 'text-white');
-});

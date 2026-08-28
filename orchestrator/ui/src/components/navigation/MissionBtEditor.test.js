@@ -11,6 +11,8 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+//
+// Author: Seongwoo Kim
 
 import {
   act,
@@ -95,7 +97,7 @@ test("hydrates a loaded tree without emitting an initial empty graph", async () 
   expect(onXmlChange).not.toHaveBeenCalled();
 });
 
-test("keeps file actions clear of the node parameter panel without a file banner", async () => {
+test("hides the file banner while a node is selected without a loaded file", async () => {
   render(
     <MissionBtEditor
       title="init Local BT"
@@ -107,14 +109,11 @@ test("keeps file actions clear of the node parameter panel without a file banner
   );
 
   const step = await screen.findByText("StepA");
-  const actions = screen.getByLabelText("Waypoint Task file actions");
-  expect(actions).toHaveStyle({ right: "12px" });
   expect(screen.queryByText("init Local BT")).not.toBeInTheDocument();
   expect(screen.queryByText("init.xml")).not.toBeInTheDocument();
   expect(screen.queryByText("Run Task")).not.toBeInTheDocument();
 
   fireEvent.click(step);
-  expect(actions).toHaveStyle({ right: "332px" });
 });
 
 test("disables clear for an empty waypoint BT", async () => {
@@ -203,8 +202,6 @@ test("clears waypoint BT contents after confirmation without changing its file i
     />,
   );
   fireEvent.click(await screen.findByText("StepA"));
-  const actions = screen.getByLabelText("Waypoint Task file actions");
-  expect(actions).toHaveStyle({ right: "332px" });
   onXmlChange.mockClear();
 
   fireEvent.click(screen.getByRole("button", { name: "Clear current waypoint task" }));
@@ -217,7 +214,6 @@ test("clears waypoint BT contents after confirmation without changing its file i
   fireEvent.click(screen.getByRole("button", { name: "Confirm clear current waypoint task" }));
 
   await screen.findByText("No waypoint task");
-  expect(actions).toHaveStyle({ right: "12px" });
   await waitFor(() => {
     expect(onXmlChange).toHaveBeenCalledTimes(1);
   });

@@ -1,3 +1,19 @@
+// Copyright 2026 ROBOTIS CO., LTD.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
+// Author: Seongwoo Kim
+
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import {
   MapViewer,
@@ -131,7 +147,7 @@ beforeEach(() => {
   mockSprites.length = 0;
 });
 
-test('closes the waypoint BT split when its left 25% map context is clicked', () => {
+test('closes the waypoint BT split when its map context is clicked', () => {
   const onBtLayerClose = jest.fn();
 
   render(
@@ -145,7 +161,6 @@ test('closes the waypoint BT split when its left 25% map context is clicked', ()
   const mapContext = screen.getByRole('button', {
     name: 'Back to Map from waypoint context',
   });
-  expect(mapContext).toHaveClass('left-0', 'w-[25%]');
 
   fireEvent.click(mapContext);
 

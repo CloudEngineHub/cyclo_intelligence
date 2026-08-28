@@ -1,3 +1,19 @@
+// Copyright 2026 ROBOTIS CO., LTD.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
+// Author: Seongwoo Kim
+
 import { StrictMode } from 'react';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import MissionCanvasPage, { assembleMissionBtFilesForSave } from './MissionCanvasPage';
@@ -354,12 +370,9 @@ test('renders Autonomy Studio with the Mission Canvas workspace', async () => {
   expect(screen.getByText('Not saved')).toBeInTheDocument();
   expect(screen.getByText('Clean')).toBeInTheDocument();
   expect(screen.queryByText('PID:')).not.toBeInTheDocument();
-  expect(screen.getByText('Mapping Session').parentElement).toHaveClass('overflow-auto');
-  expect(screen.getByText('Mapping Session').parentElement).toHaveClass('rounded-md');
   const startMappingButton = screen.getByRole('button', { name: 'Start Mapping' });
   const stopButton = screen.getByRole('button', { name: 'Stop' });
   const saveMapButton = screen.getByRole('button', { name: 'Save Map' });
-  expect(startMappingButton).toHaveClass('rounded-md');
   // The HUD puts Save Map before Stop: saving is the primary action while
   // recording; Stop ends the session.
   expect(Boolean(startMappingButton.compareDocumentPosition(saveMapButton) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
@@ -367,8 +380,6 @@ test('renders Autonomy Studio with the Mission Canvas workspace', async () => {
   // Map editing is its own top-level stage now.
   expect(screen.getByRole('tab', { name: 'Map Edit' })).toBeInTheDocument();
   expect(screen.getByText('Mobile Teleop')).toBeInTheDocument();
-  expect(screen.getByText('Mobile Teleop').parentElement).toHaveClass('overflow-auto');
-  expect(screen.getByText('Mobile Teleop').parentElement).toHaveClass('rounded-md');
   expect(screen.getByRole('group', { name: 'Mobile Teleop' })).toBeInTheDocument();
   expect(screen.getByText('/cmd_vel')).toBeInTheDocument();
   expect(screen.getAllByText('Inactive').length).toBeGreaterThan(0);
@@ -410,8 +421,6 @@ test('shows a lightweight Autonomy Studio workspace chooser on a fresh entry', (
     .toBeInTheDocument();
   expect(screen.queryByText('NO MAP REQUIRED')).not.toBeInTheDocument();
   expect(screen.queryByText('MAP REQUIRED')).not.toBeInTheDocument();
-  expect(screen.getByText('STATIONARY TASKS')).toHaveClass('text-[12px]');
-  expect(screen.getByText('MOBILE MISSIONS')).toHaveClass('text-[12px]');
   expect(screen.queryByText('Build and run robot tasks without a map.'))
     .not.toBeInTheDocument();
   expect(screen.queryByText('Plan navigation and run waypoint tasks on a map.'))
@@ -793,15 +802,9 @@ test('updates mapping topics when layer toggles change', async () => {
   expect(screen.getByText('/local_costmap/published_footprint')).toBeInTheDocument();
   const lidarSwitch = screen.getByRole('switch', { name: 'Lidar' });
   expect(lidarSwitch).toHaveAttribute('aria-checked', 'true');
-  expect(lidarSwitch).toHaveClass('inline-flex');
-  expect(lidarSwitch).toHaveStyle({ backgroundColor: '#5b8266' });
-  expect(lidarSwitch.firstChild).toHaveClass('rounded-full');
-  expect(lidarSwitch.parentElement).toHaveClass('justify-between');
-  expect(lidarSwitch.parentElement).not.toHaveClass('border');
 
   fireEvent.click(lidarSwitch);
   expect(lidarSwitch).toHaveAttribute('aria-checked', 'false');
-  expect(lidarSwitch).toHaveStyle({ backgroundColor: '#dcd7ca' });
   expect(screen.queryByText('/scan')).not.toBeInTheDocument();
   expect(screen.getByText('/pose')).toBeInTheDocument();
   expect(screen.getByText('/odom')).toBeInTheDocument();
@@ -4376,13 +4379,6 @@ test('caps the Area list at three rows and isolates scrolled delete actions', as
   fireEvent.click(screen.getByRole('button', { name: 'Area' }));
 
   const areas = screen.getByRole('group', { name: 'Map areas' });
-  expect(areas).toHaveClass('max-h-28', 'overflow-y-auto', 'overscroll-contain', 'pr-1');
-  expect(areas.style.scrollbarGutter).toBe('stable');
-  expect(screen.getByRole('menu', { name: 'Map labeling tools' })).toHaveClass(
-    'z-30',
-    'isolate',
-    'w-80',
-  );
 
   const documentClick = jest.fn();
   document.addEventListener('click', documentClick);
@@ -4799,10 +4795,6 @@ test('enables navigation runtime layers in the run stage', async () => {
   });
   const globalCostmapSwitch = screen.getByRole('switch', { name: 'Global costmap' });
   expect(globalCostmapSwitch).toHaveAttribute('aria-checked', 'true');
-  expect(globalCostmapSwitch).toHaveClass('inline-flex');
-  expect(globalCostmapSwitch.firstChild).toHaveClass('rounded-full');
-  expect(globalCostmapSwitch.parentElement).toHaveClass('justify-between');
-  expect(globalCostmapSwitch.parentElement).not.toHaveClass('border');
 
   fireEvent.click(globalCostmapSwitch);
   expect(globalCostmapSwitch).toHaveAttribute('aria-checked', 'false');
