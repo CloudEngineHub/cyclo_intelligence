@@ -16,7 +16,7 @@
 
 import { StrictMode } from 'react';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import MissionCanvasPage, { assembleMissionBtFilesForSave } from './MissionCanvasPage';
+import AutonomyStudioPage from './AutonomyStudioPage';
 import {
   cancelNavigateToPoseGoal,
   configureDesignLocalizationAmcl,
@@ -55,8 +55,8 @@ import {
 } from '../utils/navigationMissionsApi';
 
 const mockMapViewer = jest.fn(() => <div>Mission Canvas Map</div>);
-const mockStandaloneBtWorkspace = jest.fn(() => (
-  <div data-testid="standalone-bt-workspace">Standalone BT Workspace</div>
+const mockActionCanvasWorkspace = jest.fn(() => (
+  <div data-testid="action-canvas-workspace">Action Canvas Workspace</div>
 ));
 const mockPublishRosTopic = jest.fn();
 const mockCallService = jest.fn();
@@ -125,9 +125,9 @@ jest.mock('../components/navigation/MapViewer', () => ({
   MapViewer: (props) => mockMapViewer(props),
 }));
 
-jest.mock('../components/navigation/StandaloneBtWorkspace', () => ({
+jest.mock('../components/navigation/ActionCanvasWorkspace', () => ({
   __esModule: true,
-  default: (props) => mockStandaloneBtWorkspace(props),
+  default: (props) => mockActionCanvasWorkspace(props),
 }));
 
 jest.mock('../utils/navigationApi', () => ({
@@ -344,8 +344,8 @@ beforeEach(() => {
   startNavigation.mockResolvedValue({ ok: true });
   stopNavigation.mockResolvedValue({ ok: true });
   mockMapViewer.mockImplementation(() => <div>Mission Canvas Map</div>);
-  mockStandaloneBtWorkspace.mockImplementation(() => (
-    <div data-testid="standalone-bt-workspace">Standalone BT Workspace</div>
+  mockActionCanvasWorkspace.mockImplementation(() => (
+    <div data-testid="action-canvas-workspace">Action Canvas Workspace</div>
   ));
 });
 
@@ -356,7 +356,7 @@ afterEach(() => {
 });
 
 test('renders Autonomy Studio with the Mission Canvas workspace', async () => {
-  render(<MissionCanvasPage />);
+  render(<AutonomyStudioPage />);
 
   expect(screen.getByRole('heading', { name: 'Autonomy Studio' })).toBeInTheDocument();
   expect(screen.getByText('Mission Canvas Map')).toBeInTheDocument();
@@ -404,7 +404,7 @@ test('shows a lightweight Autonomy Studio workspace chooser on a fresh entry', (
   const onBackHome = jest.fn();
 
   render(
-    <MissionCanvasPage
+    <AutonomyStudioPage
       onBackHome={onBackHome}
       showWorkspaceChooser
     />,
@@ -429,7 +429,7 @@ test('shows a lightweight Autonomy Studio workspace chooser on a fresh entry', (
   // The chooser is intentionally lightweight. ROS/map work starts only after
   // the user selects the map-bound Mission Canvas workspace.
   expect(mockMapViewer).not.toHaveBeenCalled();
-  expect(mockStandaloneBtWorkspace).not.toHaveBeenCalled();
+  expect(mockActionCanvasWorkspace).not.toHaveBeenCalled();
   expect(getServiceStatus).not.toHaveBeenCalled();
   expect(getPgmFiles).not.toHaveBeenCalled();
   expect(getPgmImage).not.toHaveBeenCalled();
@@ -439,18 +439,18 @@ test('shows a lightweight Autonomy Studio workspace chooser on a fresh entry', (
 });
 
 test('opens the mapless Action Canvas from the Autonomy Studio chooser', async () => {
-  render(<MissionCanvasPage showWorkspaceChooser />);
+  render(<AutonomyStudioPage showWorkspaceChooser />);
 
   fireEvent.click(screen.getByRole('button', { name: 'Open Action Canvas' }));
 
-  expect(screen.getByTestId('standalone-bt-workspace')).toBeInTheDocument();
+  expect(screen.getByTestId('action-canvas-workspace')).toBeInTheDocument();
   expect(screen.queryByText('Choose a workspace')).not.toBeInTheDocument();
-  expect(mockStandaloneBtWorkspace).toHaveBeenLastCalledWith(expect.objectContaining({
+  expect(mockActionCanvasWorkspace).toHaveBeenLastCalledWith(expect.objectContaining({
     isActive: true,
     title: 'Action Canvas',
-    variant: 'mission-canvas',
+    variant: 'autonomy-studio',
   }));
-  expect(mockStandaloneBtWorkspace.mock.calls.at(-1)[0]).not.toHaveProperty('subtitle');
+  expect(mockActionCanvasWorkspace.mock.calls.at(-1)[0]).not.toHaveProperty('subtitle');
   expect(screen.queryByRole('tablist')).not.toBeInTheDocument();
   expect(screen.queryByRole('tab', { name: 'Mapping' })).not.toBeInTheDocument();
   expect(screen.queryByRole('tab', { name: 'Action Canvas' })).not.toBeInTheDocument();
@@ -464,12 +464,12 @@ test('opens the mapless Action Canvas from the Autonomy Studio chooser', async (
   expect(screen.getByRole('button', { name: 'Back to workspace chooser' }))
     .toBeInTheDocument();
   await waitFor(() => expect(
-    JSON.parse(window.sessionStorage.getItem('mission_canvas_session')).workspaceKind,
-  ).toBe('standalone_bt'));
+    JSON.parse(window.sessionStorage.getItem('autonomy_studio_session')).workspaceKind,
+  ).toBe('action_canvas'));
 });
 
 test('opens the Mapping stage from the Autonomy Studio chooser card', async () => {
-  render(<MissionCanvasPage showWorkspaceChooser />);
+  render(<AutonomyStudioPage showWorkspaceChooser />);
 
   fireEvent.click(screen.getByRole('button', { name: 'Open Mission Canvas' }));
 
@@ -483,18 +483,18 @@ test('opens the Mapping stage from the Autonomy Studio chooser card', async () =
   expect(within(stageNavigation).queryByRole('tab', { name: 'Action Canvas' }))
     .not.toBeInTheDocument();
   expect(screen.getByText('Mission Canvas Map')).toBeInTheDocument();
-  expect(screen.queryByTestId('standalone-bt-workspace')).not.toBeInTheDocument();
+  expect(screen.queryByTestId('action-canvas-workspace')).not.toBeInTheDocument();
   await waitFor(() => {
     expect(getServiceStatus).toHaveBeenCalled();
     expect(getPgmFiles).toHaveBeenCalled();
     expect(
-      JSON.parse(window.sessionStorage.getItem('mission_canvas_session')).workspaceKind,
+      JSON.parse(window.sessionStorage.getItem('autonomy_studio_session')).workspaceKind,
     ).toBe('mission');
   });
 });
 
 test('places the Back icon, robot brand, and Autonomy Studio title in the workspace header', async () => {
-  render(<MissionCanvasPage onBackHome={jest.fn()} />);
+  render(<AutonomyStudioPage onBackHome={jest.fn()} />);
   await waitFor(() => {
     expect(getServiceStatus).toHaveBeenCalled();
     expect(getPgmFiles).toHaveBeenCalled();
@@ -509,7 +509,7 @@ test('places the Back icon, robot brand, and Autonomy Studio title in the worksp
   expect(backToChooserButton.querySelector('svg')).toHaveAttribute('aria-hidden', 'true');
   expect(within(backToChooserButton).queryByText('Back to workspace chooser')).not.toBeInTheDocument();
 
-  const robotBrandIcon = within(topHeader).getByTestId('mission-canvas-brand-icon');
+  const robotBrandIcon = within(topHeader).getByTestId('autonomy-studio-brand-icon');
   const autonomyStudioTitle = within(topHeader).getByRole('heading', {
     name: 'Autonomy Studio',
   });
@@ -533,7 +533,7 @@ test('places the Back icon, robot brand, and Autonomy Studio title in the worksp
 test('returns a clean direct workspace to the chooser before returning Home', async () => {
   const onBackHome = jest.fn();
 
-  render(<MissionCanvasPage onBackHome={onBackHome} />);
+  render(<AutonomyStudioPage onBackHome={onBackHome} />);
   await waitFor(() => {
     expect(getServiceStatus).toHaveBeenCalled();
     expect(getPgmFiles).toHaveBeenCalled();
@@ -557,7 +557,7 @@ test('guards returning to the chooser with the existing unsaved Design dialog', 
     files: [{ path: 'factory.pgm', name: 'factory.pgm' }],
   });
 
-  render(<MissionCanvasPage onBackHome={onBackHome} />);
+  render(<AutonomyStudioPage onBackHome={onBackHome} />);
 
   fireEvent.click(screen.getByRole('tab', { name: 'Design' }));
   fireEvent.click(screen.getByRole('button', { name: 'Load Map' }));
@@ -601,7 +601,7 @@ test('keeps unsaved Map Edit changes in place when the chooser is requested', as
     pixels_base64: '/g==',
   });
 
-  render(<MissionCanvasPage onBackHome={onBackHome} />);
+  render(<AutonomyStudioPage onBackHome={onBackHome} />);
   await openMappingEditorAndSelect();
   fireEvent.click(screen.getByRole('button', { name: 'Map Edit' }));
   fireEvent.click(screen.getByRole('button', { name: 'Add Obstacle' }));
@@ -631,7 +631,7 @@ test.each([
   runRuntimeOwned,
 ) => {
   const onBackHome = jest.fn();
-  window.sessionStorage.setItem('mission_canvas_session', JSON.stringify({
+  window.sessionStorage.setItem('autonomy_studio_session', JSON.stringify({
     workspaceKind: 'mission',
     workspaceStage,
     navigationRuntimeMode: workspaceStage,
@@ -640,7 +640,7 @@ test.each([
   }));
   getServiceStatus.mockResolvedValue({ is_up: true, mode: statusMode });
 
-  render(<MissionCanvasPage onBackHome={onBackHome} />);
+  render(<AutonomyStudioPage onBackHome={onBackHome} />);
   await waitFor(() => expect(getServiceStatus).toHaveBeenCalled());
   if (workspaceStage === 'mapping') {
     await waitFor(() => expect(screen.getByText('Status: running')).toBeInTheDocument());
@@ -657,7 +657,7 @@ test.each([
 
 test('keeps a restored runtime mode guarded while status confirmation is pending', async () => {
   const onBackHome = jest.fn();
-  window.sessionStorage.setItem('mission_canvas_session', JSON.stringify({
+  window.sessionStorage.setItem('autonomy_studio_session', JSON.stringify({
     workspaceKind: 'mission',
     workspaceStage: 'mapping',
     navigationRuntimeMode: 'mapping',
@@ -666,7 +666,7 @@ test('keeps a restored runtime mode guarded while status confirmation is pending
   }));
   getServiceStatus.mockReturnValue(new Promise(() => {}));
 
-  render(<MissionCanvasPage onBackHome={onBackHome} />);
+  render(<AutonomyStudioPage onBackHome={onBackHome} />);
   await waitFor(() => expect(getServiceStatus).toHaveBeenCalled());
 
   // The first status response can lag behind a successful runtime start. Keep
@@ -691,7 +691,7 @@ test('waits for an in-flight Mission operation before returning to the chooser',
     finishStartMapping = resolve;
   }));
 
-  render(<MissionCanvasPage onBackHome={onBackHome} />);
+  render(<AutonomyStudioPage onBackHome={onBackHome} />);
   await waitFor(() => expect(screen.getByRole('button', { name: 'Start Mapping' })).toBeEnabled());
 
   fireEvent.click(screen.getByRole('button', { name: 'Start Mapping' }));
@@ -715,9 +715,9 @@ test('waits for an in-flight Mission operation before returning to the chooser',
 test('uses Action Canvas exit state to guard returning to the chooser', async () => {
   const onBackHome = jest.fn();
 
-  render(<MissionCanvasPage onBackHome={onBackHome} showWorkspaceChooser />);
+  render(<AutonomyStudioPage onBackHome={onBackHome} showWorkspaceChooser />);
   fireEvent.click(screen.getByRole('button', { name: 'Open Action Canvas' }));
-  const exitStateChange = mockStandaloneBtWorkspace.mock.calls.at(-1)[0].onExitStateChange;
+  const exitStateChange = mockActionCanvasWorkspace.mock.calls.at(-1)[0].onExitStateChange;
 
   act(() => exitStateChange({ active: true, busy: false }));
   fireEvent.click(screen.getByRole('button', { name: 'Back to workspace chooser' }));
@@ -738,7 +738,7 @@ test('uses Action Canvas exit state to guard returning to the chooser', async ()
 });
 
 test('shows only grouped navigation and mission stages inside Mission Canvas', () => {
-  render(<MissionCanvasPage />);
+  render(<AutonomyStudioPage />);
 
   const tablist = screen.getByRole('tablist', { name: 'Mission Canvas stages' });
   expect(within(tablist).getByText('NAVIGATION')).toBeInTheDocument();
@@ -757,14 +757,14 @@ test('shows only grouped navigation and mission stages inside Mission Canvas', (
 });
 
 test('restores the standalone workspace from the Mission Canvas session', () => {
-  window.sessionStorage.setItem('mission_canvas_session', JSON.stringify({
-    workspaceKind: 'standalone_bt',
+  window.sessionStorage.setItem('autonomy_studio_session', JSON.stringify({
+    workspaceKind: 'action_canvas',
     workspaceStage: 'authoring',
   }));
 
-  render(<MissionCanvasPage />);
+  render(<AutonomyStudioPage />);
 
-  expect(screen.getByTestId('standalone-bt-workspace')).toBeInTheDocument();
+  expect(screen.getByTestId('action-canvas-workspace')).toBeInTheDocument();
   expect(screen.queryByRole('tablist')).not.toBeInTheDocument();
   expect(screen.queryByRole('tab', { name: 'Design' })).not.toBeInTheDocument();
   expect(screen.queryByText('Mission Canvas Map')).not.toBeInTheDocument();
@@ -777,21 +777,21 @@ test('restores the standalone workspace from the Mission Canvas session', () => 
 });
 
 test('defaults legacy Mission Canvas sessions without workspaceKind to Mission', () => {
-  window.sessionStorage.setItem('mission_canvas_session', JSON.stringify({
+  window.sessionStorage.setItem('autonomy_studio_session', JSON.stringify({
     workspaceStage: 'authoring',
     mapName: 'factory',
   }));
 
-  render(<MissionCanvasPage />);
+  render(<AutonomyStudioPage />);
 
   expect(screen.getByRole('tab', { name: 'Design' })).toHaveAttribute('aria-selected', 'true');
   expect(screen.queryByRole('tab', { name: 'Action Canvas' })).not.toBeInTheDocument();
   expect(screen.getByText('Mission Canvas Map')).toBeInTheDocument();
-  expect(screen.queryByTestId('standalone-bt-workspace')).not.toBeInTheDocument();
+  expect(screen.queryByTestId('action-canvas-workspace')).not.toBeInTheDocument();
 });
 
 test('updates mapping topics when layer toggles change', async () => {
-  render(<MissionCanvasPage />);
+  render(<AutonomyStudioPage />);
 
   expect(screen.getByText('/scan')).toBeInTheDocument();
   expect(screen.getByText('/pose')).toBeInTheDocument();
@@ -837,7 +837,7 @@ test('shows waypoint authoring panels without Design BT runtime controls', async
     mockMapViewer.mock.calls[mockMapViewer.mock.calls.length - 1][0]
   );
 
-  render(<MissionCanvasPage />);
+  render(<AutonomyStudioPage />);
 
   fireEvent.click(screen.getByRole('tab', { name: 'Design' }));
 
@@ -897,14 +897,14 @@ test('keeps Waypoints empty on first Design entry until a map and mission are lo
     }],
   });
   window.sessionStorage.setItem('cyclo_intelligence.robot_type', 'ffw_sg2');
-  window.sessionStorage.setItem('mission_canvas_session', JSON.stringify({
+  window.sessionStorage.setItem('autonomy_studio_session', JSON.stringify({
     workspaceStage: 'authoring',
     mapName: 'map',
     missionName: 'Mission1',
     designMapPath: 'map.pgm',
   }));
 
-  render(<MissionCanvasPage />);
+  render(<AutonomyStudioPage />);
   expect(screen.getByRole('tab', { name: 'Design' })).toHaveAttribute('aria-selected', 'true');
   await waitFor(() => expect(getServiceStatus).toHaveBeenCalled());
 
@@ -916,7 +916,7 @@ test('keeps Waypoints empty on first Design entry until a map and mission are lo
 });
 
 test('does not start or stop the BT runtime while entering Design', async () => {
-  render(<MissionCanvasPage />);
+  render(<AutonomyStudioPage />);
 
   fireEvent.click(screen.getByRole('tab', { name: 'Design' }));
 
@@ -937,7 +937,7 @@ test('does not surface BT execution topics in Design', async () => {
     raw: 'up',
   }));
 
-  render(<MissionCanvasPage />);
+  render(<AutonomyStudioPage />);
 
   fireEvent.click(screen.getByRole('tab', { name: 'Design' }));
 
@@ -984,7 +984,7 @@ test('loads a saved map into the design stage', async () => {
     missions: ['chestnut', 'default'],
   });
 
-  render(<MissionCanvasPage />);
+  render(<AutonomyStudioPage />);
 
   fireEvent.click(screen.getByRole('tab', { name: 'Design' }));
   fireEvent.click(screen.getByRole('button', { name: 'Load Map' }));
@@ -1049,7 +1049,7 @@ test('prefers the active design mission when opening Run', async () => {
     metadata: {},
   }));
 
-  render(<MissionCanvasPage />);
+  render(<AutonomyStudioPage />);
 
   fireEvent.click(screen.getByRole('tab', { name: 'Design' }));
   fireEvent.click(screen.getByRole('button', { name: 'Load Map' }));
@@ -1071,7 +1071,7 @@ test('offers a fresh default mission for a map with no missions', async () => {
   });
   getNavigationMissions.mockResolvedValue({ map_name: 'factory', missions: [] });
 
-  render(<MissionCanvasPage />);
+  render(<AutonomyStudioPage />);
 
   fireEvent.click(screen.getByRole('tab', { name: 'Design' }));
   fireEvent.click(screen.getByRole('button', { name: 'Load Map' }));
@@ -1103,7 +1103,7 @@ test('names a not-yet-saved mission through the save dialog', async () => {
     metadata: {},
   }));
 
-  render(<MissionCanvasPage />);
+  render(<AutonomyStudioPage />);
 
   fireEvent.click(screen.getByRole('tab', { name: 'Design' }));
   fireEvent.click(screen.getByRole('button', { name: 'Load Map' }));
@@ -1152,7 +1152,7 @@ test('does not overwrite an existing catalog mission when naming an unsaved miss
     metadata: {},
   });
 
-  render(<MissionCanvasPage />);
+  render(<AutonomyStudioPage />);
 
   fireEvent.click(screen.getByRole('tab', { name: 'Design' }));
   fireEvent.click(screen.getByRole('button', { name: 'Load Map' }));
@@ -1193,7 +1193,7 @@ test('starts a fresh mission and guards unsaved changes', async () => {
     metadata: {},
   });
 
-  render(<MissionCanvasPage />);
+  render(<AutonomyStudioPage />);
 
   fireEvent.click(screen.getByRole('tab', { name: 'Design' }));
   fireEvent.click(screen.getByRole('button', { name: 'Load Map' }));
@@ -1251,7 +1251,7 @@ test('temporarily replaces Design Load Map with unsaved confirmation', async () 
     metadata: {},
   }));
 
-  render(<MissionCanvasPage />);
+  render(<AutonomyStudioPage />);
   fireEvent.click(screen.getByRole('tab', { name: 'Design' }));
   fireEvent.click(screen.getByRole('button', { name: 'Load Map' }));
   const initialMapSelect = await screen.findByRole('combobox', {
@@ -1307,7 +1307,7 @@ test('renames the active mission from the rail', async () => {
     .mockResolvedValueOnce({ map_name: 'factory', missions: ['picnic'] })
     .mockResolvedValue({ map_name: 'factory', missions: ['evening'] });
 
-  render(<MissionCanvasPage />);
+  render(<AutonomyStudioPage />);
 
   fireEvent.click(screen.getByRole('tab', { name: 'Design' }));
   fireEvent.click(screen.getByRole('button', { name: 'Load Map' }));
@@ -1341,7 +1341,7 @@ test('duplicates and deletes the active mission from the rail', async () => {
     .mockResolvedValueOnce({ map_name: 'factory', missions: ['chestnut', 'chestnut-copy', 'default'] })
     .mockResolvedValue({ map_name: 'factory', missions: ['chestnut-copy', 'default'] });
 
-  render(<MissionCanvasPage />);
+  render(<AutonomyStudioPage />);
 
   fireEvent.click(screen.getByRole('tab', { name: 'Design' }));
   fireEvent.click(screen.getByRole('button', { name: 'Load Map' }));
@@ -1430,7 +1430,7 @@ test('edits mission manifest waypoints without legacy spot persistence', async (
     content: `<root><BehaviorTree ID="${mapName}:${path}"/></root>`,
   }));
 
-  render(<MissionCanvasPage />);
+  render(<AutonomyStudioPage />);
 
   fireEvent.click(screen.getByRole('tab', { name: 'Design' }));
   fireEvent.click(screen.getByRole('button', { name: 'Load Map' }));
@@ -1529,7 +1529,7 @@ test('hides loaded design waypoints after returning to mapping stage', async () 
     }] : [],
   }));
 
-  render(<MissionCanvasPage />);
+  render(<AutonomyStudioPage />);
 
   fireEvent.click(screen.getByRole('tab', { name: 'Design' }));
   fireEvent.click(screen.getByRole('button', { name: 'Load Map' }));
@@ -1576,7 +1576,7 @@ test('renders legacy pixel-coordinate waypoints in loaded map coordinates', asyn
     }],
   });
 
-  render(<MissionCanvasPage />);
+  render(<AutonomyStudioPage />);
 
   fireEvent.click(screen.getByRole('tab', { name: 'Design' }));
   fireEvent.click(screen.getByRole('button', { name: 'Load Map' }));
@@ -1609,7 +1609,7 @@ test('shows waypoint actions in Waypoints after placing a waypoint', async () =>
     pixels_base64: 'AA==',
   });
 
-  render(<MissionCanvasPage />);
+  render(<AutonomyStudioPage />);
 
   fireEvent.click(screen.getByRole('tab', { name: 'Design' }));
   fireEvent.click(screen.getByRole('button', { name: 'Load Map' }));
@@ -1787,7 +1787,7 @@ test('undoes and redoes Design waypoint edits from buttons and shortcuts', async
     files: [{ path: 'factory.pgm', name: 'factory.pgm' }],
   });
 
-  render(<MissionCanvasPage />);
+  render(<AutonomyStudioPage />);
 
   fireEvent.click(screen.getByRole('tab', { name: 'Design' }));
   fireEvent.click(screen.getByRole('button', { name: 'Load Map' }));
@@ -1849,7 +1849,7 @@ test('opens waypoint BT from the rail while map selection stays runtime-independ
     }] : [],
   }));
 
-  render(<MissionCanvasPage />);
+  render(<AutonomyStudioPage />);
 
   fireEvent.click(screen.getByRole('tab', { name: 'Design' }));
   fireEvent.click(screen.getByRole('button', { name: 'Load Map' }));
@@ -1985,7 +1985,7 @@ test('loads and saves each waypoint XML through its mission-local storage path',
     exists: true,
   }));
 
-  render(<MissionCanvasPage />);
+  render(<AutonomyStudioPage />);
   fireEvent.click(screen.getByRole('tab', { name: 'Design' }));
   fireEvent.click(screen.getByRole('button', { name: 'Load Map' }));
   await screen.findByRole('combobox', { name: 'Design mission map file' });
@@ -2170,7 +2170,7 @@ test('keeps a waypoint XML library separate from its changeable runtime default'
     return Promise.resolve({ path, content: '', exists: false, revision: serverRevision });
   });
 
-  render(<MissionCanvasPage />);
+  render(<AutonomyStudioPage />);
   fireEvent.click(screen.getByRole('tab', { name: 'Design' }));
   fireEvent.click(screen.getByRole('button', { name: 'Load Map' }));
   await screen.findByRole('combobox', { name: 'Design mission map file' });
@@ -2323,7 +2323,7 @@ test('saves the latest local BT snapshot after closing the editor', async () => 
     exists: true,
   }));
 
-  render(<MissionCanvasPage />);
+  render(<AutonomyStudioPage />);
   fireEvent.click(screen.getByRole('tab', { name: 'Design' }));
   fireEvent.click(screen.getByRole('button', { name: 'Load Map' }));
   await screen.findByRole('combobox', { name: 'Design mission map file' });
@@ -2380,7 +2380,7 @@ test('saves the local BT restored by Design undo', async () => {
     exists: true,
   }));
 
-  render(<MissionCanvasPage />);
+  render(<AutonomyStudioPage />);
   fireEvent.click(screen.getByRole('tab', { name: 'Design' }));
   fireEvent.click(screen.getByRole('button', { name: 'Load Map' }));
   await screen.findByRole('combobox', { name: 'Design mission map file' });
@@ -2437,7 +2437,7 @@ test('blocks saving when any local BT file fails to load', async () => {
     return Promise.resolve({ path, content: '<root/>', exists: true });
   });
 
-  render(<MissionCanvasPage />);
+  render(<AutonomyStudioPage />);
   fireEvent.click(screen.getByRole('tab', { name: 'Design' }));
   fireEvent.click(screen.getByRole('button', { name: 'Load Map' }));
   await screen.findByRole('combobox', { name: 'Design mission map file' });
@@ -2490,7 +2490,7 @@ test('keeps edits made while a mission save is in flight', async () => {
     return new Promise((resolve) => { finishLocalSave = resolve; });
   });
 
-  render(<MissionCanvasPage />);
+  render(<AutonomyStudioPage />);
   fireEvent.click(screen.getByRole('tab', { name: 'Design' }));
   fireEvent.click(screen.getByRole('button', { name: 'Load Map' }));
   await screen.findByRole('combobox', { name: 'Design mission map file' });
@@ -2592,7 +2592,7 @@ test('retries a partially completed mission save from the latest server revision
     return Promise.resolve({ exists: true, revision: 8 });
   });
 
-  render(<MissionCanvasPage />);
+  render(<AutonomyStudioPage />);
   fireEvent.click(screen.getByRole('tab', { name: 'Design' }));
   fireEvent.click(screen.getByRole('button', { name: 'Load Map' }));
   await screen.findByRole('combobox', { name: 'Design mission map file' });
@@ -2635,7 +2635,7 @@ test('locks stage navigation while At Robot localization is starting', async () 
     pixels_base64: 'AA==',
   });
 
-  render(<MissionCanvasPage />);
+  render(<AutonomyStudioPage />);
 
   fireEvent.click(screen.getByRole('tab', { name: 'Design' }));
   fireEvent.click(screen.getByRole('button', { name: 'Load Map' }));
@@ -2713,7 +2713,7 @@ test('creates a waypoint at robot with automatic localization from the waypoint 
     pixels_base64: 'AA==',
   });
 
-  render(<MissionCanvasPage />);
+  render(<AutonomyStudioPage />);
 
   fireEvent.click(screen.getByRole('tab', { name: 'Design' }));
   fireEvent.click(screen.getByRole('button', { name: 'Load Map' }));
@@ -2860,7 +2860,7 @@ test.each([
     });
   }
 
-  render(<MissionCanvasPage />);
+  render(<AutonomyStudioPage />);
   fireEvent.click(screen.getByRole('tab', { name: 'Design' }));
   fireEvent.click(screen.getByRole('button', { name: 'Load Map' }));
   await screen.findByRole('combobox', { name: 'Design mission map file' });
@@ -2968,7 +2968,7 @@ test('clears stale robot pose before a second at-robot waypoint attempt', async 
       return { ok: true };
     });
 
-  render(<MissionCanvasPage />);
+  render(<AutonomyStudioPage />);
 
   fireEvent.click(screen.getByRole('tab', { name: 'Design' }));
   fireEvent.click(screen.getByRole('button', { name: 'Load Map' }));
@@ -3039,7 +3039,7 @@ test('syncs design localization state from navigation status mode', async () => 
     pixels_base64: 'AA==',
   });
 
-  render(<MissionCanvasPage />);
+  render(<AutonomyStudioPage />);
 
   // The map must be loaded in-session (it is not auto-restored on refresh).
   fireEvent.click(screen.getByRole('tab', { name: 'Design' }));
@@ -3084,7 +3084,7 @@ test('creates a waypoint at the current robot pose from the design toolbar', asy
     pixels_base64: 'AA==',
   });
 
-  render(<MissionCanvasPage />);
+  render(<AutonomyStudioPage />);
 
   fireEvent.click(screen.getByRole('tab', { name: 'Design' }));
   fireEvent.click(screen.getByRole('button', { name: 'Load Map' }));
@@ -3186,7 +3186,7 @@ function mockPersistedRouteMission({ closed = false } = {}) {
 }
 
 async function loadPersistedRouteDesign() {
-  render(<MissionCanvasPage />);
+  render(<AutonomyStudioPage />);
   fireEvent.click(screen.getByRole('tab', { name: 'Design' }));
   fireEvent.click(screen.getByRole('button', { name: 'Load Map' }));
   const loadDialog = await screen.findByRole('dialog', { name: 'Load Map' });
@@ -3475,7 +3475,7 @@ test('edits the mission route directly on the map', async () => {
     ] : [],
   }));
 
-  render(<MissionCanvasPage />);
+  render(<AutonomyStudioPage />);
 
   fireEvent.click(screen.getByRole('tab', { name: 'Design' }));
   fireEvent.click(screen.getByRole('button', { name: 'Load Map' }));
@@ -3604,7 +3604,7 @@ test('opens a closed loop and clears the route without deleting waypoints', asyn
     ] : [],
   }));
 
-  render(<MissionCanvasPage />);
+  render(<AutonomyStudioPage />);
 
   fireEvent.click(screen.getByRole('tab', { name: 'Design' }));
   fireEvent.click(screen.getByRole('button', { name: 'Load Map' }));
@@ -3657,7 +3657,7 @@ test('opens a closed loop and clears the route without deleting waypoints', asyn
 });
 
 test('starts mapping mode from Mission Canvas', async () => {
-  render(<MissionCanvasPage />);
+  render(<AutonomyStudioPage />);
 
   fireEvent.click(screen.getByRole('button', { name: 'Start Mapping' }));
 
@@ -3669,7 +3669,7 @@ test('locks mapping controls while mapping is running', async () => {
     .mockResolvedValueOnce({ is_up: true, mode: 'map' })
     .mockResolvedValueOnce({ is_up: false });
 
-  render(<MissionCanvasPage />);
+  render(<AutonomyStudioPage />);
 
   await waitFor(() => expect(screen.getByRole('button', { name: 'Stop' })).toBeEnabled());
   expect(screen.getByRole('button', { name: 'Save Map' })).toBeEnabled();
@@ -3687,7 +3687,7 @@ test('locks mapping controls while mapping is running', async () => {
 });
 
 test('publishes keyboard teleop commands without mapping runtime', async () => {
-  render(<MissionCanvasPage />);
+  render(<AutonomyStudioPage />);
 
   const teleop = screen.getByRole('group', { name: 'Mobile Teleop' });
   await waitFor(() => expect(screen.getByRole('button', { name: 'Activate' })).toBeEnabled());
@@ -3729,7 +3729,7 @@ test('publishes keyboard teleop commands without mapping runtime', async () => {
 test('asks for a map name before saving from Mission Canvas', async () => {
   getServiceStatus.mockResolvedValueOnce({ is_up: true, mode: 'map' });
 
-  render(<MissionCanvasPage />);
+  render(<AutonomyStudioPage />);
 
   await waitFor(() => expect(screen.getByRole('button', { name: 'Save Map' })).toBeEnabled());
 
@@ -3751,7 +3751,7 @@ test('deletes a saved map from the Mapping HUD behind a warning confirm popup', 
   });
   getNavigationMissions.mockResolvedValue({ map_name: 'factory', missions: ['default', 'patrol'] });
 
-  render(<MissionCanvasPage />);
+  render(<AutonomyStudioPage />);
 
   // The trash icon opens a saved-map list popover; picking a map opens the
   // warning popup (and closes the list).
@@ -3800,7 +3800,7 @@ test('waits for an explicit saved-map selection in the mapping fix editor', asyn
     pixels_base64: 'AA==',
   });
 
-  render(<MissionCanvasPage />);
+  render(<AutonomyStudioPage />);
 
   fireEvent.click(screen.getByRole('tab', { name: 'Map Edit' }));
 
@@ -3845,7 +3845,7 @@ test('cancels the Map Edit load dialog without loading anything', async () => {
     files: [{ path: 'factory.pgm', name: 'factory.pgm' }],
   });
 
-  render(<MissionCanvasPage />);
+  render(<AutonomyStudioPage />);
 
   fireEvent.click(screen.getByRole('tab', { name: 'Map Edit' }));
   await waitFor(() => expect(screen.getByRole('button', { name: 'Load Map' })).toBeEnabled());
@@ -3870,7 +3870,7 @@ test('switches between the Mapping and Map Edit stages via the rail tabs', async
     pixels_base64: 'AA==',
   });
 
-  render(<MissionCanvasPage />);
+  render(<AutonomyStudioPage />);
 
   // Mapping is the default stage: SLAM actions, teleop, and layers visible.
   expect(screen.getByRole('tab', { name: 'Mapping' })).toHaveAttribute('aria-selected', 'true');
@@ -3916,7 +3916,7 @@ test('keeps edit mode when the mapping runtime comes up', async () => {
     pixels_base64: 'AA==',
   });
 
-  render(<MissionCanvasPage />);
+  render(<AutonomyStudioPage />);
 
   await openMappingEditorAndSelect();
   await waitFor(() => expect(getPgmFiles).toHaveBeenCalled());
@@ -3953,7 +3953,7 @@ test('edits and saves loaded map pixels from the fix editor', async () => {
     pixels_base64: '/g==',
   });
 
-  render(<MissionCanvasPage />);
+  render(<AutonomyStudioPage />);
 
   await openMappingEditorAndSelect();
 
@@ -4021,7 +4021,7 @@ test('keeps unsaved Map Edit pixels in place by blocking return to the chooser',
     pixels_base64: '/g==',
   });
 
-  render(<MissionCanvasPage />);
+  render(<AutonomyStudioPage />);
   await openMappingEditorAndSelect();
   fireEvent.click(screen.getByRole('button', { name: 'Map Edit' }));
   fireEvent.click(screen.getByRole('button', { name: 'Add Obstacle' }));
@@ -4035,7 +4035,7 @@ test('keeps unsaved Map Edit pixels in place by blocking return to the chooser',
   fireEvent.click(backToChooserButton);
   expect(screen.getByText('· unsaved')).toBeInTheDocument();
   expect(screen.queryByText('Choose a workspace')).not.toBeInTheDocument();
-  expect(screen.queryByTestId('standalone-bt-workspace')).not.toBeInTheDocument();
+  expect(screen.queryByTestId('action-canvas-workspace')).not.toBeInTheDocument();
 });
 
 test('marks unknown map pixels from the fix editor', async () => {
@@ -4053,7 +4053,7 @@ test('marks unknown map pixels from the fix editor', async () => {
     pixels_base64: '/g==',
   });
 
-  render(<MissionCanvasPage />);
+  render(<AutonomyStudioPage />);
 
   await openMappingEditorAndSelect();
   await waitFor(() => expect(getPgmImage).toHaveBeenCalledWith('factory.pgm'));
@@ -4087,7 +4087,7 @@ test('paints continuous map pixel segments while dragging', async () => {
     pixels_base64: '/v7+',
   });
 
-  render(<MissionCanvasPage />);
+  render(<AutonomyStudioPage />);
 
   await openMappingEditorAndSelect();
 
@@ -4134,7 +4134,7 @@ test('marks free-space areas with automatic color and undo/redo support', async 
     annotations: [],
   });
 
-  render(<MissionCanvasPage />);
+  render(<AutonomyStudioPage />);
 
   await openMappingEditorAndSelect();
 
@@ -4218,7 +4218,7 @@ test('auto-numbers and auto-selects areas created by rectangle drag', async () =
   });
   getMapAnnotations.mockResolvedValue({ path: 'factory.pgm', annotations: [] });
 
-  render(<MissionCanvasPage />);
+  render(<AutonomyStudioPage />);
 
   await openMappingEditorAndSelect();
   await waitFor(() => expect(getMapAnnotations).toHaveBeenCalledWith('factory.pgm'));
@@ -4258,7 +4258,7 @@ test('keeps the saved free-space Area footprint aligned with the full drag selec
   });
   getMapAnnotations.mockResolvedValue({ path: 'factory.pgm', annotations: [] });
 
-  render(<MissionCanvasPage />);
+  render(<AutonomyStudioPage />);
 
   await openMappingEditorAndSelect();
   await waitFor(() => expect(getMapAnnotations).toHaveBeenCalledWith('factory.pgm'));
@@ -4313,7 +4313,7 @@ test('removes an area from the chip list', async () => {
     }],
   });
 
-  render(<MissionCanvasPage />);
+  render(<AutonomyStudioPage />);
 
   await openMappingEditorAndSelect();
 
@@ -4371,7 +4371,7 @@ test('caps the Area list at three rows and isolates scrolled delete actions', as
     })),
   });
 
-  render(<MissionCanvasPage />);
+  render(<AutonomyStudioPage />);
 
   await openMappingEditorAndSelect();
   await waitFor(() => expect(latestMapViewerProps().mapAnnotations).toHaveLength(4));
@@ -4424,7 +4424,7 @@ test('renames a map area from the chip list', async () => {
     }],
   });
 
-  render(<MissionCanvasPage />);
+  render(<AutonomyStudioPage />);
 
   await openMappingEditorAndSelect();
 
@@ -4504,7 +4504,7 @@ test('freezes visible area cells when deleting an overlapping area', async () =>
     ],
   });
 
-  render(<MissionCanvasPage />);
+  render(<AutonomyStudioPage />);
 
   await openMappingEditorAndSelect();
   await waitFor(() => expect(latestMapViewerProps().mapAnnotations).toEqual([
@@ -4561,7 +4561,7 @@ test('extends the selected area with the extend brush', async () => {
     }],
   });
 
-  render(<MissionCanvasPage />);
+  render(<AutonomyStudioPage />);
 
   await openMappingEditorAndSelect();
   await waitFor(() => expect(getMapAnnotations).toHaveBeenCalledWith('factory.pgm'));
@@ -4648,7 +4648,7 @@ test('erases map area pixels with brush drag', async () => {
     }],
   });
 
-  render(<MissionCanvasPage />);
+  render(<AutonomyStudioPage />);
 
   await openMappingEditorAndSelect();
 
@@ -4686,7 +4686,7 @@ test('erases map area pixels with brush drag', async () => {
 test('enables live robot and lidar layers while navigation runtime is active', async () => {
   getServiceStatus.mockResolvedValueOnce({ is_up: true, mode: 'map' });
 
-  render(<MissionCanvasPage />);
+  render(<AutonomyStudioPage />);
 
   await waitFor(() => {
     expect(mockMapViewer.mock.calls.some(([props]) => (
@@ -4739,7 +4739,7 @@ test('anchors Mapping robot, lidar, and TF to the scan-matched SLAM pose', async
     pose: { pose: { position: { x: 2, y: 0, z: 0 }, orientation: { x: 0, y: 0, z: 0, w: 1 } } },
   };
 
-  render(<MissionCanvasPage />);
+  render(<AutonomyStudioPage />);
 
   await waitFor(() => expect(latestMapViewerProps().pose).toMatchObject({
     position: { x: 1.25, y: -0.5 },
@@ -4765,7 +4765,7 @@ test('anchors Mapping robot, lidar, and TF to the scan-matched SLAM pose', async
 test('enables navigation runtime layers in the run stage', async () => {
   getServiceStatus.mockResolvedValueOnce({ is_up: true, mode: 'run' });
 
-  render(<MissionCanvasPage />);
+  render(<AutonomyStudioPage />);
 
   fireEvent.click(screen.getByRole('tab', { name: 'Run' }));
 
@@ -4852,7 +4852,7 @@ test('aligns the Run pose and odom-frame overlays to AMCL instead of stale TF', 
     },
   };
 
-  render(<MissionCanvasPage />);
+  render(<AutonomyStudioPage />);
   fireEvent.click(screen.getByRole('tab', { name: 'Run' }));
 
   await waitFor(() => expect(latestMapViewerProps().pose).toMatchObject({
@@ -4942,7 +4942,7 @@ test('loads a saved map for the run stage', async () => {
     });
   });
 
-  render(<MissionCanvasPage />);
+  render(<AutonomyStudioPage />);
 
   fireEvent.click(screen.getByRole('tab', { name: 'Run' }));
   fireEvent.click(screen.getByRole('button', { name: 'Load Map' }));
@@ -5025,7 +5025,7 @@ test('rejects a Run snapshot assembled from different mission revisions', async 
     revision: path === 'global.xml' ? 7 : 8,
   }));
 
-  render(<MissionCanvasPage />);
+  render(<AutonomyStudioPage />);
   fireEvent.click(screen.getByRole('tab', { name: 'Run' }));
   fireEvent.click(screen.getByRole('button', { name: 'Load Map' }));
   await screen.findByRole('combobox', { name: 'Run mission map file' });
@@ -5063,7 +5063,7 @@ test('allows changing the Run mission while navigation stays active between runs
     metadata: {},
   }));
 
-  render(<MissionCanvasPage />);
+  render(<AutonomyStudioPage />);
 
   fireEvent.click(screen.getByRole('tab', { name: 'Run' }));
   fireEvent.click(screen.getByRole('button', { name: 'Load Map' }));
@@ -5121,7 +5121,7 @@ test('keeps the previous Run snapshot when a mission switch fails', async () => 
     });
   });
 
-  render(<MissionCanvasPage />);
+  render(<AutonomyStudioPage />);
   fireEvent.click(screen.getByRole('tab', { name: 'Run' }));
   fireEvent.click(screen.getByRole('button', { name: 'Load Map' }));
   await screen.findByRole('combobox', { name: 'Run mission map file' });
@@ -5162,7 +5162,7 @@ test('stops an owned Run runtime across a full page refresh', async () => {
     return Promise.resolve({ ok: true, message: 'stopped' });
   });
 
-  const currentDocument = render(<MissionCanvasPage />);
+  const currentDocument = render(<AutonomyStudioPage />);
   fireEvent.click(screen.getByRole('tab', { name: 'Run' }));
   await loadRunMapFromDialog();
   fireEvent.click(screen.getByRole('button', { name: 'Localize' }));
@@ -5174,7 +5174,7 @@ test('stops an owned Run runtime across a full page refresh', async () => {
   fireEvent(window, new Event('pagehide'));
   expect(stopNavigation).toHaveBeenCalledTimes(1);
   expect(stopNavigation).toHaveBeenCalledWith({ keepalive: true });
-  expect(JSON.parse(window.sessionStorage.getItem('mission_canvas_session'))).toEqual(
+  expect(JSON.parse(window.sessionStorage.getItem('autonomy_studio_session'))).toEqual(
     expect.objectContaining({
       navigationRuntimeMode: 'idle',
       runRuntimeOwned: true,
@@ -5189,14 +5189,14 @@ test('stops an owned Run runtime across a full page refresh', async () => {
 
   currentDocument.unmount();
   stopNavigation.mockClear();
-  render(<StrictMode><MissionCanvasPage /></StrictMode>);
+  render(<StrictMode><AutonomyStudioPage /></StrictMode>);
 
   await waitFor(() => expect(
     stopNavigation.mock.calls.some((args) => args.length === 0),
   ).toBe(true));
   expect(stopNavigation.mock.calls.filter((args) => args.length === 0)).toHaveLength(1);
   await waitFor(() => expect(
-    JSON.parse(window.sessionStorage.getItem('mission_canvas_session')),
+    JSON.parse(window.sessionStorage.getItem('autonomy_studio_session')),
   ).toEqual(expect.objectContaining({
     navigationRuntimeMode: 'idle',
     runRuntimeOwned: false,
@@ -5211,7 +5211,7 @@ test('stops Run even when the page refreshes while navigation is starting', asyn
     resolveStart = resolve;
   }));
 
-  const currentDocument = render(<MissionCanvasPage />);
+  const currentDocument = render(<AutonomyStudioPage />);
   fireEvent.click(screen.getByRole('tab', { name: 'Run' }));
   await loadRunMapFromDialog();
   fireEvent.click(screen.getByRole('button', { name: 'Localize' }));
@@ -5219,7 +5219,7 @@ test('stops Run even when the page refreshes while navigation is starting', asyn
 
   fireEvent(window, new Event('pagehide'));
   expect(stopNavigation).toHaveBeenCalledWith({ keepalive: true });
-  expect(JSON.parse(window.sessionStorage.getItem('mission_canvas_session'))).toEqual(
+  expect(JSON.parse(window.sessionStorage.getItem('autonomy_studio_session'))).toEqual(
     expect.objectContaining({
       navigationRuntimeMode: 'idle',
       runRuntimeOwned: true,
@@ -5235,7 +5235,7 @@ test('stops Run even when the page refreshes while navigation is starting', asyn
     ([options]) => options?.keepalive === true,
   )).toHaveLength(2);
   // The late start completion must not overwrite the page-exit fallback.
-  expect(JSON.parse(window.sessionStorage.getItem('mission_canvas_session'))).toEqual(
+  expect(JSON.parse(window.sessionStorage.getItem('autonomy_studio_session'))).toEqual(
     expect.objectContaining({
       navigationRuntimeMode: 'idle',
       runRuntimeOwned: true,
@@ -5251,7 +5251,7 @@ test('retries the page-exit stop after a partially failed navigation start', asy
     rejectStart = reject;
   }));
 
-  const currentDocument = render(<MissionCanvasPage />);
+  const currentDocument = render(<AutonomyStudioPage />);
   fireEvent.click(screen.getByRole('tab', { name: 'Run' }));
   await loadRunMapFromDialog();
   fireEvent.click(screen.getByRole('button', { name: 'Localize' }));
@@ -5266,7 +5266,7 @@ test('retries the page-exit stop after a partially failed navigation start', asy
   expect(stopNavigation.mock.calls.filter(
     ([options]) => options?.keepalive === true,
   )).toHaveLength(2);
-  expect(JSON.parse(window.sessionStorage.getItem('mission_canvas_session'))).toEqual(
+  expect(JSON.parse(window.sessionStorage.getItem('autonomy_studio_session'))).toEqual(
     expect.objectContaining({
       navigationRuntimeMode: 'idle',
       runShutdownPending: true,
@@ -5276,7 +5276,7 @@ test('retries the page-exit stop after a partially failed navigation start', asy
 });
 
 test('does not stop a Mapping runtime when the page exits', async () => {
-  window.sessionStorage.setItem('mission_canvas_session', JSON.stringify({
+  window.sessionStorage.setItem('autonomy_studio_session', JSON.stringify({
     workspaceStage: 'mapping',
     navigationRuntimeMode: 'mapping',
     runRuntimeOwned: true,
@@ -5284,7 +5284,7 @@ test('does not stop a Mapping runtime when the page exits', async () => {
   }));
   getServiceStatus.mockResolvedValue({ is_up: true, mode: 'map' });
 
-  render(<MissionCanvasPage />);
+  render(<AutonomyStudioPage />);
   await waitFor(() => expect(screen.getByText('Status: running')).toBeInTheDocument());
   fireEvent(window, new Event('pagehide'));
 
@@ -5292,7 +5292,7 @@ test('does not stop a Mapping runtime when the page exits', async () => {
 });
 
 test('does not apply an expired Run shutdown marker to a later runtime', async () => {
-  window.sessionStorage.setItem('mission_canvas_session', JSON.stringify({
+  window.sessionStorage.setItem('autonomy_studio_session', JSON.stringify({
     workspaceStage: 'run',
     navigationRuntimeMode: 'idle',
     runRuntimeOwned: true,
@@ -5301,10 +5301,10 @@ test('does not apply an expired Run shutdown marker to a later runtime', async (
   }));
   getServiceStatus.mockResolvedValue({ is_up: true, mode: 'run' });
 
-  render(<MissionCanvasPage />);
+  render(<AutonomyStudioPage />);
   await waitFor(() => expect(screen.getByText('Status: running')).toBeInTheDocument());
   await waitFor(() => expect(
-    JSON.parse(window.sessionStorage.getItem('mission_canvas_session')),
+    JSON.parse(window.sessionStorage.getItem('autonomy_studio_session')),
   ).toEqual(expect.objectContaining({
     runRuntimeOwned: false,
     runShutdownPending: false,
@@ -5341,7 +5341,7 @@ test('lists the mission route waypoints in the run session panel', async () => {
       : { exists: false, map_name: mapName, global_bt: 'global.xml', waypoints: [], metadata: {} },
   ));
 
-  render(<MissionCanvasPage />);
+  render(<AutonomyStudioPage />);
 
   fireEvent.click(screen.getByRole('tab', { name: 'Run' }));
   fireEvent.click(screen.getByRole('button', { name: 'Load Map' }));
@@ -5406,7 +5406,7 @@ test('clears the loaded Run map and mission snapshot when navigation stops', asy
     },
   });
 
-  render(<MissionCanvasPage />);
+  render(<AutonomyStudioPage />);
 
   fireEvent.click(screen.getByRole('tab', { name: 'Run' }));
   fireEvent.click(screen.getByRole('button', { name: 'Load Map' }));
@@ -5471,7 +5471,7 @@ test('clears the loaded Run map and mission snapshot when navigation stops', asy
   expect(within(runSessionPanel).getByRole('combobox', { name: 'Active mission' }))
     .toBeDisabled();
   await waitFor(() => expect(
-    JSON.parse(window.sessionStorage.getItem('mission_canvas_session')).runMissionName,
+    JSON.parse(window.sessionStorage.getItem('autonomy_studio_session')).runMissionName,
   ).toBe(''));
   expect(screen.getByRole('button', { name: 'Localize' })).toBeDisabled();
   expect(screen.getByRole('button', { name: 'Run Mission' })).toBeDisabled();
@@ -5530,7 +5530,7 @@ test('clears the Run snapshot on Stop intent while retaining ownership after a l
     },
   });
 
-  render(<MissionCanvasPage />);
+  render(<AutonomyStudioPage />);
 
   fireEvent.click(screen.getByRole('tab', { name: 'Run' }));
   await loadRunMapFromDialog('factory.pgm');
@@ -5543,7 +5543,7 @@ test('clears the Run snapshot on Stop intent while retaining ownership after a l
   const stopButton = screen.getByRole('button', { name: 'Stop' });
   await waitFor(() => expect(stopButton).toBeEnabled());
   await waitFor(() => expect(
-    JSON.parse(window.sessionStorage.getItem('mission_canvas_session')),
+    JSON.parse(window.sessionStorage.getItem('autonomy_studio_session')),
   ).toEqual(expect.objectContaining({
     navigationRuntimeMode: 'run',
     runRuntimeOwned: true,
@@ -5563,7 +5563,7 @@ test('clears the Run snapshot on Stop intent while retaining ownership after a l
   expect(within(runSessionPanel).getByRole('combobox', { name: 'Active mission' }))
     .toBeDisabled();
   expect(screen.queryByRole('list', { name: 'Mission waypoints' })).not.toBeInTheDocument();
-  expect(JSON.parse(window.sessionStorage.getItem('mission_canvas_session')))
+  expect(JSON.parse(window.sessionStorage.getItem('autonomy_studio_session')))
     .toEqual(expect.objectContaining({
       navigationRuntimeMode: 'run',
       runMissionName: '',
@@ -5578,7 +5578,7 @@ test('clears the Run snapshot on Stop intent while retaining ownership after a l
 
   await waitFor(() => expect(screen.getByText('Status: running')).toBeInTheDocument());
   await waitFor(() => expect(stopButton).toBeEnabled());
-  expect(JSON.parse(window.sessionStorage.getItem('mission_canvas_session')))
+  expect(JSON.parse(window.sessionStorage.getItem('autonomy_studio_session')))
     .toEqual(expect.objectContaining({
       navigationRuntimeMode: 'run',
       runMissionName: '',
@@ -5611,7 +5611,7 @@ test('hides run waypoints with the map after leaving and returning to Run', asyn
       : { exists: false, map_name: mapName, global_bt: 'global.xml', waypoints: [], metadata: {} },
   ));
 
-  render(<MissionCanvasPage />);
+  render(<AutonomyStudioPage />);
 
   fireEvent.click(screen.getByRole('tab', { name: 'Run' }));
   // The BT lifecycle is run-owned (auto activate/release) — no manual panel here.
@@ -5653,7 +5653,7 @@ test('stops Run and clears its pending pose gesture before switching to Design',
     return Promise.resolve({ ok: true, message: 'stopped' });
   });
 
-  render(<MissionCanvasPage />);
+  render(<AutonomyStudioPage />);
 
   fireEvent.click(screen.getByRole('tab', { name: 'Run' }));
   await loadRunMapFromDialog('factory.pgm');
@@ -5668,7 +5668,9 @@ test('stops Run and clears its pending pose gesture before switching to Design',
   fireEvent.click(screen.getByRole('tab', { name: 'Design' }));
 
   await waitFor(() => expect(latestMapViewerProps().interactionMode).toBe('view'));
-  expect(screen.getByRole('tab', { name: 'Design' })).toHaveAttribute('aria-selected', 'true');
+  await waitFor(() => (
+    expect(screen.getByRole('tab', { name: 'Design' })).toHaveAttribute('aria-selected', 'true')
+  ));
   await waitFor(() => expect(stopNavigation).toHaveBeenCalledTimes(1));
   await act(async () => {
     latestMapViewerProps().onMapClick(1, 2);
@@ -5678,7 +5680,7 @@ test('stops Run and clears its pending pose gesture before switching to Design',
   expect(sendInitialPoseEstimate).not.toHaveBeenCalled();
   expect(createNavigationSpot).not.toHaveBeenCalled();
   expect(navigationUp).toBe(false);
-  expect(JSON.parse(window.sessionStorage.getItem('mission_canvas_session')))
+  expect(JSON.parse(window.sessionStorage.getItem('autonomy_studio_session')))
     .toEqual(expect.objectContaining({
       workspaceStage: 'authoring',
       navigationRuntimeMode: 'idle',
@@ -5734,7 +5736,7 @@ test('gates the mission run on an initial robot pose', async () => {
     return { ok: true };
   });
 
-  render(<MissionCanvasPage />);
+  render(<AutonomyStudioPage />);
 
   fireEvent.click(screen.getByRole('tab', { name: 'Run' }));
   fireEvent.click(screen.getByRole('button', { name: 'Load Map' }));
@@ -5862,7 +5864,7 @@ test('run mission activates the BT node on demand and releases it on stop', asyn
     return Promise.resolve({ success: true });
   });
 
-  const { rerender } = render(<MissionCanvasPage />);
+  const { rerender } = render(<AutonomyStudioPage />);
 
   fireEvent.click(screen.getByRole('tab', { name: 'Run' }));
   fireEvent.click(screen.getByRole('button', { name: 'Load Map' }));
@@ -5931,7 +5933,7 @@ test('run mission activates the BT node on demand and releases it on stop', asyn
   // Closing the BT view restores the selected layers before the runner starts
   // navigating to the next waypoint.
   mockTopicDataByName['/bt/status'] = stringTopicMessage('completed');
-  rerender(<MissionCanvasPage />);
+  rerender(<AutonomyStudioPage />);
   await waitFor(() => expect(sendNavigateToPoseGoalAndWait).toHaveBeenCalledTimes(2));
   await waitFor(() => expect(latestMapViewerProps().btLayer).toBeNull());
   await waitFor(() => expect(latestMapViewerProps()).toMatchObject({
@@ -6054,7 +6056,7 @@ test.each([
     return Promise.resolve({ success: true, catalog_json: '[]' });
   });
 
-  const { rerender } = render(<MissionCanvasPage />);
+  const { rerender } = render(<AutonomyStudioPage />);
 
   fireEvent.click(screen.getByRole('tab', { name: 'Run' }));
   fireEvent.click(screen.getByRole('button', { name: 'Load Map' }));
@@ -6101,13 +6103,13 @@ test.each([
     ));
     await act(async () => {
       mockTopicDataByName['/bt/status'] = stringTopicMessage('running');
-      rerender(<MissionCanvasPage />);
+      rerender(<AutonomyStudioPage />);
       resolveBtLoad({ success: true });
       await Promise.resolve();
     });
     await act(async () => {
       mockTopicDataByName['/bt/status'] = stringTopicMessage('completed');
-      rerender(<MissionCanvasPage />);
+      rerender(<AutonomyStudioPage />);
     });
     await waitFor(() => expect(sendNavigateToPoseGoalAndWait).toHaveBeenCalledTimes(2));
     await waitFor(() => expect(screen.getByRole('button', { name: 'Run Mission' })).toBeEnabled());
@@ -6147,7 +6149,7 @@ test('keeps Run localization active while the BT node is up', async () => {
       : { exists: false, map_name: mapName, global_bt: 'global.xml', waypoints: [], metadata: {} },
   ));
 
-  render(<MissionCanvasPage />);
+  render(<AutonomyStudioPage />);
 
   // Run observes the active BT service internally without exposing manual
   // lifecycle controls in Design.
@@ -6165,217 +6167,6 @@ test('keeps Run localization active while the BT node is up', async () => {
   await act(async () => { await Promise.resolve(); });
   await waitFor(() => expect(latestMapViewerProps().interactionMode).toBe('initial'));
 }, 15000);
-
-describe('assembleMissionBtFilesForSave', () => {
-  const EDITED = [
-    '<root BTCPP_format="4" main_tree_to_execute="MainTree">',
-    '  <BehaviorTree ID="MainTree"><Wait duration="2.0"/></BehaviorTree>',
-    '</root>',
-  ].join('\n');
-
-  test('moves a flat waypoint BT into its stable waypoint directory', () => {
-    const spot = {
-      id: 'spot_a',
-      label: 'Bay',
-      linked_bt_tree: 'locals/dock.xml',
-      metadata: { local_bt: 'locals/dock.xml' },
-    };
-    const { files, stalePaths } = assembleMissionBtFilesForSave(
-      [spot],
-      { 'locals/dock.xml': EDITED },
-      [],
-      'global.xml',
-      '<global/>',
-    );
-    expect(files['locals/spot_a/main.xml']).toBe(EDITED);
-    expect(files['locals/dock.xml']).toBeUndefined();
-    expect(files['global.xml']).toBe('<global/>');
-    expect(stalePaths).toEqual(['locals/dock.xml']);
-  });
-
-  test('preserves names and edited content already stored in the waypoint directory', () => {
-    const spot = {
-      id: 'spot_a',
-      label: 'Dock',
-      metadata: { local_bt: 'locals/spot_a/run.xml' },
-    };
-    const { files, stalePaths } = assembleMissionBtFilesForSave(
-      [spot],
-      { 'locals/spot_a/run.xml': EDITED },
-      [],
-      'global.xml',
-      '<global/>',
-    );
-    expect(files['locals/spot_a/run.xml']).toBe(EDITED);
-    expect(stalePaths).toEqual([]);
-  });
-
-  test('persists every owned XML while local_bt only selects the default', () => {
-    const alternate = EDITED.replace('2.0', '4.0');
-    const spot = {
-      id: 'spot_a',
-      label: 'Dock',
-      linked_bt_tree: 'locals/spot_a/alternate.xml',
-      local_bt_files: ['locals/spot_a/alternate.xml', 'locals/spot_a/default.xml'],
-      metadata: {
-        local_bt: 'locals/spot_a/alternate.xml',
-        local_bt_files: ['locals/spot_a/alternate.xml', 'locals/spot_a/default.xml'],
-      },
-    };
-    const { files, stalePaths } = assembleMissionBtFilesForSave(
-      [spot],
-      {
-        'locals/spot_a/default.xml': EDITED,
-        'locals/spot_a/alternate.xml': alternate,
-      },
-      [],
-      'global.xml',
-      '<global/>',
-    );
-
-    expect(files['locals/spot_a/default.xml']).toBe(EDITED);
-    expect(files['locals/spot_a/alternate.xml']).toBe(alternate);
-    expect(stalePaths).toEqual([]);
-  });
-
-  test('collects a mixed flat and nested library into one waypoint directory', () => {
-    const alternate = EDITED.replace('2.0', '4.0');
-    const spot = {
-      id: 'Waypoint_1_ee992021',
-      label: 'Waypoint 1',
-      linked_bt_tree: 'locals/waypoint_1.xml',
-      local_bt_files: [
-        'locals/waypoint_1.xml',
-        'locals/waypoint_1_ee992021/test.xml',
-      ],
-      metadata: { local_bt: 'locals/waypoint_1.xml' },
-    };
-    const { files, stalePaths } = assembleMissionBtFilesForSave(
-      [spot],
-      {
-        'locals/waypoint_1.xml': EDITED,
-        'locals/waypoint_1_ee992021/test.xml': alternate,
-      },
-      [],
-      'global.xml',
-      '<global/>',
-    );
-
-    expect(files['locals/waypoint_1/main.xml']).toBe(EDITED);
-    expect(files['locals/waypoint_1/test.xml']).toBe(alternate);
-    expect(stalePaths).toEqual([
-      'locals/waypoint_1.xml',
-      'locals/waypoint_1_ee992021/test.xml',
-    ]);
-  });
-
-  test('removes the waypoint token without renaming an existing XML file', () => {
-    const spot = {
-      id: 'Waypoint_1_ee992021',
-      label: 'Waypoint 1',
-      linked_bt_tree: 'locals/waypoint_1_ee992021/test.xml',
-      local_bt_files: ['locals/waypoint_1_ee992021/test.xml'],
-      metadata: { local_bt: 'locals/waypoint_1_ee992021/test.xml' },
-    };
-    const { files, stalePaths } = assembleMissionBtFilesForSave(
-      [spot],
-      { 'locals/waypoint_1_ee992021/test.xml': EDITED },
-      [],
-      'global.xml',
-      '<global/>',
-    );
-
-    expect(files['locals/waypoint_1/test.xml']).toBe(EDITED);
-    expect(stalePaths).toEqual(['locals/waypoint_1_ee992021/test.xml']);
-  });
-
-  test('migrates a legacy root-level BT file into the waypoint main XML', () => {
-    const spot = {
-      id: 'spot_legacy',
-      label: 'Prep table',
-      linked_bt_tree: 'prep_table.xml',
-      metadata: { local_bt: 'prep_table.xml' },
-    };
-    const { files, stalePaths } = assembleMissionBtFilesForSave(
-      [spot],
-      { 'prep_table.xml': EDITED },
-      [],
-      'global.xml',
-      '<global/>',
-    );
-    const localEntries = Object.entries(files).filter(([path]) => path.startsWith('locals/'));
-
-    expect(localEntries).toHaveLength(1);
-    expect(localEntries[0][0]).toBe('locals/spot_legacy/main.xml');
-    expect(localEntries[0][1]).toBe(EDITED);
-    expect(files['prep_table.xml']).toBeUndefined();
-    expect(stalePaths).toEqual(['prep_table.xml']);
-  });
-
-  test('writes an empty default for an unedited waypoint', () => {
-    const spot = { id: 'spot_a', label: 'Dock', metadata: {} };
-    const { files } = assembleMissionBtFilesForSave([spot], {}, [], 'global.xml', '<global/>');
-    expect(files['locals/spot_a/main.xml']).toContain('<BehaviorTree ID="MainTree"/>');
-  });
-
-  test('keeps distinct BT files when labels normalize to the same slug', () => {
-    const spots = [
-      {
-        id: 'spot_a',
-        label: '픽업',
-        metadata: { local_bt: 'locals/pickup_a.xml' },
-      },
-      {
-        id: 'spot_b',
-        label: '도착',
-        metadata: { local_bt: 'locals/dropoff_b.xml' },
-      },
-    ];
-    const second = EDITED.replace('2.0', '3.0');
-    const { files } = assembleMissionBtFilesForSave(
-      spots,
-      {
-        'locals/pickup_a.xml': EDITED,
-        'locals/dropoff_b.xml': second,
-      },
-      [],
-      'global.xml',
-      '<global/>',
-    );
-
-    expect(files['locals/spot_a/main.xml']).toBe(EDITED);
-    expect(files['locals/spot_b/main.xml']).toBe(second);
-  });
-
-  test('uses readable numeric suffixes when token-free waypoint folders collide', () => {
-    const startOnly = EDITED.replace('2.0', '7.0').replace('<Wait', '<Wait name="StartOnly"');
-    const spots = [
-      {
-        id: 'Waypoint_1_ee992021',
-        label: 'Start',
-        linked_bt_tree: 'locals/waypoint_1/main.xml',
-        local_bt_files: ['locals/waypoint_1/main.xml'],
-        metadata: {
-          local_bt: 'locals/waypoint_1/main.xml',
-          local_bt_files: ['locals/waypoint_1/main.xml'],
-        },
-      },
-      { id: 'Waypoint_1_d58de4b1', label: 'Waypoint 1', metadata: {} },
-    ];
-
-    const { files } = assembleMissionBtFilesForSave(
-      spots,
-      { 'locals/waypoint_1/main.xml': startOnly },
-      [],
-      'global.xml',
-      '<global/>',
-    );
-
-    expect(files['locals/waypoint_1/main.xml']).toBe(startOnly);
-    expect(files['locals/waypoint_1_2/main.xml']).toContain('<BehaviorTree ID="MainTree"/>');
-    expect(files['locals/waypoint_1_2/main.xml']).not.toContain('StartOnly');
-  });
-});
 
 
 test('invalidates a Run mission snapshot when Navigate loads a different map', async () => {
@@ -6431,7 +6222,7 @@ test('invalidates a Run mission snapshot when Navigate loads a different map', a
     revision: 11,
   }));
 
-  render(<MissionCanvasPage />);
+  render(<AutonomyStudioPage />);
 
   fireEvent.click(screen.getByRole('tab', { name: 'Run' }));
   fireEvent.click(screen.getByRole('button', { name: 'Load Map' }));
@@ -6505,7 +6296,7 @@ test('loads a Navigate map without mission state while Run keeps its mission sel
     metadata: {},
   });
 
-  render(<MissionCanvasPage />);
+  render(<AutonomyStudioPage />);
   fireEvent.click(screen.getByRole('tab', { name: 'Navigation' }));
   fireEvent.click(screen.getByRole('button', { name: 'Load Map' }));
 
@@ -6573,7 +6364,7 @@ test('drives to a clicked goal from the Navigation stage', async () => {
     resolveCancel = resolve;
   }));
 
-  render(<MissionCanvasPage />);
+  render(<AutonomyStudioPage />);
 
   fireEvent.click(screen.getByRole('tab', { name: 'Navigation' }));
   expect(screen.getByRole('button', { name: 'Set Goal' })).toBeDisabled();
@@ -6680,7 +6471,7 @@ test('stops Navigation and clears its localization before switching to Map Edit'
     return { ok: true };
   });
 
-  render(<MissionCanvasPage />);
+  render(<AutonomyStudioPage />);
 
   fireEvent.click(screen.getByRole('tab', { name: 'Navigation' }));
   fireEvent.click(screen.getByRole('button', { name: 'Load Map' }));
@@ -6710,7 +6501,7 @@ test('stops Navigation and clears its localization before switching to Map Edit'
   expect(latestMapViewerProps().interactionMode).toBe('view');
   expect(latestMapViewerProps().goalPose).toBeNull();
   await waitFor(() => expect(
-    JSON.parse(window.sessionStorage.getItem('mission_canvas_session')),
+    JSON.parse(window.sessionStorage.getItem('autonomy_studio_session')),
   ).toEqual(expect.objectContaining({
     workspaceStage: 'map_edit',
     navigationRuntimeMode: 'idle',
@@ -6737,7 +6528,7 @@ test('keeps Run selected when automatic stage-exit shutdown fails', async () => 
   });
   stopNavigation.mockRejectedValue(new Error('navigation stop failed'));
 
-  render(<MissionCanvasPage />);
+  render(<AutonomyStudioPage />);
 
   fireEvent.click(screen.getByRole('tab', { name: 'Run' }));
   await loadRunMapFromDialog('factory.pgm');
@@ -6755,7 +6546,7 @@ test('keeps Run selected when automatic stage-exit shutdown fails', async () => 
     .toHaveAttribute('aria-selected', 'false');
   expect(navigationUp).toBe(true);
   await waitFor(() => expect(
-    JSON.parse(window.sessionStorage.getItem('mission_canvas_session')),
+    JSON.parse(window.sessionStorage.getItem('autonomy_studio_session')),
   ).toEqual(expect.objectContaining({
     workspaceStage: 'run',
     navigationRuntimeMode: 'run',
@@ -6783,7 +6574,7 @@ test('reports a non-succeeded navigate goal as failed', async () => {
     ok: false, status: 'ABORTED', message: 'Goal aborted by nav2',
   });
 
-  render(<MissionCanvasPage />);
+  render(<AutonomyStudioPage />);
 
   fireEvent.click(screen.getByRole('tab', { name: 'Navigation' }));
   fireEvent.click(screen.getByRole('button', { name: 'Load Map' }));
@@ -6810,4 +6601,184 @@ test('reports a non-succeeded navigate goal as failed', async () => {
   await waitFor(() => expect(screen.getByText('Failed')).toBeInTheDocument());
   // The intended target stays visible so the operator can see what failed.
   expect(latestMapViewerProps().showGoalPose).toBe(true);
+});
+
+
+test('restores a session saved with the legacy standalone_bt workspace kind', () => {
+  window.sessionStorage.setItem('autonomy_studio_session', JSON.stringify({
+    workspaceKind: 'standalone_bt',
+    workspaceStage: 'authoring',
+  }));
+
+  render(<AutonomyStudioPage />);
+
+  expect(screen.getByTestId('action-canvas-workspace')).toBeInTheDocument();
+  expect(screen.queryByRole('tablist')).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Open Action Canvas' })).not.toBeInTheDocument();
+});
+
+test('confirms a pending Run shutdown when an Action Canvas session is restored', async () => {
+  window.sessionStorage.setItem('autonomy_studio_session', JSON.stringify({
+    workspaceKind: 'action_canvas',
+    workspaceStage: 'run',
+    navigationRuntimeMode: 'idle',
+    runRuntimeOwned: true,
+    runShutdownPending: true,
+    runShutdownRequestedAt: Date.now(),
+  }));
+
+  render(<AutonomyStudioPage />);
+
+  expect(screen.getByTestId('action-canvas-workspace')).toBeInTheDocument();
+  await waitFor(() => expect(stopNavigation).toHaveBeenCalledTimes(1));
+  await waitFor(() => expect(
+    JSON.parse(window.sessionStorage.getItem('autonomy_studio_session')),
+  ).toEqual(expect.objectContaining({
+    workspaceKind: 'action_canvas',
+    navigationRuntimeMode: 'idle',
+    runRuntimeOwned: false,
+    runShutdownPending: false,
+    runShutdownRequestedAt: null,
+  })));
+  expect(getServiceStatus).not.toHaveBeenCalled();
+});
+
+test('stops an owned Run runtime when the page exits from the Action Canvas', () => {
+  window.sessionStorage.setItem('autonomy_studio_session', JSON.stringify({
+    workspaceKind: 'action_canvas',
+    workspaceStage: 'run',
+    navigationRuntimeMode: 'run',
+    runRuntimeOwned: true,
+    runShutdownPending: false,
+  }));
+
+  render(<AutonomyStudioPage />);
+  expect(screen.getByTestId('action-canvas-workspace')).toBeInTheDocument();
+  fireEvent(window, new Event('pagehide'));
+
+  expect(stopNavigation).toHaveBeenCalledWith(expect.objectContaining({ keepalive: true }));
+  expect(JSON.parse(window.sessionStorage.getItem('autonomy_studio_session'))).toEqual(
+    expect.objectContaining({
+      workspaceKind: 'action_canvas',
+      navigationRuntimeMode: 'idle',
+      runRuntimeOwned: true,
+      runShutdownPending: true,
+    }),
+  );
+});
+
+test('does not stop a Run runtime the Action Canvas session does not own on page exit', () => {
+  window.sessionStorage.setItem('autonomy_studio_session', JSON.stringify({
+    workspaceKind: 'action_canvas',
+    navigationRuntimeMode: 'idle',
+    runRuntimeOwned: false,
+    runShutdownPending: false,
+  }));
+
+  render(<AutonomyStudioPage />);
+  fireEvent(window, new Event('pagehide'));
+
+  expect(stopNavigation).not.toHaveBeenCalled();
+});
+
+test('does not apply an expired Run shutdown marker to a later runtime from the Action Canvas', async () => {
+  window.sessionStorage.setItem('autonomy_studio_session', JSON.stringify({
+    workspaceKind: 'action_canvas',
+    workspaceStage: 'run',
+    navigationRuntimeMode: 'idle',
+    runRuntimeOwned: true,
+    runShutdownPending: true,
+    runShutdownRequestedAt: Date.now() - 120_000,
+  }));
+
+  render(<AutonomyStudioPage />);
+  await waitFor(() => expect(
+    JSON.parse(window.sessionStorage.getItem('autonomy_studio_session')),
+  ).toEqual(expect.objectContaining({
+    runRuntimeOwned: false,
+    runShutdownPending: false,
+    runShutdownRequestedAt: null,
+  })));
+  fireEvent(window, new Event('pagehide'));
+
+  expect(stopNavigation).not.toHaveBeenCalled();
+});
+
+test('keeps the retry marker when the Action Canvas shutdown confirmation fails', async () => {
+  window.sessionStorage.setItem('autonomy_studio_session', JSON.stringify({
+    workspaceKind: 'action_canvas',
+    workspaceStage: 'run',
+    navigationRuntimeMode: 'run',
+  }));
+  stopNavigation.mockImplementationOnce(() => Promise.reject(new Error('supervisor down')));
+
+  render(<AutonomyStudioPage />);
+  await waitFor(() => expect(stopNavigation).toHaveBeenCalledTimes(1));
+  await act(async () => { await Promise.resolve(); });
+
+  // A pre-ownership Run session gains ownership and a fresh marker on mount, so
+  // the failed confirmation is retried on page exit.
+  expect(JSON.parse(window.sessionStorage.getItem('autonomy_studio_session'))).toEqual(
+    expect.objectContaining({ runRuntimeOwned: true, runShutdownPending: true }),
+  );
+  fireEvent(window, new Event('pagehide'));
+  expect(stopNavigation).toHaveBeenCalledTimes(2);
+  expect(stopNavigation).toHaveBeenLastCalledWith(expect.objectContaining({ keepalive: true }));
+});
+
+test('sends the Action Canvas page-exit stop once even if pagehide is delivered twice', () => {
+  window.sessionStorage.setItem('autonomy_studio_session', JSON.stringify({
+    workspaceKind: 'action_canvas',
+    navigationRuntimeMode: 'run',
+    runRuntimeOwned: true,
+    runShutdownPending: false,
+  }));
+
+  render(<AutonomyStudioPage />);
+  fireEvent(window, new Event('pagehide'));
+  const requestedAt = JSON.parse(window.sessionStorage.getItem('autonomy_studio_session')).runShutdownRequestedAt;
+  fireEvent(window, new Event('pagehide'));
+
+  expect(stopNavigation).toHaveBeenCalledTimes(1);
+  expect(JSON.parse(window.sessionStorage.getItem('autonomy_studio_session')).runShutdownRequestedAt)
+    .toBe(requestedAt);
+});
+
+test('confirms a pending Run shutdown once under StrictMode from the Action Canvas', async () => {
+  window.sessionStorage.setItem('autonomy_studio_session', JSON.stringify({
+    workspaceKind: 'action_canvas',
+    workspaceStage: 'run',
+    navigationRuntimeMode: 'idle',
+    runRuntimeOwned: true,
+    runShutdownPending: true,
+    runShutdownRequestedAt: Date.now(),
+  }));
+
+  render(<StrictMode><AutonomyStudioPage /></StrictMode>);
+  await waitFor(() => expect(
+    JSON.parse(window.sessionStorage.getItem('autonomy_studio_session')).runShutdownPending,
+  ).toBe(false));
+
+  expect(stopNavigation).toHaveBeenCalledTimes(1);
+});
+
+test('is light-only: suspends the global dark theme class while mounted and restores it on leave', async () => {
+  const root = document.documentElement;
+  root.classList.add('dark');
+  root.setAttribute('data-theme', 'dark');
+  try {
+    const view = render(<AutonomyStudioPage />);
+    expect(root.classList.contains('dark')).toBe(false);
+
+    // The theme provider re-applying its class (e.g. on its own mount effect)
+    // must not turn the studio dark.
+    act(() => { root.classList.add('dark'); });
+    await waitFor(() => expect(root.classList.contains('dark')).toBe(false));
+
+    view.unmount();
+    expect(root.classList.contains('dark')).toBe(true);
+  } finally {
+    root.classList.remove('dark');
+    root.removeAttribute('data-theme');
+  }
 });

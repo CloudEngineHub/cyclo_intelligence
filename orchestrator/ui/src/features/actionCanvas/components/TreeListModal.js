@@ -32,7 +32,7 @@ export default function TreeListModal({
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState(null);
-  const missionCanvasVariant = variant === 'mission-canvas';
+  const autonomyStudioVariant = variant === 'autonomy-studio';
 
   const fetchTrees = useCallback(async () => {
     setLoading(true);
@@ -78,17 +78,17 @@ export default function TreeListModal({
       <div className="flex min-h-full items-center justify-center p-4">
         <div className={clsx(
           'relative max-w-lg w-full max-h-[80vh] flex flex-col',
-          missionCanvasVariant
+          autonomyStudioVariant
             ? 'rounded-2xl border border-[var(--mc-border)] bg-[var(--mc-surface)] text-[var(--mc-text)] shadow-[var(--mc-shadow)]'
             : 'bg-white rounded-lg shadow-xl',
         )}>
           <div className={clsx(
             'flex items-center justify-between px-6 py-4 border-b',
-            missionCanvasVariant ? 'border-[var(--mc-border)]' : 'border-gray-200',
+            autonomyStudioVariant ? 'border-[var(--mc-border)]' : 'border-gray-200',
           )}>
             <h2 className={clsx(
               'font-semibold',
-              missionCanvasVariant ? 'text-[15px] text-[var(--mc-text)]' : 'text-xl text-gray-900',
+              autonomyStudioVariant ? 'text-[15px] text-[var(--mc-text)]' : 'text-xl text-gray-900',
             )}>
               Open Task
             </h2>
@@ -98,7 +98,7 @@ export default function TreeListModal({
                 disabled={loading}
                 className={clsx(
                   'p-2 rounded-lg transition-colors',
-                  missionCanvasVariant
+                  autonomyStudioVariant
                     ? loading
                       ? 'text-[var(--mc-text-subtle)] cursor-not-allowed opacity-50'
                       : 'text-[var(--mc-text-muted)] hover:text-[var(--mc-text)] hover:bg-[var(--mc-surface-hover)]'
@@ -114,7 +114,7 @@ export default function TreeListModal({
                 onClick={onClose}
                 className={clsx(
                   'p-2 rounded-lg transition-colors',
-                  missionCanvasVariant
+                  autonomyStudioVariant
                     ? 'text-[var(--mc-text-subtle)] hover:text-[var(--mc-text)] hover:bg-[var(--mc-surface-hover)]'
                     : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100',
                 )}
@@ -128,7 +128,7 @@ export default function TreeListModal({
             {loading ? (
               <div className={clsx(
                 'flex items-center justify-center h-full py-12 text-sm',
-                missionCanvasVariant ? 'text-[var(--mc-text-muted)]' : 'text-gray-500',
+                autonomyStudioVariant ? 'text-[var(--mc-text-muted)]' : 'text-gray-500',
               )}>
                 Loading tasks…
               </div>
@@ -136,13 +136,13 @@ export default function TreeListModal({
               <div className="flex flex-col items-center justify-center h-full py-12 text-center">
                 <p className={clsx(
                   'text-sm font-medium',
-                  missionCanvasVariant ? 'text-[var(--mc-danger)]' : 'text-red-500',
+                  autonomyStudioVariant ? 'text-[var(--mc-danger)]' : 'text-red-500',
                 )}>
                   Failed to load tasks
                 </p>
                 <p className={clsx(
                   'text-xs mt-1 break-all px-4',
-                  missionCanvasVariant ? 'text-[var(--mc-text-muted)]' : 'text-gray-500',
+                  autonomyStudioVariant ? 'text-[var(--mc-text-muted)]' : 'text-gray-500',
                 )}>
                   {errorMsg}
                 </p>
@@ -150,14 +150,14 @@ export default function TreeListModal({
             ) : items.length === 0 ? (
               <div className={clsx(
                 'flex items-center justify-center h-full py-12 text-sm',
-                missionCanvasVariant ? 'text-[var(--mc-text-muted)]' : 'text-gray-500',
+                autonomyStudioVariant ? 'text-[var(--mc-text-muted)]' : 'text-gray-500',
               )}>
                 No saved tasks found
               </div>
             ) : (
               <ul className={clsx(
                 'divide-y',
-                missionCanvasVariant ? 'divide-[var(--mc-border)]' : 'divide-gray-100',
+                autonomyStudioVariant ? 'divide-[var(--mc-border)]' : 'divide-gray-100',
               )}>
                 {items.map((item) => (
                   <li key={item.full_path}>
@@ -169,7 +169,7 @@ export default function TreeListModal({
                       className={clsx(
                         'w-full flex items-center gap-3 px-4 py-3',
                         'text-left text-sm',
-                        missionCanvasVariant
+                        autonomyStudioVariant
                           ? 'text-[var(--mc-text)] hover:bg-[var(--mc-accent-soft)] hover:text-[var(--mc-accent-hover)]'
                           : 'text-gray-800 hover:bg-blue-50 hover:text-blue-700',
                         'transition-colors rounded-md'
@@ -179,7 +179,7 @@ export default function TreeListModal({
                         size={18}
                         className={clsx(
                           'flex-shrink-0',
-                          missionCanvasVariant ? 'text-[var(--mc-text-subtle)]' : 'text-gray-400',
+                          autonomyStudioVariant ? 'text-[var(--mc-text-subtle)]' : 'text-gray-400',
                         )}
                       />
                       <span className="font-mono break-all">{item.name}</span>

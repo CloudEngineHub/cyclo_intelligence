@@ -9,7 +9,7 @@ import PageType from '../constants/pageType';
 
 describe('recordingStatusMonitor helpers', () => {
   test('suppresses camera monitor alerts only on Mission Canvas', () => {
-    expect(shouldShowCameraMonitorAlert(PageType.MISSION_CANVAS)).toBe(false);
+    expect(shouldShowCameraMonitorAlert(PageType.AUTONOMY_STUDIO)).toBe(false);
     expect(shouldShowCameraMonitorAlert(PageType.RECORD)).toBe(true);
     expect(shouldShowCameraMonitorAlert(PageType.INFERENCE)).toBe(true);
   });

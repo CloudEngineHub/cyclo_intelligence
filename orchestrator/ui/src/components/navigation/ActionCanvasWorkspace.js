@@ -19,13 +19,13 @@ import clsx from 'clsx';
 import { useSelector } from 'react-redux';
 import { MdAccountTree } from 'react-icons/md';
 
-import BTEditorSurface from '../../features/btmanager/components/BTEditorSurface';
+import BTEditorSurface from '../../features/actionCanvas/components/BTEditorSurface';
 import {
   BT_UNSUPPORTED_ROBOT_MESSAGE,
   isBtRobotSupported,
 } from '../../constants/btSupport';
 
-export default function StandaloneBtWorkspace({
+export default function ActionCanvasWorkspace({
   isActive = true,
   title = 'Action Canvas',
   subtitle = '',
@@ -35,7 +35,7 @@ export default function StandaloneBtWorkspace({
 }) {
   const robotType = useSelector((state) => state.tasks.robotType);
   const btRobotSupported = isBtRobotSupported(robotType);
-  const missionCanvasVariant = variant === 'mission-canvas';
+  const autonomyStudioVariant = variant === 'autonomy-studio';
 
   if (!btRobotSupported) {
     return (
@@ -44,26 +44,26 @@ export default function StandaloneBtWorkspace({
         className={clsx(
           className,
           'flex flex-col',
-          missionCanvasVariant && 'bg-[var(--mc-bg)] text-[var(--mc-text)]',
+          autonomyStudioVariant && 'bg-[var(--mc-bg)] text-[var(--mc-text)]',
         )}
       >
         <div className={clsx(
           'flex items-center justify-between px-6 py-4 border-b',
-          missionCanvasVariant
+          autonomyStudioVariant
             ? 'border-[var(--mc-border)] bg-[var(--mc-surface)]'
             : 'border-black bg-white',
         )}>
           <div className="min-w-0">
             <h1 className={clsx(
               'font-bold',
-              missionCanvasVariant ? 'text-[15px] text-[var(--mc-text)]' : 'text-xl text-gray-800',
+              autonomyStudioVariant ? 'text-[15px] text-[var(--mc-text)]' : 'text-xl text-gray-800',
             )}>
               {title}
             </h1>
             {subtitle && (
               <p className={clsx(
                 'mt-0.5 truncate text-[10px] font-mono',
-                missionCanvasVariant ? 'text-[var(--mc-text-muted)]' : 'text-gray-500',
+                autonomyStudioVariant ? 'text-[var(--mc-text-muted)]' : 'text-gray-500',
               )}>
                 {subtitle}
               </p>
@@ -73,11 +73,11 @@ export default function StandaloneBtWorkspace({
 
         <div className={clsx(
           'flex-1 flex items-center justify-center px-6',
-          missionCanvasVariant ? 'bg-[var(--mc-bg)]' : 'bg-gray-50',
+          autonomyStudioVariant ? 'bg-[var(--mc-bg)]' : 'bg-gray-50',
         )}>
           <div className={clsx(
             'w-full max-w-xl rounded-2xl border px-8 py-7 text-center shadow-sm',
-            missionCanvasVariant
+            autonomyStudioVariant
               ? 'border-[var(--mc-border)] bg-[var(--mc-surface)]'
               : 'border-gray-200 bg-white',
           )}>
@@ -85,18 +85,18 @@ export default function StandaloneBtWorkspace({
               size={40}
               className={clsx(
                 'mx-auto mb-4',
-                missionCanvasVariant ? 'text-[var(--mc-accent)]' : 'text-gray-400',
+                autonomyStudioVariant ? 'text-[var(--mc-accent)]' : 'text-gray-400',
               )}
             />
             <h2 className={clsx(
               'text-lg font-semibold',
-              missionCanvasVariant ? 'text-[var(--mc-text)]' : 'text-gray-900',
+              autonomyStudioVariant ? 'text-[var(--mc-text)]' : 'text-gray-900',
             )}>
               {BT_UNSUPPORTED_ROBOT_MESSAGE}
             </h2>
             <p className={clsx(
               'mt-3 text-sm',
-              missionCanvasVariant ? 'text-[var(--mc-text-muted)]' : 'text-gray-500',
+              autonomyStudioVariant ? 'text-[var(--mc-text-muted)]' : 'text-gray-500',
             )}>
               Current robot type: {robotType || 'Not selected'}
             </p>

@@ -27,10 +27,10 @@ export default function BTActionNode({ data }) {
       className={clsx(
         'px-4 py-3 rounded-2xl border-2 min-w-[160px] text-center shadow-sm cursor-pointer',
         isActive
-          ? 'border-[#c96442] bg-[#f4e5dc] ring-2 ring-[#c96442]/30 animate-pulse dark:!bg-[#3d2a20] dark:border-[#d5794f] dark:ring-[#d5794f]/40'
+          ? 'border-[#c96442] bg-[#f4e5dc] ring-2 ring-[#c96442]/30 animate-pulse'
           : isSelected
-            ? 'border-[#5b8266] bg-[#eef3ec] ring-2 ring-[#1c1a17]/20 dark:!bg-[#212c20] dark:border-[#6f9a74] dark:ring-[#ece7dd]/20'
-            : 'border-[#5b8266] bg-[#eef3ec] dark:!bg-[#212c20] dark:border-[#4c6b4f]'
+            ? 'border-[#5b8266] bg-[#eef3ec] ring-2 ring-[#1c1a17]/20'
+            : 'border-[#5b8266] bg-[#eef3ec]'
       )}
     >
       <Handle
@@ -38,10 +38,10 @@ export default function BTActionNode({ data }) {
         position={Position.Top}
         className={clsx(isActive ? '!bg-[#c96442]' : '!bg-[#5b8266]')}
       />
-      <div className="text-xs font-semibold mb-1 text-[#4f7a52] dark:text-[#8fb894]">
+      <div className="text-xs font-semibold mb-1 text-[#4f7a52]">
         {data.nodeType}
       </div>
-      <div className="text-sm font-semibold text-[#1c1a17] dark:text-[#ece7dd] truncate">
+      <div className="text-sm font-semibold text-[#1c1a17] truncate">
         {data.label}
       </div>
       <Handle

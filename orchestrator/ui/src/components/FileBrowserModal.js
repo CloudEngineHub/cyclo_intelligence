@@ -40,7 +40,7 @@ export default function FileBrowserModal({
   const [selectedItem, setSelectedItem] = useState(null);
   const [multiSelectedItems, setMultiSelectedItems] = useState([]);
   const [currentPath, setCurrentPath] = useState(initialPath);
-  const missionCanvasVariant = variant === 'mission-canvas';
+  const autonomyStudioVariant = variant === 'autonomy-studio';
 
   const handleFileSelect = useCallback((item) => {
     if (!multiSelect) {
@@ -109,7 +109,7 @@ export default function FileBrowserModal({
 
   const classModal = clsx(
     'relative',
-    missionCanvasVariant
+    autonomyStudioVariant
       ? 'bg-[var(--mc-surface)] text-[var(--mc-text)] rounded-2xl border border-[var(--mc-border)] shadow-[var(--mc-shadow)]'
       : 'bg-white rounded-lg shadow-xl',
     'max-w-4xl',
@@ -126,17 +126,17 @@ export default function FileBrowserModal({
     'px-6',
     'py-4',
     'border-b',
-    missionCanvasVariant ? 'border-[var(--mc-border)]' : 'border-gray-200'
+    autonomyStudioVariant ? 'border-[var(--mc-border)]' : 'border-gray-200'
   );
 
   const classTitle = clsx(
     'font-semibold',
-    missionCanvasVariant ? 'text-[15px] text-[var(--mc-text)]' : 'text-xl text-gray-900',
+    autonomyStudioVariant ? 'text-[15px] text-[var(--mc-text)]' : 'text-xl text-gray-900',
   );
 
   const classCloseButton = clsx(
     'p-2',
-    missionCanvasVariant
+    autonomyStudioVariant
       ? 'text-[var(--mc-text-subtle)] hover:text-[var(--mc-text)] hover:bg-[var(--mc-surface-hover)]'
       : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100',
     'rounded-lg',
@@ -154,7 +154,7 @@ export default function FileBrowserModal({
     'px-6',
     'py-4',
     'border-t',
-    missionCanvasVariant
+    autonomyStudioVariant
       ? 'border-[var(--mc-border)] bg-[var(--mc-surface-2)]'
       : 'border-gray-200 bg-gray-50'
   );
@@ -163,7 +163,7 @@ export default function FileBrowserModal({
     'flex',
     'items-center',
     'text-sm',
-    missionCanvasVariant ? 'text-[var(--mc-text-muted)]' : 'text-gray-600',
+    autonomyStudioVariant ? 'text-[var(--mc-text-muted)]' : 'text-gray-600',
   );
 
   const classStatusRow = clsx('flex', 'items-center');
@@ -180,7 +180,7 @@ export default function FileBrowserModal({
     'px-4',
     'py-2',
     'border',
-    missionCanvasVariant
+    autonomyStudioVariant
       ? 'text-[var(--mc-text-muted)] bg-[var(--mc-surface)] border-[var(--mc-border-strong)] hover:bg-[var(--mc-surface-hover)]'
       : 'text-gray-700 bg-white border-gray-300 hover:bg-gray-50',
     'rounded-lg',
@@ -190,7 +190,7 @@ export default function FileBrowserModal({
   const classConfirmButton = clsx(
     'px-4',
     'py-2',
-    missionCanvasVariant
+    autonomyStudioVariant
       ? 'bg-[var(--mc-accent)] text-[var(--mc-accent-fg)] hover:bg-[var(--mc-accent-hover)] disabled:bg-[var(--mc-surface-hover)] disabled:text-[var(--mc-text-subtle)]'
       : 'bg-blue-600 text-white hover:bg-blue-700 disabled:bg-gray-300',
     'rounded-lg',

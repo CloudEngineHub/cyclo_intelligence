@@ -8,7 +8,7 @@ import PageType from './constants/pageType';
 import { CURRENT_PAGE_STORAGE_KEY, moveToPage } from './features/ui/uiSlice';
 import { selectRobotType } from './features/tasks/taskSlice';
 
-const mockMissionCanvasPage = jest.fn();
+const mockAutonomyStudioPage = jest.fn();
 
 jest.mock('react-hot-toast', () => {
   const React = require('react');
@@ -71,13 +71,13 @@ jest.mock('./pages/ReplayPage', () => {
   };
 });
 
-jest.mock('./pages/MissionCanvasPage', () => {
+jest.mock('./pages/AutonomyStudioPage', () => {
   const React = require('react');
-  return function MockMissionCanvasPage(props) {
-    mockMissionCanvasPage(props);
+  return function MockAutonomyStudioPage(props) {
+    mockAutonomyStudioPage(props);
     return React.createElement(
       'div',
-      { 'data-testid': 'mission-canvas-page' },
+      { 'data-testid': 'autonomy-studio-page' },
       React.createElement('span', null, 'Mission Canvas Page'),
       React.createElement(
         'button',
@@ -174,7 +174,7 @@ test.each([
   ],
 ])('blocks Autonomy Studio when %s', async (_scenario, robotType, message) => {
   window.sessionStorage.clear();
-  mockMissionCanvasPage.mockClear();
+  mockAutonomyStudioPage.mockClear();
   toast.error.mockClear();
   act(() => {
     store.dispatch(moveToPage(PageType.HOME));
@@ -201,8 +201,8 @@ test.each([
   expect(screen.getByText('Home Page')).toBeInTheDocument();
   expect(screen.getByLabelText('Cyclo Intelligence navigation'))
     .toBeInTheDocument();
-  expect(screen.queryByTestId('mission-canvas-page')).not.toBeInTheDocument();
-  expect(mockMissionCanvasPage).not.toHaveBeenCalled();
+  expect(screen.queryByTestId('autonomy-studio-page')).not.toBeInTheDocument();
+  expect(mockAutonomyStudioPage).not.toHaveBeenCalled();
 
   view.unmount();
   act(() => {
@@ -213,7 +213,7 @@ test.each([
 
 test('opens the Autonomy Studio workspace chooser from the canonical navigation entry point', async () => {
   window.sessionStorage.clear();
-  mockMissionCanvasPage.mockClear();
+  mockAutonomyStudioPage.mockClear();
   toast.error.mockClear();
   act(() => {
     store.dispatch(moveToPage(PageType.HOME));
@@ -232,11 +232,11 @@ test('opens the Autonomy Studio workspace chooser from the canonical navigation 
     screen.getByRole('button', { name: 'Autonomy Studio' }).click();
   });
 
-  expect(await screen.findByTestId('mission-canvas-page'))
+  expect(await screen.findByTestId('autonomy-studio-page'))
     .toHaveTextContent('Mission Canvas Page');
   expect(screen.queryByLabelText('Cyclo Intelligence navigation'))
     .not.toBeInTheDocument();
-  expect(mockMissionCanvasPage).toHaveBeenLastCalledWith(
+  expect(mockAutonomyStudioPage).toHaveBeenLastCalledWith(
     expect.objectContaining({
       onBackHome: expect.any(Function),
       showWorkspaceChooser: true,
@@ -245,8 +245,8 @@ test('opens the Autonomy Studio workspace chooser from the canonical navigation 
   expect(toast.error).not.toHaveBeenCalled();
   await waitFor(() => {
     expect(window.sessionStorage.getItem(CURRENT_PAGE_STORAGE_KEY))
-      .toBe(PageType.MISSION_CANVAS);
-    expect(store.getState().ui.currentPage).toBe(PageType.MISSION_CANVAS);
+      .toBe(PageType.AUTONOMY_STUDIO);
+    expect(store.getState().ui.currentPage).toBe(PageType.AUTONOMY_STUDIO);
   });
 
   act(() => {

@@ -67,13 +67,13 @@ export default function BTNodePalette({ canUpdateCatalog = true }) {
       <div className="flex-1 overflow-y-auto py-2">
         <Section
           title="Flow Controls"
-          chipClass="border-[#1c1a17] text-[#1c1a17] dark:border-[#ece7dd] dark:text-[#ece7dd]"
+          chipClass="border-[#1c1a17] text-[#1c1a17]"
           items={grouped.control}
           onDragStart={handleDragStart}
         />
         <Section
           title="Actions"
-          chipClass="border-[#9db89f] text-[#4f7a52] dark:border-[#4c6b4f] dark:text-[#8fb894]"
+          chipClass="border-[#9db89f] text-[#4f7a52]"
           items={grouped.action}
           onDragStart={handleDragStart}
         />

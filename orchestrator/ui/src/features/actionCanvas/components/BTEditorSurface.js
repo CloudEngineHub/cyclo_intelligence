@@ -51,7 +51,7 @@ import {
 } from '../../../utils/btTreeParser';
 import { isValidBtConnection } from '../../../utils/btConnection';
 import { serializeFromGraph } from '../../../utils/btXmlSerializer';
-import { setTreeXml, setTreeFileName, setBtStatus, setActiveNodeNames, setSelectedNodeId } from '../btmanagerSlice';
+import { setTreeXml, setTreeFileName, setBtStatus, setActiveNodeNames, setSelectedNodeId } from '../actionCanvasSlice';
 import { useRosServiceCaller } from '../../../hooks/useRosServiceCaller';
 import { useBTHistory } from '../../../hooks/useBTHistory';
 import { useBTNodeCatalog } from '../../../hooks/useBTNodeCatalog';
@@ -175,13 +175,13 @@ export default function BTEditorSurface({
   const { catalog: nodeCatalog = [], refreshCatalog } = useBTNodeCatalog();
   const rosbridgeUrl = useSelector((state) => state.ros.rosbridgeUrl);
   const robotType = useSelector((state) => state.tasks.robotType);
-  const missionCanvasVariant = variant === 'mission-canvas';
+  const autonomyStudioVariant = variant === 'autonomy-studio';
 
-  const treeXml = useSelector((state) => state.btmanager.treeXml);
-  const treeFileName = useSelector((state) => state.btmanager.treeFileName);
-  const btStatus = useSelector((state) => state.btmanager.btStatus);
-  const activeNodeNames = useSelector((state) => state.btmanager.activeNodeNames);
-  const selectedNodeId = useSelector((state) => state.btmanager.selectedNodeId);
+  const treeXml = useSelector((state) => state.actionCanvas.treeXml);
+  const treeFileName = useSelector((state) => state.actionCanvas.treeFileName);
+  const btStatus = useSelector((state) => state.actionCanvas.btStatus);
+  const activeNodeNames = useSelector((state) => state.actionCanvas.activeNodeNames);
+  const selectedNodeId = useSelector((state) => state.actionCanvas.selectedNodeId);
   // A non-empty Redux document is parsed asynchronously after the first
   // render. Until that graph is actually installed, an early workspace switch
   // must not persist the temporary [] state over the saved draft.
@@ -1030,7 +1030,7 @@ export default function BTEditorSurface({
     (normalizedBtStatus === 'stopped' || isBtTerminal) &&
     !isBtNodeBusy &&
     !isBtExecutionBusy;
-  const statusColor = missionCanvasVariant
+  const statusColor = autonomyStudioVariant
     ? isBtRunning ? 'bg-[var(--mc-success)]' :
       normalizedBtStatus === 'completed' ? 'bg-[var(--mc-warning)]' :
       ['failed', 'failure'].includes(normalizedBtStatus) ? 'bg-[var(--mc-danger)]' :
@@ -1042,7 +1042,7 @@ export default function BTEditorSurface({
       normalizedBtStatus === 'stopping' ? 'bg-orange-400' :
       'bg-gray-400';
   const statusLabel = getBtStatusLabel(btStatus);
-  const btNodeStatusColor = missionCanvasVariant
+  const btNodeStatusColor = autonomyStudioVariant
     ? isBtNodeUp ? 'bg-[var(--mc-success)]' :
       btNodeStatus.state === 'down' ? 'bg-[var(--mc-text-subtle)]' :
       'bg-[var(--mc-warning)]'
@@ -1060,20 +1060,20 @@ export default function BTEditorSurface({
       className={clsx(
         className,
         'bt-editor-surface flex flex-col',
-        missionCanvasVariant && 'bg-[var(--mc-bg)] text-[var(--mc-text)]',
+        autonomyStudioVariant && 'bg-[var(--mc-bg)] text-[var(--mc-text)]',
       )}
     >
       {/* Header */}
       <div className={clsx(
         'flex items-center justify-between px-6 border-b',
-        missionCanvasVariant
+        autonomyStudioVariant
           ? 'h-14 border-[var(--mc-border)] bg-[var(--mc-surface-2)]'
           : 'py-4 border-black bg-white',
       )}>
         <div className="min-w-0">
           <h1 className={clsx(
             'font-bold truncate',
-            missionCanvasVariant
+            autonomyStudioVariant
               ? 'text-[16px] tracking-tight text-[var(--mc-text)]'
               : 'text-xl text-gray-800',
           )}>
@@ -1082,7 +1082,7 @@ export default function BTEditorSurface({
           {subtitle && (
             <p className={clsx(
               'mt-0.5 truncate text-[10px] font-mono',
-              missionCanvasVariant
+              autonomyStudioVariant
                 ? 'text-[var(--mc-text-muted)]'
                 : 'text-gray-500',
             )}>
@@ -1093,7 +1093,7 @@ export default function BTEditorSurface({
         <div className="flex items-center gap-3">
           <span className={clsx(
             'max-w-[220px] truncate font-mono',
-            missionCanvasVariant
+            autonomyStudioVariant
               ? 'text-[11px] text-[var(--mc-text-muted)]'
               : 'text-sm text-gray-500',
           )}>
@@ -1105,7 +1105,7 @@ export default function BTEditorSurface({
             title="Undo (Ctrl+Z)"
             className={clsx(
               'flex items-center justify-center w-9 h-9 rounded-lg transition-colors duration-150',
-              missionCanvasVariant
+              autonomyStudioVariant
                 ? canUndo
                   ? 'border border-[var(--mc-border-strong)] bg-[var(--mc-surface)] hover:bg-[var(--mc-surface-hover)] text-[var(--mc-text-muted)] shadow-[var(--mc-shadow)] cursor-pointer'
                   : 'border border-[var(--mc-border)] bg-[var(--mc-surface)] text-[var(--mc-text-subtle)] cursor-not-allowed opacity-50'
@@ -1122,7 +1122,7 @@ export default function BTEditorSurface({
             title="Redo (Ctrl+Shift+Z)"
             className={clsx(
               'flex items-center justify-center w-9 h-9 rounded-lg transition-colors duration-150',
-              missionCanvasVariant
+              autonomyStudioVariant
                 ? canRedo
                   ? 'border border-[var(--mc-border-strong)] bg-[var(--mc-surface)] hover:bg-[var(--mc-surface-hover)] text-[var(--mc-text-muted)] shadow-[var(--mc-shadow)] cursor-pointer'
                   : 'border border-[var(--mc-border)] bg-[var(--mc-surface)] text-[var(--mc-text-subtle)] cursor-not-allowed opacity-50'
@@ -1139,7 +1139,7 @@ export default function BTEditorSurface({
             title="Auto Layout"
             className={clsx(
               'flex items-center justify-center w-9 h-9 rounded-lg transition-colors duration-150',
-              missionCanvasVariant
+              autonomyStudioVariant
                 ? hasTree
                   ? 'border border-[var(--mc-border-strong)] bg-[var(--mc-surface)] hover:bg-[var(--mc-surface-hover)] text-[var(--mc-text-muted)] shadow-[var(--mc-shadow)] cursor-pointer'
                   : 'border border-[var(--mc-border)] bg-[var(--mc-surface)] text-[var(--mc-text-subtle)] cursor-not-allowed opacity-50'
@@ -1158,7 +1158,7 @@ export default function BTEditorSurface({
             title={clearTreeArmed ? 'Click again to clear the current task' : 'Clear current task'}
             className={clsx(
               'flex items-center justify-center w-9 h-9 rounded-lg transition-colors duration-150',
-              missionCanvasVariant
+              autonomyStudioVariant
                 ? !canClearTree
                   ? 'border border-[var(--mc-border)] bg-[var(--mc-surface)] text-[var(--mc-text-subtle)] cursor-not-allowed opacity-50'
                   : clearTreeArmed
@@ -1183,7 +1183,7 @@ export default function BTEditorSurface({
             className={clsx(
               'flex items-center gap-2 px-4 py-2 rounded-lg',
               'text-sm font-medium transition-colors duration-150',
-              missionCanvasVariant
+              autonomyStudioVariant
                 ? hasTree
                   ? 'border border-[var(--mc-accent)] bg-[var(--mc-surface)] hover:bg-[var(--mc-surface-hover)] text-[var(--mc-accent-hover)] shadow-[var(--mc-shadow)] cursor-pointer'
                   : 'border border-[var(--mc-border)] bg-[var(--mc-surface)] text-[var(--mc-text-subtle)] cursor-not-allowed opacity-50'
@@ -1199,7 +1199,7 @@ export default function BTEditorSurface({
             onClick={() => setShowTreeList(true)}
             className={clsx(
               'flex items-center gap-2 px-4 py-2 rounded-lg cursor-pointer',
-              missionCanvasVariant
+              autonomyStudioVariant
                 ? 'border border-[var(--mc-border-strong)] bg-[var(--mc-surface)] hover:bg-[var(--mc-surface-hover)] text-[var(--mc-text-muted)] shadow-[var(--mc-shadow)] text-sm font-medium'
                 : 'bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-medium',
               'transition-colors duration-150'
@@ -1214,13 +1214,13 @@ export default function BTEditorSurface({
       {/* React Flow Canvas */}
       <div className={clsx(
         'flex-1 relative flex min-h-0',
-        missionCanvasVariant && 'bg-[var(--mc-bg)]',
+        autonomyStudioVariant && 'bg-[var(--mc-bg)]',
       )}>
         <BTNodePalette canUpdateCatalog={isBtNodeUp} />
         <div
           className={clsx(
             'flex-1 relative',
-            missionCanvasVariant && 'bg-[var(--mc-canvas)]',
+            autonomyStudioVariant && 'bg-[var(--mc-canvas)]',
           )}
           onDragOver={handleCanvasDragOver}
           onDrop={handleCanvasDrop}
@@ -1229,7 +1229,7 @@ export default function BTEditorSurface({
             <div className="flex items-center justify-center h-full">
               <div className={clsx(
                 'text-center',
-                missionCanvasVariant ? 'text-[var(--mc-danger)]' : 'text-red-500',
+                autonomyStudioVariant ? 'text-[var(--mc-danger)]' : 'text-red-500',
               )}>
                 <p className="font-semibold">Task File Error</p>
                 <p className="text-sm mt-1">{parseError}</p>
@@ -1238,7 +1238,7 @@ export default function BTEditorSurface({
           ) : nodes.length === 0 ? (
             <div className={clsx(
               'flex items-center justify-center h-full',
-              missionCanvasVariant ? 'text-[var(--mc-text-subtle)]' : 'text-gray-400',
+              autonomyStudioVariant ? 'text-[var(--mc-text-subtle)]' : 'text-gray-400',
             )}>
               <div className="text-center">
                 <p className="text-lg">No task yet</p>
@@ -1274,7 +1274,7 @@ export default function BTEditorSurface({
               autoPanOnConnect={false}
             >
               <Controls showInteractive={false} />
-              <Background color={missionCanvasVariant ? 'var(--mc-border)' : '#e5e7eb'} gap={16} />
+              <Background color={autonomyStudioVariant ? 'var(--mc-border)' : '#e5e7eb'} gap={16} />
             </ReactFlow>
           )}
         </div>
@@ -1292,19 +1292,19 @@ export default function BTEditorSurface({
       {/* Bottom Control Bar */}
       <div className={clsx(
         'flex items-center justify-between px-6 border-t',
-        missionCanvasVariant
+        autonomyStudioVariant
           ? 'h-14 border-[var(--mc-border)] bg-[var(--mc-surface-2)]'
           : 'py-3 border-black bg-white',
       )}>
         <div className="flex items-center gap-3">
           <div className={clsx(
             'flex items-center gap-2 pr-3 mr-1 border-r',
-            missionCanvasVariant ? 'border-[var(--mc-border)]' : 'border-gray-200',
+            autonomyStudioVariant ? 'border-[var(--mc-border)]' : 'border-gray-200',
           )}>
             <div className={clsx('w-3 h-3 rounded-full', btNodeStatusColor)} />
             <span className={clsx(
               'text-sm',
-              missionCanvasVariant ? 'text-[var(--mc-text-muted)]' : 'text-gray-600',
+              autonomyStudioVariant ? 'text-[var(--mc-text-muted)]' : 'text-gray-600',
             )}>
               Task Engine {btNodeStatusLabel}
             </span>
@@ -1314,7 +1314,7 @@ export default function BTEditorSurface({
               title="Turn on Task Engine"
               className={clsx(
                 'flex items-center gap-1 px-3 py-2 rounded-lg text-sm font-medium transition-colors',
-                missionCanvasVariant
+                autonomyStudioVariant
                   ? !canStartBtNode
                     ? 'border border-[var(--mc-border)] bg-[var(--mc-surface)] text-[var(--mc-text-subtle)] cursor-not-allowed opacity-50'
                     : 'border border-[var(--mc-success)] bg-[var(--mc-success)] text-[var(--mc-accent-fg)] shadow-[var(--mc-shadow)] hover:opacity-90'
@@ -1332,7 +1332,7 @@ export default function BTEditorSurface({
               title="Turn off Task Engine"
               className={clsx(
                 'flex items-center gap-1 px-3 py-2 rounded-lg text-sm font-medium transition-colors',
-                missionCanvasVariant
+                autonomyStudioVariant
                   ? !canStopBtNode
                     ? 'border border-[var(--mc-border)] bg-[var(--mc-surface)] text-[var(--mc-text-subtle)] cursor-not-allowed opacity-50'
                     : 'border border-[var(--mc-danger)] bg-[var(--mc-danger)] text-[var(--mc-accent-fg)] shadow-[var(--mc-shadow)] hover:opacity-90'
@@ -1350,7 +1350,7 @@ export default function BTEditorSurface({
             disabled={!canStartBt}
             className={clsx(
               'flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-medium transition-colors',
-              missionCanvasVariant
+              autonomyStudioVariant
                 ? !canStartBt
                   ? 'border border-[var(--mc-border)] bg-[var(--mc-surface)] text-[var(--mc-text-subtle)] cursor-not-allowed opacity-50'
                   : 'border border-[var(--mc-success)] bg-[var(--mc-success)] text-[var(--mc-accent-fg)] shadow-[var(--mc-shadow)] hover:opacity-90'
@@ -1367,7 +1367,7 @@ export default function BTEditorSurface({
             disabled={!canStopBt}
             className={clsx(
               'flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-medium transition-colors',
-              missionCanvasVariant
+              autonomyStudioVariant
                 ? !canStopBt
                   ? 'border border-[var(--mc-border)] bg-[var(--mc-surface)] text-[var(--mc-text-subtle)] cursor-not-allowed opacity-50'
                   : 'border border-[var(--mc-danger)] bg-[var(--mc-danger)] text-[var(--mc-accent-fg)] shadow-[var(--mc-shadow)] hover:opacity-90'
@@ -1385,7 +1385,7 @@ export default function BTEditorSurface({
           <div className={clsx('w-3 h-3 rounded-full', statusColor)} />
           <span className={clsx(
             'text-sm',
-            missionCanvasVariant ? 'text-[var(--mc-text-muted)]' : 'text-gray-600',
+            autonomyStudioVariant ? 'text-[var(--mc-text-muted)]' : 'text-gray-600',
           )}>
             {statusLabel}
           </span>
@@ -1405,19 +1405,19 @@ export default function BTEditorSurface({
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
           <div className={clsx(
             'rounded-2xl p-6 w-80',
-            missionCanvasVariant
+            autonomyStudioVariant
               ? 'border border-[var(--mc-border)] bg-[var(--mc-surface)] text-[var(--mc-text)] shadow-[var(--mc-shadow)]'
               : 'bg-white shadow-xl',
           )}>
             <h2 className={clsx(
               'text-base font-semibold mb-4',
-              missionCanvasVariant ? 'text-[var(--mc-text)]' : 'text-gray-800',
+              autonomyStudioVariant ? 'text-[var(--mc-text)]' : 'text-gray-800',
             )}>
               Save Task As
             </h2>
             <div className={clsx(
               'flex items-center gap-1 border rounded-lg px-3 py-2 focus-within:ring-2',
-              missionCanvasVariant
+              autonomyStudioVariant
                 ? 'border-[var(--mc-border-strong)] bg-[var(--mc-surface-2)] focus-within:ring-[var(--mc-accent)]'
                 : 'border-gray-300 focus-within:ring-blue-400',
             )}>
@@ -1439,12 +1439,12 @@ export default function BTEditorSurface({
                 placeholder="filename"
                 className={clsx(
                   'flex-1 min-w-0 text-sm outline-none bg-transparent',
-                  missionCanvasVariant && 'text-[var(--mc-text)] placeholder:text-[var(--mc-text-subtle)]',
+                  autonomyStudioVariant && 'text-[var(--mc-text)] placeholder:text-[var(--mc-text-subtle)]',
                 )}
               />
               <span className={clsx(
                 'text-sm',
-                missionCanvasVariant ? 'text-[var(--mc-text-subtle)]' : 'text-gray-400',
+                autonomyStudioVariant ? 'text-[var(--mc-text-subtle)]' : 'text-gray-400',
               )}>
                 .xml
               </span>
@@ -1452,7 +1452,7 @@ export default function BTEditorSurface({
             {saveConflict && (
               <div className={clsx(
                 'mt-3 rounded-lg border px-3 py-2 text-sm',
-                missionCanvasVariant
+                autonomyStudioVariant
                   ? 'border-[var(--mc-warning)] bg-[var(--mc-surface-2)] text-[var(--mc-warning)]'
                   : 'border-amber-200 bg-amber-50 text-amber-800',
               )}>
@@ -1470,7 +1470,7 @@ export default function BTEditorSurface({
                 }}
                 className={clsx(
                   'px-4 py-2 text-sm rounded-lg transition-colors',
-                  missionCanvasVariant
+                  autonomyStudioVariant
                     ? 'text-[var(--mc-text-muted)] hover:bg-[var(--mc-surface-hover)]'
                     : 'text-gray-600 hover:bg-gray-100',
                 )}
@@ -1482,7 +1482,7 @@ export default function BTEditorSurface({
                   onClick={() => handleSaveAs({ overwrite: true })}
                   className={clsx(
                     'px-4 py-2 text-sm font-medium rounded-lg transition-colors',
-                    missionCanvasVariant
+                    autonomyStudioVariant
                       ? 'border border-[var(--mc-danger-border)] bg-[var(--mc-surface)] text-[var(--mc-danger)] hover:bg-[var(--mc-surface-hover)]'
                       : 'bg-red-50 hover:bg-red-100 text-red-700',
                   )}
@@ -1495,7 +1495,7 @@ export default function BTEditorSurface({
                 disabled={!saveFileName.trim()}
                 className={clsx(
                   'px-4 py-2 text-sm font-medium rounded-lg transition-colors',
-                  missionCanvasVariant
+                  autonomyStudioVariant
                     ? saveFileName.trim()
                       ? 'bg-[var(--mc-accent)] hover:bg-[var(--mc-accent-hover)] text-[var(--mc-accent-fg)]'
                       : 'bg-[var(--mc-surface-hover)] text-[var(--mc-text-subtle)] cursor-not-allowed'

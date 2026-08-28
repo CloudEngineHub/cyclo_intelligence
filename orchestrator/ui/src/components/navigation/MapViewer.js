@@ -148,23 +148,14 @@ function scanCellsForGrid(grid, scan, scanPose, framePose) {
 }
 // Warm, theme-aware occupancy palette (see design handoff, turn 6).
 const OCC_COLORS = {
-    light: {
-        unknown: [227, 221, 207, 220], // #E3DDCF, blends into paper scene bg
-        free: [250, 248, 243, 255],    // #FAF8F3
-        wall: [42, 38, 32, 255],       // #2A2620 warm ink
-        // Local costmap in muted sand-amber (the UI's warning family) at low
-        // opacity: semantically "caution zone", warm enough to sit apart from
-        // the neutral-gray global costmap, quiet enough to stay under markers.
-        lethal: [172, 116, 58, 100],   // desaturated --mc-warning
-        inflate: [188, 148, 96, 70],   // lighter sand
-    },
-    dark: {
-        unknown: [30, 28, 24, 220],    // #1E1C18
-        free: [43, 40, 35, 255],       // #2B2823
-        wall: [216, 210, 196, 255],    // #D8D2C4 cream walls (blueprint invert)
-        lethal: [211, 158, 94, 100],   // desaturated --mc-warning (dark theme)
-        inflate: [214, 178, 128, 70],  // lighter sand
-    },
+    unknown: [227, 221, 207, 220], // #E3DDCF, blends into paper scene bg
+    free: [250, 248, 243, 255],    // #FAF8F3
+    wall: [42, 38, 32, 255],       // #2A2620 warm ink
+    // Local costmap in muted sand-amber (the UI's warning family) at low
+    // opacity: semantically "caution zone", warm enough to sit apart from
+    // the neutral-gray global costmap, quiet enough to stay under markers.
+    lethal: [172, 116, 58, 100],   // desaturated --mc-warning
+    inflate: [188, 148, 96, 70],   // lighter sand
 };
 // Rounded occupancy rendering keeps the exact cells, then only shaves exposed
 // outer corners. This avoids the old blur/threshold path where 1-cell edits
@@ -281,12 +272,8 @@ const OCC_REFINE = {
 };
 // Per-room pastel tints (refined viewer only). Hues stay off green/orange so
 // rooms never read as marker or area colors; the tint sits under annotations.
-const ROOM_TINTS = {
-    light: ["#D7E3F0", "#F0DCE3", "#E4DEF0", "#D9EAE8", "#DFE6EF", "#EFDCE9"],
-    dark: ["#31405A", "#4A3340", "#3C3452", "#2E4441", "#3A4258", "#472F45"],
-    alphaLight: 0.5,
-    alphaDark: 0.4,
-};
+const ROOM_TINTS = ["#D7E3F0", "#F0DCE3", "#E4DEF0", "#D9EAE8", "#DFE6EF", "#EFDCE9"];
+const ROOM_TINT_ALPHA = 0.5;
 function occRefineComponents(cells, w, h, { type, minSize, replacement, interiorOnly = false }) {
     const labels = new Uint8Array(w * h);
     const queue = new Int32Array(w * h);
@@ -360,7 +347,7 @@ function occThickenWalls(cells, w, h, passes) {
         }
     }
 }
-function occSilhouetteShadow(cells, w, h, scale, isDark) {
+function occSilhouetteShadow(cells, w, h, scale) {
     const silhouette = document.createElement("canvas");
     silhouette.width = w;
     silhouette.height = h;
@@ -384,16 +371,16 @@ function occSilhouetteShadow(cells, w, h, scale, isDark) {
     bctx.drawImage(silhouette, 0, 0, big.width, big.height);
     bctx.filter = "none";
     bctx.globalCompositeOperation = "source-in";
-    bctx.fillStyle = isDark ? "rgba(0,0,0,0.5)" : "rgba(28,26,23,0.26)";
+    bctx.fillStyle = "rgba(28,26,23,0.26)";
     bctx.fillRect(0, 0, big.width, big.height);
     return big;
 }
-function makeOccupancyTexture(grid, alpha, mode, highlightedCells = null, isDark = false, refined = false) {
+function makeOccupancyTexture(grid, alpha, mode, highlightedCells = null, refined = false) {
     var _a;
     const meta = gridMeta(grid);
     if (!meta || !grid.data || grid.data.length < meta.width * meta.height)
         return null;
-    const palette = isDark ? OCC_COLORS.dark : OCC_COLORS.light;
+    const palette = OCC_COLORS;
     const w = meta.width;
     const h = meta.height;
 
@@ -437,7 +424,7 @@ function makeOccupancyTexture(grid, alpha, mode, highlightedCells = null, isDark
         if (refine) {
             // Floating silhouette: unknown stays transparent, the known floor
             // casts a soft shadow onto the warm scene background.
-            const shadow = occSilhouetteShadow(cells, w, h, scale, isDark);
+            const shadow = occSilhouetteShadow(cells, w, h, scale);
             if (shadow)
                 ctx.drawImage(shadow, scale * 1.2, scale * 1.6);
         }
@@ -452,7 +439,7 @@ function makeOccupancyTexture(grid, alpha, mode, highlightedCells = null, isDark
             tintSmall.height = h;
             const tctx = tintSmall.getContext("2d");
             if (tctx) {
-                const tintPalette = (isDark ? ROOM_TINTS.dark : ROOM_TINTS.light).map((hex) => rgbaArrayFromHex(hex, 255));
+                const tintPalette = ROOM_TINTS.map((hex) => rgbaArrayFromHex(hex, 255));
                 const tintImage = tctx.createImageData(w, h);
                 for (let i = 0; i < w * h; i += 1) {
                     const label = roomLabels[i];
@@ -475,7 +462,7 @@ function makeOccupancyTexture(grid, alpha, mode, highlightedCells = null, isDark
                     // Clip the tint to the rounded free-space silhouette.
                     btx.globalCompositeOperation = "destination-in";
                     btx.drawImage(freeLayer, 0, 0);
-                    ctx.globalAlpha = isDark ? ROOM_TINTS.alphaDark : ROOM_TINTS.alphaLight;
+                    ctx.globalAlpha = ROOM_TINT_ALPHA;
                     ctx.drawImage(tintBig, 0, 0);
                     ctx.globalAlpha = 1;
                 }
@@ -643,10 +630,10 @@ function disposeObject(object) {
         }
     });
 }
-function makeGridPlane(grid, mode, z, framePose = null, highlightedCells = null, isDark = false, refined = false) {
+function makeGridPlane(grid, mode, z, framePose = null, highlightedCells = null, refined = false) {
     var _a, _b, _c, _d;
     const meta = gridMeta(grid);
-    const texture = makeOccupancyTexture(grid, mode === "map" ? 255 : 170, mode, highlightedCells, isDark, refined);
+    const texture = makeOccupancyTexture(grid, mode === "map" ? 255 : 170, mode, highlightedCells, refined);
     if (!meta || !texture)
         return null;
     const width = meta.width * meta.resolution;
@@ -844,7 +831,7 @@ function makeAnnotationRegionTexture(grid, region, colorString, alpha = 164) {
     texture.needsUpdate = true;
     return texture;
 }
-function makeEditorAreaPreview(selection, grid, excludedCells = null, isDark = false) {
+function makeEditorAreaPreview(selection, grid, excludedCells = null) {
     const meta = mapAreaGridMeta(grid);
     if (!meta)
         return null;
@@ -901,7 +888,7 @@ function makeEditorAreaPreview(selection, grid, excludedCells = null, isDark = f
     geometry.setIndex(indices);
     geometry.computeBoundingSphere();
     return new THREE.Mesh(geometry, new THREE.MeshBasicMaterial({
-        color: isDark ? 0xd5794f : 0x6d1f2a,
+        color: 0x6d1f2a,
         transparent: true,
         opacity: 0.3,
         depthWrite: false,
@@ -964,47 +951,28 @@ function makeMissionRouteLine(points, color, scale) {
     }
     return group;
 }
-// Warm, theme-aware marker palette (turn 9 shapes + 11b colors + 12 labels).
+// Warm marker palette (turn 9 shapes + 11b colors + 12 labels).
 const MARKER_COLORS = {
-    light: {
-        idle: 0x5b8266,          // sage — waypoints/behavior actions (walls stay ink)
-        selected: 0xc96442,      // clay
-        control: 0x1c1a17,       // ink — behavior control chips
-        action: 0x5b8266,        // sage
-        decorator: 0xb4762f,     // amber
-        badgeTextIdle: "#ffffff",
-        badgeTextSelected: "#ffffff",
-        badgeStroke: "rgba(250,248,243,0.95)",
-        labelBg: "rgba(243,241,234,0.92)",
-        labelBorder: "rgba(226,221,209,1)",
-        labelText: "#1c1a17",
-        labelSelBg: "rgba(244,229,220,0.96)",
-        labelSelBorder: "#c96442",
-        labelSelText: "#b5563a",
-        poseArrow: "#f3f1ea",
-    },
-    dark: {
-        idle: 0x6f9a74,
-        selected: 0xd5794f,
-        control: 0xece7dd,       // cream — behavior control chips
-        action: 0x6f9a74,
-        decorator: 0xd9a05a,
-        badgeTextIdle: "#1b1916",
-        badgeTextSelected: "#1b1916",
-        badgeStroke: "rgba(27,25,22,0.9)",
-        labelBg: "rgba(43,40,35,0.92)",
-        labelBorder: "rgba(61,57,49,1)",
-        labelText: "#ece7dd",
-        labelSelBg: "rgba(61,42,32,0.96)",
-        labelSelBorder: "#d5794f",
-        labelSelText: "#e0a488",
-        poseArrow: "#1b1916",
-    },
+    idle: 0x5b8266,          // sage — waypoints/behavior actions (walls stay ink)
+    selected: 0xc96442,      // clay
+    control: 0x1c1a17,       // ink — behavior control chips
+    action: 0x5b8266,        // sage
+    decorator: 0xb4762f,     // amber
+    badgeTextIdle: "#ffffff",
+    badgeTextSelected: "#ffffff",
+    badgeStroke: "rgba(250,248,243,0.95)",
+    labelBg: "rgba(243,241,234,0.92)",
+    labelBorder: "rgba(226,221,209,1)",
+    labelText: "#1c1a17",
+    labelSelBg: "rgba(244,229,220,0.96)",
+    labelSelBorder: "#c96442",
+    labelSelText: "#b5563a",
+    poseArrow: "#f3f1ea",
 };
-const markerPalette = (isDark) => (isDark ? MARKER_COLORS.dark : MARKER_COLORS.light);
+const markerPalette = MARKER_COLORS;
 
-function makeTextSprite(text, { width = 256, height = 64, fontSize = 22, backgroundAlpha = 0.92 } = {}, isDark = false) {
-    const pal = markerPalette(isDark);
+function makeTextSprite(text, { width = 256, height = 64, fontSize = 22, backgroundAlpha = 0.92 } = {}) {
+    const pal = markerPalette;
     const canvas = document.createElement("canvas");
     canvas.width = width;
     canvas.height = height;
@@ -1045,7 +1013,7 @@ function pastelizeHexColor(hex, mix = 0.45) {
     const b = lift(num & 255);
     return `#${((r << 16) | (g << 8) | b).toString(16).padStart(6, "0").toUpperCase()}`;
 }
-function makeAnnotationLabelSprite(text, color, isDark = false) {
+function makeAnnotationLabelSprite(text, color) {
     const label = String(text || "Area");
     const fontSize = 21;
     const font = `700 ${fontSize}px "Hanken Grotesk", "Pretendard Variable", sans-serif`;
@@ -1075,8 +1043,8 @@ function makeAnnotationLabelSprite(text, color, isDark = false) {
 
 // Auto-width glass pill + downward tail; clay tint when selected. Returns
 // { sprite, aspect } so the caller scales without squishing long names.
-function makeWaypointLabelSprite(text, { fontSize = 56, selected = false } = {}, isDark = false) {
-    const pal = markerPalette(isDark);
+function makeWaypointLabelSprite(text, { fontSize = 56, selected = false } = {}) {
+    const pal = markerPalette;
     const font = `${selected ? 700 : 600} ${fontSize}px "Hanken Grotesk", "Pretendard Variable", sans-serif`;
     const measure = document.createElement("canvas").getContext("2d");
     measure.font = font;
@@ -1171,7 +1139,7 @@ function makeWaypointHeadingArrow() {
     group.add(hitArea);
     return group;
 }
-function makePoseMarker(pose, color, z, isDark = false) {
+function makePoseMarker(pose, color, z) {
     var _a, _b, _c, _d;
     const group = new THREE.Group();
     const x = Number((_b = (_a = pose.position) === null || _a === void 0 ? void 0 : _a.x) !== null && _b !== void 0 ? _b : 0);
@@ -1187,12 +1155,12 @@ function makePoseMarker(pose, color, z, isDark = false) {
     arrowShape.lineTo(-0.04, 0);
     arrowShape.lineTo(-0.1, -0.13);
     arrowShape.closePath();
-    const arrow = new THREE.Mesh(new THREE.ShapeGeometry(arrowShape), new THREE.MeshBasicMaterial({ color: markerPalette(isDark).poseArrow }));
+    const arrow = new THREE.Mesh(new THREE.ShapeGeometry(arrowShape), new THREE.MeshBasicMaterial({ color: markerPalette.poseArrow }));
     arrow.position.z = 0.01;
     group.add(arrow);
     return group;
 }
-function makeSpotMarker(spot, selected = false, scale = 1, isDark = false, active = false) {
+function makeSpotMarker(spot, selected = false, scale = 1, active = false) {
     var _a, _b, _c, _d;
     const pose = spot === null || spot === void 0 ? void 0 : spot.pose;
     if (!pose)
@@ -1200,7 +1168,7 @@ function makeSpotMarker(spot, selected = false, scale = 1, isDark = false, activ
     const x = Number((_a = pose.x) !== null && _a !== void 0 ? _a : 0);
     const y = Number((_b = pose.y) !== null && _b !== void 0 ? _b : 0);
     const yaw = Number((_c = pose.yaw) !== null && _c !== void 0 ? _c : 0);
-    const pal = markerPalette(isDark);
+    const pal = markerPalette;
     const color = active ? pal.selected : (selected ? pal.selected : pal.idle);
     const group = new THREE.Group();
     // Flush with the map plane: just enough lift to avoid z-fighting, so the
@@ -1259,7 +1227,7 @@ function makeSpotMarker(spot, selected = false, scale = 1, isDark = false, activ
     group.add(marker);
     const label = String((_d = spot.label) !== null && _d !== void 0 ? _d : spot.id);
     if (label) {
-        const { sprite, aspect } = makeWaypointLabelSprite(label, { selected }, isDark);
+        const { sprite, aspect } = makeWaypointLabelSprite(label, { selected });
         // Anchor the sprite at the waypoint and shift its visual center in
         // screen space. Unlike a world-Y position offset, this stays directly
         // above the waypoint when the camera rolls with a rotated map.
@@ -1274,8 +1242,8 @@ function makeSpotMarker(spot, selected = false, scale = 1, isDark = false, activ
     }
     return group;
 }
-function makeRouteBadgeSprite(text, selected = false, isDark = false) {
-    const pal = markerPalette(isDark);
+function makeRouteBadgeSprite(text, selected = false) {
+    const pal = markerPalette;
     const canvas = document.createElement("canvas");
     canvas.width = 128;
     canvas.height = 128;
@@ -1301,14 +1269,14 @@ function makeRouteBadgeSprite(text, selected = false, isDark = false) {
     texture.colorSpace = THREE.SRGBColorSpace;
     return new THREE.Sprite(new THREE.SpriteMaterial({ map: texture, transparent: true }));
 }
-function makeMissionRouteBadge(spot, order, selected = false, scale = 1, isDark = false) {
+function makeMissionRouteBadge(spot, order, selected = false, scale = 1) {
     var _a, _b;
     const pose = spot === null || spot === void 0 ? void 0 : spot.pose;
     if (!pose)
         return null;
     const x = Number((_a = pose.x) !== null && _a !== void 0 ? _a : 0);
     const y = Number((_b = pose.y) !== null && _b !== void 0 ? _b : 0);
-    const sprite = makeRouteBadgeSprite(order, selected, isDark);
+    const sprite = makeRouteBadgeSprite(order, selected);
     const markerRadius = WAYPOINT_RING_OUTER_RADIUS * scale;
     const arrowRadius = WAYPOINT_HEADING_LENGTH * scale;
     const size = Math.max(0.34, markerRadius * 2.2);
@@ -1332,9 +1300,9 @@ function makeMissionRouteBadge(spot, order, selected = false, scale = 1, isDark 
 // annotation object. The editor keeps unchanged annotations reference-identical
 // across edits, so only the annotation actually being brushed re-rasterizes.
 const annotationTextureCache = new WeakMap();
-function cachedAnnotationRegionTexture(annotation, grid, region, colorString, isDark, selected) {
+function cachedAnnotationRegionTexture(annotation, grid, region, colorString, selected) {
     const hit = annotationTextureCache.get(annotation);
-    if (hit && hit.grid === grid && hit.isDark === isDark && hit.selected === selected) {
+    if (hit && hit.grid === grid && hit.selected === selected) {
         return hit.texture;
     }
     const texture = makeAnnotationRegionTexture(grid, region, colorString, selected ? 210 : 164);
@@ -1342,11 +1310,11 @@ function cachedAnnotationRegionTexture(annotation, grid, region, colorString, is
         texture.userData.retain = true;
         if ((hit === null || hit === void 0 ? void 0 : hit.texture) && hit.texture !== texture)
             hit.texture.dispose();
-        annotationTextureCache.set(annotation, { grid, isDark, selected, texture });
+        annotationTextureCache.set(annotation, { grid, selected, texture });
     }
     return texture;
 }
-function makeMapAnnotationRegion(annotation, grid, isDark = false, coveredCells = null, selected = false) {
+function makeMapAnnotationRegion(annotation, grid, coveredCells = null, selected = false) {
     var _a, _b, _c, _d, _e, _f;
     const meta = gridMeta(grid);
     if (!meta)
@@ -1362,7 +1330,7 @@ function makeMapAnnotationRegion(annotation, grid, isDark = false, coveredCells 
     const colorString = pastelizeHexColor(
         hexColorString(annotation === null || annotation === void 0 ? void 0 : annotation.color, "#6D1F2A"),
     );
-    const texture = cachedAnnotationRegionTexture(annotation, grid, region, colorString, isDark, selected);
+    const texture = cachedAnnotationRegionTexture(annotation, grid, region, colorString, selected);
     // Flush with the map, and strictly BELOW the waypoint/route layer
     // (0.01-0.05) so labeled areas never cover mission markers.
     const plane = makeGridTexturePlane(grid, texture, 0.004);
@@ -1375,7 +1343,7 @@ function makeMapAnnotationRegion(annotation, grid, isDark = false, coveredCells 
     }
     const label = String((annotation === null || annotation === void 0 ? void 0 : annotation.label) || "Area").trim();
     if (label) {
-        const { sprite, aspect } = makeAnnotationLabelSprite(label, colorString, isDark);
+        const { sprite, aspect } = makeAnnotationLabelSprite(label, colorString);
         const center = gridCellToMapPoint(meta, region.centroid.x, region.centroid.y);
         const labelHeight = Math.max(0.24, Math.min(0.72, meta.resolution * 11));
         sprite.position.set(center.x, center.y, 0.008);
@@ -1384,8 +1352,8 @@ function makeMapAnnotationRegion(annotation, grid, isDark = false, coveredCells 
     }
     return group;
 }
-function behaviorNodeColor(category, selected = false, isDark = false) {
-    const pal = markerPalette(isDark);
+function behaviorNodeColor(category, selected = false) {
+    const pal = markerPalette;
     if (selected)
         return pal.selected;
     switch (category) {
@@ -1398,7 +1366,7 @@ function behaviorNodeColor(category, selected = false, isDark = false) {
             return pal.action;
     }
 }
-function makeBehaviorNodeMarker(node, selected = false, isDark = false) {
+function makeBehaviorNodeMarker(node, selected = false) {
     var _a, _b, _c, _d, _e;
     const pose = node === null || node === void 0 ? void 0 : node.pose;
     if (!pose)
@@ -1406,7 +1374,7 @@ function makeBehaviorNodeMarker(node, selected = false, isDark = false) {
     const x = Number((_a = pose.x) !== null && _a !== void 0 ? _a : 0);
     const y = Number((_b = pose.y) !== null && _b !== void 0 ? _b : 0);
     const yaw = Number((_c = pose.yaw) !== null && _c !== void 0 ? _c : 0);
-    const color = behaviorNodeColor(node.category, selected, isDark);
+    const color = behaviorNodeColor(node.category, selected);
     const group = new THREE.Group();
     group.position.set(x, y, 0.28);
     group.rotation.z = yaw;
@@ -1425,13 +1393,13 @@ function makeBehaviorNodeMarker(node, selected = false, isDark = false) {
         new THREE.Vector3(0.26, 0.16, 0.02),
         new THREE.Vector3(-0.26, 0.16, 0.02),
         new THREE.Vector3(-0.26, -0.16, 0.02),
-    ], isDark ? 0x1b1916 : 0xf3f1ea, 2);
+    ], 0xf3f1ea, 2);
     if (outline) {
         outline.userData.behaviorNodeId = node.id;
         group.add(outline);
     }
     const port = new THREE.Mesh(new THREE.CircleGeometry(0.045, 16), new THREE.MeshBasicMaterial({
-        color: isDark ? 0x1b1916 : 0xffffff,
+        color: 0xffffff,
         transparent: true,
         opacity: 0.92,
     }));
@@ -1440,7 +1408,7 @@ function makeBehaviorNodeMarker(node, selected = false, isDark = false) {
     group.add(port);
     const label = String((_e = (_d = node.label) !== null && _d !== void 0 ? _d : node.tag) !== null && _e !== void 0 ? _e : node.id);
     if (label) {
-        const sprite = makeTfLabelSprite(label, isDark);
+        const sprite = makeTfLabelSprite(label);
         sprite.position.set(0, 0.38, 0.06);
         sprite.scale.set(0.56, 0.14, 1);
         sprite.userData.behaviorNodeId = node.id;
@@ -1448,7 +1416,7 @@ function makeBehaviorNodeMarker(node, selected = false, isDark = false) {
     }
     return group;
 }
-function makeTfAxes(pose, label, isDark = false) {
+function makeTfAxes(pose, label) {
     var _a, _b, _c, _d, _e, _f;
     const group = new THREE.Group();
     group.position.set(Number((_b = (_a = pose.position) === null || _a === void 0 ? void 0 : _a.x) !== null && _b !== void 0 ? _b : 0), Number((_d = (_c = pose.position) === null || _c === void 0 ? void 0 : _c.y) !== null && _d !== void 0 ? _d : 0), Number((_f = (_e = pose.position) === null || _e === void 0 ? void 0 : _e.z) !== null && _f !== void 0 ? _f : 0) + 0.08);
@@ -1462,7 +1430,7 @@ function makeTfAxes(pose, label, isDark = false) {
         group.add(yAxis);
     if (zAxis)
         group.add(zAxis);
-    const sprite = makeTfLabelSprite(label, isDark);
+    const sprite = makeTfLabelSprite(label);
     sprite.position.set(0, -TF_AXIS_LENGTH * 0.85, 0.012);
     group.add(sprite);
     return group;
@@ -1515,8 +1483,8 @@ function makeFootprintMarker(footprint, framePose) {
     group.add(fill);
     return group;
 }
-function makeTfLabelSprite(text, isDark = false) {
-    const sprite = makeTextSprite(text, undefined, isDark);
+function makeTfLabelSprite(text) {
+    const sprite = makeTextSprite(text);
     sprite.scale.set(TF_AXIS_LENGTH * 1.8, TF_AXIS_LENGTH * 0.45, 1);
     return sprite;
 }
@@ -1635,9 +1603,9 @@ function WaypointBtFocusLayer({ layer, onClose }) {
 // warm near-black so the occupancy palette (free ~245, occupied ~28) still reads
 // as a clean floor-plan without retuning makeOccupancyTexture.
 // Keep these values aligned with the Mission Canvas `--mc-canvas` theme token.
-const SCENE_BG = { light: 0xefece3, dark: 0x1b1916 };
+const SCENE_BG = 0xefece3;
 
-export function MapViewer({ map, globalCostmap, localCostmap, scan, scanPose = null, pose, plan, goalPose, footprint, tf, showMap, showGlobalCostmap, showLocalCostmap, showScan, showGlobalPlan, showGoalPose, showTf, showRobotModel, interactionDisabled, interactionMode, editorActive, editorPaintOnDrag = true, editorAreaSelection = false, editorBrush = null, mapRefined = true, viewKey, isDark = false, waitingLabel = "Waiting for /map", fitContainer = false, spots = [], selectedSpotId = "", activeWaypointId = "", missionFollowRobot = false, behaviorNodes = [], selectedBehaviorNodeId = "", behaviorPreviewNode = null, missionRouteOrder = [], missionRouteClosed = false, missionRouteMode = false, selectedMissionRouteSourceId = "", mapAnnotations = [], selectedMapAnnotationId = "", btLayer = null, onBtLayerClose, onSpotClick, onBehaviorNodeClick, onMissionRouteSpotClick, onMissionRouteMapClick, onSpotPoseChange, onBehaviorNodePoseChange, onEditorMapPoint, onEditorMapArea, onMapClick, onMapPose, }) {
+export function MapViewer({ map, globalCostmap, localCostmap, scan, scanPose = null, pose, plan, goalPose, footprint, tf, showMap, showGlobalCostmap, showLocalCostmap, showScan, showGlobalPlan, showGoalPose, showTf, showRobotModel, interactionDisabled, interactionMode, editorActive, editorPaintOnDrag = true, editorAreaSelection = false, editorBrush = null, mapRefined = true, viewKey, waitingLabel = "Waiting for /map", fitContainer = false, spots = [], selectedSpotId = "", activeWaypointId = "", missionFollowRobot = false, behaviorNodes = [], selectedBehaviorNodeId = "", behaviorPreviewNode = null, missionRouteOrder = [], missionRouteClosed = false, missionRouteMode = false, selectedMissionRouteSourceId = "", mapAnnotations = [], selectedMapAnnotationId = "", btLayer = null, onBtLayerClose, onSpotClick, onBehaviorNodeClick, onMissionRouteSpotClick, onMissionRouteMapClick, onSpotPoseChange, onBehaviorNodePoseChange, onEditorMapPoint, onEditorMapArea, onMapClick, onMapPose, }) {
     const containerRef = useRef(null);
     const sceneRef = useRef(null);
     const rendererRef = useRef(null);
@@ -1700,7 +1668,7 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, scanPose = n
         let handleControlsEnd = null;
         try {
             scene = new THREE.Scene();
-            scene.background = new THREE.Color(isDark ? SCENE_BG.dark : SCENE_BG.light);
+            scene.background = new THREE.Color(SCENE_BG);
             sceneRef.current = scene;
             camera = new THREE.PerspectiveCamera(48, 1, CAMERA_NEAR, CAMERA_FAR);
             camera.up.set(0, 1, 0);
@@ -1711,7 +1679,7 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, scanPose = n
             // the pixels rendered per frame for no visible gain on a map view,
             // and the full-width editor canvas made that cost noticeable.
             renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
-            renderer.setClearColor(isDark ? SCENE_BG.dark : SCENE_BG.light, 1);
+            renderer.setClearColor(SCENE_BG, 1);
             renderer.domElement.className = "block w-full h-full cursor-grab";
             containerEl.appendChild(renderer.domElement);
             rendererRef.current = renderer;
@@ -1895,20 +1863,6 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, scanPose = n
             liveLayerRef.current = null;
         };
     }, []);
-    useEffect(() => {
-        const scene = sceneRef.current;
-        const renderer = rendererRef.current;
-        if (!scene || !renderer)
-            return;
-        const bg = isDark ? SCENE_BG.dark : SCENE_BG.light;
-        if (scene.background instanceof THREE.Color) {
-            scene.background.set(bg);
-        }
-        else {
-            scene.background = new THREE.Color(bg);
-        }
-        renderer.setClearColor(bg, 1);
-    }, [isDark]);
     // Editor brush ring — geometry rebuilt only when the brush spec changes.
     useEffect(() => {
         const brushLayer = editorBrushLayerRef.current;
@@ -1924,7 +1878,7 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, scanPose = n
         const group = new THREE.Group();
         // Ink/cream contrast underlay so a paper-colored ring stays visible on the map.
         const underlay = new THREE.Mesh(new THREE.RingGeometry(radius * 0.78, radius * 1.08, 40), new THREE.MeshBasicMaterial({
-            color: isDark ? 0xf3f1ea : 0x1c1a17,
+            color: 0x1c1a17,
             transparent: true,
             opacity: 0.32,
             depthWrite: false,
@@ -1949,7 +1903,7 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, scanPose = n
         group.position.set(0, 0, 0.9);
         group.visible = false;
         brushLayer.add(group);
-    }, [editorBrush, map, isDark]);
+    }, [editorBrush, map]);
     // Follow the pointer via ref mutation — zero React renders per move.
     useEffect(() => {
         const renderer = rendererRef.current;
@@ -2094,10 +2048,10 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, scanPose = n
         mapLayer.clear();
         if (!showMap || !map)
             return;
-        const mapPlane = makeGridPlane(map, "map", 0, null, null, isDark, mapRefined);
+        const mapPlane = makeGridPlane(map, "map", 0, null, null, mapRefined);
         if (mapPlane)
             mapLayer.add(mapPlane);
-    }, [map, showMap, isDark, mapRefined]);
+    }, [map, showMap, mapRefined]);
     useEffect(() => {
         var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p, _q, _r, _s, _t, _u, _v, _w, _x, _y, _z, _0, _1, _2, _3, _4;
         const scene = sceneRef.current;
@@ -2119,7 +2073,7 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, scanPose = n
                     id: "__waypoint_preview__",
                     label: "Waypoint",
                     pose: { x: previewX, y: previewY, yaw: previewYaw },
-                }, true, waypointScale, isDark));
+                }, true, waypointScale));
             }
             else if (interactionMode === "behavior" && behaviorPreviewNode) {
                 layers.add(makeBehaviorNodeMarker({
@@ -2128,21 +2082,21 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, scanPose = n
                     label: behaviorPreviewNode.label || behaviorPreviewNode.tag,
                     category: behaviorPreviewNode.category || "action",
                     pose: { x: previewX, y: previewY, yaw: previewYaw },
-                }, true, isDark));
+                }, true));
             }
             else {
-                layers.add(makePoseMarker(dragPreviewPose, interactionMode === "initial" ? (isDark ? 0x6f9a74 : 0x5b8266) : (isDark ? 0xd5794f : 0xc96442), 0.2, isDark));
+                layers.add(makePoseMarker(dragPreviewPose, interactionMode === "initial" ? 0x5b8266 : 0xc96442, 0.2));
             }
         }
         const spotById = new Map(spots.map((spot) => [spot.id, spot]));
         const coveredAnnotationCells = new Set();
         mapAnnotations.forEach((annotation) => {
-            const marker = makeMapAnnotationRegion(annotation, map, isDark, coveredAnnotationCells, annotation.id === selectedMapAnnotationId);
+            const marker = makeMapAnnotationRegion(annotation, map, coveredAnnotationCells, annotation.id === selectedMapAnnotationId);
             if (marker)
                 layers.add(marker);
         });
         if (editorAreaPreview) {
-            const preview = makeEditorAreaPreview(editorAreaPreview, map, coveredAnnotationCells, isDark);
+            const preview = makeEditorAreaPreview(editorAreaPreview, map, coveredAnnotationCells);
             if (preview)
                 layers.add(preview);
         }
@@ -2160,7 +2114,7 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, scanPose = n
                         yaw: preview.yaw,
                     },
                 }
-                : spot, spot.id === selectedSpotId, waypointScale, isDark, spot.id === activeWaypointId);
+                : spot, spot.id === selectedSpotId, waypointScale, spot.id === activeWaypointId);
             if (marker)
                 layers.add(marker);
         });
@@ -2173,13 +2127,13 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, scanPose = n
             if (missionRouteClosed && routePoints.length > 1) {
                 routePoints.push(routePoints[0].clone());
             }
-            const routeLine = makeMissionRouteLine(routePoints, markerPalette(isDark).idle, waypointScale);
+            const routeLine = makeMissionRouteLine(routePoints, markerPalette.idle, waypointScale);
             if (routeLine)
                 layers.add(routeLine);
         }
         missionRouteOrder.forEach(({ id, order }) => {
             const spot = spotById.get(id);
-            const badge = makeMissionRouteBadge(spot, order, id === selectedMissionRouteSourceId, waypointScale, isDark);
+            const badge = makeMissionRouteBadge(spot, order, id === selectedMissionRouteSourceId, waypointScale);
             if (badge)
                 layers.add(badge);
         });
@@ -2197,7 +2151,7 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, scanPose = n
                         yaw: preview.yaw,
                     },
                 }
-                : node, node.id === selectedBehaviorNodeId, isDark);
+                : node, node.id === selectedBehaviorNodeId);
             if (marker)
                 layers.add(marker);
         });
@@ -2225,7 +2179,6 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, scanPose = n
         activeWaypointId,
         spots,
         viewKey,
-        isDark,
     ]);
     // Global costmap plane. A full snapshot builds one DataTexture; subsequent
     // dirty rectangles patch only their affected rows in CPU memory and WebGL.
@@ -2242,7 +2195,7 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, scanPose = n
         }
         const meta = gridMeta(globalCostmap);
         const geometryKey = meta
-            ? `${meta.width}:${meta.height}:${meta.resolution}:${meta.originX}:${meta.originY}:${meta.originYaw}:${isDark}`
+            ? `${meta.width}:${meta.height}:${meta.resolution}:${meta.originX}:${meta.originY}:${meta.originYaw}`
             : null;
         const current = globalCostmapTextureRef.current;
         if (
@@ -2262,7 +2215,7 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, scanPose = n
         disposeObject(group);
         group.clear();
         globalCostmapTextureRef.current = null;
-        const plane = makeGridPlane(globalCostmap, "globalCostmap", 0.03, null, null, isDark);
+        const plane = makeGridPlane(globalCostmap, "globalCostmap", 0.03, null, null);
         if (plane) {
             group.add(plane);
             globalCostmapTextureRef.current = {
@@ -2270,7 +2223,7 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, scanPose = n
                 texture: plane.userData.mapTexture,
             };
         }
-    }, [globalCostmap, showGlobalCostmap, isDark]);
+    }, [globalCostmap, showGlobalCostmap]);
     // Planner output: global plan line + goal marker (updates at plan rate).
     useEffect(() => {
         var _a, _b;
@@ -2289,9 +2242,9 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, scanPose = n
                 group.add(planLine);
         }
         if (showGoalPose && ((_b = goalPose === null || goalPose === void 0 ? void 0 : goalPose.pose) === null || _b === void 0 ? void 0 : _b.position)) {
-            group.add(makePoseMarker(goalPose.pose, isDark ? 0xd5794f : 0xc96442, 0.14, isDark));
+            group.add(makePoseMarker(goalPose.pose, 0xc96442, 0.14));
         }
-    }, [plan, showGlobalPlan, goalPose, showGoalPose, isDark]);
+    }, [plan, showGlobalPlan, goalPose, showGoalPose]);
     // High-frequency live overlay: robot pose marker, footprint, scan points,
     // TF axes, and the (small) local costmap. Rebuilding this group is cheap;
     // everything expensive lives in the groups above and is untouched by TF.
@@ -2319,7 +2272,7 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, scanPose = n
                 ? poseForScanFrameAtBasePose(scanFrame, tfFramePoseByName, scanPose)
                 : poseForScanFrame(scanFrame, tfFramePoseByName, pose);
             const scanCells = scanCellsForGrid(localCostmap, scan, resolvedScanPose, localFramePose);
-            const plane = makeGridPlane(localCostmap, "localCostmap", 0.1, localFramePose, scanCells, isDark);
+            const plane = makeGridPlane(localCostmap, "localCostmap", 0.1, localFramePose, scanCells);
             if (plane)
                 group.add(plane);
         }
@@ -2371,7 +2324,6 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, scanPose = n
                     group.add(makeTfAxes(
                         poseForTfAxesFrame(frame, framePose, pose),
                         frame,
-                        isDark,
                     ));
                 });
             }
@@ -2379,7 +2331,7 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, scanPose = n
                 group.add(makeTfAxes({
                     position: { x: robotX, y: robotY, z: 0 },
                     orientation: pose === null || pose === void 0 ? void 0 : pose.orientation,
-                }, "base_link", isDark));
+                }, "base_link"));
             }
         }
         const footprintPoints = tfSyncedFootprint === null || tfSyncedFootprint === void 0 ? void 0 : tfSyncedFootprint.polygon?.points;
@@ -2394,9 +2346,9 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, scanPose = n
                 group.add(footprintMarker);
         }
         if (pose === null || pose === void 0 ? void 0 : pose.position) {
-            group.add(makePoseMarker(pose, showRobotModel && (footprintPoints === null || footprintPoints === void 0 ? void 0 : footprintPoints.length) ? 0x60a5fa : 0x007acc, 0.16, isDark));
+            group.add(makePoseMarker(pose, showRobotModel && (footprintPoints === null || footprintPoints === void 0 ? void 0 : footprintPoints.length) ? 0x60a5fa : 0x007acc, 0.16));
         }
-    }, [tf, pose, scan, scanPose, localCostmap, showLocalCostmap, showScan, showTf, showRobotModel, map, isDark]);
+    }, [tf, pose, scan, scanPose, localCostmap, showLocalCostmap, showScan, showTf, showRobotModel, map]);
     useEffect(() => {
         const renderer = rendererRef.current;
         const camera = cameraRef.current;

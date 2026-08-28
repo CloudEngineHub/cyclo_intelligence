@@ -37,19 +37,19 @@ export default function BTControlNode({ id, data }) {
     <div
       className={clsx(
         'relative px-4 py-3 rounded-xl border-2 min-w-[160px] text-center shadow-sm cursor-pointer',
-        'border-[#1c1a17] bg-white dark:!bg-[#2b2823] dark:border-[#ece7dd]',
-        isSelected && 'ring-2 ring-[#1c1a17]/20 dark:ring-[#ece7dd]/20',
+        'border-[#1c1a17] bg-white',
+        isSelected && 'ring-2 ring-[#1c1a17]/20',
         isActive && 'animate-pulse',
       )}
     >
-      <Handle type="target" position={Position.Top} className="!bg-[#1c1a17] dark:!bg-[#ece7dd]" />
-      <div className="text-xs text-[#6f6a5d] dark:text-[#9a9384] font-semibold mb-1 font-mono">
+      <Handle type="target" position={Position.Top} className="!bg-[#1c1a17]" />
+      <div className="text-xs text-[#6f6a5d] font-semibold mb-1 font-mono">
         {icon} {data.nodeType}
       </div>
-      <div className="text-sm font-semibold text-[#1c1a17] dark:text-[#ece7dd] truncate">
+      <div className="text-sm font-semibold text-[#1c1a17] truncate">
         {data.label}
       </div>
-      <Handle type="source" position={Position.Bottom} className="!bg-[#1c1a17] dark:!bg-[#ece7dd]" />
+      <Handle type="source" position={Position.Bottom} className="!bg-[#1c1a17]" />
 
       <button
         type="button"
@@ -67,17 +67,17 @@ export default function BTControlNode({ id, data }) {
               : 'Collapse'
         }
         className={clsx(
-          'absolute -right-2 -top-2 w-5 h-5 rounded-full border bg-white dark:!bg-[#2b2823] shadow text-xs leading-none flex items-center justify-center select-none',
+          'absolute -right-2 -top-2 w-5 h-5 rounded-full border bg-white shadow text-xs leading-none flex items-center justify-center select-none',
           hasChildren
-            ? 'border-[#dcd7ca] text-[#6f6a5d] hover:bg-[#f4e5dc] hover:text-[#c96442] dark:border-[#3d3931] dark:text-[#9a9384] dark:hover:!bg-[#322e28] cursor-pointer'
-            : 'border-[#e7e3d9] text-[#c3bcac] dark:border-[#322e28] dark:text-[#6e685b] cursor-not-allowed'
+            ? 'border-[#dcd7ca] text-[#6f6a5d] hover:bg-[#f4e5dc] hover:text-[#c96442] cursor-pointer'
+            : 'border-[#e7e3d9] text-[#c3bcac] cursor-not-allowed'
         )}
       >
         {collapsed ? '+' : '−'}
       </button>
 
       {collapsed && hasChildren && (
-        <div className="absolute -bottom-2 right-1 text-[10px] text-[#6f6a5d] dark:text-[#9a9384] bg-white dark:!bg-[#2b2823] border border-[#e7e3d9] dark:border-[#322e28] rounded px-1 leading-tight">
+        <div className="absolute -bottom-2 right-1 text-[10px] text-[#6f6a5d] bg-white border border-[#e7e3d9] rounded px-1 leading-tight">
           {childCount} hidden
         </div>
       )}

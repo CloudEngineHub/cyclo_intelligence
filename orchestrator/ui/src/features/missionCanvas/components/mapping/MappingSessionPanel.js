@@ -1,4 +1,4 @@
-// Copyright 2025 ROBOTIS CO., LTD.
+// Copyright 2026 ROBOTIS CO., LTD.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,18 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 //
-// Author: Kiwoong Park, Seongwoo Kim
+// Author: Seongwoo Kim
 
-// PageType enum-like object for page types
-// Use this for better code readability and maintainability
+import { Panel, SessionRow } from "../primitives";
 
-const PageType = {
-  HOME: 'home',
-  RECORD: 'record',
-  INFERENCE: 'inference',
-  TRAINING: 'training',
-  EDIT_DATASET: 'edit_dataset',
-  AUTONOMY_STUDIO: 'autonomy_studio',
-};
-
-export default PageType;
+export default function MappingSessionPanel() {
+  return (
+    <Panel title="Mapping Session" compact className="grid gap-1 content-start overflow-auto">
+      <div className="grid gap-1">
+        <SessionRow label="Source" value="Live mapping" />
+        <SessionRow label="Map" value="Not saved" />
+        <SessionRow label="Edits" value="Clean" />
+      </div>
+    </Panel>
+  );
+}

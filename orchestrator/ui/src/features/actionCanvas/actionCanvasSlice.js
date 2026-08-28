@@ -24,8 +24,8 @@ const initialState = {
   selectedNodeId: null, // ID of the node selected for param editing
 };
 
-const btmanagerSlice = createSlice({
-  name: 'btmanager',
+const actionCanvasSlice = createSlice({
+  name: 'actionCanvas',
   initialState,
   reducers: {
     setTreeXml: (state, action) => {
@@ -46,5 +46,5 @@ const btmanagerSlice = createSlice({
   },
 });
 
-export const { setTreeXml, setTreeFileName, setBtStatus, setActiveNodeNames, setSelectedNodeId } = btmanagerSlice.actions;
-export default btmanagerSlice.reducer;
+export const { setTreeXml, setTreeFileName, setBtStatus, setActiveNodeNames, setSelectedNodeId } = actionCanvasSlice.actions;
+export default actionCanvasSlice.reducer;

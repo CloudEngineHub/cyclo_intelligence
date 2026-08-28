@@ -39,7 +39,7 @@ import {
   isBtRobotSupported,
 } from './constants/btSupport';
 
-const MissionCanvasPage = React.lazy(() => import('./pages/MissionCanvasPage'));
+const AutonomyStudioPage = React.lazy(() => import('./pages/AutonomyStudioPage'));
 
 function getAutonomyStudioBlockMessage(robotType) {
   const normalizedRobotType = String(robotType || '').trim();
@@ -55,7 +55,7 @@ function getAutonomyStudioBlockMessage(robotType) {
   return '';
 }
 
-function MissionCanvasIcon({ size = 36 }) {
+function AutonomyStudioIcon({ size = 36 }) {
   const treeSize = Math.round(size * 0.48);
   return (
     <span
@@ -160,7 +160,7 @@ function App() {
   // The map and task workspaces currently share the SG2-specific runtime.
   // Keep restored/deep-linked sessions behind the same guard as rail entry.
   useEffect(() => {
-    if (page !== PageType.MISSION_CANVAS) return;
+    if (page !== PageType.AUTONOMY_STUDIO) return;
 
     const blockMessage = getAutonomyStudioBlockMessage(robotType);
     if (!blockMessage) return;
@@ -309,7 +309,7 @@ function App() {
     dispatch(moveToPage(PageType.EDIT_DATASET));
   };
 
-  const handleMissionCanvasPageNavigation = () => {
+  const handleAutonomyStudioPageNavigation = () => {
     const blockMessage = getAutonomyStudioBlockMessage(robotType);
     if (blockMessage) {
       toast.error(blockMessage, { duration: 5000 });
@@ -318,7 +318,7 @@ function App() {
 
     isFirstLoad.current = false;
     setShowMissionWorkspaceChooser(true);
-    dispatch(moveToPage(PageType.MISSION_CANVAS));
+    dispatch(moveToPage(PageType.AUTONOMY_STUDIO));
   };
 
   const classPageButton = clsx(
@@ -369,7 +369,7 @@ function App() {
 
   return (
     <div className="flex min-h-screen w-screen bg-white text-gray-900 dark:bg-slate-950 dark:text-slate-100">
-      {page !== PageType.MISSION_CANVAS && (
+      {page !== PageType.AUTONOMY_STUDIO && (
         <aside
           aria-label="Cyclo Intelligence navigation"
           className="w-30 min-w-28 bg-gray-100 dark:bg-slate-900 min-h-screen flex flex-col items-center gap-4 shadow-[inset_0_0_2px_rgba(0,0,0,0.1)] dark:shadow-[inset_0_0_0_1px_rgba(148,163,184,0.12)]"
@@ -481,12 +481,12 @@ function App() {
           {/* Autonomy Studio workspace entry */}
           <button
             className={clsx(classPageButton, {
-              'hover:bg-gray-200 active:bg-gray-400 dark:hover:bg-slate-800 dark:active:bg-slate-700': page !== PageType.MISSION_CANVAS,
-              'bg-gray-300 dark:bg-slate-700': page === PageType.MISSION_CANVAS,
+              'hover:bg-gray-200 active:bg-gray-400 dark:hover:bg-slate-800 dark:active:bg-slate-700': page !== PageType.AUTONOMY_STUDIO,
+              'bg-gray-300 dark:bg-slate-700': page === PageType.AUTONOMY_STUDIO,
             })}
-            onClick={handleMissionCanvasPageNavigation}
+            onClick={handleAutonomyStudioPageNavigation}
           >
-            <MissionCanvasIcon />
+            <AutonomyStudioIcon />
             <span className="mt-1 text-center text-sm leading-tight">
               Autonomy<br />Studio
             </span>
@@ -506,9 +506,9 @@ function App() {
           <TrainingPage isActive={page === PageType.TRAINING} />
         ) : page === PageType.EDIT_DATASET ? (
           <EditDatasetPage isActive={page === PageType.EDIT_DATASET} />
-        ) : page === PageType.MISSION_CANVAS ? (
+        ) : page === PageType.AUTONOMY_STUDIO ? (
           <React.Suspense fallback={<div className="flex-1 flex items-center justify-center">Loading Autonomy Studio...</div>}>
-            <MissionCanvasPage
+            <AutonomyStudioPage
               onBackHome={handleHomePageNavigation}
               showWorkspaceChooser={showMissionWorkspaceChooser}
             />

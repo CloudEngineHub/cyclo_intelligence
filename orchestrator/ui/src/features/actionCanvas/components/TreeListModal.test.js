@@ -50,7 +50,7 @@ test('presents saved XML documents as tasks without exposing BT terminology', as
       isOpen
       onClose={onClose}
       onSelect={onSelect}
-      variant="mission-canvas"
+      variant="autonomy-studio"
     />,
   );
 

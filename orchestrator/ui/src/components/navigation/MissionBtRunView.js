@@ -22,7 +22,7 @@
 // parses the same XML string sent to /bt/load_and_run, the parser's bt_N ids
 // line up with the backend's active-node ids — no name matching needed.
 
-import { memo, useEffect, useLayoutEffect, useMemo, useState } from "react";
+import { memo, useLayoutEffect, useMemo } from "react";
 import { ReactFlow, Controls, Background, useNodesState } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 
@@ -38,7 +38,7 @@ const nodeTypes = {
 
 const reactFlowProOptions = { hideAttribution: true };
 
-function ReadOnlyBtFlow({ nodes, edges, isDark }) {
+function ReadOnlyBtFlow({ nodes, edges }) {
   // Keep ReactFlow's measured dimensions in controlled state. Replacing the
   // parsed nodes directly whenever /bt/active_nodes changed discarded those
   // measurements, which makes XYFlow hide every node until ResizeObserver runs
@@ -102,26 +102,9 @@ function ReadOnlyBtFlow({ nodes, edges, isDark }) {
       proOptions={reactFlowProOptions}
     >
       <Controls showInteractive={false} />
-      <Background color={isDark ? "#3a352e" : "#dcd7ca"} gap={16} />
+      <Background color="#dcd7ca" gap={16} />
     </ReactFlow>
   );
-}
-
-function useIsDark() {
-  const [isDark, setIsDark] = useState(() => (
-    typeof document !== "undefined"
-    && document.documentElement.classList.contains("dark")
-  ));
-  useEffect(() => {
-    if (typeof document === "undefined") return undefined;
-    const root = document.documentElement;
-    const sync = () => setIsDark(root.classList.contains("dark"));
-    sync();
-    const observer = new MutationObserver(sync);
-    observer.observe(root, { attributes: true, attributeFilter: ["class"] });
-    return () => observer.disconnect();
-  }, []);
-  return isDark;
 }
 
 // Memoized: the parent page re-renders at pose rate (5-10 Hz) during a run,
@@ -129,7 +112,6 @@ function useIsDark() {
 // view hitch. Props are stable between actual BT changes (xml string,
 // memoized activeNodeNames array), so memo skips nearly all of those renders.
 function MissionBtRunView({ xml, activeNodeNames = [], loading = false }) {
-  const isDark = useIsDark();
   // Build the graph during the same render that receives the waypoint XML.
   // Parsing in an effect committed an empty/stale graph first, so short BTs
   // could finish before ReactFlow ever displayed their nodes.
@@ -208,7 +190,6 @@ function MissionBtRunView({ xml, activeNodeNames = [], loading = false }) {
           key={xml}
           nodes={annotatedNodes}
           edges={graph.edges}
-          isDark={isDark}
         />
       )}
     </div>

@@ -1,4 +1,4 @@
-// Copyright 2025 ROBOTIS CO., LTD.
+// Copyright 2026 ROBOTIS CO., LTD.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,18 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 //
-// Author: Kiwoong Park, Seongwoo Kim
+// Author: Seongwoo Kim
 
-// PageType enum-like object for page types
-// Use this for better code readability and maintainability
-
-const PageType = {
-  HOME: 'home',
-  RECORD: 'record',
-  INFERENCE: 'inference',
-  TRAINING: 'training',
-  EDIT_DATASET: 'edit_dataset',
-  AUTONOMY_STUDIO: 'autonomy_studio',
-};
-
-export default PageType;
+export function isTextInputTarget(target) {
+  if (!target || !(target instanceof Element)) return false;
+  const tagName = target.tagName.toLowerCase();
+  return (
+    tagName === "input" ||
+    tagName === "textarea" ||
+    tagName === "select" ||
+    target.isContentEditable
+  );
+}

@@ -66,25 +66,6 @@ const nodeTypes = {
 
 const reactFlowProOptions = { hideAttribution: true };
 
-// Observe the app's dark theme via the `dark` class on <html> so the ReactFlow
-// canvas (which needs a JS color value for its dot grid) stays theme-aware.
-function useIsDark() {
-  const [isDark, setIsDark] = useState(() => (
-    typeof document !== "undefined" &&
-    document.documentElement.classList.contains("dark")
-  ));
-  useEffect(() => {
-    if (typeof document === "undefined") return undefined;
-    const root = document.documentElement;
-    const sync = () => setIsDark(root.classList.contains("dark"));
-    sync();
-    const observer = new MutationObserver(sync);
-    observer.observe(root, { attributes: true, attributeFilter: ["class"] });
-    return () => observer.disconnect();
-  }, []);
-  return isDark;
-}
-
 function catalogEntryToParams(entry) {
   return Object.fromEntries(
     (entry?.ports || []).map((port) => [port.name, port.default]),
@@ -115,7 +96,7 @@ function computeHiddenIds(nodes, edges) {
   return hidden;
 }
 
-// Shared with the standalone Behavior Trees editor; re-exported to keep existing imports.
+// Shared with the Action Canvas editor; re-exported to keep existing imports.
 export { isValidBtConnection } from "../../utils/btConnection";
 
 function layoutVisibleOnly(nodes, edges, { anchorNodeId = null } = {}) {
@@ -147,7 +128,6 @@ export default function MissionBtEditor({
   onSetDefaultXml,
   fileActionsDisabled = false,
 }) {
-  const isDark = useIsDark();
   const { catalog: nodeCatalog = [] } = useBTNodeCatalog();
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
@@ -959,7 +939,7 @@ export default function MissionBtEditor({
               proOptions={reactFlowProOptions}
             >
               <Controls showInteractive={false} />
-              <Background color={isDark ? "#3a352e" : "#dcd7ca"} gap={16} />
+              <Background color="#dcd7ca" gap={16} />
             </ReactFlow>
           )}
         </div>
@@ -970,7 +950,7 @@ export default function MissionBtEditor({
             onParamChange={handleParamChange}
             onNameChange={handleNameChange}
             onClose={() => setSelectedNodeId(null)}
-            variant="mission-canvas"
+            variant="autonomy-studio"
           />
         )}
         {showLoadDialog && (

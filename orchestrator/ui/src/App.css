@@ -13,7 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  *
- * Author: Kiwoong Park
+ * Author: Kiwoong Park, Seongwoo Kim
  */
 
 /* Mission Canvas typography (warm-minimal): Hanken Grotesk (UI) + IBM Plex Mono
@@ -256,7 +256,7 @@ body {
  * `--mc-*` are the source of truth; `--vscode-*` aliases keep shared map
  * chrome theme-correct without coupling it to a standalone page.
  */
-.mission-canvas-page {
+.autonomy-studio-page {
   --mc-bg: #f3f1ea;            /* app / stage fill (warm paper) */
   --mc-canvas: #efece3;        /* map + behavior-tree canvas */
   --mc-surface: #ffffff;        /* cards, panels */
@@ -295,62 +295,29 @@ body {
   color: var(--mc-text);
 }
 
-.dark .mission-canvas-page {
-  --mc-bg: #211f1b;             /* warm near-black */
-  --mc-canvas: #1b1916;         /* map + behavior-tree canvas */
-  --mc-surface: #2b2823;
-  --mc-surface-2: #242019;
-  --mc-surface-hover: #322e28;
-  --mc-border: #322e28;
-  --mc-border-strong: #3d3931;
-  --mc-text: #ece7dd;           /* near-cream */
-  --mc-text-muted: #9a9384;
-  --mc-text-subtle: #6e685b;
-  --mc-accent: #d5794f;         /* brighter clay for dark */
-  --mc-accent-fg: #1a1815;
-  --mc-accent-hover: #e0895f;
-  --mc-accent-soft: #3d2a20;
-  --mc-success: #6f9a74;
-  --mc-danger: #d47a6b;
-  --mc-danger-border: #a85042;
-  --mc-warning: #d9a05a;
-  --mc-focus: #d5794f;
-  --mc-shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 24px -12px rgba(0, 0, 0, 0.6);
-}
 
-/* ReactFlow injects its own DOM (BT editor); Tailwind utilities can't reach it. */
-.dark .mission-canvas-page .react-flow__controls-button {
-  background: #2b2823;
-  border-color: #3d3931;
-  color: #ece7dd;
-  fill: currentColor;
-}
-
-.dark .mission-canvas-page .react-flow__controls-button:hover {
-  background: #322e28;
-}
-
-/* Light-mode ReactFlow controls — warm neutrals to match the paper canvas. */
-.mission-canvas-page .react-flow__controls-button {
+/* ReactFlow injects its own DOM (BT editor); Tailwind utilities can't reach it.
+ * Warm neutrals to match the paper canvas. */
+.autonomy-studio-page .react-flow__controls-button {
   background: #faf8f3;
   border-color: #e7e3d9;
   color: #6f6a5d;
   fill: currentColor;
 }
-.mission-canvas-page .react-flow__controls-button:hover {
+.autonomy-studio-page .react-flow__controls-button:hover {
   background: #efece3;
 }
 
 /* ── Typography (scoped): Hanken Grotesk UI, IBM Plex Mono for data —
  * both fall back to Pretendard / system mono when the webfont is absent. */
-.mission-canvas-page {
+.autonomy-studio-page {
   font-family: "Hanken Grotesk", "Pretendard Variable", Pretendard, system-ui, sans-serif;
   letter-spacing: -0.01em;
   -webkit-font-smoothing: antialiased;
 }
-.mission-canvas-page .font-mono,
-.mission-canvas-page code,
-.mission-canvas-page kbd {
+.autonomy-studio-page .font-mono,
+.autonomy-studio-page code,
+.autonomy-studio-page kbd {
   font-family: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
   letter-spacing: 0;
 }

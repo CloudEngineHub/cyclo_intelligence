@@ -138,7 +138,7 @@ beforeEach(() => {
   mockState = {
     ros: { rosbridgeUrl: 'ws://localhost:9090' },
     tasks: { robotType: 'ffw_sg2_rev1' },
-    btmanager: {
+    actionCanvas: {
       treeXml: '<root/>',
       treeFileName: 'tree.xml',
       btStatus: 'stopped',
@@ -147,17 +147,17 @@ beforeEach(() => {
     },
   };
   mockDispatch.mockImplementation((action) => {
-    if (action?.type === 'btmanager/setTreeXml') {
-      mockState.btmanager.treeXml = action.payload;
+    if (action?.type === 'actionCanvas/setTreeXml') {
+      mockState.actionCanvas.treeXml = action.payload;
     }
-    if (action?.type === 'btmanager/setTreeFileName') {
-      mockState.btmanager.treeFileName = action.payload;
+    if (action?.type === 'actionCanvas/setTreeFileName') {
+      mockState.actionCanvas.treeFileName = action.payload;
     }
-    if (action?.type === 'btmanager/setSelectedNodeId') {
-      mockState.btmanager.selectedNodeId = action.payload;
+    if (action?.type === 'actionCanvas/setSelectedNodeId') {
+      mockState.actionCanvas.selectedNodeId = action.payload;
     }
-    if (action?.type === 'btmanager/setBtStatus') {
-      mockState.btmanager.btStatus = action.payload;
+    if (action?.type === 'actionCanvas/setBtStatus') {
+      mockState.actionCanvas.btStatus = action.payload;
     }
     return action;
   });
@@ -169,19 +169,19 @@ afterEach(() => {
 
 test('reports whether an Action Canvas task is active before the workspace can exit', async () => {
   const onExitStateChange = jest.fn();
-  const view = renderEditor('mission-canvas', { onExitStateChange });
+  const view = renderEditor('autonomy-studio', { onExitStateChange });
 
   await waitFor(() => expect(onExitStateChange).toHaveBeenLastCalledWith({
     active: false,
     busy: false,
   }));
 
-  mockState.btmanager.btStatus = 'running';
+  mockState.actionCanvas.btStatus = 'running';
   view.rerender(
     <BTEditorSurface
       isActive={false}
       title="Action Canvas"
-      variant="mission-canvas"
+      variant="autonomy-studio"
       onExitStateChange={onExitStateChange}
     />,
   );
@@ -193,10 +193,10 @@ test('reports whether an Action Canvas task is active before the workspace can e
 });
 
 test('disables the clear-current-BT control when the canvas is empty', () => {
-  mockState.btmanager.treeXml = '';
-  mockState.btmanager.treeFileName = '';
+  mockState.actionCanvas.treeXml = '';
+  mockState.actionCanvas.treeFileName = '';
 
-  renderEditor('mission-canvas');
+  renderEditor('autonomy-studio');
 
   expect(screen.getByRole('button', { name: 'Clear current task' })).toBeDisabled();
   expect(screen.getByText('No task yet')).toBeInTheDocument();
@@ -205,9 +205,9 @@ test('disables the clear-current-BT control when the canvas is empty', () => {
 test.each(['running', 'stopping'])(
   'disables the clear-current-BT control while BT status is %s',
   (btStatus) => {
-    mockState.btmanager.btStatus = btStatus;
+    mockState.actionCanvas.btStatus = btStatus;
 
-    renderEditor('mission-canvas');
+    renderEditor('autonomy-studio');
 
     expect(screen.getByTestId('react-flow-canvas')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Clear current task' })).toBeDisabled();
@@ -226,7 +226,7 @@ test('disarms and disables clear while a Start request is pending', async () => 
     return Promise.resolve({ success: true });
   });
 
-  renderEditor('mission-canvas', { isActive: true });
+  renderEditor('autonomy-studio', { isActive: true });
 
   const startButton = screen.getByRole('button', { name: 'Run Task' });
   await waitFor(() => expect(startButton).toBeEnabled());
@@ -253,7 +253,7 @@ test('disarms and disables clear while a Start request is pending', async () => 
 
 test('requires a second click to clear and disarms confirmation after four seconds', () => {
   jest.useFakeTimers();
-  renderEditor('mission-canvas');
+  renderEditor('autonomy-studio');
 
   fireEvent.click(screen.getByRole('button', { name: 'Clear current task' }));
 
@@ -263,11 +263,11 @@ test('requires a second click to clear and disarms confirmation after four secon
   );
   expect(screen.getByTestId('react-flow-canvas')).toBeInTheDocument();
   expect(mockDispatch).not.toHaveBeenCalledWith({
-    type: 'btmanager/setTreeXml',
+    type: 'actionCanvas/setTreeXml',
     payload: '',
   });
   expect(mockDispatch).not.toHaveBeenCalledWith({
-    type: 'btmanager/setTreeFileName',
+    type: 'actionCanvas/setTreeFileName',
     payload: '',
   });
 
@@ -280,8 +280,8 @@ test('requires a second click to clear and disarms confirmation after four secon
 });
 
 test('clears the graph and persisted identity, then restores both through undo and redo', async () => {
-  mockState.btmanager.selectedNodeId = 'root';
-  renderEditor('mission-canvas');
+  mockState.actionCanvas.selectedNodeId = 'root';
+  renderEditor('autonomy-studio');
 
   fireEvent.click(screen.getByRole('button', { name: 'Clear current task' }));
   expect(screen.getByTestId('react-flow-canvas')).toBeInTheDocument();
@@ -291,15 +291,15 @@ test('clears the graph and persisted identity, then restores both through undo a
   expect(screen.getByText('No task yet')).toBeInTheDocument();
   expect(screen.getByText('No file loaded')).toBeInTheDocument();
   expect(mockDispatch).toHaveBeenCalledWith({
-    type: 'btmanager/setSelectedNodeId',
+    type: 'actionCanvas/setSelectedNodeId',
     payload: null,
   });
   expect(mockDispatch).toHaveBeenCalledWith({
-    type: 'btmanager/setTreeXml',
+    type: 'actionCanvas/setTreeXml',
     payload: '',
   });
   expect(mockDispatch).toHaveBeenCalledWith({
-    type: 'btmanager/setTreeFileName',
+    type: 'actionCanvas/setTreeFileName',
     payload: '',
   });
   expect(toast.success).toHaveBeenCalledWith('Task cleared');
@@ -310,7 +310,7 @@ test('clears the graph and persisted identity, then restores both through undo a
 
   expect(screen.getByTestId('react-flow-canvas')).toBeInTheDocument();
   expect(screen.getByText('tree.xml')).toBeInTheDocument();
-  await waitFor(() => expect(mockState.btmanager.treeXml).toBe('<root/>'));
+  await waitFor(() => expect(mockState.actionCanvas.treeXml).toBe('<root/>'));
 
   const redoButton = screen.getByTitle('Redo (Ctrl+Shift+Z)');
   expect(redoButton).toBeEnabled();
@@ -318,7 +318,7 @@ test('clears the graph and persisted identity, then restores both through undo a
 
   expect(screen.getByText('No task yet')).toBeInTheDocument();
   expect(screen.getByText('No file loaded')).toBeInTheDocument();
-  await waitFor(() => expect(mockState.btmanager.treeXml).toBe(''));
+  await waitFor(() => expect(mockState.actionCanvas.treeXml).toBe(''));
 });
 
 test.each([
@@ -332,10 +332,10 @@ test.each([
   'sets Mission BT Start/Stop availability for %s status',
   async (btStatus, startEnabled, stopEnabled) => {
     mockState.ros.rosbridgeUrl = '';
-    mockState.btmanager.btStatus = btStatus;
+    mockState.actionCanvas.btStatus = btStatus;
     mockBtNodeStatus('up');
 
-    renderEditor('mission-canvas', { isActive: true });
+    renderEditor('autonomy-studio', { isActive: true });
 
     const startButton = screen.getByRole('button', { name: 'Run Task' });
     const stopButton = screen.getByRole('button', { name: 'Stop Task' });
@@ -365,10 +365,10 @@ test.each([
   'sets Mission BT Node OFF availability for %s status',
   async (btStatus, offEnabled) => {
     mockState.ros.rosbridgeUrl = '';
-    mockState.btmanager.btStatus = btStatus;
+    mockState.actionCanvas.btStatus = btStatus;
     mockBtNodeStatus('up');
 
-    renderEditor('mission-canvas', { isActive: true });
+    renderEditor('autonomy-studio', { isActive: true });
 
     const offButton = screen.getByRole('button', { name: 'Turn Off' });
 
@@ -385,11 +385,11 @@ test.each([
 
 test('stops BT execution before stopping the BT Node after completion', async () => {
   mockState.ros.rosbridgeUrl = '';
-  mockState.btmanager.btStatus = 'completed';
+  mockState.actionCanvas.btStatus = 'completed';
   mockCallService.mockResolvedValue({ success: true });
   mockBtNodeStatus('up');
 
-  renderEditor('mission-canvas', { isActive: true });
+  renderEditor('autonomy-studio', { isActive: true });
 
   const offButton = screen.getByRole('button', { name: 'Turn Off' });
   await waitFor(() => expect(offButton).toBeEnabled());
@@ -418,11 +418,11 @@ test('stops BT execution before stopping the BT Node after completion', async ()
 
 test('does not stop the BT Node when terminal BT cleanup fails', async () => {
   mockState.ros.rosbridgeUrl = '';
-  mockState.btmanager.btStatus = 'failed';
+  mockState.actionCanvas.btStatus = 'failed';
   mockCallService.mockResolvedValue({ success: false, message: 'cleanup failed' });
   mockBtNodeStatus('up');
 
-  renderEditor('mission-canvas', { isActive: true });
+  renderEditor('autonomy-studio', { isActive: true });
 
   const offButton = screen.getByRole('button', { name: 'Turn Off' });
   await waitFor(() => expect(offButton).toBeEnabled());
@@ -440,11 +440,11 @@ test.each(['completed', 'failed'])(
   'cleans up terminal %s execution before starting a new tree',
   async (btStatus) => {
     mockState.ros.rosbridgeUrl = '';
-    mockState.btmanager.btStatus = btStatus;
+    mockState.actionCanvas.btStatus = btStatus;
     mockCallService.mockResolvedValue({ success: true });
     mockBtNodeStatus('up');
 
-    renderEditor('mission-canvas', { isActive: true });
+    renderEditor('autonomy-studio', { isActive: true });
 
     const startButton = screen.getByRole('button', { name: 'Run Task' });
     await waitFor(() => expect(startButton).toBeEnabled());

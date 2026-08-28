@@ -18,7 +18,7 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import { MdClose, MdFolderOpen } from 'react-icons/md';
 import FileBrowserModal from '../FileBrowserModal';
-import { setSelectedNodeId } from '../../features/btmanager/btmanagerSlice';
+import { setSelectedNodeId } from '../../features/actionCanvas/actionCanvasSlice';
 import { DEFAULT_PATHS } from '../../constants/paths';
 
 const NUMBER_PARAMS = new Set([
@@ -518,7 +518,7 @@ export default function BTParamPanel({
     );
   };
 
-  // The --mc-* tokens are scoped to .mission-canvas-page; outside it (BT
+  // The --mc-* tokens are scoped to .autonomy-studio-page; outside it (BT
   // Manager) the vars are undefined, so the panel chrome needs opaque
   // fallbacks or the canvas nodes show through.
   return (

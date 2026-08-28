@@ -21,7 +21,10 @@ import { createSlice } from '@reduxjs/toolkit';
 import PageType from '../../constants/pageType';
 
 export const CURRENT_PAGE_STORAGE_KEY = 'cyclo_intelligence.current_page';
-export const MISSION_CANVAS_SESSION_STORAGE_KEY = 'mission_canvas_session';
+export const AUTONOMY_STUDIO_SESSION_STORAGE_KEY = 'autonomy_studio_session';
+// Keys written before the page became Autonomy Studio; read as fallbacks.
+export const LEGACY_MISSION_CANVAS_SESSION_STORAGE_KEY = 'mission_canvas_session';
+export const LEGACY_MISSION_CANVAS_PAGE = 'mission_canvas';
 export const LEGACY_BT_MANAGER_PAGE = 'bt_manager';
 export const LEGACY_NAVIGATION_PAGE = 'navigation';
 
@@ -56,13 +59,28 @@ export const resolveInitialPageState = (storage = getSessionStorage()) => {
     };
   }
 
+  if (storedPage === LEGACY_MISSION_CANVAS_PAGE) {
+    // The page id changed when Mission Canvas became a workspace inside
+    // Autonomy Studio; keep resuming the same session under the new id.
+    try {
+      storage.setItem(CURRENT_PAGE_STORAGE_KEY, PageType.AUTONOMY_STUDIO);
+    } catch (_error) {
+      // A blocked write does not prevent this in-memory redirect.
+    }
+    return {
+      currentPage: PageType.AUTONOMY_STUDIO,
+      restoredPageFromSession: true,
+    };
+  }
+
   if (storedPage === LEGACY_BT_MANAGER_PAGE) {
-    // One-time migration for tabs saved before BT Manager moved into Mission
+    // One-time migration for tabs saved before BT Manager became the Action
     // Canvas. Preserve the rest of the Mission Canvas session and only select
-    // the mapless Behavior Trees workspace.
+    // Canvas workspace inside Autonomy Studio; select that mapless workspace.
     let missionSession = {};
     try {
-      const rawMissionSession = storage.getItem(MISSION_CANVAS_SESSION_STORAGE_KEY);
+      const rawMissionSession = (storage.getItem(AUTONOMY_STUDIO_SESSION_STORAGE_KEY)
+        ?? storage.getItem(LEGACY_MISSION_CANVAS_SESSION_STORAGE_KEY));
       const parsedMissionSession = rawMissionSession ? JSON.parse(rawMissionSession) : {};
       if (parsedMissionSession && typeof parsedMissionSession === 'object') {
         missionSession = parsedMissionSession;
@@ -71,16 +89,16 @@ export const resolveInitialPageState = (storage = getSessionStorage()) => {
       missionSession = {};
     }
     try {
-      storage.setItem(MISSION_CANVAS_SESSION_STORAGE_KEY, JSON.stringify({
+      storage.setItem(AUTONOMY_STUDIO_SESSION_STORAGE_KEY, JSON.stringify({
         ...missionSession,
-        workspaceKind: 'standalone_bt',
+        workspaceKind: 'action_canvas',
       }));
-      storage.setItem(CURRENT_PAGE_STORAGE_KEY, PageType.MISSION_CANVAS);
+      storage.setItem(CURRENT_PAGE_STORAGE_KEY, PageType.AUTONOMY_STUDIO);
     } catch (_error) {
       // A blocked write does not prevent this in-memory compatibility redirect.
     }
     return {
-      currentPage: PageType.MISSION_CANVAS,
+      currentPage: PageType.AUTONOMY_STUDIO,
       restoredPageFromSession: true,
     };
   }
@@ -90,7 +108,8 @@ export const resolveInitialPageState = (storage = getSessionStorage()) => {
     // existing Mission Canvas context and open its map-only Navigate stage.
     let missionSession = {};
     try {
-      const rawMissionSession = storage.getItem(MISSION_CANVAS_SESSION_STORAGE_KEY);
+      const rawMissionSession = (storage.getItem(AUTONOMY_STUDIO_SESSION_STORAGE_KEY)
+        ?? storage.getItem(LEGACY_MISSION_CANVAS_SESSION_STORAGE_KEY));
       const parsedMissionSession = rawMissionSession ? JSON.parse(rawMissionSession) : {};
       if (parsedMissionSession && typeof parsedMissionSession === 'object') {
         missionSession = parsedMissionSession;
@@ -99,17 +118,17 @@ export const resolveInitialPageState = (storage = getSessionStorage()) => {
       missionSession = {};
     }
     try {
-      storage.setItem(MISSION_CANVAS_SESSION_STORAGE_KEY, JSON.stringify({
+      storage.setItem(AUTONOMY_STUDIO_SESSION_STORAGE_KEY, JSON.stringify({
         ...missionSession,
         workspaceKind: 'mission',
         workspaceStage: 'navigate',
       }));
-      storage.setItem(CURRENT_PAGE_STORAGE_KEY, PageType.MISSION_CANVAS);
+      storage.setItem(CURRENT_PAGE_STORAGE_KEY, PageType.AUTONOMY_STUDIO);
     } catch (_error) {
       // A blocked write does not prevent this in-memory compatibility redirect.
     }
     return {
-      currentPage: PageType.MISSION_CANVAS,
+      currentPage: PageType.AUTONOMY_STUDIO,
       restoredPageFromSession: true,
     };
   }

@@ -15,7 +15,7 @@
 // Author: Seongwoo Kim
 
 /**
- * Shared BT edge validation for Mission Canvas Behavior Tree editors.
+ * Shared BT edge validation for the Autonomy Studio Behavior Tree editors.
  *
  * Standard behavior-tree structure: only control nodes are internal — actions
  * are always leaves, so an edge may only leave a btControl node. The engine

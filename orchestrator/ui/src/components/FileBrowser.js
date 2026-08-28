@@ -72,26 +72,26 @@ const FileBrowserHeader = ({
   defaultPath,
   variant = 'legacy',
 }) => {
-  const missionCanvasVariant = variant === 'mission-canvas';
+  const autonomyStudioVariant = variant === 'autonomy-studio';
   const classHeader = clsx(
     'flex',
     'items-center',
     'justify-between',
     'p-4',
     'border-b',
-    missionCanvasVariant ? 'border-[var(--mc-border)]' : 'border-gray-200'
+    autonomyStudioVariant ? 'border-[var(--mc-border)]' : 'border-gray-200'
   );
 
   const classTitle = clsx(
     'font-semibold',
-    missionCanvasVariant ? 'text-sm text-[var(--mc-text)]' : 'text-lg text-gray-900',
+    autonomyStudioVariant ? 'text-sm text-[var(--mc-text)]' : 'text-lg text-gray-900',
   );
 
   const classButtonContainer = clsx('flex', 'items-center', 'space-x-2');
 
   const classButton = clsx(
     'p-2',
-    missionCanvasVariant
+    autonomyStudioVariant
       ? 'text-[var(--mc-text-muted)] hover:text-[var(--mc-accent-hover)] hover:bg-[var(--mc-surface-hover)]'
       : 'text-gray-600 hover:text-blue-600 hover:bg-blue-50',
     'rounded-lg',
@@ -154,12 +154,12 @@ const PathInfo = ({
   targetFileName,
   variant = 'legacy',
 }) => {
-  const missionCanvasVariant = variant === 'mission-canvas';
+  const autonomyStudioVariant = variant === 'autonomy-studio';
   const classContainer = clsx(
     'px-4',
     'py-2',
     'border-b',
-    missionCanvasVariant
+    autonomyStudioVariant
       ? 'bg-[var(--mc-surface-2)] border-[var(--mc-border)]'
       : 'bg-gray-50 border-gray-200',
   );
@@ -168,7 +168,7 @@ const PathInfo = ({
     'flex',
     'items-center',
     'text-sm',
-    missionCanvasVariant ? 'text-[var(--mc-text-muted)]' : 'text-gray-600',
+    autonomyStudioVariant ? 'text-[var(--mc-text-muted)]' : 'text-gray-600',
   );
 
   const classLabel = clsx('font-medium');
@@ -180,7 +180,7 @@ const PathInfo = ({
     'items-center',
     'mt-1',
     'text-xs',
-    missionCanvasVariant ? 'text-[var(--mc-accent)]' : 'text-purple-600',
+    autonomyStudioVariant ? 'text-[var(--mc-accent)]' : 'text-purple-600',
   );
 
   const classHomeBadge = clsx(
@@ -189,7 +189,7 @@ const PathInfo = ({
     'px-2',
     'py-1',
     'rounded',
-    missionCanvasVariant ? 'bg-[var(--mc-accent-soft)]' : 'bg-purple-100',
+    autonomyStudioVariant ? 'bg-[var(--mc-accent-soft)]' : 'bg-purple-100',
   );
 
   const classDefaultRow = clsx(
@@ -197,7 +197,7 @@ const PathInfo = ({
     'items-center',
     'mt-1',
     'text-xs',
-    missionCanvasVariant ? 'text-[var(--mc-warning)]' : 'text-orange-600',
+    autonomyStudioVariant ? 'text-[var(--mc-warning)]' : 'text-orange-600',
   );
 
   const classDefaultBadge = clsx(
@@ -206,7 +206,7 @@ const PathInfo = ({
     'px-2',
     'py-1',
     'rounded',
-    missionCanvasVariant ? 'bg-[var(--mc-surface-hover)]' : 'bg-orange-100',
+    autonomyStudioVariant ? 'bg-[var(--mc-surface-hover)]' : 'bg-orange-100',
   );
 
   return (
@@ -252,7 +252,7 @@ const FileItem = ({
   allowFileSelect = true,
   variant = 'legacy',
 }) => {
-  const missionCanvasVariant = variant === 'mission-canvas';
+  const autonomyStudioVariant = variant === 'autonomy-studio';
   const classItemContainer = clsx(
     'flex',
     'items-center',
@@ -260,13 +260,13 @@ const FileItem = ({
     'py-3',
     'cursor-pointer',
     'transition-colors',
-    missionCanvasVariant
+    autonomyStudioVariant
       ? hasTarget
         ? 'bg-[var(--mc-surface-2)] hover:bg-[var(--mc-surface-hover)]'
         : 'hover:bg-[var(--mc-surface-hover)]'
       : hasTarget ? 'hover:bg-green-50 bg-green-25' : 'hover:bg-blue-50',
     isSelected &&
-      (missionCanvasVariant
+      (autonomyStudioVariant
         ? 'bg-[var(--mc-accent-soft)] border-l-4 border-[var(--mc-accent)]'
         : hasTarget
           ? 'bg-green-100 border-l-4 border-green-500'
@@ -278,7 +278,7 @@ const FileItem = ({
   const classFolderIcon = clsx(
     'w-5',
     'h-5',
-    missionCanvasVariant
+    autonomyStudioVariant
       ? hasTarget ? 'text-[var(--mc-success)]' : 'text-[var(--mc-accent)]'
       : hasTarget ? 'text-green-500' : 'text-blue-500',
   );
@@ -286,7 +286,7 @@ const FileItem = ({
   const classStarIcon = clsx(
     'w-3',
     'h-3',
-    missionCanvasVariant ? 'text-[var(--mc-warning)]' : 'text-yellow-500',
+    autonomyStudioVariant ? 'text-[var(--mc-warning)]' : 'text-yellow-500',
     'absolute',
     '-top-1',
     '-right-1',
@@ -295,7 +295,7 @@ const FileItem = ({
   const classFileIcon = clsx(
     'w-5',
     'h-5',
-    missionCanvasVariant ? 'text-[var(--mc-text-subtle)]' : 'text-gray-400',
+    autonomyStudioVariant ? 'text-[var(--mc-text-subtle)]' : 'text-gray-400',
   );
 
   const classContentContainer = clsx('flex-1', 'min-w-0');
@@ -308,7 +308,7 @@ const FileItem = ({
     'text-sm',
     'font-medium',
     'truncate',
-    missionCanvasVariant
+    autonomyStudioVariant
       ? 'text-[var(--mc-text)]'
       : hasTarget ? 'text-green-900' : 'text-gray-900'
   );
@@ -316,7 +316,7 @@ const FileItem = ({
   const classTargetBadge = clsx(
     'ml-2',
     'text-xs',
-    missionCanvasVariant
+    autonomyStudioVariant
       ? 'bg-[var(--mc-surface-hover)] text-[var(--mc-success)]'
       : 'bg-green-100 text-green-700',
     'px-2',
@@ -328,7 +328,7 @@ const FileItem = ({
     'w-4',
     'h-4',
     'ml-2',
-    missionCanvasVariant
+    autonomyStudioVariant
       ? hasTarget ? 'text-[var(--mc-success)]' : 'text-[var(--mc-accent)]'
       : hasTarget ? 'text-green-600' : 'text-blue-600',
   );
@@ -338,14 +338,14 @@ const FileItem = ({
     'items-center',
     'mt-1',
     'text-xs',
-    missionCanvasVariant ? 'text-[var(--mc-text-muted)]' : 'text-gray-500',
+    autonomyStudioVariant ? 'text-[var(--mc-text-muted)]' : 'text-gray-500',
   );
 
   const classArrowIcon = clsx(
     'w-4',
     'h-4',
     'ml-2',
-    missionCanvasVariant ? 'text-[var(--mc-text-subtle)]' : 'text-gray-400',
+    autonomyStudioVariant ? 'text-[var(--mc-text-subtle)]' : 'text-gray-400',
   );
 
   const canSelectDirectory = item.is_directory && allowDirectorySelect;
@@ -362,7 +362,7 @@ const FileItem = ({
     'rounded-md',
     'border',
     'transition-colors',
-    missionCanvasVariant
+    autonomyStudioVariant
       ? isSelected
         ? 'bg-[var(--mc-accent)] text-[var(--mc-accent-fg)] border-[var(--mc-accent)]'
         : 'bg-[var(--mc-surface)] text-[var(--mc-accent)] border-[var(--mc-border-strong)] hover:bg-[var(--mc-surface-hover)]'
@@ -431,7 +431,7 @@ const FileItem = ({
               <span className="mx-2">•</span>
               <span className={clsx(
                 'font-medium',
-                missionCanvasVariant ? 'text-[var(--mc-accent)]' : 'text-blue-600',
+                autonomyStudioVariant ? 'text-[var(--mc-accent)]' : 'text-blue-600',
               )}>
                 Selectable folder
               </span>
@@ -442,7 +442,7 @@ const FileItem = ({
               <span className="mx-2">•</span>
               <span className={clsx(
                 'font-medium',
-                missionCanvasVariant ? 'text-[var(--mc-text-subtle)]' : 'text-gray-400',
+                autonomyStudioVariant ? 'text-[var(--mc-text-subtle)]' : 'text-gray-400',
               )}>
                 Navigation only
               </span>
@@ -453,7 +453,7 @@ const FileItem = ({
               <span className="mx-2">•</span>
               <span className={clsx(
                 'font-medium',
-                missionCanvasVariant ? 'text-[var(--mc-text-subtle)]' : 'text-gray-400',
+                autonomyStudioVariant ? 'text-[var(--mc-text-subtle)]' : 'text-gray-400',
               )}>
                 File selection disabled
               </span>
@@ -470,7 +470,7 @@ const FileItem = ({
 };
 
 const LoadingState = ({ variant = 'legacy' }) => {
-  const missionCanvasVariant = variant === 'mission-canvas';
+  const autonomyStudioVariant = variant === 'autonomy-studio';
   const classContainer = clsx('flex', 'items-center', 'justify-center', 'py-8');
 
   const classSpinner = clsx(
@@ -479,12 +479,12 @@ const LoadingState = ({ variant = 'legacy' }) => {
     'h-6',
     'w-6',
     'border-b-2',
-    missionCanvasVariant ? 'border-[var(--mc-accent)]' : 'border-blue-600'
+    autonomyStudioVariant ? 'border-[var(--mc-accent)]' : 'border-blue-600'
   );
 
   const classText = clsx(
     'ml-2',
-    missionCanvasVariant ? 'text-[var(--mc-text-muted)]' : 'text-gray-600',
+    autonomyStudioVariant ? 'text-[var(--mc-text-muted)]' : 'text-gray-600',
   );
 
   return (
@@ -496,13 +496,13 @@ const LoadingState = ({ variant = 'legacy' }) => {
 };
 
 const EmptyState = ({ variant = 'legacy' }) => {
-  const missionCanvasVariant = variant === 'mission-canvas';
+  const autonomyStudioVariant = variant === 'autonomy-studio';
   const classContainer = clsx(
     'flex',
     'items-center',
     'justify-center',
     'py-8',
-    missionCanvasVariant ? 'text-[var(--mc-text-muted)]' : 'text-gray-500',
+    autonomyStudioVariant ? 'text-[var(--mc-text-muted)]' : 'text-gray-500',
   );
 
   return (
@@ -513,19 +513,19 @@ const EmptyState = ({ variant = 'legacy' }) => {
 };
 
 const ErrorDisplay = ({ error, variant = 'legacy' }) => {
-  const missionCanvasVariant = variant === 'mission-canvas';
+  const autonomyStudioVariant = variant === 'autonomy-studio';
   const classContainer = clsx(
     'px-4',
     'py-3',
     'border-b',
-    missionCanvasVariant
+    autonomyStudioVariant
       ? 'bg-[var(--mc-surface-2)] border-[var(--mc-danger-border)]'
       : 'bg-red-50 border-red-200',
   );
 
   const classText = clsx(
     'text-sm',
-    missionCanvasVariant ? 'text-[var(--mc-danger)]' : 'text-red-600',
+    autonomyStudioVariant ? 'text-[var(--mc-danger)]' : 'text-red-600',
   );
 
   return (
@@ -547,13 +547,13 @@ const SelectedItemInfo = ({
     targetFileName &&
     selectedItem.is_directory &&
     directoriesWithTarget.has(selectedItem.full_path);
-  const missionCanvasVariant = variant === 'mission-canvas';
+  const autonomyStudioVariant = variant === 'autonomy-studio';
 
   const classContainer = clsx(
     'px-4',
     'py-3',
     'border-t',
-    missionCanvasVariant
+    autonomyStudioVariant
       ? 'bg-[var(--mc-surface-2)] border-[var(--mc-border)]'
       : isTargetDirectory ? 'bg-green-50 border-green-200' : 'bg-blue-50 border-blue-200'
   );
@@ -562,7 +562,7 @@ const SelectedItemInfo = ({
 
   const classLabel = clsx(
     'font-medium',
-    missionCanvasVariant
+    autonomyStudioVariant
       ? 'text-[var(--mc-text)]'
       : isTargetDirectory ? 'text-green-900' : 'text-blue-900',
   );
@@ -571,13 +571,13 @@ const SelectedItemInfo = ({
     'font-mono',
     'break-all',
     'mt-1',
-    missionCanvasVariant
+    autonomyStudioVariant
       ? 'text-[var(--mc-text-muted)]'
       : isTargetDirectory ? 'text-green-700' : 'text-blue-700'
   );
 
   const classTargetInfo = clsx(
-    missionCanvasVariant ? 'text-[var(--mc-success)]' : 'text-green-600',
+    autonomyStudioVariant ? 'text-[var(--mc-success)]' : 'text-green-600',
     'text-xs',
     'mt-2',
     'flex',
@@ -586,11 +586,11 @@ const SelectedItemInfo = ({
 
   const classFileLabel = clsx(
     'font-medium',
-    missionCanvasVariant ? 'text-[var(--mc-text)]' : 'text-blue-900',
+    autonomyStudioVariant ? 'text-[var(--mc-text)]' : 'text-blue-900',
   );
 
   const classFilePath = clsx(
-    missionCanvasVariant ? 'text-[var(--mc-text-muted)]' : 'text-blue-700',
+    autonomyStudioVariant ? 'text-[var(--mc-text-muted)]' : 'text-blue-700',
     'font-mono',
     'break-all',
     'mt-1',
@@ -646,7 +646,7 @@ export default function FileBrowser({
   variant = 'legacy',
 }) {
   const { browseFile } = useRosServiceCaller();
-  const missionCanvasVariant = variant === 'mission-canvas';
+  const autonomyStudioVariant = variant === 'autonomy-studio';
   const isInitializedRef = useRef(false);
 
   const [currentPath, setCurrentPath] = useState(initialPath);
@@ -857,9 +857,9 @@ export default function FileBrowser({
     'w-full',
     'flex',
     'flex-col',
-    missionCanvasVariant ? 'bg-[var(--mc-surface)] text-[var(--mc-text)]' : 'bg-white',
+    autonomyStudioVariant ? 'bg-[var(--mc-surface)] text-[var(--mc-text)]' : 'bg-white',
     'border',
-    missionCanvasVariant ? 'border-[var(--mc-border-strong)]' : 'border-gray-300',
+    autonomyStudioVariant ? 'border-[var(--mc-border-strong)]' : 'border-gray-300',
     'rounded-lg',
     className
   );
@@ -868,7 +868,7 @@ export default function FileBrowser({
 
   const classItemList = clsx(
     'divide-y',
-    missionCanvasVariant ? 'divide-[var(--mc-border)]' : 'divide-gray-100',
+    autonomyStudioVariant ? 'divide-[var(--mc-border)]' : 'divide-gray-100',
   );
 
   return (
