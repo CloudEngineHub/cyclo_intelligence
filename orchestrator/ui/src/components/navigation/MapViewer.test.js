@@ -8,6 +8,24 @@ import {
 
 const mockPointPositions = [];
 const mockDataTextures = [];
+const mockCanvasFillStyles = [];
+const mockMeshes = [];
+const mockSprites = [];
+const mockCanvasContext = {
+  arc: jest.fn(),
+  beginPath: jest.fn(),
+  clearRect: jest.fn(),
+  closePath: jest.fn(),
+  fill: jest.fn(),
+  fillRect: jest.fn(),
+  fillText: jest.fn(),
+  lineTo: jest.fn(),
+  measureText: (text) => ({ width: String(text).length * 28 }),
+  moveTo: jest.fn(),
+  roundRect: jest.fn(),
+  stroke: jest.fn(),
+};
+let canvasContextSpy;
 
 jest.mock('three', () => {
   const actual = jest.requireActual('three');
@@ -35,6 +53,13 @@ jest.mock('three', () => {
     }
   }
 
+  class Mesh extends actual.Mesh {
+    constructor(...args) {
+      super(...args);
+      mockMeshes.push(this);
+    }
+  }
+
   class DataTexture extends actual.DataTexture {
     constructor(...args) {
       super(...args);
@@ -42,13 +67,30 @@ jest.mock('three', () => {
     }
   }
 
-  return { ...actual, DataTexture, Points, WebGLRenderer };
+  class Sprite extends actual.Sprite {
+    constructor(...args) {
+      super(...args);
+      mockSprites.push(this);
+    }
+  }
+
+  return { ...actual, DataTexture, Mesh, Points, Sprite, WebGLRenderer };
 });
 
 jest.mock('three/examples/jsm/controls/OrbitControls.js', () => ({
   OrbitControls: class OrbitControls {
     constructor() {
-      this.target = { x: 0, y: 0, z: 0 };
+      this.target = {
+        x: 0,
+        y: 0,
+        z: 0,
+        copy(value) {
+          this.x = value.x;
+          this.y = value.y;
+          this.z = value.z;
+          return this;
+        },
+      };
     }
 
     update() {}
@@ -67,9 +109,26 @@ const waypointBtLayer = {
   editor: <div>Waypoint BT editor</div>,
 };
 
+beforeAll(() => {
+  canvasContextSpy = jest
+    .spyOn(HTMLCanvasElement.prototype, 'getContext')
+    .mockReturnValue(mockCanvasContext);
+});
+
+afterAll(() => {
+  canvasContextSpy.mockRestore();
+});
+
 beforeEach(() => {
+  canvasContextSpy.mockReturnValue(mockCanvasContext);
+  mockCanvasContext.fill.mockImplementation(function captureFillStyle() {
+    mockCanvasFillStyles.push(this.fillStyle);
+  });
   mockPointPositions.length = 0;
   mockDataTextures.length = 0;
+  mockCanvasFillStyles.length = 0;
+  mockMeshes.length = 0;
+  mockSprites.length = 0;
 });
 
 test('closes the waypoint BT split when its left 25% map context is clicked', () => {
@@ -97,6 +156,116 @@ test('uses adaptive map render intervals for active, idle and hidden states', ()
   expect(mapRenderIntervalMs({ active: true })).toBe(16);
   expect(mapRenderIntervalMs({ active: false })).toBe(100);
   expect(mapRenderIntervalMs({ hidden: true, active: true })).toBe(500);
+});
+
+test('anchors waypoint labels above their markers in screen space', async () => {
+  render(
+    <MapViewer
+      spots={[{
+        id: 'waypoint-a',
+        label: 'Waypoint A',
+        pose: { x: 1, y: 2, yaw: 0 },
+      }]}
+      selectedSpotId="waypoint-a"
+      showMap={false}
+    />,
+  );
+
+  const label = await waitFor(() => {
+    const sprite = mockSprites.find((item) => item.userData.spotId === 'waypoint-a');
+    expect(sprite).toBeDefined();
+    return sprite;
+  });
+
+  expect(label.position.x).toBe(0);
+  expect(label.position.y).toBe(0);
+  expect(label.position.z).toBe(0.04);
+  expect(label.center.x).toBe(0.5);
+  expect(label.material.depthWrite).toBe(false);
+  expect(mockCanvasFillStyles).toContain('rgba(244,229,220,0.5)');
+  // Sprite.center is evaluated in camera/screen space. This effective offset
+  // remains 8.9 — the existing marker-to-label distance — at every map roll.
+  expect((0.5 - label.center.y) * label.scale.y).toBeCloseTo(8.9);
+});
+
+test('passes input through waypoint labels to an enlarged rotation target', async () => {
+  render(
+    <MapViewer
+      spots={[{
+        id: 'waypoint-a',
+        label: 'A very long waypoint name',
+        pose: { x: 1, y: 2, yaw: 0 },
+      }]}
+      showMap={false}
+    />,
+  );
+
+  const { label, rotateHitArea } = await waitFor(() => {
+    const nextLabel = mockSprites.find((item) => item.userData.spotId === 'waypoint-a');
+    const nextHitArea = mockMeshes.find((item) => item.userData.waypointRotateHitArea);
+    expect(nextLabel).toBeDefined();
+    expect(nextHitArea).toBeDefined();
+    return { label: nextLabel, rotateHitArea: nextHitArea };
+  });
+
+  const intersections = [];
+  expect(() => label.raycast({}, intersections)).not.toThrow();
+  expect(intersections).toEqual([]);
+  expect(mockCanvasFillStyles).toContain('rgba(243,241,234,0.5)');
+
+  rotateHitArea.geometry.computeBoundingSphere();
+  expect(rotateHitArea.geometry.boundingSphere.radius).toBeCloseTo(1.4);
+  expect(rotateHitArea.position.x).toBeCloseTo(4.5);
+  expect(rotateHitArea.material.opacity).toBe(0);
+  expect(rotateHitArea.material.colorWrite).toBe(false);
+  expect(rotateHitArea.userData).toMatchObject({
+    spotId: 'waypoint-a',
+    dragAction: 'rotate',
+  });
+});
+
+test('keeps the route order badge clear at the waypoint screen-space bottom-left', async () => {
+  const map = {
+    info: {
+      width: 20,
+      height: 20,
+      resolution: 0.05,
+      origin: {
+        position: { x: 0, y: 0, z: 0 },
+        orientation: { x: 0, y: 0, z: 0, w: 1 },
+      },
+    },
+    data: Array(400).fill(0),
+  };
+
+  render(
+    <MapViewer
+      map={map}
+      spots={[{
+        id: 'waypoint-a',
+        label: 'Waypoint A',
+        pose: { x: 1, y: 2, yaw: 0 },
+      }]}
+      missionRouteOrder={[{ id: 'waypoint-a', order: 1 }]}
+      showMap={false}
+    />,
+  );
+
+  const badge = await waitFor(() => {
+    const sprite = mockSprites.find((item) => item.userData.missionRouteBadge);
+    expect(sprite).toBeDefined();
+    return sprite;
+  });
+
+  const screenOffsetX = (0.5 - badge.center.x) * badge.scale.x;
+  const screenOffsetY = (0.5 - badge.center.y) * badge.scale.y;
+  const expectedClearRadius = (4.4 * 0.05) + (0.34 / 2) + 0.04;
+
+  expect(badge.position.x).toBe(1);
+  expect(badge.position.y).toBe(2);
+  expect(screenOffsetX).toBeLessThan(0);
+  expect(screenOffsetY).toBeLessThan(0);
+  expect(Math.hypot(screenOffsetX, screenOffsetY)).toBeCloseTo(expectedClearRadius);
 });
 
 test('previews only the free, unclaimed cells that an Area drag will save', () => {

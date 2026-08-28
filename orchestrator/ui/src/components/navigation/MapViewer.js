@@ -36,7 +36,11 @@ const WAYPOINT_HEADING_LENGTH = 4.4;
 const WAYPOINT_HEADING_SHAFT_WIDTH = 1.12;
 const WAYPOINT_HEADING_HEAD_LENGTH = 1.05;
 const WAYPOINT_HEADING_HEAD_WIDTH = 2.84;
+const WAYPOINT_ROTATE_HIT_RADIUS = 1.4;
+const WAYPOINT_ROTATE_HIT_OFFSET = 0.1;
 const WAYPOINT_LABEL_SCALE_Y = 6;
+const WAYPOINT_LABEL_BG_ALPHA = 0.5;
+const WAYPOINT_LABEL_SELECTED_BG_ALPHA = 0.5;
 // Keep the label just outside the heading arrow's full rotation radius. This
 // leaves the rotate handle unobstructed without visually detaching the name
 // from its waypoint marker.
@@ -1087,7 +1091,9 @@ function makeWaypointLabelSprite(text, { fontSize = 56, selected = false } = {},
     canvas.height = height;
     const ctx = canvas.getContext("2d");
     if (ctx) {
-        const bg = selected ? pal.labelSelBg : pal.labelBg;
+        const bgAlpha = selected ? WAYPOINT_LABEL_SELECTED_BG_ALPHA : WAYPOINT_LABEL_BG_ALPHA;
+        const bg = (selected ? pal.labelSelBg : pal.labelBg)
+            .replace(/,\s*[\d.]+\s*\)$/, `,${bgAlpha})`);
         const border = selected ? pal.labelSelBorder : pal.labelBorder;
         ctx.clearRect(0, 0, width, height);
         ctx.beginPath();
@@ -1116,7 +1122,11 @@ function makeWaypointLabelSprite(text, { fontSize = 56, selected = false } = {},
     }
     const texture = new THREE.CanvasTexture(canvas);
     texture.colorSpace = THREE.SRGBColorSpace;
-    const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: texture, transparent: true }));
+    const sprite = new THREE.Sprite(new THREE.SpriteMaterial({
+        map: texture,
+        transparent: true,
+        depthWrite: false,
+    }));
     return { sprite, aspect: width / height };
 }
 function waypointHeadingShape(shaftWidth, headWidth, headLength) {
@@ -1137,6 +1147,7 @@ function waypointHeadingShape(shaftWidth, headWidth, headLength) {
     return shape;
 }
 function makeWaypointHeadingArrow() {
+    const group = new THREE.Group();
     const arrow = new THREE.Mesh(new THREE.ShapeGeometry(waypointHeadingShape(WAYPOINT_HEADING_SHAFT_WIDTH, WAYPOINT_HEADING_HEAD_WIDTH, WAYPOINT_HEADING_HEAD_LENGTH)), new THREE.MeshBasicMaterial({
         color: 0x111827,
         transparent: true,
@@ -1144,7 +1155,21 @@ function makeWaypointHeadingArrow() {
         side: THREE.DoubleSide,
     }));
     arrow.position.z = 0.04;
-    return arrow;
+    group.add(arrow);
+    // The visible arrow remains unchanged. A transparent target around its tip
+    // makes rotation easy to grab without stealing drag input from the marker
+    // center. It also reaches slightly beneath the fixed waypoint label.
+    const hitArea = new THREE.Mesh(new THREE.CircleGeometry(WAYPOINT_ROTATE_HIT_RADIUS, 24), new THREE.MeshBasicMaterial({
+        transparent: true,
+        opacity: 0,
+        colorWrite: false,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+    }));
+    hitArea.position.set(WAYPOINT_HEADING_LENGTH + WAYPOINT_ROTATE_HIT_OFFSET, 0, 0.06);
+    hitArea.userData.waypointRotateHitArea = true;
+    group.add(hitArea);
+    return group;
 }
 function makePoseMarker(pose, color, z, isDark = false) {
     var _a, _b, _c, _d;
@@ -1228,16 +1253,23 @@ function makeSpotMarker(spot, selected = false, scale = 1, isDark = false, activ
     marker.add(center);
     const heading = makeWaypointHeadingArrow();
     heading.traverse((child) => {
-        child.userData = { spotId: spot.id, dragAction: "rotate" };
+        child.userData = { ...child.userData, spotId: spot.id, dragAction: "rotate" };
     });
     marker.add(heading);
     group.add(marker);
     const label = String((_d = spot.label) !== null && _d !== void 0 ? _d : spot.id);
     if (label) {
         const { sprite, aspect } = makeWaypointLabelSprite(label, { selected }, isDark);
-        sprite.position.set(0, WAYPOINT_LABEL_OFFSET_Y, 0.04);
+        // Anchor the sprite at the waypoint and shift its visual center in
+        // screen space. Unlike a world-Y position offset, this stays directly
+        // above the waypoint when the camera rolls with a rotated map.
+        sprite.position.set(0, 0, 0.04);
         sprite.scale.set(WAYPOINT_LABEL_SCALE_Y * aspect, WAYPOINT_LABEL_SCALE_Y, 1); // auto width, no squish
+        sprite.center.set(0.5, 0.5 - WAYPOINT_LABEL_OFFSET_Y / WAYPOINT_LABEL_SCALE_Y);
         sprite.userData = { spotId: spot.id, dragAction: "move" };
+        // Sprite raycasting uses the entire transparent label rectangle. Keep
+        // the label decorative so pointer input reaches the rotate target below.
+        sprite.raycast = () => { };
         group.add(sprite);
     }
     return group;
@@ -1277,11 +1309,22 @@ function makeMissionRouteBadge(spot, order, selected = false, scale = 1, isDark 
     const x = Number((_a = pose.x) !== null && _a !== void 0 ? _a : 0);
     const y = Number((_b = pose.y) !== null && _b !== void 0 ? _b : 0);
     const sprite = makeRouteBadgeSprite(order, selected, isDark);
-    const size = Math.max(0.34, WAYPOINT_RING_OUTER_RADIUS * scale * 2.2);
-    const offset = WAYPOINT_RING_OUTER_RADIUS * scale * 2.25;
-    sprite.position.set(x - offset, y, 0.05);
+    const markerRadius = WAYPOINT_RING_OUTER_RADIUS * scale;
+    const arrowRadius = WAYPOINT_HEADING_LENGTH * scale;
+    const size = Math.max(0.34, markerRadius * 2.2);
+    const clearance = Math.max(0.04, scale * 0.5);
+    const radialOffset = Math.max(markerRadius, arrowRadius) + size / 2 + clearance;
+    const diagonalOffset = radialOffset / Math.SQRT2;
+    // Keep route order at a stable screen-space bottom-left position. The
+    // waypoint name stays above, while the radial clearance prevents overlap
+    // with both the marker ring and a heading arrow pointed toward the badge.
+    sprite.position.set(x, y, 0.05);
     sprite.scale.set(size, size, 1);
-    sprite.userData = { spotId: spot.id, dragAction: "move" };
+    sprite.center.set(
+        0.5 + diagonalOffset / size,
+        0.5 + diagonalOffset / size,
+    );
+    sprite.userData = { spotId: spot.id, dragAction: "move", missionRouteBadge: true };
     return sprite;
 }
 // Rasterizing an annotation region is the most expensive part of a layers
