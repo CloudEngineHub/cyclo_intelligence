@@ -2,6 +2,17 @@
 Changelog for package cyclo_intelligence
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+1.4.0 (2026-08-28)
+------------------
+* Added the Autonomy Studio page, a shell hosting the Mission Canvas (Mapping, Map Edit, Navigation, Design, Run) and the Action Canvas; it replaces the Navigation and BT Manager pages.
+* Added map-based mission authoring: waypoint routes with per-waypoint local behavior trees, named missions with server-side manifests and revisions, and a global mission tree as the executable artifact.
+* Added a Navigation stage for direct point-to-point driving, an AMCL localization flow with initial-pose publishing through the supervisor API, and robot-following during runs.
+* Added a Map Edit stage with pixel and area tools, map area labels, and cascading saved-map deletion.
+* Added the ArmStateGate behavior-tree node, per-joint JointControl selection, and inference lifecycle control through SendCommand.
+* Improved navigation map streaming and rendering with a supervisor grid cache, 60 fps interactions, and a capped pixel ratio.
+* Updated image support to ``robotis/cyclo-intelligence:1.4.0``.
+* Contributors: Seongwoo Kim
+
 1.3.0 (2026-08-14)
 ------------------
 * Updated the LeRobot integration to 0.6.1 with MolmoAct2, VLA-JEPA, and FastWAM inference support.

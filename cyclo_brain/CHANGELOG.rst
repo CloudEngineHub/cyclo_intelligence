@@ -2,6 +2,10 @@
 Changelog for package cyclo_brain
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+1.4.0 (2026-08-28)
+------------------
+* None
+
 1.3.0 (2026-08-14)
 ------------------
 * Updated the LeRobot fork to 0.6.1 and added MolmoAct2, VLA-JEPA, and FastWAM inference dependencies on AMD64 and ARM64.

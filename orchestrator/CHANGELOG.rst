@@ -2,6 +2,13 @@
 Changelog for package orchestrator
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+1.4.0 (2026-08-28)
+------------------
+* Added the ArmStateGate behavior-tree action node and per-joint selection for JointControl.
+* Integrated inference lifecycle control (load, resume, stop, clear) into SendCommand with orchestrator-side recovery.
+* Tracked the ``ffw_sg2_rev1`` example behavior tree in the repository.
+* Contributors: Seongwoo Kim
+
 1.3.0 (2026-08-14)
 ------------------
 * Added MolmoAct2, VLA-JEPA, and FastWAM routing for inference commands, behavior trees, and training requests.
