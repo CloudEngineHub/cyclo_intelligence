@@ -7658,13 +7658,24 @@ function MissionCanvasWorkspace({
             </div>
 
             {/* Mission Route — LIST ONLY (Edit/Clear moved to the map HUD) */}
-            <div className="min-h-0 overflow-hidden" style={{ backgroundColor: "var(--mc-surface)", border: "1px solid var(--mc-border)", borderRadius: 16, boxShadow: "var(--mc-shadow)", padding: 18 }}>
+            {/* Route-edit mode is signalled by the card itself (accent border +
+                title dot) instead of a third header chip, so the header stays
+                one clean row: title · closed-loop chip · Clear Route. */}
+            <div
+              className="min-h-0 overflow-hidden"
+              aria-label={missionRouteMode ? "Mission Route (editing on map)" : "Mission Route"}
+              style={{ backgroundColor: "var(--mc-surface)", border: `1px solid ${missionRouteMode ? "var(--mc-accent)" : "var(--mc-border)"}`, borderRadius: 16, boxShadow: "var(--mc-shadow)", padding: 18 }}
+            >
               <div className="h-full min-h-0 grid grid-rows-[auto_minmax(0,1fr)] gap-2.5">
                 <div className="flex items-center justify-between">
-                  <span className="text-[13.5px] font-bold">Mission Route</span>
+                  <span className="inline-flex items-center gap-2 text-[13.5px] font-bold" style={{ color: missionRouteMode ? "var(--mc-accent-hover)" : "var(--mc-text)" }}>
+                    {missionRouteMode && (
+                      <span aria-hidden="true" className="inline-block shrink-0" style={{ width: 8, height: 8, borderRadius: 999, backgroundColor: "var(--mc-accent)" }} />
+                    )}
+                    Mission Route
+                  </span>
                   <div className="flex items-center gap-1.5">
                     {designPanelRouteClosed && <span className="text-[10.5px] font-mono px-2 py-1" style={{ borderRadius: 6, backgroundColor: "color-mix(in srgb, var(--mc-success) 14%, transparent)", color: "var(--mc-success)" }}>closed loop</span>}
-                    {missionRouteMode && <span className="text-[10.5px] font-mono px-2 py-1" style={{ borderRadius: 6, backgroundColor: "var(--mc-accent-soft)", color: "var(--mc-accent-hover)" }}>editing on map</span>}
                     {/* Only while a route exists — map clicks can only ADD
                         edges, so this is the sole way to discard a route (or a
                         closed loop) without deleting waypoints. */}
