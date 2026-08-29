@@ -14,9 +14,18 @@
 //
 // Author: Seongwoo Kim
 
-import { BT_SUPPORTED_ROBOT_TYPE } from "../../../constants/btSupport";
+import { ROBOT_TYPE_STORAGE_KEY } from "../../tasks/taskSlice";
 
 export const SUPERVISOR_API_BASE = "/api";
+
+// The robot the operator selected on the Home page (persisted by taskSlice).
+function readPersistedRobotType() {
+  try {
+    return String(window.sessionStorage.getItem(ROBOT_TYPE_STORAGE_KEY) || "").trim();
+  } catch {
+    return "";
+  }
+}
 
 export async function readJsonResponse(response) {
   const text = await response.text();
@@ -44,11 +53,14 @@ export function getBtNodeServiceStatus() {
   return requestSupervisorApi("/services/bt_node/status");
 }
 
-export function setBtNodeServiceActive(active) {
+// The supervisor validates the robot type against shared.robot_configs.schema
+// and falls back to its default when none is given.
+export function setBtNodeServiceActive(active, robotType = "") {
   const init = { method: "POST" };
   if (active) {
+    const resolved = String(robotType || "").trim() || readPersistedRobotType();
     init.headers = { "Content-Type": "application/json" };
-    init.body = JSON.stringify({ robot_type: BT_SUPPORTED_ROBOT_TYPE });
+    init.body = JSON.stringify({ robot_type: resolved });
   }
   return requestSupervisorApi(`/services/bt_node/${active ? "start" : "stop"}`, init);
 }

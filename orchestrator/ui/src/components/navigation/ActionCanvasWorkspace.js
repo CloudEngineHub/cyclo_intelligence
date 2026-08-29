@@ -21,9 +21,10 @@ import { MdAccountTree } from 'react-icons/md';
 
 import BTEditorSurface from '../../features/actionCanvas/components/BTEditorSurface';
 import {
-  BT_UNSUPPORTED_ROBOT_MESSAGE,
+  btUnsupportedRobotMessage,
   isBtRobotSupported,
 } from '../../constants/btSupport';
+import { selectBtSupportedRobotTypes } from '../../features/actionCanvas/btSupportSlice';
 
 export default function ActionCanvasWorkspace({
   isActive = true,
@@ -34,7 +35,8 @@ export default function ActionCanvasWorkspace({
   onExitStateChange,
 }) {
   const robotType = useSelector((state) => state.tasks.robotType);
-  const btRobotSupported = isBtRobotSupported(robotType);
+  const supportedRobotTypes = useSelector(selectBtSupportedRobotTypes);
+  const btRobotSupported = isBtRobotSupported(robotType, supportedRobotTypes);
   const autonomyStudioVariant = variant === 'autonomy-studio';
 
   if (!btRobotSupported) {
@@ -92,7 +94,7 @@ export default function ActionCanvasWorkspace({
               'text-lg font-semibold',
               autonomyStudioVariant ? 'text-[var(--mc-text)]' : 'text-gray-900',
             )}>
-              {BT_UNSUPPORTED_ROBOT_MESSAGE}
+              {btUnsupportedRobotMessage(supportedRobotTypes)}
             </h2>
             <p className={clsx(
               'mt-3 text-sm',

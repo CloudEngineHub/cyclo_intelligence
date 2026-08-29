@@ -4,12 +4,10 @@ Changelog for package cyclo-ui
 
 1.4.0 (2026-08-28)
 ------------------
-* Added the Autonomy Studio page with a workspace chooser, a light-only theme, and a shell that hosts the Mission Canvas and the Action Canvas.
-* Added the Mission Canvas stages: Mapping (teleop, save, delete maps), Map Edit (HUD tool popovers, area labels), Navigation (localize and send a goal), Design (waypoint routes, per-waypoint and global behavior trees), and Run.
-* Added the Action Canvas, the former BT Manager, with shared edge rules, per-joint JointControl chips, and safe clear actions.
-* Improved map rendering and navigation performance: grid streaming, 60 fps interactions, capped pixel ratio, and a throttled behavior-tree run view.
-* Unified runtime shutdown, stop controls, and page-exit cleanup across the mission stages.
-* Removed the legacy Navigation and BT Manager pages.
+* Added Autonomy Studio with the Mission Canvas and the Action Canvas; removed the Navigation and BT Manager pages.
+* Added per-joint JointControl chips, a shared edge rule, and safe clear actions to the BT editors.
+* Improved map rendering and navigation performance; unified runtime shutdown and page-exit cleanup.
+* Loaded and saved Action Canvas trees through ``/api/bt/trees`` and read supported robots from ``/api/bt/support``.
 * Contributors: Seongwoo Kim
 
 1.3.0 (2026-08-14)

@@ -99,6 +99,9 @@ _navigation_missions_module = _load_sibling_module(
     "navigation_missions", "navigation_missions.py"
 )
 navigation_missions_router = _navigation_missions_module.router
+_bt_support_module = _load_sibling_module("bt_support", "bt_support.py")
+_bt_trees_module = _load_sibling_module("bt_trees", "bt_trees.py")
+bt_trees_router = _bt_trees_module.router
 
 
 logger = logging.getLogger("supervisor_api")
@@ -143,7 +146,6 @@ _USER_SERVICES: tuple[str, ...] = (
 )
 
 _BT_ROBOT_TYPE_FILE = "/run/cyclo_intelligence/bt_node_robot_type"
-_BT_SUPPORTED_ROBOT_TYPE = "ffw_sg2_rev1"
 _ROBOT_TYPE_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
 
 
@@ -196,13 +198,19 @@ def _validate_robot_type(robot_type: str) -> str:
 
 
 def _validate_bt_robot_type(robot_type: str = "") -> str:
-    normalized = robot_type.strip() or _BT_SUPPORTED_ROBOT_TYPE
+    # shared.robot_configs.schema owns the supported list; bt_node and its
+    # launch file validate against the same source.
+    try:
+        supported = _bt_support_module.bt_supported_robot_types()
+    except RuntimeError as exc:
+        raise HTTPException(503, str(exc)) from exc
+    normalized = robot_type.strip() or supported[0]
     normalized = _validate_robot_type(normalized)
-    if normalized != _BT_SUPPORTED_ROBOT_TYPE:
+    if normalized not in supported:
         raise HTTPException(
             400,
             "bt_node currently supports only "
-            f"{_BT_SUPPORTED_ROBOT_TYPE}",
+            f"{', '.join(supported)}",
         )
     return normalized
 
@@ -1163,6 +1171,7 @@ app = FastAPI(
 _include_router_with_eager_routes(app, navigation_router)
 _include_router_with_eager_routes(app, navigation_spots_router)
 _include_router_with_eager_routes(app, navigation_missions_router)
+_include_router_with_eager_routes(app, bt_trees_router)
 
 
 @app.get("/health", response_model=HealthResponse)

@@ -4,9 +4,10 @@ Changelog for package orchestrator
 
 1.4.0 (2026-08-28)
 ------------------
-* Added the ArmStateGate behavior-tree action node and per-joint selection for JointControl.
-* Integrated inference lifecycle control (load, resume, stop, clear) into SendCommand with orchestrator-side recovery.
-* Tracked the ``ffw_sg2_rev1`` example behavior tree in the repository.
+* Added the ArmStateGate node, per-joint JointControl selection, and SendCommand inference lifecycle control.
+* Moved ``/bt/list_trees`` out of ``orchestrator_node``; ``bt_node`` owns every ``/bt/*`` interface.
+* Read the supported BT robot types from ``shared.robot_configs.schema`` and added an import-boundary test between the engine and the control plane.
+* Corrected ``package.xml`` dependencies.
 * Contributors: Seongwoo Kim
 
 1.3.0 (2026-08-14)

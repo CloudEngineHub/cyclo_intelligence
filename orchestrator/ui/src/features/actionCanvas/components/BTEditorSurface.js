@@ -55,9 +55,10 @@ import { setTreeXml, setTreeFileName, setBtStatus, setActiveNodeNames, setSelect
 import { useRosServiceCaller } from '../../../hooks/useRosServiceCaller';
 import { useBTHistory } from '../../../hooks/useBTHistory';
 import { useBTNodeCatalog } from '../../../hooks/useBTNodeCatalog';
-import { BT_SUPPORTED_ROBOT_TYPE } from '../../../constants/btSupport';
+import { formatBtSupportedRobotTypes, isBtRobotSupported } from '../../../constants/btSupport';
 import { formatTaskDisplayMessage } from '../../../utils/taskTerminology';
-import { CYCLO_VIDEO_SERVER_PORT } from '../../../config/runtimeConfig';
+import { selectBtSupportedRobotTypes } from '../btSupportSlice';
+import { readBtTree, saveBtTree } from '../btTreesApi';
 
 const nodeTypes = {
   btControl: BTControlNode,
@@ -175,6 +176,7 @@ export default function BTEditorSurface({
   const { catalog: nodeCatalog = [], refreshCatalog } = useBTNodeCatalog();
   const rosbridgeUrl = useSelector((state) => state.ros.rosbridgeUrl);
   const robotType = useSelector((state) => state.tasks.robotType);
+  const supportedRobotTypes = useSelector(selectBtSupportedRobotTypes);
   const autonomyStudioVariant = variant === 'autonomy-studio';
 
   const treeXml = useSelector((state) => state.actionCanvas.treeXml);
@@ -384,16 +386,12 @@ export default function BTEditorSurface({
 
   // ── Handle tree selection from TreeListModal ──────────────────────────────
   const handleServerFileSelect = useCallback(async (item) => {
-    if (!item || !item.full_path) return;
+    const requestedName = item?.name || String(item?.full_path || '').split('/').pop();
+    if (!requestedName) return;
     try {
-      const urlMatch = rosbridgeUrl.match(/ws:\/\/([^:]+):/);
-      const host = urlMatch ? urlMatch[1] : 'localhost';
-      const fileUrl = `http://${host}:${CYCLO_VIDEO_SERVER_PORT}${item.full_path}`;
-      const response = await fetch(fileUrl);
-      if (!response.ok) throw new Error(`Failed to fetch file: ${response.status}`);
-
-      const xmlContent = await response.text();
-      const fileName = item.name || item.full_path.split('/').pop();
+      const tree = await readBtTree(requestedName);
+      const xmlContent = tree.content || '';
+      const fileName = tree.name || requestedName;
 
       const { nodes: n, edges: e, nodeDataMap: ndm } = parseBTXml(xmlContent);
       setNodes(n);
@@ -410,7 +408,7 @@ export default function BTEditorSurface({
     } catch (err) {
       toast.error(`Failed to load file: ${formatTaskDisplayMessage(err.message)}`);
     }
-  }, [disarmClearTree, rosbridgeUrl, dispatch, setNodes, setEdges, resetHistory]);
+  }, [disarmClearTree, dispatch, setNodes, setEdges, resetHistory]);
 
   // ── Node click handler ────────────────────────────────────────────────────
   const handleNodeClick = useCallback((event, node) => {
@@ -700,13 +698,6 @@ export default function BTEditorSurface({
     return () => document.removeEventListener('keydown', handler);
   }, [undoHistory, redoHistory]);
 
-  // ── HTTP base URL helper ──────────────────────────────────────────────────
-  const getHttpBaseUrl = useCallback(() => {
-    const urlMatch = rosbridgeUrl.match(/ws:\/\/([^:]+):/);
-    const host = urlMatch ? urlMatch[1] : 'localhost';
-    return `http://${host}:${CYCLO_VIDEO_SERVER_PORT}`;
-  }, [rosbridgeUrl]);
-
   // ── Serialize current graph to BT XML ────────────────────────────────────
   const getSerializedXml = useCallback(() => {
     return serializeFromGraph(nodes, edges, nodeDataMap);
@@ -721,30 +712,22 @@ export default function BTEditorSurface({
     if (!content) return;
 
     try {
-      const baseUrl = getHttpBaseUrl();
-      const res = await fetch(`${baseUrl}/bt/save_tree`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ filename: name, content, overwrite }),
-      });
-      const data = await res.json();
-      if (data.success) {
-        toast.success(formatTaskDisplayMessage(data.message));
-        setShowSaveDialog(false);
-        setSaveFileName('');
-        setSaveConflict(null);
-      } else {
-        if (res.status === 409 || data.code === 'file_exists') {
-          setSaveConflict(data);
-          toast.error(formatTaskDisplayMessage(data.message) || 'File already exists');
-          return;
-        }
-        toast.error(formatTaskDisplayMessage(data.message) || 'Save failed');
-      }
+      const data = await saveBtTree({ filename: name, content, overwrite });
+      toast.success(formatTaskDisplayMessage(data.message));
+      setShowSaveDialog(false);
+      setSaveFileName('');
+      setSaveConflict(null);
     } catch (err) {
+      const conflict = err.status === 409 || err.detail?.code === 'file_exists';
+      if (conflict) {
+        const detail = err.detail && typeof err.detail === 'object' ? err.detail : {};
+        setSaveConflict({ ...detail, message: err.message });
+        toast.error(formatTaskDisplayMessage(err.message) || 'File already exists');
+        return;
+      }
       toast.error(`Save failed: ${formatTaskDisplayMessage(err.message)}`);
     }
-  }, [saveFileName, getSerializedXml, getHttpBaseUrl]);
+  }, [saveFileName, getSerializedXml]);
 
   // ── BT Start ──────────────────────────────────────────────────────────────
   const handleStart = useCallback(async () => {
@@ -875,8 +858,8 @@ export default function BTEditorSurface({
   }, [robotType]);
 
   const handleBtNodeOn = useCallback(async () => {
-    if (robotType && robotType !== BT_SUPPORTED_ROBOT_TYPE) {
-      toast.error(`Action Canvas currently supports only ${BT_SUPPORTED_ROBOT_TYPE}`);
+    if (robotType && !isBtRobotSupported(robotType, supportedRobotTypes)) {
+      toast.error(`Action Canvas currently supports only ${formatBtSupportedRobotTypes(supportedRobotTypes)}`);
       return;
     }
 
@@ -893,7 +876,7 @@ export default function BTEditorSurface({
       toast.error(`Failed to start Task Engine: ${formatTaskDisplayMessage(err.message)}`);
       await refreshBtNodeStatus({ quiet: true });
     }
-  }, [callBtNodeService, refreshBtNodeStatus, refreshCatalog, robotType]);
+  }, [callBtNodeService, refreshBtNodeStatus, refreshCatalog, robotType, supportedRobotTypes]);
 
   const handleBtNodeOff = useCallback(async () => {
     try {

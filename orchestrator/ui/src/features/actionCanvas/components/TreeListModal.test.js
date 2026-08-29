@@ -20,10 +20,10 @@ import toast from 'react-hot-toast';
 
 import TreeListModal from './TreeListModal';
 
-const mockGetTreeList = jest.fn();
+const mockListBtTrees = jest.fn();
 
-jest.mock('../../../hooks/useRosServiceCaller', () => ({
-  useRosServiceCaller: () => ({ getTreeList: mockGetTreeList }),
+jest.mock('../btTreesApi', () => ({
+  listBtTrees: () => mockListBtTrees(),
 }));
 
 jest.mock('react-hot-toast', () => ({
@@ -32,17 +32,16 @@ jest.mock('react-hot-toast', () => ({
 }));
 
 beforeEach(() => {
-  mockGetTreeList.mockReset();
+  mockListBtTrees.mockReset();
   toast.error.mockClear();
 });
 
 test('presents saved XML documents as tasks without exposing BT terminology', async () => {
   const onClose = jest.fn();
   const onSelect = jest.fn();
-  mockGetTreeList.mockResolvedValue({
-    success: true,
-    tree_names: ['pick-and-place.xml'],
-    tree_full_paths: ['/tasks/pick-and-place.xml'],
+  mockListBtTrees.mockResolvedValue({
+    directory: '/tasks',
+    trees: [{ name: 'pick-and-place.xml', path: '/tasks/pick-and-place.xml', modified_at: 1 }],
   });
 
   render(
@@ -67,14 +66,14 @@ test('presents saved XML documents as tasks without exposing BT terminology', as
 });
 
 test('uses task language for empty and failed library states', async () => {
-  mockGetTreeList.mockResolvedValueOnce({ success: true, tree_names: [] });
+  mockListBtTrees.mockResolvedValueOnce({ directory: '/tasks', trees: [] });
   const view = render(
     <TreeListModal isOpen onClose={jest.fn()} onSelect={jest.fn()} />,
   );
 
   expect(await screen.findByText('No saved tasks found')).toBeInTheDocument();
 
-  mockGetTreeList.mockResolvedValueOnce({ success: false, message: 'offline' });
+  mockListBtTrees.mockRejectedValueOnce(new Error('offline'));
   view.rerender(
     <TreeListModal isOpen={false} onClose={jest.fn()} onSelect={jest.fn()} />,
   );

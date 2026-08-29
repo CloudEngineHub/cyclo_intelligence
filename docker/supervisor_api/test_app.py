@@ -35,6 +35,14 @@ docker_errors_stub.NotFound = NotFound
 sys.modules["docker"] = docker_stub
 sys.modules["docker.errors"] = docker_errors_stub
 
+# The supervisor reads the BT robot capability from the shared robot-config
+# schema; point it at the checkout when the runtime mounts are absent.
+import os as _os  # noqa: E402
+_os.environ.setdefault(
+    "CYCLO_ROBOT_CONFIGS_DIR",
+    str(REPO_ROOT / "shared" / "shared" / "robot_configs"),
+)
+
 original_path = list(sys.path)
 sys.path = [
     path for path in sys.path
@@ -66,6 +74,8 @@ navigation = sys.modules["supervisor_api.navigation"]
 navigation_grid_cache = sys.modules["supervisor_api.navigation_grid_cache"]
 navigation_spots = sys.modules["supervisor_api.navigation_spots"]
 navigation_missions = sys.modules["supervisor_api.navigation_missions"]
+bt_support = sys.modules["supervisor_api.bt_support"]
+bt_trees = sys.modules["supervisor_api.bt_trees"]
 _GROOT_REQUIRED_MOUNTS = app._REQUIRED_BACKEND_MOUNTS["groot"]
 _LEROBOT_REQUIRED_MOUNTS = app._REQUIRED_BACKEND_MOUNTS["lerobot"]
 
@@ -3767,3 +3777,129 @@ def test_navigation_cancel_attempts_both_before_reporting_error(monkeypatch):
 
     assert calls == ["pose", "through"]
     assert "pose cancel failed" in str(exc_info.value.detail)
+
+
+def test_bt_support_comes_from_shared_schema():
+    assert bt_support.bt_supported_robot_types() == ["ffw_sg2_rev1"]
+    assert app._validate_bt_robot_type("") == "ffw_sg2_rev1"
+    assert asyncio.run(bt_trees.bt_support_info()).supported_robot_types == [
+        "ffw_sg2_rev1",
+    ]
+
+
+def test_bt_support_reports_missing_schema(monkeypatch):
+    monkeypatch.setattr(bt_support, "_schema_module", None)
+    monkeypatch.setenv("CYCLO_ROBOT_CONFIGS_DIR", "/nonexistent/robot_configs")
+    monkeypatch.setenv("COLCON_WS", "/nonexistent/ws")
+    monkeypatch.setattr(
+        bt_support, "robot_configs_dir_candidates",
+        lambda: [Path("/nonexistent/robot_configs")],
+    )
+
+    try:
+        app._validate_bt_robot_type("")
+    except app.HTTPException as exc:
+        assert exc.status_code == 503
+    else:
+        raise AssertionError("missing schema must not silently allow bt_node")
+
+
+def test_bt_trees_seed_examples_and_never_overwrite(monkeypatch, tmp_path):
+    examples = tmp_path / "examples"
+    examples.mkdir()
+    (examples / "example.xml").write_text("<root/>")
+    trees = tmp_path / "trees"
+    monkeypatch.setenv("CYCLO_BT_TREES_DIR", str(trees))
+    monkeypatch.setenv("CYCLO_BT_EXAMPLE_TREES_DIR", str(examples))
+    monkeypatch.setenv("COLCON_WS", str(tmp_path / "no_ws"))
+
+    listed = asyncio.run(bt_trees.list_trees())
+    assert listed.directory == str(trees)
+    assert [item.name for item in listed.trees] == ["example.xml"]
+
+    (trees / "example.xml").write_text("<root edited='1'/>")
+    listed = asyncio.run(bt_trees.list_trees())
+    assert asyncio.run(bt_trees.read_tree("example.xml")).content == "<root edited='1'/>"
+
+
+def test_bt_trees_save_read_and_conflict(monkeypatch, tmp_path):
+    trees = tmp_path / "trees"
+    monkeypatch.setenv("CYCLO_BT_TREES_DIR", str(trees))
+    monkeypatch.setenv("COLCON_WS", str(tmp_path / "no_ws"))
+    monkeypatch.delenv("CYCLO_BT_EXAMPLE_TREES_DIR", raising=False)
+
+    saved = asyncio.run(bt_trees.save_tree(
+        bt_trees.BtTreeSaveRequest(filename="pick-and-place", content="<root/>"),
+    ))
+    assert saved.ok is True
+    assert saved.name == "pick-and-place.xml"
+    assert saved.path == str(trees / "pick-and-place.xml")
+    assert asyncio.run(bt_trees.read_tree("pick-and-place.xml")).content == "<root/>"
+
+    try:
+        asyncio.run(bt_trees.save_tree(
+            bt_trees.BtTreeSaveRequest(filename="pick-and-place.xml", content="<x/>"),
+        ))
+    except app.HTTPException as exc:
+        assert exc.status_code == 409
+        assert exc.detail["code"] == "file_exists"
+    else:
+        raise AssertionError("saving over an existing tree must require overwrite")
+
+    overwritten = asyncio.run(bt_trees.save_tree(
+        bt_trees.BtTreeSaveRequest(filename="pick-and-place.xml", content="<x/>", overwrite=True),
+    ))
+    assert overwritten.ok is True
+    assert asyncio.run(bt_trees.read_tree("pick-and-place")).content == "<x/>"
+
+
+def test_bt_trees_reject_unsafe_names_and_missing_files(monkeypatch, tmp_path):
+    monkeypatch.setenv("CYCLO_BT_TREES_DIR", str(tmp_path / "trees"))
+    monkeypatch.setenv("COLCON_WS", str(tmp_path / "no_ws"))
+    monkeypatch.delenv("CYCLO_BT_EXAMPLE_TREES_DIR", raising=False)
+
+    for bad in ("", "../escape.xml", "a/b.xml", "bad name.xml"):
+        try:
+            asyncio.run(bt_trees.save_tree(bt_trees.BtTreeSaveRequest(filename=bad, content="")))
+        except app.HTTPException as exc:
+            assert exc.status_code == 400, bad
+        else:
+            raise AssertionError(f"{bad!r} must be rejected")
+
+    try:
+        asyncio.run(bt_trees.read_tree("missing.xml"))
+    except app.HTTPException as exc:
+        assert exc.status_code == 404
+    else:
+        raise AssertionError("missing tree must 404")
+
+
+def test_bt_routes_are_registered():
+    paths = {route.path for route in app.app.routes if hasattr(route, "path")}
+    assert {"/bt/support", "/bt/trees", "/bt/trees/{name}"} <= paths
+
+
+def test_bt_trees_seed_from_the_pre_1_4_source_directory(monkeypatch, tmp_path):
+    # Releases before 1.4.0 saved trees into orchestrator/orchestrator/bt/trees
+    # of the bind-mounted checkout; they must survive the upgrade.
+    ws = tmp_path / "ws"
+    legacy = ws / "src" / "cyclo_intelligence" / "orchestrator" / "orchestrator" / "bt" / "trees"
+    legacy.mkdir(parents=True)
+    (legacy / "user_task.xml").write_text("<root user='1'/>")
+    (legacy / "notes.txt").write_text("ignored")
+    trees = tmp_path / "trees"
+    monkeypatch.setenv("CYCLO_BT_TREES_DIR", str(trees))
+    monkeypatch.setenv("COLCON_WS", str(ws))
+    monkeypatch.delenv("CYCLO_BT_EXAMPLE_TREES_DIR", raising=False)
+    monkeypatch.delenv("CYCLO_BT_LEGACY_TREES_DIR", raising=False)
+
+    listed = asyncio.run(bt_trees.list_trees())
+    assert [item.name for item in listed.trees] == ["user_task.xml"]
+    assert asyncio.run(bt_trees.read_tree("user_task.xml")).content == "<root user='1'/>"
+
+    # The copy is one-way: later edits stay in the user directory only.
+    asyncio.run(bt_trees.save_tree(
+        bt_trees.BtTreeSaveRequest(filename="user_task.xml", content="<root user='2'/>", overwrite=True),
+    ))
+    assert (legacy / "user_task.xml").read_text() == "<root user='1'/>"
+    assert asyncio.run(bt_trees.read_tree("user_task.xml")).content == "<root user='2'/>"

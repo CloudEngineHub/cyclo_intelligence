@@ -19,8 +19,8 @@ import clsx from 'clsx';
 import toast from 'react-hot-toast';
 import { MdClose, MdDescription, MdRefresh } from 'react-icons/md';
 
-import { useRosServiceCaller } from '../../../hooks/useRosServiceCaller';
 import { formatTaskDisplayMessage } from '../../../utils/taskTerminology';
+import { listBtTrees } from '../btTreesApi';
 
 export default function TreeListModal({
   isOpen,
@@ -28,7 +28,6 @@ export default function TreeListModal({
   onSelect,
   variant = 'legacy',
 }) {
-  const { getTreeList } = useRosServiceCaller();
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState(null);
@@ -38,19 +37,10 @@ export default function TreeListModal({
     setLoading(true);
     setErrorMsg(null);
     try {
-      const result = await getTreeList();
-      if (!result || !result.success) {
-        const msg = formatTaskDisplayMessage(result && result.message) || 'Unknown error';
-        setItems([]);
-        setErrorMsg(msg);
-        toast.error(`Failed to load tasks: ${msg}`);
-        return;
-      }
-      const names = result.tree_names || [];
-      const paths = result.tree_full_paths || [];
-      const next = names.map((name, i) => ({
-        name,
-        full_path: paths[i] || name,
+      const result = await listBtTrees();
+      const next = (result.trees || []).map((tree) => ({
+        name: tree.name,
+        full_path: tree.path || tree.name,
       }));
       setItems(next);
     } catch (err) {
@@ -61,7 +51,7 @@ export default function TreeListModal({
     } finally {
       setLoading(false);
     }
-  }, [getTreeList]);
+  }, []);
 
   useEffect(() => {
     if (isOpen) {

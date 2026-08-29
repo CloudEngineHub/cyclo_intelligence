@@ -26,6 +26,7 @@ import replaySlice from '../features/replay/replaySlice';
 import layoutSlice from '../features/layout/layoutSlice';
 import actionCanvasSlice from '../features/actionCanvas/actionCanvasSlice';
 import btCatalogSlice from '../features/actionCanvas/btCatalogSlice';
+import btSupportSlice from '../features/actionCanvas/btSupportSlice';
 
 export const store = configureStore({
   reducer: {
@@ -38,6 +39,7 @@ export const store = configureStore({
     layout: layoutSlice,
     actionCanvas: actionCanvasSlice,
     btCatalog: btCatalogSlice,
+    btSupport: btSupportSlice,
   },
   middleware: (getDefaultMiddleware) =>
     getDefaultMiddleware({

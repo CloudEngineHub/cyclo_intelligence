@@ -35,21 +35,26 @@ import { moveToPage, persistCurrentPage } from './features/ui/uiSlice';
 import { persistRobotType } from './features/tasks/taskSlice';
 import PageType from './constants/pageType';
 import {
-  BT_SUPPORTED_ROBOT_TYPE,
+  formatBtSupportedRobotTypes,
   isBtRobotSupported,
 } from './constants/btSupport';
+import {
+  fetchBtSupport,
+  selectBtSupportSettled,
+  selectBtSupportedRobotTypes,
+} from './features/actionCanvas/btSupportSlice';
 
 const AutonomyStudioPage = React.lazy(() => import('./pages/AutonomyStudioPage'));
 
-function getAutonomyStudioBlockMessage(robotType) {
+function getAutonomyStudioBlockMessage(robotType, supportedRobotTypes) {
   const normalizedRobotType = String(robotType || '').trim();
 
   if (!normalizedRobotType) {
     return 'Please select a robot type first in the Home page';
   }
 
-  if (!isBtRobotSupported(normalizedRobotType)) {
-    return `Autonomy Studio currently supports only ${BT_SUPPORTED_ROBOT_TYPE}. Current robot type: ${normalizedRobotType}`;
+  if (!isBtRobotSupported(normalizedRobotType, supportedRobotTypes)) {
+    return `Autonomy Studio currently supports only ${formatBtSupportedRobotTypes(supportedRobotTypes)}. Current robot type: ${normalizedRobotType}`;
   }
 
   return '';
@@ -98,6 +103,8 @@ function App() {
     (state) => state.ui.restoredPageFromSession
   );
   const robotType = useSelector((state) => state.tasks.robotType);
+  const btSupportedRobotTypes = useSelector(selectBtSupportedRobotTypes);
+  const btSupportSettled = useSelector(selectBtSupportSettled);
   const hasSyncedTaskInfo = useSelector((state) => Boolean(
     state.tasks.taskInfoSync.serverTaskInfo ||
     state.tasks.inferenceTaskInfoSync.serverTaskInfo
@@ -159,16 +166,25 @@ function App() {
 
   // The map and task workspaces currently share the SG2-specific runtime.
   // Keep restored/deep-linked sessions behind the same guard as rail entry.
+  // The supervisor API (backed by shared.robot_configs.schema) owns the list
+  // of robots the task engine supports; fetch it once per app load.
+  useEffect(() => {
+    fetchBtSupport(dispatch);
+  }, [dispatch]);
+
   useEffect(() => {
     if (page !== PageType.AUTONOMY_STUDIO) return;
+    // A restored session must be judged on the supervisor's list, not on the
+    // pre-fetch fallback.
+    if (!btSupportSettled) return;
 
-    const blockMessage = getAutonomyStudioBlockMessage(robotType);
+    const blockMessage = getAutonomyStudioBlockMessage(robotType, btSupportedRobotTypes);
     if (!blockMessage) return;
 
     setShowMissionWorkspaceChooser(false);
     dispatch(moveToPage(PageType.HOME));
     toast.error(blockMessage, { duration: 5000 });
-  }, [dispatch, page, robotType]);
+  }, [btSupportSettled, btSupportedRobotTypes, dispatch, page, robotType]);
 
   useEffect(() => {
     if (isFirstLoad.current && restoredPageFromSession) {
@@ -310,7 +326,7 @@ function App() {
   };
 
   const handleAutonomyStudioPageNavigation = () => {
-    const blockMessage = getAutonomyStudioBlockMessage(robotType);
+    const blockMessage = getAutonomyStudioBlockMessage(robotType, btSupportedRobotTypes);
     if (blockMessage) {
       toast.error(blockMessage, { duration: 5000 });
       return;

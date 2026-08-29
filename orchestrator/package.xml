@@ -12,24 +12,24 @@
   <author email="kimsw@robotis.com">Seongwoo Kim</author>
   <author email="kth@robotis.com">Taehyeong Kim</author>
   <depend>rclpy</depend>
+  <depend>ament_index_python</depend>
   <depend>std_msgs</depend>
+  <depend>std_srvs</depend>
   <depend>sensor_msgs</depend>
   <depend>geometry_msgs</depend>
-  <depend>map_msgs</depend>
-  <depend>interfaces</depend>
-  <depend>message_filters</depend>
-  <depend>cv_bridge</depend>
+  <depend>nav_msgs</depend>
   <depend>trajectory_msgs</depend>
-  <depend>rosbag2_py</depend>
+  <depend>interfaces</depend>
   <depend>rosbag_recorder</depend>
   <depend>shared</depend>
-  <!-- bt/ subtree (absorbed from orchestrator/bt in Step 5-A) needs
-       numpy (math) and lxml (tree XML parsing) at runtime. -->
-  <exec_depend>python3-lxml</exec_depend>
-  <exec_depend>python3-numpy</exec_depend>
+  <exec_depend>launch</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
   <exec_depend>web_video_server</exec_depend>
   <exec_depend>rosbridge_suite</exec_depend>
   <exec_depend>image_transport_plugins</exec_depend>
+  <!-- The data_processing tests exercise cyclo_data converters. -->
+  <test_depend>rosbag2_py</test_depend>
+  <test_depend>python3-numpy</test_depend>
   <export>
     <build_type>ament_python</build_type>
   </export>
