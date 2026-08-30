@@ -362,11 +362,19 @@ _ros_thread: threading.Thread | None = None
 def _ros_grid_spin() -> None:
     try:
         import rclpy
-        from map_msgs.msg import OccupancyGridUpdate
         from nav_msgs.msg import OccupancyGrid
         from rclpy.executors import SingleThreadedExecutor
         from rclpy.node import Node
         from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
+
+        try:
+            from map_msgs.msg import OccupancyGridUpdate
+        except ImportError:
+            OccupancyGridUpdate = None
+            logger.warning(
+                "map_msgs is unavailable; Navigation grid cache will use "
+                "full OccupancyGrid messages without costmap delta updates"
+            )
 
         if not rclpy.ok():
             rclpy.init()
@@ -378,7 +386,11 @@ def _ros_grid_spin() -> None:
         )
         executor = SingleThreadedExecutor()
         executor.add_node(node)
-        ros_topics = (*GRID_TOPICS, *GRID_UPDATE_TOPICS)
+        ros_topics = (
+            (*GRID_TOPICS, *GRID_UPDATE_TOPICS)
+            if OccupancyGridUpdate is not None
+            else tuple(GRID_TOPICS)
+        )
         discovered_qos = {}
         for _ in range(20):
             for topic in ros_topics:
@@ -397,15 +409,16 @@ def _ros_grid_spin() -> None:
             )
             for topic in GRID_TOPICS
         ]
-        subscriptions.extend(
-            node.create_subscription(
-                OccupancyGridUpdate,
-                update_topic,
-                GRID_CACHES[grid_topic].cache_ros_update,
-                discovered_qos.get(update_topic, fallback_qos),
+        if OccupancyGridUpdate is not None:
+            subscriptions.extend(
+                node.create_subscription(
+                    OccupancyGridUpdate,
+                    update_topic,
+                    GRID_CACHES[grid_topic].cache_ros_update,
+                    discovered_qos.get(update_topic, fallback_qos),
+                )
+                for update_topic, grid_topic in GRID_UPDATE_TOPICS.items()
             )
-            for update_topic, grid_topic in GRID_UPDATE_TOPICS.items()
-        )
         node._navigation_grid_subscriptions = subscriptions
         executor.spin()
     except Exception:

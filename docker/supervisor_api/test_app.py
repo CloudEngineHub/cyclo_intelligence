@@ -2430,6 +2430,93 @@ def test_navigation_grid_cache_serializes_only_changed_data():
     assert json.loads(restored_payload)["data"]["data"] == [0, 2]
 
 
+def test_navigation_grid_cache_keeps_full_grids_without_map_msgs(
+    monkeypatch, caplog
+):
+    created_topics = []
+    executors = []
+
+    class FakeOccupancyGrid:
+        pass
+
+    class FakeQoSProfile:
+        def __init__(self, **kwargs):
+            self.settings = kwargs
+
+    class FakeNode:
+        def __init__(self, name):
+            self.name = name
+
+        def get_publishers_info_by_topic(self, topic):
+            return []
+
+        def create_subscription(self, message_type, topic, callback, qos):
+            created_topics.append((message_type, topic, callback, qos))
+            return SimpleNamespace(topic=topic)
+
+    class FakeExecutor:
+        def __init__(self):
+            self.spun = False
+            executors.append(self)
+
+        def add_node(self, node):
+            self.node = node
+
+        def spin_once(self, timeout_sec):
+            self.timeout_sec = timeout_sec
+
+        def spin(self):
+            self.spun = True
+
+    rclpy_stub = types.ModuleType("rclpy")
+    rclpy_stub.ok = lambda: True
+    rclpy_stub.init = lambda: None
+    executors_stub = types.ModuleType("rclpy.executors")
+    executors_stub.SingleThreadedExecutor = FakeExecutor
+    node_stub = types.ModuleType("rclpy.node")
+    node_stub.Node = FakeNode
+    qos_stub = types.ModuleType("rclpy.qos")
+    qos_stub.DurabilityPolicy = SimpleNamespace(TRANSIENT_LOCAL="transient")
+    qos_stub.QoSProfile = FakeQoSProfile
+    qos_stub.ReliabilityPolicy = SimpleNamespace(RELIABLE="reliable")
+    nav_msgs_stub = types.ModuleType("nav_msgs")
+    nav_msgs_msg_stub = types.ModuleType("nav_msgs.msg")
+    nav_msgs_msg_stub.OccupancyGrid = FakeOccupancyGrid
+
+    monkeypatch.setitem(sys.modules, "rclpy", rclpy_stub)
+    monkeypatch.setitem(sys.modules, "rclpy.executors", executors_stub)
+    monkeypatch.setitem(sys.modules, "rclpy.node", node_stub)
+    monkeypatch.setitem(sys.modules, "rclpy.qos", qos_stub)
+    monkeypatch.setitem(sys.modules, "nav_msgs", nav_msgs_stub)
+    monkeypatch.setitem(sys.modules, "nav_msgs.msg", nav_msgs_msg_stub)
+    monkeypatch.delitem(sys.modules, "map_msgs.msg", raising=False)
+    monkeypatch.setitem(sys.modules, "map_msgs", None)
+
+    with caplog.at_level(
+        "WARNING", logger="supervisor_api.navigation_topics"
+    ):
+        navigation_grid_cache._ros_grid_spin()
+
+    assert executors[0].spun is True
+    assert {topic for _, topic, _, _ in created_topics} == set(
+        navigation_grid_cache.GRID_TOPICS
+    )
+    assert all(
+        message_type is FakeOccupancyGrid
+        for message_type, _, _, _ in created_topics
+    )
+    assert "full OccupancyGrid messages" in caplog.text
+
+
+@pytest.mark.parametrize("architecture", ["amd64", "arm64"])
+def test_navigation_runtime_image_installs_map_msgs(architecture):
+    dockerfile = REPO_ROOT / "docker" / f"Dockerfile.{architecture}"
+
+    assert "ros-${ROS_DISTRO}-map-msgs" in dockerfile.read_text(
+        encoding="utf-8"
+    )
+
+
 def test_navigation_grid_cache_sends_costmap_deltas_and_resyncs_lagging_clients():
     cache = navigation_grid_cache.OccupancyGridCache(
         "/global_costmap/costmap"
