@@ -32,6 +32,7 @@ const WAYPOINT_RING_OUTER_RADIUS = 3;
 const WAYPOINT_SELECTED_HALO_INNER_RADIUS = 3.28;
 const WAYPOINT_SELECTED_HALO_OUTER_RADIUS = 3.72;
 const WAYPOINT_CENTER_RADIUS = 1.25;
+const WAYPOINT_BODY_HIT_RADIUS = WAYPOINT_SELECTED_HALO_OUTER_RADIUS;
 const WAYPOINT_HEADING_LENGTH = 4.4;
 const WAYPOINT_HEADING_SHAFT_WIDTH = 1.12;
 const WAYPOINT_HEADING_HEAD_LENGTH = 1.05;
@@ -1180,6 +1181,23 @@ function makeSpotMarker(spot, selected = false, scale = 1, active = false) {
     const marker = new THREE.Group();
     marker.rotation.z = yaw;
     marker.userData = { spotId: spot.id, dragAction: "move" };
+    // Fill the complete visual footprint with one invisible pointer target.
+    // The visible center and ring otherwise leave a dead annulus between them,
+    // which makes small waypoints unnecessarily difficult to select.
+    const bodyHitArea = new THREE.Mesh(new THREE.CircleGeometry(WAYPOINT_BODY_HIT_RADIUS, 32), new THREE.MeshBasicMaterial({
+        transparent: true,
+        opacity: 0,
+        colorWrite: false,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+    }));
+    bodyHitArea.position.z = 0.005;
+    bodyHitArea.userData = {
+        spotId: spot.id,
+        dragAction: "move",
+        waypointBodyHitArea: true,
+    };
+    marker.add(bodyHitArea);
     if (active) {
         // Pulsing halo for the waypoint the mission is currently working on;
         // the animation loop drives opacity + scale from userData.pulse.
@@ -1235,9 +1253,8 @@ function makeSpotMarker(spot, selected = false, scale = 1, active = false) {
         sprite.scale.set(WAYPOINT_LABEL_SCALE_Y * aspect, WAYPOINT_LABEL_SCALE_Y, 1); // auto width, no squish
         sprite.center.set(0.5, 0.5 - WAYPOINT_LABEL_OFFSET_Y / WAYPOINT_LABEL_SCALE_Y);
         sprite.userData = { spotId: spot.id, dragAction: "move" };
-        // Sprite raycasting uses the entire transparent label rectangle. Keep
-        // the label decorative so pointer input reaches the rotate target below.
-        sprite.raycast = () => { };
+        // Keep the full name pill interactive. The dedicated rotate target sits
+        // above it on the z-axis, so overlapping arrow input still wins.
         group.add(sprite);
     }
     return group;

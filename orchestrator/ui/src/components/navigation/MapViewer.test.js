@@ -203,7 +203,7 @@ test('anchors waypoint labels above their markers in screen space', async () => 
   expect((0.5 - label.center.y) * label.scale.y).toBeCloseTo(8.9);
 });
 
-test('passes input through waypoint labels to an enlarged rotation target', async () => {
+test('uses waypoint labels as selection targets without hiding rotation handles', async () => {
   render(
     <MapViewer
       spots={[{
@@ -223,9 +223,12 @@ test('passes input through waypoint labels to an enlarged rotation target', asyn
     return { label: nextLabel, rotateHitArea: nextHitArea };
   });
 
-  const intersections = [];
-  expect(() => label.raycast({}, intersections)).not.toThrow();
-  expect(intersections).toEqual([]);
+  const THREE = jest.requireActual('three');
+  expect(label.raycast).toBe(THREE.Sprite.prototype.raycast);
+  expect(label.userData).toMatchObject({
+    spotId: 'waypoint-a',
+    dragAction: 'move',
+  });
   expect(mockCanvasFillStyles).toContain('rgba(243,241,234,0.5)');
 
   rotateHitArea.geometry.computeBoundingSphere();
@@ -233,9 +236,38 @@ test('passes input through waypoint labels to an enlarged rotation target', asyn
   expect(rotateHitArea.position.x).toBeCloseTo(4.5);
   expect(rotateHitArea.material.opacity).toBe(0);
   expect(rotateHitArea.material.colorWrite).toBe(false);
+  expect(rotateHitArea.position.z).toBeGreaterThan(label.position.z);
   expect(rotateHitArea.userData).toMatchObject({
     spotId: 'waypoint-a',
     dragAction: 'rotate',
+  });
+});
+
+test('covers the complete waypoint body with an enlarged pointer target', async () => {
+  render(
+    <MapViewer
+      spots={[{
+        id: 'waypoint-a',
+        label: 'Waypoint A',
+        pose: { x: 1, y: 2, yaw: 0 },
+      }]}
+      showMap={false}
+    />,
+  );
+
+  const bodyHitArea = await waitFor(() => {
+    const target = mockMeshes.find((item) => item.userData.waypointBodyHitArea);
+    expect(target).toBeDefined();
+    return target;
+  });
+
+  bodyHitArea.geometry.computeBoundingSphere();
+  expect(bodyHitArea.geometry.boundingSphere.radius).toBeCloseTo(3.72);
+  expect(bodyHitArea.material.opacity).toBe(0);
+  expect(bodyHitArea.material.colorWrite).toBe(false);
+  expect(bodyHitArea.userData).toMatchObject({
+    spotId: 'waypoint-a',
+    dragAction: 'move',
   });
 });
 
