@@ -2,7 +2,7 @@
 Changelog for package cyclo_intelligence
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-1.4.0 (2026-08-28)
+1.4.0 (2026-08-31)
 ------------------
 * Added Autonomy Studio: Mission Canvas and Action Canvas replace the Navigation and BT Manager pages.
 * Added map-based missions: waypoint routes, per-waypoint behavior trees, named missions with manifests and revisions.

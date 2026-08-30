@@ -2,7 +2,7 @@
 Changelog for package orchestrator
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-1.4.0 (2026-08-28)
+1.4.0 (2026-08-31)
 ------------------
 * Added the ArmStateGate node, per-joint JointControl selection, and SendCommand inference lifecycle control.
 * Moved ``/bt/list_trees`` out of ``orchestrator_node``; ``bt_node`` owns every ``/bt/*`` interface.

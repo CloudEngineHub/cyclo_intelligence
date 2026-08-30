@@ -2,7 +2,7 @@
 Changelog for package cyclo-ui
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-1.4.0 (2026-08-28)
+1.4.0 (2026-08-31)
 ------------------
 * Added Autonomy Studio with the Mission Canvas and the Action Canvas; removed the Navigation and BT Manager pages.
 * Added per-joint JointControl chips, a shared edge rule, and safe clear actions to the BT editors.
