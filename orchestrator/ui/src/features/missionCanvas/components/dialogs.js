@@ -185,6 +185,7 @@ export function LoadMapDialog({
   missionNames = null,
   selectedMissionName = "",
   busy,
+  catalogReady = true,
   title = "Load Map",
   fieldLabel = "Map file",
   selectAriaLabel = "Map file",
@@ -204,41 +205,54 @@ export function LoadMapDialog({
         onSubmit={(event) => { event.preventDefault(); onSubmit(); }}
       >
         <div id="mission-load-map-title" className="text-[15px] font-bold">{title}</div>
-        <label className="grid gap-1.5 text-xs">
-          <span style={{ color: "var(--mc-text-muted)" }}>{fieldLabel}</span>
-          <select
-            aria-label={selectAriaLabel} value={selectedPath} disabled={busy || files.length === 0}
-            onChange={(event) => onChange(event.currentTarget.value)}
-            className="h-9 px-2.5 text-sm"
-            style={{ color: "var(--mc-text)", backgroundColor: "var(--mc-surface-2)", border: "1px solid var(--mc-border-strong)", borderRadius: 10 }}
-          >
-            {files.length === 0 ? (<option value="">No maps found</option>)
-              : files.map((file) => (<option key={file.path} value={file.path}>{file.name || file.path}</option>))}
-          </select>
-        </label>
-        {missionNames !== null && (
-          <label className="grid gap-1.5 text-xs">
-            <span style={{ color: "var(--mc-text-muted)" }}>Mission</span>
-            <select
-              aria-label={missionSelectAriaLabel}
-              value={selectedMissionName}
-              disabled={busy}
-              onChange={(event) => onMissionChange(event.currentTarget.value)}
-              className="h-9 px-2.5 text-sm"
-              style={{ color: "var(--mc-text)", backgroundColor: "var(--mc-surface-2)", border: "1px solid var(--mc-border-strong)", borderRadius: 10 }}
-            >
-              {missionNames.length === 0
-                // A map with no missions yet: loading the default name starts a
-                // fresh mission (created on first save).
-                ? (<option value={DEFAULT_MISSION_NAME}>{DEFAULT_MISSION_NAME} (new)</option>)
-                : missionNames.map((name) => (<option key={name} value={name}>{name}</option>))}
-            </select>
-          </label>
+        {catalogReady ? (
+          <>
+            <label className="grid gap-1.5 text-xs">
+              <span style={{ color: "var(--mc-text-muted)" }}>{fieldLabel}</span>
+              <select
+                aria-label={selectAriaLabel} value={selectedPath} disabled={busy || files.length === 0}
+                onChange={(event) => onChange(event.currentTarget.value)}
+                className="h-9 px-2.5 text-sm"
+                style={{ color: "var(--mc-text)", backgroundColor: "var(--mc-surface-2)", border: "1px solid var(--mc-border-strong)", borderRadius: 10 }}
+              >
+                {files.length === 0 ? (<option value="">No maps found</option>)
+                  : files.map((file) => (<option key={file.path} value={file.path}>{file.name || file.path}</option>))}
+              </select>
+            </label>
+            {missionNames !== null && (
+              <label className="grid gap-1.5 text-xs">
+                <span style={{ color: "var(--mc-text-muted)" }}>Mission</span>
+                <select
+                  aria-label={missionSelectAriaLabel}
+                  value={selectedMissionName}
+                  disabled={busy}
+                  onChange={(event) => onMissionChange(event.currentTarget.value)}
+                  className="h-9 px-2.5 text-sm"
+                  style={{ color: "var(--mc-text)", backgroundColor: "var(--mc-surface-2)", border: "1px solid var(--mc-border-strong)", borderRadius: 10 }}
+                >
+                  {missionNames.length === 0
+                    // A map with no missions yet: loading the default name starts a
+                    // fresh mission (created on first save).
+                    ? (<option value={DEFAULT_MISSION_NAME}>{DEFAULT_MISSION_NAME} (new)</option>)
+                    : missionNames.map((name) => (<option key={name} value={name}>{name}</option>))}
+                </select>
+              </label>
+            )}
+          </>
+        ) : (
+          <div role="status" className="h-9 flex items-center text-xs" style={{ color: "var(--mc-text-muted)" }}>
+            Loading saved maps...
+          </div>
         )}
         <div className="flex justify-end gap-2">
           <ActionButton disabled={busy} onClick={onCancel} variant="secondary">Cancel</ActionButton>
           <ActionButton
-            disabled={busy || !selectedPath || (missionNames !== null && !selectedMissionName)}
+            disabled={
+              busy
+              || !catalogReady
+              || !selectedPath
+              || (missionNames !== null && !selectedMissionName)
+            }
             type="submit"
             variant="secondary"
           >Load</ActionButton>
