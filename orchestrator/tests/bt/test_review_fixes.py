@@ -922,3 +922,23 @@ def test_joint_control_from_xml_params_forwards_selected_joints():
         ch['group']: ch for ch in legacy._channels
     }['arm_left']
     assert len(legacy_left['joint_names']) == 8
+
+
+def test_load_send_command_sets_action_processing_timing():
+    context = types.SimpleNamespace(node=_DummyNode())
+
+    action = SendCommand.from_xml_params(
+        context,
+        'LoadInference',
+        {
+            'command': 'LOAD',
+            'control_hz': '80',
+            'inference_hz': '20',
+            'chunk_align_window_s': '0.25',
+        },
+    )
+    task_info = action._build_task_info()
+
+    assert task_info.control_hz == 80
+    assert task_info.inference_hz == 20
+    assert task_info.chunk_align_window_s == 0.25

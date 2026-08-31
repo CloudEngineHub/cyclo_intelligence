@@ -49,7 +49,6 @@ packages = [
     f'{package_name}.timer',
     f'{package_name}.training',
 ]
-
 setup(
     name=package_name,
     version='1.4.0',

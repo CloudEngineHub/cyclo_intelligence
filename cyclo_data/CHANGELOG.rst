@@ -7,6 +7,10 @@ Changelog for package cyclo_data
 * Removed the BT process and tree-file handlers from the video file server; the supervisor API owns them.
 * Contributors: Seongwoo Kim
 
+1.3.1 (2026-08-26)
+------------------
+* None
+
 1.3.0 (2026-08-14)
 ------------------
 * None

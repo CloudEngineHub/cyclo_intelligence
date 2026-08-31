@@ -131,6 +131,14 @@ def _bare_node(client):
     node._loaded_inference_acceleration_mode = 'pytorch'
     node._loaded_inference_acceleration_engine_path = ''
     node._loaded_inference_action_request_mode = 'async'
+    node._loaded_inference_control_hz = 100
+    node._loaded_inference_inference_hz = 15
+    node._loaded_inference_chunk_align_window_s = 0.3
+    node._loaded_inference_initial_pose_sync = False
+    node._loaded_inference_initial_pose_sync_duration_s = 5.0
+    node._initial_pose_sync_status_timer = None
+    node._initial_pose_sync_status_generation = 0
+    node._initial_pose_sync_hold_pending = False
     node.robot_type = 'ffw_sg2'
     node.logger = _Logger()
     node.published_phases = []

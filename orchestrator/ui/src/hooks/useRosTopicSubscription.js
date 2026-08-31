@@ -565,6 +565,7 @@ export function useRosTopicSubscription() {
     [InferencePhase.LOADING]: 'LOADING',
     [InferencePhase.INFERENCING]: 'INFERENCING',
     [InferencePhase.PAUSED]: 'PAUSED',
+    [InferencePhase.SYNCING]: 'SYNCING',
   }[phase] || 'UNKNOWN'), []);
 
   const subscribeToTrainingStatus = useCallback(async () => {
