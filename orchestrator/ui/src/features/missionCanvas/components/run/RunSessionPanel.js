@@ -108,7 +108,7 @@ export default function RunSessionPanel({
         </div>
       )}
       {showProgress && (
-        <ol className="grid gap-1 mt-0.5 max-h-40 overflow-y-auto" role="list" aria-label="Mission waypoints">
+        <ol className="grid gap-1 mt-0.5 max-h-40 overflow-y-auto" aria-label="Mission waypoints">
           {runner.progress.map((entry, index) => {
             const meta = WAYPOINT_STATE_META[entry.state] || WAYPOINT_STATE_META.pending;
             const returnsToStart = (

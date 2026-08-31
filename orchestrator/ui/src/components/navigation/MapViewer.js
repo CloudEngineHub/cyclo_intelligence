@@ -1332,7 +1332,7 @@ function cachedAnnotationRegionTexture(annotation, grid, region, colorString, se
     return texture;
 }
 function makeMapAnnotationRegion(annotation, grid, coveredCells = null, selected = false) {
-    var _a, _b, _c, _d, _e, _f;
+    var _a, _b, _c, _d;
     const meta = gridMeta(grid);
     if (!meta)
         return null;
@@ -1530,9 +1530,9 @@ function applyTopViewRoll(camera, controls, roll) {
     camera.lookAt(controls.target);
     controls.update();
 }
-function focusCameraToWaypoint(camera, controls, meta, spot, roll = 0) {
+function focusCameraToWaypoint(camera, controls, meta, pose, roll = 0) {
     var _a, _b;
-    if (!meta || !(spot === null || spot === void 0 ? void 0 : spot.pose))
+    if (!meta || !pose)
         return;
     const width = meta.width * meta.resolution;
     const height = meta.height * meta.resolution;
@@ -1541,8 +1541,8 @@ function focusCameraToWaypoint(camera, controls, meta, spot, roll = 0) {
     const halfFov = THREE.MathUtils.degToRad(camera.fov / 2);
     const distance = visibleHeight / (2 * Math.tan(halfFov));
     const halfWidth = distance * Math.tan(halfFov) * Math.max(camera.aspect, 0.1);
-    const x = Number((_a = spot.pose.x) !== null && _a !== void 0 ? _a : 0);
-    const y = Number((_b = spot.pose.y) !== null && _b !== void 0 ? _b : 0);
+    const x = Number((_a = pose.x) !== null && _a !== void 0 ? _a : 0);
+    const y = Number((_b = pose.y) !== null && _b !== void 0 ? _b : 0);
     const screenRight = new THREE.Vector3(Math.cos(roll), -Math.sin(roll), 0);
     const target = new THREE.Vector3(x, y, 0).addScaledVector(screenRight, -BT_FOCUS_WAYPOINT_NDC_X * halfWidth);
     camera.up.set(Math.sin(roll), Math.cos(roll), 0);
@@ -1568,7 +1568,7 @@ function WaypointBtFocusLayer({ layer, onClose }) {
     const spot = layer === null || layer === void 0 ? void 0 : layer.spot;
     if (!spot)
         return null;
-    return (<section className="absolute inset-0 z-20 pointer-events-none" role="region" aria-label="Waypoint Task focus canvas">
+    return (<section className="absolute inset-0 z-20 pointer-events-none" aria-label="Waypoint Task focus canvas">
       {onClose ? (<button type="button" className="absolute inset-y-0 left-0 w-[25%] pointer-events-auto cursor-pointer border-0 p-0 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px]" style={{
             background: "linear-gradient(90deg, rgba(28,26,23,0.08), rgba(28,26,23,0))",
             outlineColor: "var(--mc-accent)",
@@ -1623,6 +1623,9 @@ function WaypointBtFocusLayer({ layer, onClose }) {
 const SCENE_BG = 0xefece3;
 
 export function MapViewer({ map, globalCostmap, localCostmap, scan, scanPose = null, pose, plan, goalPose, footprint, tf, showMap, showGlobalCostmap, showLocalCostmap, showScan, showGlobalPlan, showGoalPose, showTf, showRobotModel, interactionDisabled, interactionMode, editorActive, editorPaintOnDrag = true, editorAreaSelection = false, editorBrush = null, mapRefined = true, viewKey, waitingLabel = "Waiting for /map", fitContainer = false, spots = [], selectedSpotId = "", activeWaypointId = "", missionFollowRobot = false, behaviorNodes = [], selectedBehaviorNodeId = "", behaviorPreviewNode = null, missionRouteOrder = [], missionRouteClosed = false, missionRouteMode = false, selectedMissionRouteSourceId = "", mapAnnotations = [], selectedMapAnnotationId = "", btLayer = null, onBtLayerClose, onSpotClick, onBehaviorNodeClick, onMissionRouteSpotClick, onMissionRouteMapClick, onSpotPoseChange, onBehaviorNodePoseChange, onEditorMapPoint, onEditorMapArea, onMapClick, onMapPose, }) {
+    const btSpotId = btLayer?.spot?.id;
+    const btSpotPose = btLayer?.spot?.pose;
+    const btSpotTree = btLayer?.spot?.linked_bt_tree;
     const containerRef = useRef(null);
     const sceneRef = useRef(null);
     const rendererRef = useRef(null);
@@ -1996,9 +1999,8 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, scanPose = n
         const meta = gridMeta(map);
         if (!camera || !controls || !meta)
             return;
-        const spot = btLayer === null || btLayer === void 0 ? void 0 : btLayer.spot;
-        if (spot === null || spot === void 0 ? void 0 : spot.pose) {
-            focusCameraToWaypoint(camera, controls, meta, spot, viewRollRef.current);
+        if (btSpotPose) {
+            focusCameraToWaypoint(camera, controls, meta, btSpotPose, viewRollRef.current);
             btFocusActiveRef.current = true;
             return;
         }
@@ -2006,9 +2008,9 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, scanPose = n
             btFocusActiveRef.current = false;
         }
     }, [
-        btLayer?.spot?.id,
-        btLayer?.spot?.pose,
-        btLayer?.spot?.linked_bt_tree,
+        btSpotId,
+        btSpotPose,
+        btSpotTree,
         map,
         viewKey,
     ]);
@@ -2070,7 +2072,6 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, scanPose = n
             mapLayer.add(mapPlane);
     }, [map, showMap, mapRefined]);
     useEffect(() => {
-        var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p, _q, _r, _s, _t, _u, _v, _w, _x, _y, _z, _0, _1, _2, _3, _4;
         const scene = sceneRef.current;
         const layers = layersRef.current;
         const camera = cameraRef.current;
@@ -2082,8 +2083,8 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, scanPose = n
         const meta = gridMeta(map);
         const waypointScale = meta?.resolution && meta.resolution > 0 ? meta.resolution : 1;
         if (dragPreviewPose === null || dragPreviewPose === void 0 ? void 0 : dragPreviewPose.position) {
-            const previewX = Number((_g = dragPreviewPose.position.x) !== null && _g !== void 0 ? _g : 0);
-            const previewY = Number((_h = dragPreviewPose.position.y) !== null && _h !== void 0 ? _h : 0);
+            const previewX = Number(dragPreviewPose.position.x ?? 0);
+            const previewY = Number(dragPreviewPose.position.y ?? 0);
             const previewYaw = yawFromPose(dragPreviewPose);
             if (interactionMode === "spot") {
                 layers.add(makeSpotMarker({
@@ -2173,7 +2174,7 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, scanPose = n
                 layers.add(marker);
         });
         const fitKey = viewKey !== null && viewKey !== void 0 ? viewKey : "default";
-        if (meta && fitMapKeyRef.current !== fitKey && !(btLayer?.spot?.pose)) {
+        if (meta && fitMapKeyRef.current !== fitKey && !btSpotPose) {
             fitCameraToMap(camera, controls, meta, viewRollRef.current);
             fitMapKeyRef.current = fitKey;
         }
@@ -2190,7 +2191,8 @@ export function MapViewer({ map, globalCostmap, localCostmap, scan, scanPose = n
         behaviorPreviewNode,
         map,
         behaviorNodes,
-        btLayer?.spot?.id,
+        btSpotId,
+        btSpotPose,
         selectedBehaviorNodeId,
         selectedSpotId,
         activeWaypointId,
